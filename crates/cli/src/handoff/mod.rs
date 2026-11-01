@@ -86,7 +86,8 @@ fn slug_for_dir(dir: &str) -> Result<String, String> {
 
 /// How long a session-tagged handoff stays eligible, and how long a clear
 /// marker does, before the next start removes it. The tagged handoff is one a
-/// context hygiene nudge asked for, meant for the very next `/clear`.
+/// context hygiene nudge asked for, meant for the next `/clear` or `/compact`
+/// of that session.
 const TAGGED_MAX_AGE_SECS: u64 = SECS_PER_DAY;
 const MARKER_MAX_AGE_SECS: u64 = 3600;
 const CLEARED_DIR: &str = "cleared";
@@ -328,8 +329,8 @@ fn mark_cleared_in(dir: &Path, session_id: &str) {
     }
 }
 
-/// A session-tagged handoff taken for a start after `/clear`.
-pub struct Cleared {
+/// A session-tagged handoff taken for a start after `/clear` or `/compact`.
+pub struct Resumed {
     pub text: String,
     /// Where the full handoff now lives (under `used/`).
     pub path: PathBuf,
@@ -341,7 +342,7 @@ pub struct Cleared {
 /// moves to `used/`, so it can never load twice. A tagged handoff whose
 /// session never cleared, such as a parallel session still running, is left
 /// alone. Never panics.
-pub fn take_cleared_in(dir: &Path, slug: &str, now: SystemTime) -> Option<Cleared> {
+pub fn take_cleared_in(dir: &Path, slug: &str, now: SystemTime) -> Option<Resumed> {
     prune_hygiene(dir, slug, now);
     let markers = dir.join(CLEARED_DIR);
     let best = unread(dir, slug)
@@ -353,7 +354,7 @@ pub fn take_cleared_in(dir: &Path, slug: &str, now: SystemTime) -> Option<Cleare
                 .ok()?;
             Some((marked, tag, entry))
         })
-        .max_by_key(|(marked, _, _)| *marked)?;
+        .max_by_key(|(marked, _, entry)| (*marked, entry.modified))?;
     let (_, tag, entry) = best;
     let _ = fs::remove_file(markers.join(tag));
     load_and_archive(dir, entry)
@@ -361,29 +362,34 @@ pub fn take_cleared_in(dir: &Path, slug: &str, now: SystemTime) -> Option<Cleare
 
 /// The read side of a start after `/compact`. A compact keeps the session id,
 /// so the handoff tagged with it is this session's own and needs no marker.
-/// The freshest unread one moves to `used/`, so it loads once. A handoff
-/// tagged for another session, an untagged one and an empty id are left
-/// alone. Never panics.
+/// The freshest unread one moves to `used/`, so it loads once, and older ones
+/// with the same tag move there unread because the freshest replaces them. A
+/// handoff tagged for another session, an untagged one and an empty id are
+/// left alone. Never panics.
 pub fn take_session_in(
     dir: &Path,
     slug: &str,
     session_id: &str,
     now: SystemTime,
-) -> Option<Cleared> {
+) -> Option<Resumed> {
     let wanted = session_tag(session_id);
     if wanted.is_empty() {
         return None;
     }
     prune_hygiene(dir, slug, now);
-    let entry = unread(dir, slug)
+    let mut own = unread(dir, slug)
         .into_iter()
-        .find(|entry| tag_of(&entry.path, slug).as_deref() == Some(wanted.as_str()))?;
-    load_and_archive(dir, entry)
+        .filter(|entry| tag_of(&entry.path, slug).as_deref() == Some(wanted.as_str()));
+    let freshest = own.next()?;
+    for superseded in own {
+        archive(dir, &superseded.path);
+    }
+    load_and_archive(dir, freshest)
 }
 
 /// Reads a tagged handoff and moves it to `used/`. An empty file is removed
 /// and yields nothing.
-fn load_and_archive(dir: &Path, entry: Entry) -> Option<Cleared> {
+fn load_and_archive(dir: &Path, entry: Entry) -> Option<Resumed> {
     let text = fs::read_to_string(&entry.path)
         .ok()
         .filter(|t| !t.trim().is_empty());
@@ -395,7 +401,7 @@ fn load_and_archive(dir: &Path, entry: Entry) -> Option<Cleared> {
     archive(dir, &entry.path);
     let used = dir.join(USED_DIR).join(name);
     let path = if used.is_file() { used } else { entry.path };
-    Some(Cleared { text, path })
+    Some(Resumed { text, path })
 }
 
 fn age(now: SystemTime, then: SystemTime) -> String {
@@ -732,6 +738,55 @@ mod tests {
             1,
             "the untagged one stays for take_in"
         );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_compact_takes_the_newest_handoff_and_retires_the_older_ones_of_the_session() {
+        let dir = scratch_dir("handoff-compact-two");
+        let tag = session_tag(SESSION);
+        let older = save_in(&dir, SLUG, "# Older", 100, 7, &tag).unwrap();
+        save_in(&dir, SLUG, "# Newer", 101, 7, &tag).unwrap();
+        let an_hour_ago = SystemTime::now() - Duration::from_secs(3600);
+        fs::File::options()
+            .write(true)
+            .open(&older)
+            .unwrap()
+            .set_modified(an_hour_ago)
+            .unwrap();
+
+        let taken = take_session_in(&dir, SLUG, SESSION, SystemTime::now()).unwrap();
+
+        assert_eq!(taken.text, "# Newer");
+        assert_eq!(unread(&dir, SLUG).len(), 0, "the older one is retired too");
+        assert!(take_session_in(&dir, SLUG, SESSION, SystemTime::now()).is_none());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_compact_ignores_and_removes_a_stale_tagged_handoff() {
+        let dir = scratch_dir("handoff-compact-stale");
+        let path = save_in(&dir, SLUG, "# Old", 100, 7, &session_tag(SESSION)).unwrap();
+        backdate(&path, 2);
+
+        let taken = take_session_in(&dir, SLUG, SESSION, SystemTime::now());
+
+        assert!(taken.is_none());
+        assert!(!path.exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_compact_removes_a_blank_tagged_file_and_loads_nothing() {
+        let dir = scratch_dir("handoff-compact-blank");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{SLUG}-100-7-{}.md", session_tag(SESSION)));
+        fs::write(&path, "  \n").unwrap();
+
+        let taken = take_session_in(&dir, SLUG, SESSION, SystemTime::now());
+
+        assert!(taken.is_none());
+        assert!(!path.exists());
         let _ = fs::remove_dir_all(dir);
     }
 

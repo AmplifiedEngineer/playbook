@@ -391,10 +391,7 @@ fn append_handoff_slice(extra_context: &mut String, source: &str, session_id: &s
     let taken = crate::handoff::take_in(&crate::handoff::root(), &slug, SystemTime::now());
     // Leave the memory block its share of the cap. The handoff files are
     // archived under `handoff/used/` once taken, so a cut loses nothing.
-    let budget = CONTEXT_CAP_CHARS
-        .saturating_sub(extra_context.chars().count() + MEMORY_BLOCK_CAP_CHARS)
-        .max(MIN_HANDOFF_CHARS)
-        / taken.contents.len().max(1);
+    let budget = handoff_room(extra_context).max(MIN_HANDOFF_CHARS) / taken.contents.len().max(1);
     for (i, contents) in taken.contents.iter().enumerate() {
         let contents = &fit_handoff(contents, budget);
         let ctx = if taken.total > 1 {
@@ -462,14 +459,18 @@ fn append_compacted_handoff(extra_context: &mut String, slug: &str, session_id: 
 
 /// `lead`, the handoff cut to `CLEARED_HANDOFF_CAP_CHARS`, and a pointer to the
 /// full file.
-fn push_resumed_handoff(extra_context: &mut String, lead: &str, handoff: &crate::handoff::Cleared) {
+fn push_resumed_handoff(extra_context: &mut String, lead: &str, handoff: &crate::handoff::Resumed) {
     let pointer = format!("Full handoff: {}", handoff.path.display());
-    let room = CONTEXT_CAP_CHARS
-        .saturating_sub(extra_context.chars().count() + MEMORY_BLOCK_CAP_CHARS)
+    let room = handoff_room(extra_context)
         .saturating_sub(pointer.chars().count() + 200)
         .min(CLEARED_HANDOFF_CAP_CHARS);
     let body = fit_handoff(&handoff.text, room);
     push_context(extra_context, &format!("{lead}\n\n{body}\n\n{pointer}"));
+}
+
+/// Characters left for handoffs once the memory block has its share.
+fn handoff_room(extra_context: &str) -> usize {
+    CONTEXT_CAP_CHARS.saturating_sub(extra_context.chars().count() + MEMORY_BLOCK_CAP_CHARS)
 }
 
 /// Room a handoff keeps even when the rest of the context is large.
