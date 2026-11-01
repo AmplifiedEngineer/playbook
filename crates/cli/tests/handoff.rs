@@ -319,6 +319,20 @@ impl Env {
             .to_string()
     }
 
+    /// A start after `/compact`: the session id stays the same.
+    fn compact_start(&self, cwd: &Path, sid: &str) -> String {
+        let payload = format!(
+            r#"{{"hook_event_name":"SessionStart","source":"compact","session_id":"{sid}"}}"#
+        );
+        let (code, out, _) = self.run_in(cwd, &["hook", "session-init"], &payload);
+        assert_eq!(code, 0);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap_or_default();
+        v["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap_or("")
+            .to_string()
+    }
+
     fn save_for(&self, sid: &str, text: &str) {
         let (code, _, err) = self.run(&["handoff", "save", "--session", sid], text);
         assert_eq!(code, 0, "{err}");
@@ -416,6 +430,39 @@ fn after_clear_the_sessions_own_handoff_loads_once_with_a_pointer() {
         "pointer names the archived file: {ctx}"
     );
     assert!(!again.contains("RESUME-ALPHA"), "consumed: {again}");
+}
+
+#[test]
+fn after_a_compact_the_sessions_own_handoff_loads_once_with_a_pointer() {
+    let env = Env::new("hy-compact");
+    env.save_for("sessA", "# Topic\nCOMPACT-ALPHA\n");
+
+    let ctx = env.compact_start(&env.cwd, "sessA");
+    let again = env.compact_start(&env.cwd, "sessA");
+
+    assert!(ctx.contains("COMPACT-ALPHA"), "{ctx}");
+    assert!(ctx.contains("was compacted"), "{ctx}");
+    assert!(
+        ctx.contains("/used/"),
+        "pointer names the archived file: {ctx}"
+    );
+    assert!(!again.contains("COMPACT-ALPHA"), "consumed: {again}");
+}
+
+#[test]
+fn a_compact_does_not_load_the_handoff_of_another_session() {
+    let env = Env::new("hy-compact-other");
+    env.save_for("sessB", "# Other\nNOT-MINE\n");
+
+    let ctx = env.compact_start(&env.cwd, "sessA");
+
+    assert!(!ctx.contains("NOT-MINE"), "{ctx}");
+    env.end_clear("sessB");
+    let later = env.clear_start(&env.cwd, "clear");
+    assert!(
+        later.contains("NOT-MINE"),
+        "still there for its own clear: {later}"
+    );
 }
 
 #[test]

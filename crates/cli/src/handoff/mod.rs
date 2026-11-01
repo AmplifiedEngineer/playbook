@@ -356,6 +356,34 @@ pub fn take_cleared_in(dir: &Path, slug: &str, now: SystemTime) -> Option<Cleare
         .max_by_key(|(marked, _, _)| *marked)?;
     let (_, tag, entry) = best;
     let _ = fs::remove_file(markers.join(tag));
+    load_and_archive(dir, entry)
+}
+
+/// The read side of a start after `/compact`. A compact keeps the session id,
+/// so the handoff tagged with it is this session's own and needs no marker.
+/// The freshest unread one moves to `used/`, so it loads once. A handoff
+/// tagged for another session, an untagged one and an empty id are left
+/// alone. Never panics.
+pub fn take_session_in(
+    dir: &Path,
+    slug: &str,
+    session_id: &str,
+    now: SystemTime,
+) -> Option<Cleared> {
+    let wanted = session_tag(session_id);
+    if wanted.is_empty() {
+        return None;
+    }
+    prune_hygiene(dir, slug, now);
+    let entry = unread(dir, slug)
+        .into_iter()
+        .find(|entry| tag_of(&entry.path, slug).as_deref() == Some(wanted.as_str()))?;
+    load_and_archive(dir, entry)
+}
+
+/// Reads a tagged handoff and moves it to `used/`. An empty file is removed
+/// and yields nothing.
+fn load_and_archive(dir: &Path, entry: Entry) -> Option<Cleared> {
     let text = fs::read_to_string(&entry.path)
         .ok()
         .filter(|t| !t.trim().is_empty());
@@ -648,6 +676,62 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(fs::read_to_string(a).unwrap(), "first");
         assert_eq!(fs::read_to_string(b).unwrap(), "second");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    const SESSION: &str = "c6e91d16-99c2-4305-b9c5-2abc835f7f83";
+    const OTHER_SESSION: &str = "0a1b2c3d-0000-4000-8000-000000000000";
+
+    #[test]
+    fn a_compact_loads_the_handoff_tagged_for_the_same_session_once() {
+        let dir = scratch_dir("handoff-compact");
+        save_in(&dir, SLUG, "# Mine", 100, 7, &session_tag(SESSION)).unwrap();
+
+        let first = take_session_in(&dir, SLUG, SESSION, SystemTime::now()).unwrap();
+        let second = take_session_in(&dir, SLUG, SESSION, SystemTime::now());
+
+        assert_eq!(first.text, "# Mine");
+        assert!(
+            first.path.starts_with(dir.join(USED_DIR)),
+            "{:?}",
+            first.path
+        );
+        assert!(second.is_none(), "a handoff loads once");
+        assert_eq!(unread(&dir, SLUG).len(), 0);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_compact_leaves_the_handoff_of_another_session_alone() {
+        let dir = scratch_dir("handoff-compact-other");
+        save_in(&dir, SLUG, "# Theirs", 100, 7, &session_tag(OTHER_SESSION)).unwrap();
+
+        let taken = take_session_in(&dir, SLUG, SESSION, SystemTime::now());
+
+        assert!(taken.is_none());
+        assert_eq!(
+            unread(&dir, SLUG).len(),
+            1,
+            "the other session still has it"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_compact_does_not_take_an_untagged_handoff_or_an_empty_session_id() {
+        let dir = scratch_dir("handoff-compact-untagged");
+        save_in(&dir, SLUG, "# Untagged", 100, 7, "").unwrap();
+        save_in(&dir, SLUG, "# Tagged", 101, 7, &session_tag(SESSION)).unwrap();
+
+        assert!(take_session_in(&dir, SLUG, "", SystemTime::now()).is_none());
+        let taken = take_session_in(&dir, SLUG, SESSION, SystemTime::now()).unwrap();
+
+        assert_eq!(taken.text, "# Tagged");
+        assert_eq!(
+            unread(&dir, SLUG).len(),
+            1,
+            "the untagged one stays for take_in"
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
