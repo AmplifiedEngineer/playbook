@@ -105,6 +105,10 @@ cfg-if 1.0.5
   Licence: MIT OR Apache-2.0
   Copyright: Alex Crichton
 
+cfg_aliases 0.2.2
+  Licence: MIT
+  Copyright: Zicklag
+
 chacha20 0.10.2
   Licence: MIT OR Apache-2.0
   Copyright: RustCrypto Developers
@@ -324,6 +328,10 @@ miniz_oxide 0.9.1
 multiversion_no_op 1.0.0
   Licence: Apache-2.0 OR MIT
   Copyright: Henri Sivonen
+
+nix 0.31.3
+  Licence: MIT
+  Copyright: see crate source
 
 nom 8.0.0
   Licence: MIT
@@ -558,6 +566,10 @@ windows-sys 0.61.2
   Copyright: see crate source
 
 zip 8.6.0
+  Licence: MIT
+  Copyright: Mathijs van de Nes, Marli Frost, Ryan Levick, Chris Hennick
+
+zip 9.0.5
   Licence: MIT
   Copyright: Mathijs van de Nes, Marli Frost, Ryan Levick, Chris Hennick
 
