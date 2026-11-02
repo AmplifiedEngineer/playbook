@@ -131,7 +131,11 @@ pub fn run(payload: &Payload) {
     let injected = if headless {
         0
     } else {
-        append_handoff_slice(&mut extra_context, &payload.field(".source"))
+        append_handoff_slice(
+            &mut extra_context,
+            &payload.field(".source"),
+            &payload.field(".session_id"),
+        )
     };
     if !headless || crate::common::headless::headless_memory_enabled() {
         append_memory_context(&mut extra_context, &repo_root);
@@ -374,11 +378,12 @@ fn append_memory_context(extra_context: &mut String, repo_root: &str) {
 
 /// ADR 0008 WU-3: reload persisted session-handoffs (saved by
 /// `playbook handoff save`) at every `SessionStart`, including
-/// `source: "clear"`: this is called unconditionally regardless of `.source`.
+/// `source: "clear"` and `"compact"`: this is called unconditionally regardless
+/// of `.source`.
 /// The shared `crate::handoff` module keys, loads, and archives them: up to
 /// three fresh ones are injected and moved to `handoff/used/`, stale and
 /// over-cap ones are removed. Returns how many were injected. Never panics.
-fn append_handoff_slice(extra_context: &mut String, source: &str) -> usize {
+fn append_handoff_slice(extra_context: &mut String, source: &str, session_id: &str) -> usize {
     let slug = crate::handoff::current_slug();
     if slug.is_empty() {
         return 0;
@@ -386,10 +391,7 @@ fn append_handoff_slice(extra_context: &mut String, source: &str) -> usize {
     let taken = crate::handoff::take_in(&crate::handoff::root(), &slug, SystemTime::now());
     // Leave the memory block its share of the cap. The handoff files are
     // archived under `handoff/used/` once taken, so a cut loses nothing.
-    let budget = CONTEXT_CAP_CHARS
-        .saturating_sub(extra_context.chars().count() + MEMORY_BLOCK_CAP_CHARS)
-        .max(MIN_HANDOFF_CHARS)
-        / taken.contents.len().max(1);
+    let budget = handoff_room(extra_context).max(MIN_HANDOFF_CHARS) / taken.contents.len().max(1);
     for (i, contents) in taken.contents.iter().enumerate() {
         let contents = &fit_handoff(contents, budget);
         let ctx = if taken.total > 1 {
@@ -407,6 +409,8 @@ fn append_handoff_slice(extra_context: &mut String, source: &str) -> usize {
     let mut injected = taken.contents.len();
     if source == "clear" {
         injected += usize::from(append_cleared_handoff(extra_context, &slug));
+    } else if source == "compact" {
+        injected += usize::from(append_compacted_handoff(extra_context, &slug, session_id));
     }
     injected
 }
@@ -425,17 +429,48 @@ fn append_cleared_handoff(extra_context: &mut String, slug: &str) -> bool {
     else {
         return false;
     };
-    let pointer = format!("Full handoff: {}", cleared.path.display());
-    let room = CONTEXT_CAP_CHARS
-        .saturating_sub(extra_context.chars().count() + MEMORY_BLOCK_CAP_CHARS)
-        .saturating_sub(pointer.chars().count() + 200)
-        .min(CLEARED_HANDOFF_CAP_CHARS);
-    let body = fit_handoff(&cleared.text, room);
-    push_context(
+    push_resumed_handoff(
         extra_context,
-        &format!("You ran /clear after saving a handoff. Resume from it:\n\n{body}\n\n{pointer}"),
+        "You ran /clear after saving a handoff. Resume from it:",
+        &cleared,
     );
     true
+}
+
+/// After `/compact`: the handoff this session saved before the compact. The
+/// session id survives a compact, so it picks the handoff tagged with it (see
+/// `crate::handoff::take_session_in`).
+fn append_compacted_handoff(extra_context: &mut String, slug: &str, session_id: &str) -> bool {
+    let Some(cleared) = crate::handoff::take_session_in(
+        &crate::handoff::root(),
+        slug,
+        session_id,
+        SystemTime::now(),
+    ) else {
+        return false;
+    };
+    push_resumed_handoff(
+        extra_context,
+        "The conversation was compacted. This session saved a handoff first. Resume from it:",
+        &cleared,
+    );
+    true
+}
+
+/// `lead`, the handoff cut to `CLEARED_HANDOFF_CAP_CHARS`, and a pointer to the
+/// full file.
+fn push_resumed_handoff(extra_context: &mut String, lead: &str, handoff: &crate::handoff::Resumed) {
+    let pointer = format!("Full handoff: {}", handoff.path.display());
+    let room = handoff_room(extra_context)
+        .saturating_sub(pointer.chars().count() + 200)
+        .min(CLEARED_HANDOFF_CAP_CHARS);
+    let body = fit_handoff(&handoff.text, room);
+    push_context(extra_context, &format!("{lead}\n\n{body}\n\n{pointer}"));
+}
+
+/// Characters left for handoffs once the memory block has its share.
+fn handoff_room(extra_context: &str) -> usize {
+    CONTEXT_CAP_CHARS.saturating_sub(extra_context.chars().count() + MEMORY_BLOCK_CAP_CHARS)
 }
 
 /// Room a handoff keeps even when the rest of the context is large.
