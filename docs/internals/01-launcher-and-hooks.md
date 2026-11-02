@@ -70,7 +70,7 @@ Every hook is a module under `crates/cli/src/hooks/`, run as `playbook hook <nam
 | `session-init` | Creates the per-session runtime dir and zeros its counters. Clears the statusline PR/CI cache for the current branch. Checks the config hash and warns on drift when a resumed session is running on stale config. Injects `additionalContext` (list below). Read only: it never writes to the memory store. |
 | `usage-warm` | Starts a detached, low priority, time bounded `playbook usage warm` when the last finished run is older than `usage.autoIngestMinutes`, so the usage store is filled before you open `playbook usage`. Returns at once with no output. Off with `usage.autoIngest` false. |
 
-`session-init` injects the tool map (what `playbook tools map` prints, on every start including headless, ending with a pointer to `playbook commands`), an auto-learn nudge, a handoff (after `/clear`, the one the ended session saved for itself, see `context-hygiene`) and one small ranked memory block (pinned, most used, most linked facts, capped near 2,500 characters). The whole string stays under 9,000 characters because Claude Code replaces a hook string over 10,000 with a 2,000 character preview.
+`session-init` injects the tool map (what `playbook tools map` prints, on every start including headless, ending with a pointer to `playbook commands`), an auto-learn nudge, a handoff (after `/clear` or `/compact`, the one the session saved for itself, see `context-hygiene`) and one small ranked memory block (pinned, most used, most linked facts, capped near 2,500 characters). The whole string stays under 9,000 characters because Claude Code replaces a hook string over 10,000 with a 2,000 character preview.
 
 **The handoff loop.**
 
@@ -78,7 +78,7 @@ Every hook is a module under `crates/cli/src/hooks/`, run as `playbook hook <nam
 2. When the session ends with `/clear`, `session-clean-exit` (SessionEnd, reason `clear`) drops a marker in `handoff/cleared/`.
 3. The next `session-init` with source `clear` takes the tagged handoff whose marker is freshest. It injects at most 3,000 characters of it with the path of the full file (moved to `handoff/used/`), and removes the marker, so it loads once.
 
-A tagged handoff with no marker belongs to a session still running and is left alone. Tagged handoffs expire after a day and markers after an hour. Handoffs saved without `--session` behave as before. `compact` does not load one, because compaction keeps the session and its summary.
+A tagged handoff with no marker belongs to a session still running and is left alone. Tagged handoffs expire after a day and markers after an hour. Handoffs saved without `--session` behave as before. A `/compact` needs no marker, because the session id stays the same: the next `session-init` with source `compact` takes the unread handoff tagged with the current session id, with the same 3,000 character cap, and moves it to `handoff/used/`. The compact summary and the handoff can repeat each other in part. Older unread handoffs with the same tag move to `handoff/used/` unread. A handoff tagged for another session is left alone. A compact uses up the handoff, so a `/clear` after it loads nothing (see #1392).
 
 ### PreToolUse
 
