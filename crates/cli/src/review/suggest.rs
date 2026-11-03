@@ -12,7 +12,7 @@
 
 use crate::common::re::static_regex;
 use crate::pr::shared::{gh, git, reject_option_like};
-use crate::pr::stack::Gh;
+use crate::pr::stack::{detect, Gh, StackPr, State};
 use crate::pr::triage::Review;
 use regex::Regex;
 use serde::Serialize;
@@ -552,8 +552,7 @@ fn pr_part(run: Gh, number: &str) -> Result<PrPart, String> {
         vec!["pr", "view", number, "--json", "labels,author"],
     ];
     let mut results =
-        crate::common::par::map(&calls, crate::common::par::MAX_CONCURRENT, |a| run(a))
-            .into_iter();
+        crate::common::par::map(&calls, crate::common::par::MAX_CONCURRENT, |a| run(a)).into_iter();
     let (Some(files), Some(meta)) = (results.next(), results.next()) else {
         return Err("gh returned fewer results than calls".to_string());
     };
@@ -573,6 +572,134 @@ fn pr_facts(run: Gh, number: &str) -> Result<Facts, String> {
         labels,
         own: me.map(|m| m == author),
     })
+}
+
+/// Which change `review suggest` measures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, clap::ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
+pub enum Scope {
+    /// The one PR given, or the local branch.
+    ThisPr,
+    /// Every open PR in the stack around the PR given.
+    Stack,
+}
+
+/// The PRs of a stack by role: `open` are measured, `merged` are context
+/// only, `skipped` are closed without merging.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct StackScope {
+    pub open: Vec<u64>,
+    pub merged: Vec<u64>,
+    pub skipped: Vec<u64>,
+}
+
+/// What a stack run found.
+#[derive(Debug, Clone)]
+pub enum StackFacts {
+    /// The PR is not in a stack: its own facts.
+    Alone(Facts),
+    /// The merged facts of every open PR in the stack.
+    Scored(Facts, StackScope),
+    /// More open PRs than `review.stackMaxPrs`: nothing was fetched, and the
+    /// signals hold the sums `gh` already reported for the stack.
+    OverBudget(StackScope, Signals),
+}
+
+/// One `Facts` for several PRs measured together. Files merge by path (lines
+/// add up, `renamed` holds only when every part renamed the file), labels
+/// union, and `own` is yours only when every part is. Summing per path can
+/// count a line edited in two PRs twice, which overstates size and leans
+/// toward deep, the safe side.
+pub fn merge_facts(parts: Vec<Facts>) -> Facts {
+    let mut files: Vec<File> = Vec::new();
+    let mut labels: Vec<String> = Vec::new();
+    for part in &parts {
+        for f in &part.files {
+            match files.iter_mut().find(|m| m.path == f.path) {
+                Some(m) => {
+                    m.added += f.added;
+                    m.removed += f.removed;
+                    m.renamed &= f.renamed;
+                }
+                None => files.push(f.clone()),
+            }
+        }
+        for l in &part.labels {
+            if !labels.contains(l) {
+                labels.push(l.clone());
+            }
+        }
+    }
+    let own = if parts.iter().any(|p| p.own == Some(false)) {
+        Some(false)
+    } else if !parts.is_empty() && parts.iter().all(|p| p.own == Some(true)) {
+        Some(true)
+    } else {
+        None
+    };
+    Facts { files, labels, own }
+}
+
+/// The facts for the stack around PR `number`. Merged PRs are left out and
+/// closed ones skipped. A stack with more than `max_prs` open PRs is answered
+/// from the sums `gh` already reported, so a long chain costs no further
+/// call. Any failed fetch fails the whole call: no partial stack score.
+pub fn stack_facts(run: Gh, number: &str, max_prs: u64) -> Result<StackFacts, String> {
+    let n: u64 = number
+        .parse()
+        .map_err(|_| format!("`{number}` is not a PR number"))?;
+    let stack = detect(run, Some(n))?;
+    if stack.prs.len() < 2 {
+        return Ok(StackFacts::Alone(pr_facts(run, number)?));
+    }
+    let given = stack
+        .prs
+        .iter()
+        .find(|p| p.number == n)
+        .ok_or_else(|| format!("PR #{n} was not found in its stack"))?;
+    match given.state {
+        State::Open => {}
+        State::Merged => return Err(format!("PR #{n} is merged; nothing to review")),
+        State::Closed => return Err(format!("PR #{n} is closed; nothing to review")),
+    }
+    let numbers = |state: State| -> Vec<u64> {
+        stack
+            .prs
+            .iter()
+            .filter(|p| p.state == state)
+            .map(|p| p.number)
+            .collect()
+    };
+    let scope = StackScope {
+        open: numbers(State::Open),
+        merged: numbers(State::Merged),
+        skipped: numbers(State::Closed),
+    };
+    if scope.open.len() as u64 > max_prs {
+        let open = || stack.prs.iter().filter(|p| p.state == State::Open);
+        let signals = Signals {
+            lines: open().map(StackPr::lines).sum(),
+            files: open().map(|p| p.changed_files).sum(),
+            ..Signals::default()
+        };
+        return Ok(StackFacts::OverBudget(scope, signals));
+    }
+    let parts = crate::common::par::map(&scope.open, crate::common::par::MAX_CONCURRENT, |pr| {
+        pr_part(run, &pr.to_string())
+    })
+    .into_iter()
+    .collect::<Result<Vec<_>, String>>()?;
+    let me = login(run);
+    let facts = parts
+        .into_iter()
+        .map(|(files, labels, author)| Facts {
+            files,
+            labels,
+            own: me.as_ref().map(|m| *m == author),
+        })
+        .collect();
+    Ok(StackFacts::Scored(merge_facts(facts), scope))
 }
 
 #[derive(serde::Deserialize)]
@@ -627,7 +754,9 @@ fn parse_part(files: &str, meta: &str) -> Result<PrPart, String> {
 /// `pr` is `None`, and decide.
 pub fn run(pr: Option<&str>, base: Option<&str>) -> Result<Suggestion, String> {
     let facts = match pr.map(|p| p.trim_start_matches('#')) {
-        Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => pr_facts(&|a| gh(a), n)?,
+        Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => {
+            pr_facts(&|a| gh(a), n)?
+        }
         Some(other) => return Err(format!("`{other}` is not a PR number")),
         None => local_facts(base)?,
     };
@@ -897,6 +1026,189 @@ mod tests {
         assert_eq!((mine.own, mine.files.len(), mine.labels), (Some(true), 1, vec!["security".to_string()]));
         assert_eq!(pr_facts(&seam(&calls, Some("bob")), "7").unwrap().own, Some(false));
         assert_eq!(pr_facts(&seam(&calls, None), "7").unwrap().own, None);
+    }
+
+    macro_rules! fx {
+        ($n:literal) => {
+            include_str!(concat!("../../tests/fixtures/pr_stack/", $n))
+        };
+    }
+
+    /// A fake `gh` over the `pr_stack` fixtures that records every call. PR
+    /// `n` changes `f<n>.rs` by `n * 10` added lines, and the caller is `me`.
+    fn stack_gh<'a>(calls: &'a std::sync::Mutex<Vec<String>>, api: &'static str, me: &'static str) -> impl Fn(&[&str]) -> Result<String, String> + Sync + 'a {
+        move |args: &[&str]| {
+            calls.lock().unwrap().push(args.join(" "));
+            match args {
+                ["repo", "view", ..] => Ok(fx!("repo.json").to_string()),
+                ["api", "graphql", ..] => Ok(match api {
+                    "api-none" => fx!("api-none.json"),
+                    "api-5" => fx!("api-5.json"),
+                    "api-bottom-merged" => fx!("api-bottom-merged.json"),
+                    "api-one-open" => fx!("api-one-open.json"),
+                    "api-top-closed" => fx!("api-top-closed.json"),
+                    other => panic!("no fixture {other}"),
+                }.to_string()),
+                ["api", "--paginate", endpoint, ..] => {
+                    let n: u64 = endpoint.split('/').nth(4).and_then(|n| n.parse().ok()).unwrap();
+                    Ok(format!("{{\"path\":\"f{n}.rs\",\"added\":{},\"removed\":0,\"renamed\":false}}", n * 10))
+                }
+                ["pr", "view", _, "--json", "labels,author"] => Ok(r#"{"labels":[],"author":{"login":"ana"}}"#.to_string()),
+                ["pr", "view", "3", ..] => Ok(fx!("pr-3.json").to_string()),
+                ["pr", "list", ..] => Ok("[]".to_string()),
+                ["api", "/user", ..] => Ok(me.to_string()),
+                _ => Err("unexpected gh call".to_string()),
+            }
+        }
+    }
+
+    fn fetched(calls: &std::sync::Mutex<Vec<String>>) -> Vec<String> {
+        calls.lock().unwrap().iter().filter(|c| c.contains("/files")).cloned().collect()
+    }
+
+    fn scored(r: Result<StackFacts, String>) -> (Facts, StackScope) {
+        match r.unwrap() {
+            StackFacts::Scored(f, s) => (f, s),
+            other => panic!("not scored: {other:?}"),
+        }
+    }
+
+    fn part(files: Vec<File>, labels: &[&str], own: Option<bool>) -> Facts {
+        Facts { files, labels: labels.iter().map(|l| l.to_string()).collect(), own }
+    }
+
+    #[test]
+    fn merge_sums_lines_per_path() {
+        let a = File { added: 30, removed: 5, ..file("a.rs", 0) };
+        let b = File { added: 20, removed: 1, ..file("a.rs", 0) };
+        let m = merge_facts(vec![part(vec![a], &[], None), part(vec![b], &[], None)]);
+        assert_eq!(m.files.len(), 1);
+        assert_eq!((m.files[0].added, m.files[0].removed), (50, 6));
+        let s = measure(&m);
+        assert_eq!((s.files, s.lines), (1, 56));
+    }
+
+    #[test]
+    fn merge_keeps_a_rename_only_when_every_part_renamed() {
+        let mv = File { renamed: true, ..file("a.rs", 0) };
+        let both = merge_facts(vec![part(vec![mv.clone()], &[], None), part(vec![mv.clone()], &[], None)]);
+        let one = merge_facts(vec![part(vec![mv], &[], None), part(vec![file("a.rs", 3)], &[], None)]);
+        assert_eq!((both.files[0].renamed, one.files[0].renamed), (true, false));
+    }
+
+    #[test]
+    fn merge_unions_labels_once() {
+        let m = merge_facts(vec![part(vec![], &["security"], None), part(vec![], &["security", "bug"], None)]);
+        assert_eq!(m.labels, ["security", "bug"]);
+    }
+
+    #[test]
+    fn merge_owner_needs_every_part_to_be_yours() {
+        let own = |owns: &[Option<bool>]| merge_facts(owns.iter().map(|o| part(vec![], &[], *o)).collect()).own;
+        assert_eq!(own(&[Some(true), Some(true)]), Some(true));
+        assert_eq!(own(&[Some(true), None]), None);
+        assert_eq!(own(&[Some(true), Some(false)]), Some(false));
+        assert_eq!(own(&[Some(false), Some(false)]), Some(false));
+        assert_eq!(own(&[Some(false), None]), Some(false));
+        assert_eq!(own(&[None, None]), None);
+    }
+
+    #[test]
+    fn merge_skips_an_empty_part_and_keeps_the_rest() {
+        let m = merge_facts(vec![part(vec![], &["a"], Some(true)), part(vec![file("b.rs", 10)], &["b"], Some(true))]);
+        assert_eq!((m.files.iter().map(|f| (f.path.as_str(), f.added)).collect::<Vec<_>>(), m.labels, m.own), (vec![("b.rs", 10)], vec!["a".to_string(), "b".to_string()], Some(true)));
+    }
+
+    #[test]
+    fn a_stack_is_scored_as_one_change_not_a_sum_of_changes() {
+        let stack = merge_facts((0..3).map(|i| part(vec![file(&format!("crates/a/src/x{i}.rs"), 30)], &[], Some(false))).collect());
+        let single = Facts { files: vec![file("crates/a/src/x.rs", 90)], labels: vec![], own: Some(false) };
+        let (a, b) = (decide(measure(&stack), &C), decide(measure(&single), &C));
+        assert_eq!((a.recommendation, a.confidence, a.rules), (b.recommendation, b.confidence, b.rules));
+    }
+
+    #[test]
+    fn the_stack_holds_open_prs_only_and_asks_for_the_login_once() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        let (facts, scope) = scored(stack_facts(&stack_gh(&calls, "api-bottom-merged", "ana"), "3", 6));
+        assert_eq!(scope, StackScope { open: vec![2, 3], merged: vec![1], skipped: vec![] });
+        let mut paths: Vec<_> = facts.files.iter().map(|f| (f.path.as_str(), f.added)).collect();
+        paths.sort();
+        assert_eq!(paths, [("f2.rs", 20), ("f3.rs", 30)]);
+        assert_eq!(facts.own, Some(true));
+        assert_eq!(calls.lock().unwrap().iter().filter(|c| c.starts_with("api /user")).count(), 1);
+        assert!(fetched(&calls).iter().all(|c| !c.contains("pulls/1/")));
+    }
+
+    #[test]
+    fn one_open_pr_in_a_two_pr_stack_is_its_own_facts() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        let (facts, scope) = scored(stack_facts(&stack_gh(&calls, "api-one-open", "ana"), "2", 6));
+        assert_eq!(scope, StackScope { open: vec![2], merged: vec![1], skipped: vec![] });
+        let alone = pr_facts(&stack_gh(&calls, "api-one-open", "ana"), "2").unwrap();
+        assert_eq!((facts.files, facts.labels, facts.own), (alone.files, alone.labels, alone.own));
+    }
+
+    #[test]
+    fn a_closed_pr_is_skipped_and_never_fetched() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        let (facts, scope) = scored(stack_facts(&stack_gh(&calls, "api-top-closed", "ana"), "2", 6));
+        assert_eq!(scope, StackScope { open: vec![1, 2], merged: vec![], skipped: vec![3] });
+        assert_eq!(facts.files.len(), 2);
+        assert!(fetched(&calls).iter().all(|c| !c.contains("pulls/3/")));
+    }
+
+    #[test]
+    fn a_closed_or_merged_given_pr_is_an_error_before_any_fetch() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        let closed = stack_facts(&stack_gh(&calls, "api-top-closed", "ana"), "3", 6).unwrap_err();
+        assert_eq!(closed, "PR #3 is closed; nothing to review");
+        let merged = stack_facts(&stack_gh(&calls, "api-bottom-merged", "ana"), "1", 6).unwrap_err();
+        assert_eq!(merged, "PR #1 is merged; nothing to review");
+        assert!(fetched(&calls).is_empty());
+    }
+
+    #[test]
+    fn a_pr_outside_a_stack_falls_back_to_its_own_facts() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        let got = stack_facts(&stack_gh(&calls, "api-none", "ana"), "3", 6).unwrap();
+        match got {
+            StackFacts::Alone(f) => assert_eq!(f.files.len(), 1),
+            other => panic!("not alone: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn over_the_pr_budget_nothing_is_fetched_and_the_sums_come_from_the_stack() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        match stack_facts(&stack_gh(&calls, "api-5", "ana"), "3", 4).unwrap() {
+            StackFacts::OverBudget(scope, signals) => {
+                assert_eq!(scope.open.len(), 5);
+                assert_eq!((signals.lines, signals.files), (60, 5));
+            }
+            other => panic!("not over budget: {other:?}"),
+        }
+        assert!(fetched(&calls).is_empty());
+    }
+
+    #[test]
+    fn at_the_pr_budget_the_stack_is_still_fetched() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        let (facts, scope) = scored(stack_facts(&stack_gh(&calls, "api-5", "ana"), "3", 5));
+        assert_eq!((scope.open.len(), facts.files.len(), fetched(&calls).len()), (5, 5, 5));
+    }
+
+    #[test]
+    fn a_failed_fetch_fails_the_whole_stack() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        let inner = stack_gh(&calls, "api-bottom-merged", "ana");
+        let failing = |args: &[&str]| if args.iter().any(|a| a.contains("pulls/2/files")) { Err("boom".to_string()) } else { inner(args) };
+        assert_eq!(stack_facts(&failing, "3", 6).unwrap_err(), "boom");
+    }
+
+    #[test]
+    fn scope_serialises_in_kebab_case() {
+        assert_eq!(serde_json::to_string(&[Scope::ThisPr, Scope::Stack]).unwrap(), r#"["this-pr","stack"]"#);
     }
 
     #[test]
