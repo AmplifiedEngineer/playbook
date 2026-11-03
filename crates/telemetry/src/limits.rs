@@ -451,9 +451,60 @@ impl Burn {
     }
 }
 
+const SECONDS_PER_HOUR: i64 = 3600;
+const SECONDS_PER_MINUTE: i64 = 60;
+
+/// Shown for a span under one minute, and for one that is not positive.
+const UNDER_A_MINUTE: &str = "<1m";
+
+/// A span of seconds as at most two units, rounded down: `4d9h`, `2d`,
+/// `1h20m`, `3h`, `45m`, or `<1m`. A day or more shows days and hours, under a
+/// day shows hours and minutes, under an hour shows minutes.
+pub fn fmt_span(seconds: i64) -> String {
+    let units = |big: i64, big_unit: &str, small: i64, small_unit: &str| {
+        let (big_count, rest) = (seconds / big, seconds % big);
+        match rest / small {
+            0 => format!("{big_count}{big_unit}"),
+            n => format!("{big_count}{big_unit}{n}{small_unit}"),
+        }
+    };
+    if seconds >= SECONDS_PER_DAY {
+        units(SECONDS_PER_DAY, "d", SECONDS_PER_HOUR, "h")
+    } else if seconds >= SECONDS_PER_HOUR {
+        units(SECONDS_PER_HOUR, "h", SECONDS_PER_MINUTE, "m")
+    } else if seconds >= SECONDS_PER_MINUTE {
+        format!("{}m", seconds / SECONDS_PER_MINUTE)
+    } else {
+        UNDER_A_MINUTE.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fmt_span_rounds_down_to_two_units() {
+        let (m, h, d) = (60, 3600, SECONDS_PER_DAY);
+        let rows = [
+            (2 * d + 3 * h, "2d3h"),
+            (2 * d, "2d"),
+            (4 * d + 9 * h, "4d9h"),
+            (d, "1d"),
+            (d - 1, "23h59m"),
+            (3 * h, "3h"),
+            (h + 20 * m, "1h20m"),
+            (h, "1h"),
+            (h - 1, "59m"),
+            (45 * m, "45m"),
+            (59, "<1m"),
+            (0, "<1m"),
+            (-5, "<1m"),
+        ];
+        for (seconds, want) in rows {
+            assert_eq!(fmt_span(seconds), want, "{seconds}s");
+        }
+    }
 
     const D: i64 = SECONDS_PER_DAY;
 
