@@ -442,7 +442,7 @@ pub enum Command {
     ///
     /// Example: `playbook completions zsh`
     Completions {
-        /// The shell to print the script for
+        /// Shell to print the script for
         #[arg(value_enum)]
         shell: completions::CompletionShell,
     },
@@ -513,7 +513,7 @@ pub enum Command {
     ///
     /// Example: `playbook migrate --status`
     Migrate {
-        /// List each migration with the release that ships it, its scope and state, the recorded and running versions, and what needs you, writing nothing
+        /// List each migration with its release, scope and state, writing nothing
         #[arg(long, conflicts_with = "dry_run")]
         status: bool,
         /// Show the migrations a run would start and what needs you, writing nothing
@@ -878,7 +878,7 @@ pub enum Command {
     ///
     /// Example: `playbook commands pr`
     Commands {
-        /// A command or group, such as `pr` or `worktree review`
+        /// Command or group to list, such as `pr` or `worktree review`
         group: Vec<String>,
         /// Print a JSON array with one object per command: command, purpose, access, args, subcommands, intents
         #[arg(long)]
@@ -1015,6 +1015,8 @@ pub enum Command {
     /// Writes to `~/.claude.json` so Claude Code's first-launch trust prompt
     /// does not block `playbook cc` or `playbook ccd`. Always exits 0, even on failure, so a
     /// script can call it without checking.
+    ///
+    /// Example: `playbook trust /Users/me/project`
     Trust {
         /// Absolute path of the directory to trust
         path: String,
@@ -2003,29 +2005,37 @@ pub enum DoctorCommand {
     /// Print the version from a plugin manifest
     ///
     /// Prints an empty line if the file is missing, unreadable, or has no version.
+    ///
+    /// Example: `playbook doctor plugin-version plugin.json`
     PluginVersion {
-        /// Plugin manifest to read
+        /// Path of the plugin manifest to read
         path: PathBuf,
     },
     /// Print the status line command from a settings.json
     ///
     /// Prints an empty line if the file is missing, unreadable, or has none.
+    ///
+    /// Example: `playbook doctor statusline-command settings.json`
     StatuslineCommand {
-        /// settings.json to read
+        /// Path of the settings.json to read
         path: PathBuf,
     },
     /// List every hook command in a settings.json, one per line
     ///
     /// Prints nothing if the file is unreadable, invalid, or has no hooks.
+    ///
+    /// Example: `playbook doctor hook-commands settings.json`
     HookCommands {
-        /// settings.json to read
+        /// Path of the settings.json to read
         path: PathBuf,
     },
     /// Count the commands wired to each named guard for one event
     ///
     /// Prints one `guard=count` line per guard.
+    ///
+    /// Example: `playbook doctor hook-commands-for-event settings.json PreToolUse rm-workspace-guard`
     HookCommandsForEvent {
-        /// settings.json to read
+        /// Path of the settings.json to read
         path: PathBuf,
         /// Event name, such as `PreToolUse`
         event: String,
@@ -2035,12 +2045,14 @@ pub enum DoctorCommand {
     /// Count hook commands that match a pattern
     ///
     /// Counts across every event, or only one if you name it.
+    ///
+    /// Example: `playbook doctor hook-commands-matching settings.json guard`
     HookCommandsMatching {
-        /// settings.json to read
+        /// Path of the settings.json to read
         path: PathBuf,
         /// Regex to look for anywhere in a command
         pattern: String,
-        /// Only count this event (default: every event)
+        /// Event to count, every event when left out
         event: Option<String>,
     },
 }
@@ -2090,13 +2102,17 @@ pub enum ToolsCommand {
 /// `playbook deps` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum DepsCommand {
-    /// Keep each tool on PATH and install only the missing ones with
-    /// Homebrew, from the `brew` and `tap` lines of a Brewfile.
+    /// Install the missing tools a Brewfile lists with Homebrew
+    ///
+    /// Keeps each tool already on PATH and installs only the missing ones,
+    /// from the `brew` and `tap` lines of the Brewfile.
+    ///
+    /// Example: `playbook deps ensure --builtin`
     Ensure {
-        /// Brewfile to read; defaults to `Brewfile` in the current directory.
+        /// Brewfile to read, `Brewfile` in the current directory by default
         #[arg(conflicts_with = "builtin")]
         brewfile: Option<PathBuf>,
-        /// Read the Brewfile built into this binary instead of a file.
+        /// Read the Brewfile built into this binary instead of a file
         #[arg(long)]
         builtin: bool,
     },

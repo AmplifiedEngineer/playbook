@@ -345,7 +345,7 @@ Built from this binary's own command tree, so it lists only the commands the bin
 
 Example: `playbook commands pr`
 
-- `<GROUP>`: A command or group, such as `pr` or `worktree review`
+- `<GROUP>`: Command or group to list, such as `pr` or `worktree review`
 - `--json`: Print a JSON array with one object per command: command, purpose, access, args, subcommands, intents
 
 ### `playbook commit`
@@ -383,7 +383,7 @@ Print a shell completion script for bash, zsh or fish
 
 Example: `playbook completions zsh`
 
-- `<SHELL>`: The shell to print the script for (one of `bash`, `zsh`, `fish`)
+- `<SHELL>`: Shell to print the script for (one of `bash`, `zsh`, `fish`)
 
 ### `playbook config`
 
@@ -473,9 +473,13 @@ Subcommands: `ensure`
 
 ### `playbook deps ensure`
 
-Keep each tool on PATH and install only the missing ones with Homebrew, from the `brew` and `tap` lines of a Brewfile
+Install the missing tools a Brewfile lists with Homebrew
 
-- `<BREWFILE>`: Brewfile to read; defaults to `Brewfile` in the current directory
+Keeps each tool already on PATH and installs only the missing ones, from the `brew` and `tap` lines of the Brewfile.
+
+Example: `playbook deps ensure --builtin`
+
+- `<BREWFILE>`: Brewfile to read, `Brewfile` in the current directory by default
 - `--builtin`: Read the Brewfile built into this binary instead of a file
 
 ### `playbook doc`
@@ -532,7 +536,9 @@ List every hook command in a settings.json, one per line
 
 Prints nothing if the file is unreadable, invalid, or has no hooks.
 
-- `<PATH>`: settings.json to read
+Example: `playbook doctor hook-commands settings.json`
+
+- `<PATH>`: Path of the settings.json to read
 
 ### `playbook doctor hook-commands-for-event`
 
@@ -540,7 +546,9 @@ Count the commands wired to each named guard for one event
 
 Prints one `guard=count` line per guard.
 
-- `<PATH>`: settings.json to read
+Example: `playbook doctor hook-commands-for-event settings.json PreToolUse rm-workspace-guard`
+
+- `<PATH>`: Path of the settings.json to read
 - `<EVENT>`: Event name, such as `PreToolUse`
 - `<GUARDS>`: Guard names, such as `rm-workspace-guard`
 
@@ -550,9 +558,11 @@ Count hook commands that match a pattern
 
 Counts across every event, or only one if you name it.
 
-- `<PATH>`: settings.json to read
+Example: `playbook doctor hook-commands-matching settings.json guard`
+
+- `<PATH>`: Path of the settings.json to read
 - `<PATTERN>`: Regex to look for anywhere in a command
-- `<EVENT>`: Only count this event (default: every event)
+- `<EVENT>`: Event to count, every event when left out
 
 ### `playbook doctor models`
 
@@ -574,7 +584,9 @@ Print the version from a plugin manifest
 
 Prints an empty line if the file is missing, unreadable, or has no version.
 
-- `<PATH>`: Plugin manifest to read
+Example: `playbook doctor plugin-version plugin.json`
+
+- `<PATH>`: Path of the plugin manifest to read
 
 ### `playbook doctor statusline-command`
 
@@ -582,7 +594,9 @@ Print the status line command from a settings.json
 
 Prints an empty line if the file is missing, unreadable, or has none.
 
-- `<PATH>`: settings.json to read
+Example: `playbook doctor statusline-command settings.json`
+
+- `<PATH>`: Path of the settings.json to read
 
 ### `playbook effort`
 
@@ -930,7 +944,7 @@ Exit codes: 0 when it finished or had nothing to do, 1 when the record could not
 
 Example: `playbook migrate --status`
 
-- `--status`: List each migration with the release that ships it, its scope and state, the recorded and running versions, and what needs you, writing nothing
+- `--status`: List each migration with its release, scope and state, writing nothing
 - `--dry-run`: Show the migrations a run would start and what needs you, writing nothing
 - `--json`: Print JSON for tools
 - `--no-plugin`: Leave the playbook plugin in Claude Code as it is. By default a run updates it with `claude plugin update`, unless the config key `update.plugin` is `off`
@@ -1466,6 +1480,8 @@ Print the map from each task to the command that does it. The session start hook
 Mark a directory as trusted in Claude Code
 
 Writes to `~/.claude.json` so Claude Code's first-launch trust prompt does not block `playbook cc` or `playbook ccd`. Always exits 0, even on failure, so a script can call it without checking.
+
+Example: `playbook trust /Users/me/project`
 
 - `<PATH>`: Absolute path of the directory to trust
 

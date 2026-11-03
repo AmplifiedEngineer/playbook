@@ -218,7 +218,6 @@ pub(crate) const META: &[Meta] = &[
         .purpose("Change a setting; protected keys such as `pr.rules.*` are the user's"),
     free("deliver").for_agents(),
     user("deps").for_users(),
-    user("deps ensure").purpose("Install the missing tools of a Brewfile with Homebrew"),
     ro("doc")
         .purpose("Read a PDF or Office file as text with the bundled converter")
         .for_agents(),
