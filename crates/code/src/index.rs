@@ -1398,7 +1398,7 @@ impl P { fn go(&self) {} }
     /// delete an old row.
     const EXTRACTOR_HISTORY: &[(u32, &str)] = &[(
         1,
-        "1d212189516758012408041d84182c27c80d60cf9fc6b5b92bea2dcba75ed47f",
+        "41a8b01d96802962c92d2d199283a2682b1c2dc1729b1472d5274f3c930bc22f",
     )];
 
     /// One source per grammar, with enough syntax to touch symbols, imports,
@@ -1406,11 +1406,15 @@ impl P { fn go(&self) {} }
     const DIGEST_FIXTURES: &[(&str, &str)] = &[
         (
             "a.rs",
-            "use std::fmt::Display;\n/// Doc.\npub struct HttpClient { pub retry_count: u32 }\nimpl HttpClient {\n    pub fn send_request(&self) -> u32 { 1 }\n}\nfn helper() {}\n",
+            "use std::fmt::Display;\n/// Doc.\npub struct HttpClient { pub retry_count: u32 }\nimpl HttpClient {\n    pub fn send_request(&self) -> u32 { 1 }\n}\nfn helper() {}\npub enum Mode { Fast, Slow }\npub trait Runner { fn run_all(&self); }\nmod inner { pub const MAX_RETRIES: u32 = 3; }\nstatic GLOBAL_NAME: &str = \"x\";\nmacro_rules! make_it { () => {}; }\n",
+        ),
+        (
+            "broken.rs",
+            "pub fn good_one() {}\nimpl Broken {\n    fn half_done( {\n",
         ),
         (
             "a.py",
-            "import os\nfrom typing import List\n\nclass UserStore:\n    def load_user(self, user_id):\n        return user_id\n\ndef main():\n    pass\n",
+            "import os\nfrom typing import List\nfrom __future__ import annotations\n\nclass UserStore:\n    def load_user(self, user_id):\n        return user_id\n\n@decorator\ndef main():\n    pass\n\nMAX_USERS = 10\n",
         ),
         (
             "a.js",
@@ -1418,7 +1422,7 @@ impl P { fn go(&self) {} }
         ),
         (
             "a.ts",
-            "import type { Config } from './config';\nexport interface RequestOptions { retryCount: number }\nexport class ApiClient { sendRequest(o: RequestOptions): void {} }\n",
+            "import type { Config } from './config';\nexport interface RequestOptions { retryCount: number }\nexport class ApiClient { sendRequest(o: RequestOptions): void {} }\nexport enum Level { Low, High }\nexport type Handler = (e: string) => void;\nexport abstract class Base { abstract go(): void; }\n",
         ),
         (
             "a.tsx",
@@ -1426,9 +1430,26 @@ impl P { fn go(&self) {} }
         ),
         (
             "a.go",
-            "package main\n\nimport \"fmt\"\n\ntype HttpServer struct{ Port int }\n\nfunc (s *HttpServer) StartServer() { fmt.Println(s.Port) }\n\nfunc main() {}\n",
+            "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\ntype HttpServer struct{ Port int }\n\ntype Alias = HttpServer\n\nconst MaxConns = 5\n\nvar defaultName = \"x\"\n\nfunc (s *HttpServer) StartServer() { fmt.Println(s.Port, os.Args) }\n\nfunc main() {}\n",
+        ),
+        (
+            "long.py",
+            LONG_FIXTURE,
         ),
     ];
+
+    /// 74 lines, so the chunker makes more than one window.
+    const LONG_FIXTURE: &str = concat!(
+        "def first_function():\n    pass\n",
+        "# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n",
+        "# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n",
+        "# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n",
+        "# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n",
+        "# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n",
+        "# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n",
+        "# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n",
+        "def second_function():\n    pass\n",
+    );
 
     fn extractor_digest() -> String {
         let mut out = String::new();
@@ -1443,7 +1464,7 @@ impl P { fn go(&self) {} }
                 parsed.partial
             ));
             out.push_str(&format!("{:?}\n{:?}\n", found.symbols, found.imports));
-            for chunk in make_chunks(source, 60) {
+            for chunk in make_chunks(source, Options::default().chunk_lines) {
                 out.push_str(&format!(
                     "{}-{}:{}\n",
                     chunk.start_line, chunk.end_line, chunk.body
@@ -1470,6 +1491,20 @@ impl P { fn go(&self) {} }
             "extractor output changed: append a row with a higher revision and the new digest \
              to EXTRACTOR_HISTORY, bump EXTRACTOR_REVISION to match, and keep the old rows"
         );
+    }
+
+    #[test]
+    fn the_digest_fixtures_cover_a_broken_file_and_a_second_chunk_window() {
+        // Arrange
+        let (path, source) = DIGEST_FIXTURES
+            .iter()
+            .find(|(p, _)| *p == "broken.rs")
+            .expect("broken fixture");
+        let parsed = lang::parse(lang::Lang::for_path(path).unwrap(), source.as_bytes()).unwrap();
+
+        // Assert
+        assert!(parsed.partial);
+        assert!(make_chunks(LONG_FIXTURE, Options::default().chunk_lines).len() > 1);
     }
 
     #[test]

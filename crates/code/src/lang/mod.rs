@@ -120,7 +120,12 @@ fn sources_hash(sources: &[&str]) -> String {
 
 #[cfg(debug_assertions)]
 fn extractor_revision() -> String {
+    // The chunker and the full text body live in `index.rs` and are part of
+    // what the digest test pins, so they count as extractor sources too.
+    let revision = EXTRACTOR_REVISION.to_string();
     sources_hash(&[
+        &revision,
+        include_str!("../index.rs"),
         include_str!("mod.rs"),
         include_str!("go.rs"),
         include_str!("python.rs"),
