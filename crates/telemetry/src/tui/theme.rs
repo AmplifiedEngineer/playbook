@@ -457,4 +457,195 @@ mod tests {
         assert_eq!(p.graded(p.cpu, 90.0), Color::Reset);
         assert_eq!(p.graded(p.process, 90.0), Color::Reset);
     }
+
+    /// Contrast and color-blind checks. The method is WCAG 2.x contrast from
+    /// sRGB relative luminance, and the Machado et al. (2009) simulation at
+    /// full severity in linear RGB, compared with CIE76 delta E in CIELAB.
+    mod accessibility {
+        use super::*;
+
+        const TEXT_CONTRAST: f64 = 4.5;
+        const NON_TEXT_CONTRAST: f64 = 3.0;
+        const MIN_CVD_DISTANCE: f64 = 10.0;
+
+        const PROTAN: [[f64; 3]; 3] = [
+            [0.152286, 1.052583, -0.204868],
+            [0.114503, 0.786281, 0.099216],
+            [-0.003882, -0.048116, 1.051998],
+        ];
+        const DEUTAN: [[f64; 3]; 3] = [
+            [0.367322, 0.860646, -0.227968],
+            [0.280085, 0.672501, 0.047413],
+            [-0.011820, 0.042940, 0.968881],
+        ];
+        const TRITAN: [[f64; 3]; 3] = [
+            [1.255528, -0.076749, -0.178779],
+            [-0.078411, 0.930809, 0.147602],
+            [0.004733, 0.691367, 0.303900],
+        ];
+
+        fn linear(c: u8) -> f64 {
+            let v = f64::from(c) / 255.0;
+            if v <= 0.04045 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        }
+
+        fn luminance(c: Rgb) -> f64 {
+            0.2126 * linear(c.0) + 0.7152 * linear(c.1) + 0.0722 * linear(c.2)
+        }
+
+        fn contrast(a: Rgb, b: Rgb) -> f64 {
+            let (la, lb) = (luminance(a), luminance(b));
+            (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+        }
+
+        fn simulate(c: Rgb, m: &[[f64; 3]; 3]) -> [f64; 3] {
+            let v = [linear(c.0), linear(c.1), linear(c.2)];
+            m.map(|row| (row[0] * v[0] + row[1] * v[1] + row[2] * v[2]).clamp(0.0, 1.0))
+        }
+
+        fn lab(linear_rgb: [f64; 3]) -> [f64; 3] {
+            let [r, g, b] = linear_rgb;
+            let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+            let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+            let f = |t: f64| {
+                if t > 216.0 / 24389.0 {
+                    t.cbrt()
+                } else {
+                    (24389.0 / 27.0 * t + 16.0) / 116.0
+                }
+            };
+            let (fx, fy, fz) = (f(x), f(y), f(z));
+            [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
+        }
+
+        fn distance(a: Rgb, b: Rgb, m: &[[f64; 3]; 3]) -> f64 {
+            let (la, lb) = (lab(simulate(a, m)), lab(simulate(b, m)));
+            ((la[0] - lb[0]).powi(2) + (la[1] - lb[1]).powi(2) + (la[2] - lb[2]).powi(2)).sqrt()
+        }
+
+        /// The first pair in `colors` closer than the threshold under any of
+        /// the three simulations, if any.
+        fn confusable(colors: &[Rgb]) -> Option<(Rgb, Rgb)> {
+            for (i, a) in colors.iter().enumerate() {
+                for b in &colors[i + 1..] {
+                    if [&PROTAN, &DEUTAN, &TRITAN]
+                        .iter()
+                        .any(|m| distance(*a, *b, m) < MIN_CVD_DISTANCE)
+                    {
+                        return Some((*a, *b));
+                    }
+                }
+            }
+            None
+        }
+
+        fn rgb_of(ink: Ink) -> Rgb {
+            match ink {
+                Ink::Rgb(rgb) => rgb,
+                other => panic!("the Standard theme uses RGB only, got {other:?}"),
+            }
+        }
+
+        fn standard() -> Palette {
+            Theme::Standard.palette(ColorDepth::True)
+        }
+
+        fn series() -> Vec<Rgb> {
+            standard().series.iter().map(|i| rgb_of(*i)).collect()
+        }
+
+        #[test]
+        fn text_roles_meet_the_text_contrast_on_the_ground() {
+            let p = standard();
+            let bg = rgb_of(p.bg);
+            for (name, ink) in [
+                ("fg", p.fg),
+                ("title", p.title),
+                ("graph_text", p.graph_text),
+                ("inactive", p.inactive),
+                ("hi", p.hi),
+                ("warn", p.warn),
+                ("error", p.error),
+                ("live", p.live),
+            ] {
+                let ratio = contrast(rgb_of(ink), bg);
+                assert!(ratio >= TEXT_CONTRAST, "{name} is {ratio:.2}");
+            }
+        }
+
+        #[test]
+        fn the_selected_row_meets_the_text_contrast() {
+            let p = standard();
+            let ratio = contrast(rgb_of(p.sel_fg), rgb_of(p.sel_bg));
+            assert!(ratio >= TEXT_CONTRAST, "selection is {ratio:.2}");
+        }
+
+        #[test]
+        fn lines_boxes_and_series_meet_the_non_text_contrast() {
+            let p = standard();
+            let bg = rgb_of(p.bg);
+            let mut shapes = vec![p.div_line, p.meter_bg, p.box_cpu, p.box_mem, p.box_net];
+            shapes.push(p.box_proc);
+            shapes.extend(p.series);
+            for ink in shapes {
+                let ratio = contrast(rgb_of(ink), bg);
+                assert!(ratio >= NON_TEXT_CONTRAST, "{ink:?} is {ratio:.2}");
+            }
+        }
+
+        #[test]
+        fn text_and_shape_roles_hold_up_after_reduction_to_256_colors() {
+            let p = Theme::Standard.palette(ColorDepth::Ansi256);
+            let bg = Rgb(0, 0, 0);
+            let back = |ink: Ink| match p.color(ink) {
+                Color::Indexed(i) => indexed_rgb(i),
+                other => panic!("expected an indexed color, got {other:?}"),
+            };
+            for ink in [
+                p.fg,
+                p.graph_text,
+                p.inactive,
+                p.hi,
+                p.warn,
+                p.error,
+                p.live,
+            ] {
+                assert!(contrast(back(ink), bg) >= TEXT_CONTRAST, "{ink:?}");
+            }
+            for ink in [p.div_line, p.box_cpu, p.box_mem, p.box_net, p.box_proc] {
+                assert!(contrast(back(ink), bg) >= NON_TEXT_CONTRAST, "{ink:?}");
+            }
+        }
+
+        /// The xterm value of a 256 color index of 16 or more.
+        fn indexed_rgb(i: u8) -> Rgb {
+            if i >= 232 {
+                return gray(8 + 10 * (i - 232));
+            }
+            let level = |n: u8| if n == 0 { 0 } else { 55 + 40 * n };
+            let n = i - 16;
+            Rgb(level(n / 36), level(n / 6 % 6), level(n % 6))
+        }
+
+        #[test]
+        fn every_series_pair_stays_apart_under_each_color_vision_type() {
+            assert_eq!(confusable(&series()), None);
+        }
+
+        #[test]
+        fn the_checker_flags_two_near_grays() {
+            let grays = [gray(0x77), gray(0x7a)];
+            assert!(confusable(&grays).is_some());
+        }
+
+        #[test]
+        fn the_checker_flags_the_old_graph_text_gray() {
+            assert!(contrast(gray(0x60), Rgb(0, 0, 0)) < TEXT_CONTRAST);
+        }
+    }
 }
