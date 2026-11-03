@@ -8,7 +8,7 @@
 
 use super::search::{fts_hits, load, Loaded, SearchOptions};
 use super::source::cut_at_boundary;
-use rusqlite::{params, Connection};
+use rusqlite::{params, params_from_iter, Connection};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -320,23 +320,29 @@ fn import_cands(
 }
 
 /// How much each term tells apart: rare names weigh more than common ones.
+/// One pass over the worktree's symbols counts them all and each term's
+/// matches, because a scan through the scoped views costs more than a plain
+/// table scan. Two paths with the same bytes count twice, as they did when
+/// each path had its own rows.
 fn term_weights(conn: &Connection, words: &[String]) -> Result<Vec<f64>, String> {
-    let total: i64 = conn
-        .query_row("SELECT COUNT(*) FROM symbols", [], |r| r.get(0))
+    let sums: String = (1..=words.len())
+        .map(|i| format!(", COALESCE(SUM(lower(s.name) LIKE ?{i} ESCAPE '\\'), 0)"))
+        .collect();
+    let sql = format!("SELECT COUNT(*){sums} FROM symbols s JOIN files f ON f.id = s.file_id");
+    let patterns: Vec<String> = words
+        .iter()
+        .map(|w| format!("%{}%", w.replace('\\', "\\\\").replace('_', "\\_")))
+        .collect();
+    let counts: Vec<i64> = conn
+        .query_row(&sql, params_from_iter(patterns.iter()), |r| {
+            (0..=words.len()).map(|i| r.get(i)).collect()
+        })
         .map_err(sql_err)?;
-    let mut out = Vec::new();
-    for word in words {
-        let pattern = format!("%{}%", word.replace('\\', "\\\\").replace('_', "\\_"));
-        let df: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM symbols WHERE lower(name) LIKE ?1 ESCAPE '\\'",
-                [pattern],
-                |r| r.get(0),
-            )
-            .map_err(sql_err)?;
-        out.push((2.0 + total as f64 / (1.0 + df as f64)).ln());
-    }
-    Ok(out)
+    let total = counts[0];
+    Ok(counts[1..]
+        .iter()
+        .map(|df| (2.0 + total as f64 / (1.0 + *df as f64)).ln())
+        .collect())
 }
 
 /// A documentation file: a prose extension or a `docs` or `doc` directory.
@@ -1180,5 +1186,24 @@ mod tests {
         // Assert
         assert!(text.len() <= 120, "{}", text.len());
         assert!(text.is_empty() || text.ends_with('\n'));
+    }
+
+    #[test]
+    fn term_weights_count_a_declaration_once_per_path() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("cx-df-per-path");
+        f.write("a.rs", "fn widget() {}\n");
+        f.write("b.rs", "fn widget() {}\n");
+        f.write("c.rs", "fn other() {}\n");
+        f.run();
+        let conn = f.conn();
+
+        // Act
+        let weights = term_weights(&conn, &["widget".to_string()]).expect("weights");
+
+        // Assert: three symbols in total, two of them named widget.
+        let expected = (2.0 + 3.0 / (1.0 + 2.0_f64)).ln();
+        assert!((weights[0] - expected).abs() < 1e-9, "{weights:?}");
     }
 }

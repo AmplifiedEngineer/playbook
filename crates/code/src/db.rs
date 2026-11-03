@@ -7,7 +7,7 @@
 
 use super::host;
 use playbook_common::sqlite::{retry_busy, OPEN_BUDGET};
-use rusqlite::{Connection, ErrorCode, Transaction, TransactionBehavior};
+use rusqlite::{Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -96,17 +96,6 @@ CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS files (
-    id INTEGER PRIMARY KEY,
-    path TEXT NOT NULL UNIQUE,
-    lang TEXT,
-    sha256 TEXT NOT NULL,
-    size INTEGER NOT NULL,
-    mtime_ns INTEGER NOT NULL,
-    indexed_at INTEGER NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('ok', 'partial', 'failed', 'skipped')),
-    error TEXT
-);
 CREATE TABLE IF NOT EXISTS worktrees (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key TEXT NOT NULL UNIQUE,
@@ -139,7 +128,7 @@ CREATE TABLE IF NOT EXISTS manifest (
 CREATE INDEX IF NOT EXISTS manifest_content ON manifest(content, worktree);
 CREATE TABLE IF NOT EXISTS symbols (
     id INTEGER PRIMARY KEY,
-    file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    content INTEGER NOT NULL REFERENCES content(id) ON DELETE CASCADE,
     parent_id INTEGER,
     name TEXT NOT NULL,
     qualified_name TEXT NOT NULL,
@@ -151,26 +140,26 @@ CREATE TABLE IF NOT EXISTS symbols (
     end_byte INTEGER NOT NULL,
     start_line INTEGER NOT NULL,
     end_line INTEGER NOT NULL
-);
+) STRICT;
 CREATE INDEX IF NOT EXISTS symbols_name ON symbols(name);
 CREATE INDEX IF NOT EXISTS symbols_name_lower ON symbols(lower(name));
 CREATE INDEX IF NOT EXISTS symbols_qualified ON symbols(qualified_name);
-CREATE INDEX IF NOT EXISTS symbols_file ON symbols(file_id);
+CREATE INDEX IF NOT EXISTS symbols_content ON symbols(content);
 CREATE TABLE IF NOT EXISTS imports (
-    file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    content INTEGER NOT NULL REFERENCES content(id) ON DELETE CASCADE,
     module TEXT NOT NULL,
     names TEXT,
     line INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS imports_file ON imports(file_id);
+) STRICT;
+CREATE INDEX IF NOT EXISTS imports_content ON imports(content);
 CREATE INDEX IF NOT EXISTS imports_module ON imports(module);
 CREATE TABLE IF NOT EXISTS chunks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    content INTEGER NOT NULL REFERENCES content(id) ON DELETE CASCADE,
     start_line INTEGER NOT NULL,
     end_line INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS chunks_file ON chunks(file_id);
+) STRICT;
+CREATE INDEX IF NOT EXISTS chunks_content ON chunks(content);
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     body,
     content='',
@@ -345,6 +334,92 @@ fn try_open(path: &Path, mode: OpenMode) -> Result<Connection, DbError> {
     Ok(conn)
 }
 
+/// Which connection the scoped views are for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScopeKind {
+    /// An index run: only `files` is a view. The run reads and writes the real
+    /// `symbols`, `imports` and `chunks` tables.
+    Writer,
+    /// A query: `files`, `symbols`, `imports` and `chunks` are all views that
+    /// show one worktree.
+    Reader,
+}
+
+/// Creates the TEMP views that show one worktree under today's table names.
+/// A view cannot bind a parameter, so the integer row id of the worktree is
+/// written into the text. Call it after that row is final: `--rebuild` deletes
+/// and inserts the row and gets a new id. Bodies name `main.` tables, because
+/// an unqualified name inside a temp view resolves to the view itself.
+///
+/// `files` has the columns of the old table, minus `indexed_at`, plus
+/// `content` and `parser`. Its `id` is the content id, and NULL for a path with
+/// no content, which no `file_id` matches. A plain column keeps the view flat,
+/// so `f.id = ?` is an index search on `manifest_content`; a `COALESCE` or a
+/// `UNION ALL` view is built as a temporary table on every query and costs
+/// more. In `symbols`, `imports`
+/// and `chunks` the `file_id` column is the content id, restricted to the
+/// content that `files` lists. `imports` also lists its `rowid`.
+pub fn create_scope_views(
+    conn: &Connection,
+    worktree_row_id: i64,
+    kind: ScopeKind,
+) -> rusqlite::Result<()> {
+    let wt = worktree_row_id;
+    // The first write to the temp schema opens a temp file; keep it in memory.
+    conn.pragma_update(None, "temp_store", "MEMORY")?;
+    let mut sql = format!(
+        "CREATE TEMP VIEW IF NOT EXISTS files AS
+         SELECT m.content AS id, m.path AS path, m.lang AS lang, m.sha256 AS sha256,
+                m.size AS size, m.mtime_ns AS mtime_ns, m.status AS status, m.error AS error,
+                m.content AS content, c.parser AS parser
+         FROM main.manifest m LEFT JOIN main.content c ON c.id = m.content
+         WHERE m.worktree = {wt};"
+    );
+    if kind == ScopeKind::Reader {
+        // A correlated EXISTS on `manifest_content` costs one index probe per
+        // row. An `IN (SELECT ...)` list is rebuilt on every statement.
+        let listed = |table: &str| {
+            format!(
+                "EXISTS (SELECT 1 FROM main.manifest m2
+                         WHERE m2.content = main.{table}.content AND m2.worktree = {wt})"
+            )
+        };
+        sql.push_str(&format!(
+            "CREATE TEMP VIEW IF NOT EXISTS symbols AS
+             SELECT id, content AS file_id, parent_id, name, qualified_name, kind, signature,
+                    signature_cut, exported, start_byte, end_byte, start_line, end_line
+             FROM main.symbols WHERE {};
+             CREATE TEMP VIEW IF NOT EXISTS imports AS
+             SELECT rowid AS rowid, content AS file_id, module, names, line
+             FROM main.imports WHERE {};
+             CREATE TEMP VIEW IF NOT EXISTS chunks AS
+             SELECT id, content AS file_id, start_line, end_line
+             FROM main.chunks WHERE {};",
+            listed("symbols"),
+            listed("imports"),
+            listed("chunks"),
+        ));
+    }
+    conn.execute_batch(&sql)
+}
+
+/// Opens the index for a query: never creates or deletes anything, finds the
+/// row of `worktree` and creates the scoped views. A store with no row for
+/// this worktree reads as [`DbError::Missing`].
+pub fn open_query(path: &Path, worktree: &str) -> Result<Connection, DbError> {
+    let conn = open_index(path, OpenMode::Query)?;
+    let row: Option<i64> = conn
+        .query_row("SELECT id FROM worktrees WHERE key = ?1", [worktree], |r| {
+            r.get(0)
+        })
+        .optional()
+        .map_err(|e| step(path, "read the worktree row", &e))?;
+    let id = row.ok_or(DbError::Missing)?;
+    create_scope_views(&conn, id, ScopeKind::Reader)
+        .map_err(|e| step(path, "create the scoped views", &e))?;
+    Ok(conn)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -488,7 +563,7 @@ mod tests {
         let index = open_index(&path, OpenMode::Index).expect("index mode rebuilds");
 
         // Assert
-        assert_eq!(count(&index, "files"), 0);
+        assert_eq!(count(&index, "manifest"), 0);
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -511,18 +586,17 @@ mod tests {
     }
 
     #[test]
-    fn deleting_a_file_row_cascades_to_symbols_imports_and_chunks() {
+    fn deleting_a_content_row_cascades_to_symbols_imports_and_chunks() {
         // Arrange
         let dir = scratch_dir("code-db-cascade");
         let path = dir.join("index.sqlite3");
         let conn = open_index(&path, OpenMode::Index).expect("open");
         conn.execute_batch(
-            "INSERT INTO files(id, path, sha256, size, mtime_ns, indexed_at, status)
-                 VALUES (1, 'a.rs', 'h', 1, 1, 1, 'ok');
-             INSERT INTO symbols(file_id, name, qualified_name, kind, start_byte, end_byte, start_line, end_line)
+            "INSERT INTO content(id, sha256, grammar, parser, partial) VALUES (1, 'h', 'rust', 'p', 0);
+             INSERT INTO symbols(content, name, qualified_name, kind, start_byte, end_byte, start_line, end_line)
                  VALUES (1, 'f', 'f', 'function', 0, 1, 1, 1);
-             INSERT INTO imports(file_id, module, names, line) VALUES (1, 'm', 'x', 1);
-             INSERT INTO chunks(file_id, start_line, end_line) VALUES (1, 1, 1);",
+             INSERT INTO imports(content, module, names, line) VALUES (1, 'm', 'x', 1);
+             INSERT INTO chunks(content, start_line, end_line) VALUES (1, 1, 1);",
         )
         .expect("seed");
         for table in ["symbols", "imports", "chunks"] {
@@ -530,7 +604,7 @@ mod tests {
         }
 
         // Act
-        conn.execute("DELETE FROM files WHERE id = 1", [])
+        conn.execute("DELETE FROM content WHERE id = 1", [])
             .expect("delete");
 
         // Assert
@@ -607,7 +681,14 @@ mod tests {
         assert_eq!(pragma(&conn, "foreign_keys"), 1);
         assert_eq!(pragma(&conn, "auto_vacuum"), 2);
         assert_eq!(pragma(&conn, "journal_size_limit"), WAL_SIZE_LIMIT);
-        for table in ["worktrees", "content", "manifest"] {
+        for table in [
+            "worktrees",
+            "content",
+            "manifest",
+            "symbols",
+            "imports",
+            "chunks",
+        ] {
             let strict: i64 = conn
                 .query_row(
                     "SELECT strict FROM pragma_table_list WHERE name = ?1",
@@ -648,13 +729,12 @@ mod tests {
         // Assert
         assert!(next > top);
         conn.execute(
-            "INSERT INTO files(id, path, sha256, size, mtime_ns, indexed_at, status)
-             VALUES (1, 'a.rs', 'h', 1, 1, 1, 'ok')",
+            "INSERT INTO content(id, sha256, grammar, parser, partial) VALUES (99, 'h', 'rust', 'p', 0)",
             [],
         )
-        .expect("file");
+        .expect("content");
         conn.execute(
-            "INSERT INTO chunks(file_id, start_line, end_line) VALUES (1, 1, 1)",
+            "INSERT INTO chunks(content, start_line, end_line) VALUES (99, 1, 1)",
             [],
         )
         .expect("chunk");
@@ -662,7 +742,7 @@ mod tests {
         conn.execute("DELETE FROM chunks WHERE id = ?1", [chunk])
             .expect("delete chunk");
         conn.execute(
-            "INSERT INTO chunks(file_id, start_line, end_line) VALUES (1, 1, 1)",
+            "INSERT INTO chunks(content, start_line, end_line) VALUES (99, 1, 1)",
             [],
         )
         .expect("chunk again");

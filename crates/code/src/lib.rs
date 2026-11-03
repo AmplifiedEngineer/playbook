@@ -39,7 +39,13 @@ pub struct IndexOutcome {
 pub fn index(cwd: &Path, rebuild: bool) -> Result<IndexOutcome, String> {
     let root = location::repo_root(cwd)?;
     let index_path = location::index_path()?;
-    let report = index::run(&root, &index_path, rebuild, &index::Options::default())?;
+    let report = index::run(
+        &root,
+        &index_path,
+        &host::worktree_id(),
+        rebuild,
+        &index::Options::default(),
+    )?;
     Ok(IndexOutcome { index_path, report })
 }
 
@@ -57,11 +63,12 @@ pub enum StatusOutcome {
 pub fn status(cwd: &Path) -> Result<StatusOutcome, String> {
     let root = location::repo_root(cwd)?;
     let index_path = location::index_path()?;
-    match db::open_index(&index_path, db::OpenMode::Query) {
+    let worktree = host::worktree_id();
+    match db::open_query(&index_path, &worktree) {
         Err(db::DbError::Missing) => Ok(StatusOutcome::Missing { index_path }),
         Err(e) => Err(e.to_string()),
         Ok(conn) => {
-            let status = status::status(&conn, &index_path, &root)?;
+            let status = status::status(&conn, &index_path, &root, &worktree)?;
             Ok(StatusOutcome::Found { index_path, status })
         }
     }
@@ -91,7 +98,7 @@ fn lookup(
 ) -> Result<SearchOutcome, String> {
     let root = location::repo_root(cwd)?;
     let index_path = location::index_path()?;
-    let conn = db::open_index(&index_path, db::OpenMode::Query).map_err(|e| e.to_string())?;
+    let conn = db::open_query(&index_path, &host::worktree_id()).map_err(|e| e.to_string())?;
     let drift = status::quick_check(&conn, &root)?;
     let result = run(&conn, &root, opts)?;
     Ok(SearchOutcome {
@@ -131,7 +138,7 @@ pub struct RefsOutcome {
 pub fn find_refs(cwd: &Path, opts: &refs::RefsOptions) -> Result<RefsOutcome, String> {
     let root = location::repo_root(cwd)?;
     let index_path = location::index_path()?;
-    let conn = db::open_index(&index_path, db::OpenMode::Query).map_err(|e| e.to_string())?;
+    let conn = db::open_query(&index_path, &host::worktree_id()).map_err(|e| e.to_string())?;
     let drift = status::quick_check(&conn, &root)?;
     let result = refs::find_refs(&conn, &root, opts)?;
     Ok(RefsOutcome {
@@ -152,7 +159,7 @@ pub struct ContextOutcome {
 pub fn build_context(cwd: &Path, opts: &context::ContextOptions) -> Result<ContextOutcome, String> {
     let root = location::repo_root(cwd)?;
     let index_path = location::index_path()?;
-    let conn = db::open_index(&index_path, db::OpenMode::Query).map_err(|e| e.to_string())?;
+    let conn = db::open_query(&index_path, &host::worktree_id()).map_err(|e| e.to_string())?;
     let drift = status::quick_check(&conn, &root)?;
     let result = context::build(&conn, &root, opts)?;
     Ok(ContextOutcome {

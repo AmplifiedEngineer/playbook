@@ -7,7 +7,7 @@
 //! file inside a transaction per batch. A file is the atomic unit: an error in
 //! one file rolls back only that file.
 
-use super::db::{self, OpenMode, TxHooks};
+use super::db::{self, OpenMode, ScopeKind, TxHooks};
 use super::host;
 use super::lang::{self, Lang};
 use super::walker::{self, Skipped};
@@ -325,55 +325,6 @@ fn prepare(root: &Path, path: &str, existing: Option<&Existing>, opts: &Options)
     }))
 }
 
-/// Deletes a file's chunks, FTS rows (first, while the chunk ids exist),
-/// symbols and imports.
-fn clear_children(conn: &Connection, file_id: i64) -> rusqlite::Result<()> {
-    conn.execute(
-        "DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE file_id = ?1)",
-        [file_id],
-    )?;
-    conn.execute("DELETE FROM chunks WHERE file_id = ?1", [file_id])?;
-    conn.execute("DELETE FROM symbols WHERE file_id = ?1", [file_id])?;
-    conn.execute("DELETE FROM imports WHERE file_id = ?1", [file_id])?;
-    Ok(())
-}
-
-fn file_id(conn: &Connection, path: &str) -> rusqlite::Result<Option<i64>> {
-    conn.query_row("SELECT id FROM files WHERE path = ?1", [path], |r| r.get(0))
-        .optional()
-}
-
-#[allow(clippy::too_many_arguments)]
-fn upsert_file(
-    conn: &Connection,
-    path: &str,
-    sha: &str,
-    size: u64,
-    mtime_ns: i64,
-    status: &str,
-    error: Option<&str>,
-    lang: Option<&str>,
-    now_s: i64,
-) -> rusqlite::Result<i64> {
-    let size = i64::try_from(size).unwrap_or(i64::MAX);
-    if let Some(id) = file_id(conn, path)? {
-        clear_children(conn, id)?;
-        conn.execute(
-            "UPDATE files SET sha256 = ?2, size = ?3, mtime_ns = ?4, indexed_at = ?5,
-                 status = ?6, error = ?7, lang = ?8 WHERE id = ?1",
-            params![id, sha, size, mtime_ns, now_s, status, error, lang],
-        )?;
-        Ok(id)
-    } else {
-        conn.execute(
-            "INSERT INTO files(path, sha256, size, mtime_ns, indexed_at, status, error, lang)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![path, sha, size, mtime_ns, now_s, status, error, lang],
-        )?;
-        Ok(conn.last_insert_rowid())
-    }
-}
-
 /// A manifest row to write.
 struct ManifestRow<'a> {
     path: &'a str,
@@ -387,29 +338,37 @@ struct ManifestRow<'a> {
 }
 
 /// Stores the content row for `(sha, grammar, parser)` once and returns its
-/// id. The key is the bytes, so a second path with the same bytes reuses it.
-fn ensure_content(conn: &Connection, p: &Prepared, parser: &str) -> rusqlite::Result<i64> {
-    conn.execute(
+/// id, with whether this call inserted it. The key is the bytes, so a second
+/// path with the same bytes reuses the row and its children.
+fn ensure_content(conn: &Connection, p: &Prepared, parser: &str) -> rusqlite::Result<(i64, bool)> {
+    let inserted = conn.execute(
         "INSERT INTO content(sha256, grammar, parser, partial) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(sha256, grammar, parser) DO NOTHING",
         params![p.sha, p.grammar, parser, p.status == "partial"],
-    )?;
-    conn.query_row(
+    )? == 1;
+    let id = conn.query_row(
         "SELECT id FROM content WHERE sha256 = ?1 AND grammar = ?2 AND parser = ?3",
         params![p.sha, p.grammar, parser],
         |r| r.get(0),
-    )
+    )?;
+    Ok((id, inserted))
 }
 
-/// Deletes a content row that no manifest row references. The children still
-/// hang off `files` in this change; they move to the content key with the
-/// reader change, and are cleared here then.
+/// Deletes a content row that no manifest row references, with its FTS rows
+/// first. The children go with it through the foreign keys.
 fn drop_unreferenced_content(conn: &Connection, content: i64) -> rusqlite::Result<()> {
-    conn.execute(
-        "DELETE FROM content WHERE id = ?1
-           AND NOT EXISTS (SELECT 1 FROM manifest WHERE content = ?1)",
+    let used: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM manifest WHERE content = ?1)",
         [content],
+        |r| r.get(0),
     )?;
+    if !used {
+        conn.execute(
+            "DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE content = ?1)",
+            [content],
+        )?;
+        conn.execute("DELETE FROM content WHERE id = ?1", [content])?;
+    }
     Ok(())
 }
 
@@ -469,17 +428,17 @@ fn delete_manifest(conn: &Connection, wt: i64, path: &str) -> rusqlite::Result<(
 }
 
 /// Stores a file's symbols and imports; `parent_id` follows the extractor's parent index.
-fn insert_syntax(conn: &Connection, file_id: i64, p: &Prepared) -> rusqlite::Result<()> {
+fn insert_syntax(conn: &Connection, content: i64, p: &Prepared) -> rusqlite::Result<()> {
     let to_i64 = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
     let mut ids: Vec<i64> = Vec::with_capacity(p.symbols.len());
     for sym in &p.symbols {
         let parent_id = sym.parent.and_then(|i| ids.get(i).copied());
         conn.execute(
-            "INSERT INTO symbols(file_id, parent_id, name, qualified_name, kind, signature,
+            "INSERT INTO symbols(content, parent_id, name, qualified_name, kind, signature,
                  signature_cut, exported, start_byte, end_byte, start_line, end_line)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
-                file_id,
+                content,
                 parent_id,
                 sym.name,
                 sym.qualified_name,
@@ -497,29 +456,34 @@ fn insert_syntax(conn: &Connection, file_id: i64, p: &Prepared) -> rusqlite::Res
     }
     for import in &p.imports {
         conn.execute(
-            "INSERT INTO imports(file_id, module, names, line) VALUES (?1, ?2, ?3, ?4)",
-            params![file_id, import.module, import.names, to_i64(import.line)],
+            "INSERT INTO imports(content, module, names, line) VALUES (?1, ?2, ?3, ?4)",
+            params![content, import.module, import.names, to_i64(import.line)],
         )?;
     }
     Ok(())
 }
 
-fn apply(
-    conn: &Connection,
-    outcome: &Outcome,
-    opts: &Options,
-    wt: i64,
-    now_s: i64,
-) -> Result<(), String> {
+fn apply(conn: &Connection, outcome: &Outcome, opts: &Options, wt: i64) -> Result<(), String> {
     let sql = |e: rusqlite::Error| e.to_string();
     match outcome {
         Outcome::Write(p) => {
             opts.before_file(&p.path)?;
-            let id = upsert_file(
-                conn, &p.path, &p.sha, p.size, p.mtime_ns, p.status, None, p.lang, now_s,
-            )
-            .map_err(sql)?;
-            let content = ensure_content(conn, p, &opts.parser).map_err(sql)?;
+            let (content, inserted) = ensure_content(conn, p, &opts.parser).map_err(sql)?;
+            if inserted {
+                insert_syntax(conn, content, p).map_err(sql)?;
+                for chunk in &p.chunks {
+                    conn.execute(
+                        "INSERT INTO chunks(content, start_line, end_line) VALUES (?1, ?2, ?3)",
+                        params![content, chunk.start_line as i64, chunk.end_line as i64],
+                    )
+                    .map_err(sql)?;
+                    conn.execute(
+                        "INSERT INTO chunks_fts(rowid, body) VALUES (?1, ?2)",
+                        params![conn.last_insert_rowid(), chunk.body],
+                    )
+                    .map_err(sql)?;
+                }
+            }
             upsert_manifest(
                 conn,
                 wt,
@@ -535,34 +499,9 @@ fn apply(
                 },
             )
             .map_err(sql)?;
-            insert_syntax(conn, id, p).map_err(sql)?;
-            for chunk in &p.chunks {
-                conn.execute(
-                    "INSERT INTO chunks(file_id, start_line, end_line) VALUES (?1, ?2, ?3)",
-                    params![id, chunk.start_line as i64, chunk.end_line as i64],
-                )
-                .map_err(sql)?;
-                conn.execute(
-                    "INSERT INTO chunks_fts(rowid, body) VALUES (?1, ?2)",
-                    params![conn.last_insert_rowid(), chunk.body],
-                )
-                .map_err(sql)?;
-            }
         }
         Outcome::Skip(s) => {
             opts.before_file(&s.path)?;
-            upsert_file(
-                conn,
-                &s.path,
-                "",
-                s.size,
-                s.mtime_ns,
-                "skipped",
-                Some(s.reason.as_str()),
-                None,
-                now_s,
-            )
-            .map_err(sql)?;
             upsert_manifest(
                 conn,
                 wt,
@@ -585,11 +524,6 @@ fn apply(
             mtime_ns,
         } => {
             conn.execute(
-                "UPDATE files SET size = ?2, mtime_ns = ?3 WHERE path = ?1",
-                params![path, i64::try_from(*size).unwrap_or(i64::MAX), mtime_ns],
-            )
-            .map_err(sql)?;
-            conn.execute(
                 "UPDATE manifest SET size = ?3, mtime_ns = ?4 WHERE worktree = ?1 AND path = ?2",
                 params![wt, path, i64::try_from(*size).unwrap_or(i64::MAX), mtime_ns],
             )
@@ -600,24 +534,7 @@ fn apply(
     Ok(())
 }
 
-fn mark_failed(
-    conn: &Connection,
-    wt: i64,
-    path: &str,
-    error: &str,
-    now_s: i64,
-) -> rusqlite::Result<()> {
-    let changed = conn.execute(
-        "UPDATE files SET status = 'failed', error = ?2 WHERE path = ?1",
-        params![path, error],
-    )?;
-    if changed == 0 {
-        conn.execute(
-            "INSERT INTO files(path, sha256, size, mtime_ns, indexed_at, status, error)
-             VALUES (?1, '', 0, 0, ?3, 'failed', ?2)",
-            params![path, error, now_s],
-        )?;
-    }
+fn mark_failed(conn: &Connection, wt: i64, path: &str, error: &str) -> rusqlite::Result<()> {
     // A failed path that had content keeps it, as it keeps its children.
     let changed = conn.execute(
         "UPDATE manifest SET status = 'failed', error = ?3 WHERE worktree = ?1 AND path = ?2",
@@ -640,7 +557,6 @@ fn write_batch(
     wt: i64,
     report: &mut Report,
 ) -> Result<(), String> {
-    let now_s = now_ms() / 1000;
     let hooks = TxHooks::default();
     let mut tx = db::write_tx(conn, &hooks).map_err(|e| e.to_string())?;
     let mut failures: Vec<(String, String)> = Vec::new();
@@ -656,7 +572,7 @@ fn write_batch(
             Outcome::Unchanged | Outcome::Missing(_) => continue,
         };
         let sp = tx.savepoint().map_err(|e| e.to_string())?;
-        match apply(&sp, outcome, opts, wt, now_s) {
+        match apply(&sp, outcome, opts, wt) {
             Ok(()) => {
                 sp.commit().map_err(|e| e.to_string())?;
                 if let Outcome::Write(p) = outcome {
@@ -673,7 +589,7 @@ fn write_batch(
         }
     }
     for (path, error) in failures {
-        mark_failed(&tx, wt, &path, &error, now_s).map_err(|e| e.to_string())?;
+        mark_failed(&tx, wt, &path, &error).map_err(|e| e.to_string())?;
         report.failed += 1;
     }
     db::commit_tx(tx, &hooks).map_err(|e| e.to_string())
@@ -681,7 +597,7 @@ fn write_batch(
 
 pub(crate) fn load_existing(conn: &Connection) -> Result<HashMap<String, Existing>, String> {
     let mut stmt = conn
-        .prepare("SELECT path, sha256, status, error, size, mtime_ns FROM files")
+        .prepare("SELECT path, sha256, status, error, size, mtime_ns, parser FROM files")
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |r| {
@@ -693,7 +609,7 @@ pub(crate) fn load_existing(conn: &Connection) -> Result<HashMap<String, Existin
                     error: r.get(3)?,
                     size: r.get(4)?,
                     mtime_ns: r.get(5)?,
-                    parser: None,
+                    parser: r.get(6)?,
                 },
             ))
         })
@@ -702,20 +618,15 @@ pub(crate) fn load_existing(conn: &Connection) -> Result<HashMap<String, Existin
         .map_err(|e| e.to_string())
 }
 
-fn set_meta(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
-    conn.execute(
-        "INSERT INTO meta(key, value) VALUES (?1, ?2)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        params![key, value],
-    )
-    .map(|_| ())
-    .map_err(|e| e.to_string())
-}
-
 /// Adds this worktree's row, or refreshes it, and returns its id. The id of an
 /// existing row stays, so its manifest rows stay attached.
-fn register_worktree(conn: &mut Connection, root: &Path, started: i64) -> Result<i64, String> {
-    let key = host::worktree_id();
+fn register_worktree(
+    conn: &mut Connection,
+    root: &Path,
+    worktree: &str,
+    started: i64,
+) -> Result<i64, String> {
+    let key = worktree;
     let hooks = TxHooks::default();
     let tx = db::write_tx(conn, &hooks).map_err(|e| e.to_string())?;
     tx.execute(
@@ -733,38 +644,12 @@ fn register_worktree(conn: &mut Connection, root: &Path, started: i64) -> Result
     )
     .map_err(|e| e.to_string())?;
     let id = tx
-        .query_row("SELECT id FROM worktrees WHERE key = ?1", [&key], |r| {
+        .query_row("SELECT id FROM worktrees WHERE key = ?1", [key], |r| {
             r.get(0)
         })
         .map_err(|e| e.to_string())?;
     db::commit_tx(tx, &hooks).map_err(|e| e.to_string())?;
     Ok(id)
-}
-
-/// Fills `Existing::parser` from the worktree's manifest and content rows.
-fn attach_parsers(
-    conn: &Connection,
-    wt: i64,
-    existing: &mut HashMap<String, Existing>,
-) -> Result<(), String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT m.path, c.parser FROM manifest m JOIN content c ON c.id = m.content
-             WHERE m.worktree = ?1",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([wt], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-        })
-        .map_err(|e| e.to_string())?;
-    for row in rows {
-        let (path, parser) = row.map_err(|e| e.to_string())?;
-        if let Some(old) = existing.get_mut(&path) {
-            old.parser = Some(parser);
-        }
-    }
-    Ok(())
 }
 
 /// The lock file beside the index. Held for the whole run and released by the
@@ -803,22 +688,24 @@ pub fn acquire_lock(index: &Path) -> Result<RunLock, String> {
 }
 
 /// Runs one indexing pass over the repo at `root`, storing into `index`.
-pub fn run(root: &Path, index: &Path, rebuild: bool, opts: &Options) -> Result<Report, String> {
+pub fn run(
+    root: &Path,
+    index: &Path,
+    worktree: &str,
+    rebuild: bool,
+    opts: &Options,
+) -> Result<Report, String> {
     let _lock = acquire_lock(index)?;
     if rebuild {
         db::delete_index_files(index)?;
     }
     let mut conn = db::open_index(index, OpenMode::Index).map_err(|e| e.to_string())?;
     let started = now_ms();
-    let wt = register_worktree(&mut conn, root, started)?;
-    set_meta(&conn, "last_run_started", &started.to_string())?;
-    set_meta(&conn, "repo_root", &root.display().to_string())?;
-    set_meta(&conn, "worktree_id", &host::worktree_id())?;
-    set_meta(&conn, "tool_version", host::tool_version())?;
+    let wt = register_worktree(&mut conn, root, worktree, started)?;
+    db::create_scope_views(&conn, wt, ScopeKind::Writer).map_err(|e| e.to_string())?;
 
     let found = walker::discover(root, &opts.limits)?;
-    let mut existing = load_existing(&conn)?;
-    attach_parsers(&conn, wt, &mut existing)?;
+    let existing = load_existing(&conn)?;
     let mut report = Report {
         skipped: found.skipped.len(),
         ..Report::default()
@@ -935,7 +822,6 @@ pub fn run(root: &Path, index: &Path, rebuild: bool, opts: &Options) -> Result<R
         .map_err(|e| e.to_string())
         .map(|n| usize::try_from(n).unwrap_or(0))?;
     let completed = now_ms().max(started);
-    set_meta(&conn, "last_run_completed", &completed.to_string())?;
     conn.execute(
         "UPDATE worktrees SET last_run_completed = ?2 WHERE id = ?1",
         params![wt, completed],
@@ -950,27 +836,24 @@ fn remove_unlisted(
     wt: i64,
     listed: &HashSet<String>,
 ) -> Result<usize, String> {
-    let rows: Vec<(i64, String)> = {
+    let paths: Vec<String> = {
         let mut stmt = conn
-            .prepare("SELECT id, path FROM files")
+            .prepare("SELECT path FROM manifest WHERE worktree = ?1")
             .map_err(|e| e.to_string())?;
         let mapped = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .query_map([wt], |r| r.get(0))
             .map_err(|e| e.to_string())?;
         mapped
             .collect::<Result<_, _>>()
             .map_err(|e| e.to_string())?
     };
-    let gone: Vec<(i64, String)> = rows
+    let gone: Vec<String> = paths
         .into_iter()
-        .filter(|(_, path)| !listed.contains(path))
+        .filter(|path| !listed.contains(path))
         .collect();
     let hooks = TxHooks::default();
     let tx = db::write_tx(conn, &hooks).map_err(|e| e.to_string())?;
-    for (id, path) in &gone {
-        clear_children(&tx, *id).map_err(|e| e.to_string())?;
-        tx.execute("DELETE FROM files WHERE id = ?1", [id])
-            .map_err(|e| e.to_string())?;
+    for path in &gone {
         delete_manifest(&tx, wt, path).map_err(|e| e.to_string())?;
     }
     db::commit_tx(tx, &hooks).map_err(|e| e.to_string())?;
@@ -1198,7 +1081,8 @@ mod tests {
         }
         let root = f.root.clone();
         let index = f.index.clone();
-        let writer = std::thread::spawn(move || run(&root, &index, false, &opts));
+        let worktree = f.worktree.clone();
+        let writer = std::thread::spawn(move || run(&root, &index, &worktree, false, &opts));
         let _release = Release(release_tx);
 
         // Act
@@ -1228,7 +1112,7 @@ mod tests {
         let held = acquire_lock(&f.index).expect("first lock");
 
         // Act
-        let second = run(&f.root, &f.index, false, &Options::default());
+        let second = run(&f.root, &f.index, &f.worktree, false, &Options::default());
 
         // Assert
         assert_eq!(
@@ -1236,7 +1120,7 @@ mod tests {
             "another index run is in progress"
         );
         drop(held);
-        assert!(run(&f.root, &f.index, false, &Options::default()).is_ok());
+        assert!(run(&f.root, &f.index, &f.worktree, false, &Options::default()).is_ok());
     }
 
     #[test]
@@ -1271,41 +1155,26 @@ mod tests {
         };
 
         // Act
-        let stopped = run(&f.root, &f.index, false, &opts);
+        let stopped = run(&f.root, &f.index, &f.worktree, false, &opts);
 
         // Assert
         assert_eq!(stopped.expect_err("stopped"), "stop");
         let conn = f.conn();
-        let meta = |k: &str| -> Option<i64> {
-            conn.query_row("SELECT value FROM meta WHERE key = ?1", [k], |r| {
-                r.get::<_, String>(0)
-            })
-            .ok()
-            .and_then(|v| v.parse().ok())
+        let times = |conn: &Connection| -> (Option<i64>, Option<i64>) {
+            conn.query_row(
+                "SELECT last_run_started, last_run_completed FROM worktrees",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("worktree row")
         };
-        assert!(meta("last_run_started").is_some());
-        assert!(meta("last_run_completed").is_none());
+        let (started, completed) = times(&conn);
+        assert!(started.is_some());
+        assert!(completed.is_none());
         drop(conn);
         f.run();
-        let conn = f.conn();
-        let done: i64 = conn
-            .query_row(
-                "SELECT value FROM meta WHERE key = 'last_run_completed'",
-                [],
-                |r| r.get::<_, String>(0),
-            )
-            .expect("completed")
-            .parse()
-            .expect("number");
-        let started: i64 = conn
-            .query_row(
-                "SELECT value FROM meta WHERE key = 'last_run_started'",
-                [],
-                |r| r.get::<_, String>(0),
-            )
-            .expect("started")
-            .parse()
-            .expect("number");
+        let (started, done) = times(&f.conn());
+        let (started, done) = (started.expect("started"), done.expect("completed"));
         assert!(done >= started);
     }
 
@@ -1620,10 +1489,12 @@ impl P { fn go(&self) {} }
         f.run();
 
         // Act
-        let report = run(&f.root, &f.index, true, &Options::default()).expect("rebuild");
+        let report =
+            run(&f.root, &f.index, &f.worktree, true, &Options::default()).expect("rebuild");
 
         // Assert
         assert_eq!((report.changed, report.unchanged), (1, 0));
+        assert_eq!(report.indexed, 1);
     }
 
     /// Append only. One row per extractor revision, with the digest of what the
@@ -1986,7 +1857,7 @@ impl P { fn go(&self) {} }
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .expect("row");
-        assert_eq!(key, host::worktree_id());
+        assert_eq!(key, f.worktree);
         assert!(completed >= started);
     }
 
@@ -2046,5 +1917,189 @@ impl P { fn go(&self) {} }
             .expect("row");
         assert_eq!((status.as_str(), content), ("failed", before));
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM content"), 1);
+    }
+
+    fn temp_views(conn: &Connection) -> Vec<String> {
+        conn.prepare("SELECT name FROM sqlite_temp_master WHERE type = 'view' ORDER BY name")
+            .expect("prepare")
+            .query_map([], |r| r.get(0))
+            .expect("query")
+            .map(|r| r.expect("row"))
+            .collect()
+    }
+
+    #[test]
+    fn a_query_connection_reads_four_views_and_a_writer_reads_only_files() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-views");
+        write(&f.root, "a.rs", b"fn one() {}\n");
+        f.run();
+
+        // Act
+        let reader = f.conn();
+        let writer = db::open_index(&f.index, OpenMode::Index).expect("writer");
+        let id: i64 = writer
+            .query_row("SELECT id FROM worktrees", [], |r| r.get(0))
+            .expect("row");
+        db::create_scope_views(&writer, id, ScopeKind::Writer).expect("views");
+
+        // Assert
+        assert_eq!(
+            temp_views(&reader),
+            vec!["chunks", "files", "imports", "symbols"]
+        );
+        assert_eq!(temp_views(&writer), vec!["files"]);
+    }
+
+    #[test]
+    fn two_worktrees_in_one_store_see_only_their_own_paths() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-two-worktrees");
+        write(&f.root, "a.rs", b"fn shared_name() {}\n");
+        write(&f.root, "only_a.rs", b"fn only_in_a() {}\n");
+        let other = crate::walker::test_repo::init("idx-two-worktrees-b");
+        write(&other, "b.rs", b"fn shared_name() {}\n");
+        f.run();
+        run(&other, &f.index, "other", false, &Options::default()).expect("second worktree");
+
+        // Act
+        let a = f.conn();
+        let b = db::open_query(&f.index, "other").expect("other");
+
+        // Assert
+        assert_eq!(paths(&a), vec!["a.rs", "only_a.rs"]);
+        assert_eq!(paths(&b), vec!["b.rs"]);
+        assert_eq!(symbol_names(&a, "a.rs"), vec!["shared_name"]);
+        assert_eq!(count(&b, "SELECT COUNT(*) FROM symbols"), 1);
+        assert_eq!(fts_paths(&b, "only_in_a"), Vec::<String>::new());
+        assert_eq!(count(&f.conn(), "SELECT COUNT(*) FROM content"), 2);
+    }
+
+    #[test]
+    fn a_worktree_with_no_row_reads_as_missing() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-no-row");
+        write(&f.root, "a.rs", b"fn a() {}\n");
+        f.run();
+
+        // Act
+        let got = db::open_query(&f.index, "never-indexed");
+
+        // Assert
+        assert_eq!(got.err(), Some(db::DbError::Missing));
+    }
+
+    #[test]
+    fn two_paths_with_the_same_bytes_return_the_declaration_once_per_path() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-same-bytes-view");
+        write(&f.root, "a.rs", b"fn twin() {}\n");
+        write(&f.root, "b.rs", b"fn twin() {}\n");
+        f.run();
+
+        // Act
+        let conn = f.conn();
+        let hits = count(
+            &conn,
+            "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id
+             WHERE s.name = 'twin'",
+        );
+
+        // Assert
+        assert_eq!(hits, 2);
+        assert_eq!(
+            count(&conn, "SELECT COUNT(DISTINCT id) FROM files"),
+            1,
+            "both paths share the content id"
+        );
+    }
+
+    #[test]
+    fn a_path_without_content_shows_in_files_with_a_null_content() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-null-content-view");
+        write(&f.root, "bin.dat", b"a\0b");
+        write(&f.root, "ok.rs", b"fn ok() {}\n");
+
+        // Act
+        f.run();
+
+        // Assert
+        let conn = f.conn();
+        let (id, content): (Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT id, content FROM files WHERE path = 'bin.dat'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("row");
+        assert_eq!((id, content), (None, None));
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM files"), 2);
+    }
+
+    #[test]
+    fn the_hot_queries_use_an_index_search_through_the_views() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-plans");
+        for i in 0..5 {
+            write(
+                &f.root,
+                &format!("f{i}.rs"),
+                format!("fn name{i}() {{}}\n").as_bytes(),
+            );
+        }
+        f.run();
+        let conn = f.conn();
+        let queries = [
+            "SELECT f.path FROM symbols s JOIN files f ON f.id = s.file_id WHERE s.name = 'name1'",
+            "SELECT f.path FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
+             JOIN files f ON f.id = c.file_id WHERE chunks_fts MATCH 'name1'",
+            "SELECT f.path FROM imports i JOIN files f ON f.id = i.file_id WHERE i.module = 'm'",
+        ];
+
+        // Act and assert, one row per query
+        for sql in queries {
+            let plan: Vec<String> = conn
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .expect("prepare")
+                .query_map([], |r| r.get::<_, String>(3))
+                .expect("plan")
+                .map(|r| r.expect("row"))
+                .collect();
+            let text = plan.join(" | ");
+            assert!(
+                text.contains("SEARCH") || text.contains("VIRTUAL TABLE"),
+                "{text}"
+            );
+            for table in ["main.symbols", "main.chunks", "main.imports"] {
+                let scan = format!("SCAN {table}");
+                assert!(!plan.iter().any(|row| row.starts_with(&scan)), "{text}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_query_modules_never_name_the_manifest() {
+        let sources = [
+            include_str!("lib.rs"),
+            include_str!("search.rs"),
+            include_str!("ranked.rs"),
+            include_str!("refs.rs"),
+            include_str!("context.rs"),
+            include_str!("status.rs"),
+        ];
+        for source in sources {
+            let production = source
+                .split("\n#[cfg(test)]\nmod tests")
+                .next()
+                .expect("production part");
+            assert!(!production.contains("manifest"));
+        }
     }
 }
