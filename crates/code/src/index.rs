@@ -1392,4 +1392,123 @@ impl P { fn go(&self) {} }
         // Assert
         assert_eq!((report.changed, report.unchanged), (1, 0));
     }
+
+    /// Append only. One row per extractor revision, with the digest of what the
+    /// extractors and the chunker produce for `DIGEST_FIXTURES`. Never edit or
+    /// delete an old row.
+    const EXTRACTOR_HISTORY: &[(u32, &str)] = &[(
+        1,
+        "41a8b01d96802962c92d2d199283a2682b1c2dc1729b1472d5274f3c930bc22f",
+    )];
+
+    /// One source per grammar, with enough syntax to touch symbols, imports,
+    /// nesting and the identifier pieces of the full text body.
+    const DIGEST_FIXTURES: &[(&str, &str)] = &[
+        (
+            "a.rs",
+            "use std::fmt::Display;\n/// Doc.\npub struct HttpClient { pub retry_count: u32 }\nimpl HttpClient {\n    pub fn send_request(&self) -> u32 { 1 }\n}\nfn helper() {}\npub enum Mode { Fast, Slow }\npub trait Runner { fn run_all(&self); }\nmod inner { pub const MAX_RETRIES: u32 = 3; }\nstatic GLOBAL_NAME: &str = \"x\";\nmacro_rules! make_it { () => {}; }\n",
+        ),
+        (
+            "broken.rs",
+            "pub fn good_one() {}\nimpl Broken {\n    fn half_done( {\n",
+        ),
+        (
+            "a.py",
+            "import os\nfrom typing import List\nfrom __future__ import annotations\n\nclass UserStore:\n    def load_user(self, user_id):\n        return user_id\n\n@decorator\ndef main():\n    pass\n\nMAX_USERS = 10\n",
+        ),
+        (
+            "a.js",
+            "import { readFile } from 'fs';\nexport function loadConfig(path) { return readFile(path); }\nconst maxRetries = 3;\n",
+        ),
+        (
+            "a.ts",
+            "import type { Config } from './config';\nexport interface RequestOptions { retryCount: number }\nexport class ApiClient { sendRequest(o: RequestOptions): void {} }\nexport enum Level { Low, High }\nexport type Handler = (e: string) => void;\nexport abstract class Base { abstract go(): void; }\n",
+        ),
+        (
+            "a.tsx",
+            "import React from 'react';\nexport function UserCard(props: { userName: string }) { return <div>{props.userName}</div>; }\n",
+        ),
+        (
+            "a.go",
+            "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\ntype HttpServer struct{ Port int }\n\ntype Alias = HttpServer\n\nconst MaxConns = 5\n\nvar defaultName = \"x\"\n\nfunc (s *HttpServer) StartServer() { fmt.Println(s.Port, os.Args) }\n\nfunc main() {}\n",
+        ),
+        (
+            "long.py",
+            LONG_FIXTURE,
+        ),
+    ];
+
+    /// 74 lines, so the chunker makes more than one window.
+    const LONG_FIXTURE: &str = concat!(
+        "def first_function():\n    pass\n",
+        "# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n",
+        "# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n",
+        "# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n",
+        "# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n",
+        "# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n",
+        "# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n",
+        "# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n# line\n",
+        "def second_function():\n    pass\n",
+    );
+
+    fn extractor_digest() -> String {
+        let mut out = String::new();
+        for (path, source) in DIGEST_FIXTURES {
+            let language = lang::Lang::for_path(path).expect("fixture language");
+            let bytes = source.as_bytes();
+            let parsed = lang::parse(language, bytes).expect("parse");
+            let found = lang::extract(language, &parsed, bytes);
+            out.push_str(&format!(
+                "{path}|{}|{}\n",
+                language.grammar_id(),
+                parsed.partial
+            ));
+            out.push_str(&format!("{:?}\n{:?}\n", found.symbols, found.imports));
+            for chunk in make_chunks(source, Options::default().chunk_lines) {
+                out.push_str(&format!(
+                    "{}-{}:{}\n",
+                    chunk.start_line, chunk.end_line, chunk.body
+                ));
+            }
+        }
+        playbook_common::hash::sha256_hex(out.as_bytes())
+    }
+
+    #[test]
+    fn extractor_output_matches_the_last_history_row() {
+        // Arrange
+        let (revision, pinned_digest) = EXTRACTOR_HISTORY.last().expect("history has a row");
+
+        // Assert
+        assert_eq!(
+            *revision,
+            lang::EXTRACTOR_REVISION,
+            "EXTRACTOR_REVISION must equal the revision of the last EXTRACTOR_HISTORY row"
+        );
+        assert_eq!(
+            extractor_digest(),
+            *pinned_digest,
+            "extractor output changed: append a row with a higher revision and the new digest \
+             to EXTRACTOR_HISTORY, bump EXTRACTOR_REVISION to match, and keep the old rows"
+        );
+    }
+
+    #[test]
+    fn the_digest_fixtures_cover_a_broken_file_and_a_second_chunk_window() {
+        // Arrange
+        let (path, source) = DIGEST_FIXTURES
+            .iter()
+            .find(|(p, _)| *p == "broken.rs")
+            .expect("broken fixture");
+        let parsed = lang::parse(lang::Lang::for_path(path).unwrap(), source.as_bytes()).unwrap();
+
+        // Assert
+        assert!(parsed.partial);
+        assert!(make_chunks(LONG_FIXTURE, Options::default().chunk_lines).len() > 1);
+    }
+
+    #[test]
+    fn extractor_history_only_grows_in_revision_order() {
+        assert!(EXTRACTOR_HISTORY.windows(2).all(|w| w[0].0 < w[1].0));
+    }
 }

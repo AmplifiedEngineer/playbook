@@ -60,6 +60,20 @@ impl Lang {
         }
     }
 
+    /// The grammar a file is parsed with. Unlike `name`, it keeps `tsx` apart
+    /// from `typescript`, because the two grammars read the same bytes
+    /// differently.
+    pub fn grammar_id(self) -> &'static str {
+        match self {
+            Lang::Rust => "rust",
+            Lang::TypeScript => "typescript",
+            Lang::Tsx => "tsx",
+            Lang::JavaScript => "javascript",
+            Lang::Python => "python",
+            Lang::Go => "go",
+        }
+    }
+
     fn grammar(self) -> tree_sitter::Language {
         match self {
             Lang::Rust => tree_sitter_rust::LANGUAGE.into(),
@@ -70,6 +84,75 @@ impl Lang {
             Lang::Go => tree_sitter_go::LANGUAGE.into(),
         }
     }
+}
+
+/// The grammar id stored for a file that no grammar parses. Such a file still
+/// gets chunks and full text rows.
+pub const TEXT_GRAMMAR: &str = "text";
+
+/// Bump this number whenever extractor output changes for the same bytes. The
+/// digest test in `index.rs` fails until it is bumped, so stored content is
+/// never trusted across two different extractors.
+pub const EXTRACTOR_REVISION: u32 = 1;
+
+/// The text of this crate's manifest, read at build time for the grammar pins.
+const CARGO_TOML: &str = include_str!("../../Cargo.toml");
+
+/// Hash of the `tree-sitter*` dependency lines of a `Cargo.toml` text. A
+/// grammar upgrade changes the value, so content parsed by the old grammar is
+/// parsed again.
+pub fn hash_pins(text: &str) -> String {
+    let pins: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("tree-sitter"))
+        .collect();
+    playbook_common::hash::sha256_hex(pins.join("\n").as_bytes())
+}
+
+/// Hash of the extractor sources. Debug builds use it in place of
+/// `EXTRACTOR_REVISION`, so a developer who edits an extractor never reads
+/// stale content from the same store.
+#[cfg(debug_assertions)]
+fn sources_hash(sources: &[&str]) -> String {
+    playbook_common::hash::sha256_hex(sources.join("\u{1f}").as_bytes())
+}
+
+#[cfg(debug_assertions)]
+fn extractor_revision() -> String {
+    // The chunker and the full text body live in `index.rs` and are part of
+    // what the digest test pins, so they count as extractor sources too.
+    let revision = EXTRACTOR_REVISION.to_string();
+    sources_hash(&[
+        &revision,
+        include_str!("../index.rs"),
+        include_str!("mod.rs"),
+        include_str!("go.rs"),
+        include_str!("python.rs"),
+        include_str!("rust.rs"),
+        include_str!("typescript.rs"),
+    ])
+}
+
+#[cfg(not(debug_assertions))]
+fn extractor_revision() -> String {
+    EXTRACTOR_REVISION.to_string()
+}
+
+/// Names the parser that produced stored content: the tool version, the
+/// extractor revision and the grammar pins. Equal keys mean equal output for
+/// equal bytes.
+pub fn parser_key() -> String {
+    static KEY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| {
+        format!(
+            "{}+{}+{}",
+            crate::host::tool_version(),
+            extractor_revision(),
+            hash_pins(CARGO_TOML)
+        )
+    })
+    .clone()
 }
 
 /// A parsed file.
@@ -471,5 +554,53 @@ mod tests {
         assert_eq!((exact.0.len(), exact.1), (200, false));
         assert_eq!((long.0.len(), long.1), (200, true));
         assert_eq!(clean_signature("fn  a(\n  x: i32 )").0, "fn a( x: i32 )");
+    }
+
+    #[test]
+    fn hash_pins_follows_the_tree_sitter_lines_only() {
+        // Arrange
+        let base = "[dependencies]\nserde = \"1\"\ntree-sitter-rust = \"=0.24.2\"\n";
+        let bumped = "[dependencies]\nserde = \"1\"\ntree-sitter-rust = \"=0.24.3\"\n";
+        let other_dep = "[dependencies]\nserde = \"2\"\ntree-sitter-rust = \"=0.24.2\"\n";
+
+        // Assert
+        assert_eq!(hash_pins(base), hash_pins(base));
+        assert_ne!(hash_pins(base), hash_pins(bumped));
+        assert_eq!(hash_pins(base), hash_pins(other_dep));
+    }
+
+    #[test]
+    fn the_crate_manifest_has_pins_to_hash() {
+        assert_ne!(hash_pins(CARGO_TOML), hash_pins(""));
+    }
+
+    #[test]
+    fn grammar_id_keeps_tsx_apart_and_every_id_is_distinct() {
+        // Arrange
+        let ids: std::collections::HashSet<&str> = ALL.iter().map(|l| l.grammar_id()).collect();
+
+        // Assert
+        assert_eq!(ids.len(), ALL.len());
+        assert_eq!(Lang::Tsx.grammar_id(), "tsx");
+        assert_eq!(Lang::Tsx.name(), Lang::TypeScript.name());
+        assert!(!ids.contains(TEXT_GRAMMAR));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn a_changed_extractor_source_changes_the_debug_revision() {
+        assert_eq!(sources_hash(&["a", "b"]), sources_hash(&["a", "b"]));
+        assert_ne!(sources_hash(&["a", "b"]), sources_hash(&["a", "c"]));
+    }
+
+    #[test]
+    fn the_parser_key_names_version_revision_and_pins() {
+        // Act
+        let key = parser_key();
+
+        // Assert
+        assert!(key.starts_with(crate::host::tool_version()));
+        assert_eq!(key.split('+').count(), 3);
+        assert_eq!(key, parser_key());
     }
 }
