@@ -20,6 +20,11 @@ ignoreUntil = 2026-12-31
 reason = "zip extraction only; pbdoc and anydoc 0.2.4 never extract to disk"
 
 [[IgnoredVulns]]
+id = "RUSTSEC-2026-0429"
+ignoreUntil = 2026-12-31
+reason = "zip ZipArchive::extract abort on a symlink entry; extraction only, and pbdoc and anydoc 0.2.4 never extract to disk"
+
+[[IgnoredVulns]]
 id = "RUSTSEC-2026-0192"
 ignoreUntil = 2026-12-31
 reason = "ttf-parser is unmaintained, which is a notice and not a vulnerability; transitive through anydoc"
