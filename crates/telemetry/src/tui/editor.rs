@@ -101,9 +101,11 @@ impl Editor {
                 self.message = Some("A tab needs at least one panel".to_string());
             } else {
                 tab.panels.remove(at);
+                tab.rows = None;
             }
         } else {
             tab.panels.push(panel);
+            tab.rows = None;
         }
     }
 
@@ -147,6 +149,7 @@ impl Editor {
         self.layout.tabs.push(Tab {
             name,
             panels: vec![ALL[self.row]],
+            rows: None,
         });
         self.tab = self.layout.tabs.len() - 1;
     }
@@ -294,9 +297,22 @@ mod tests {
     }
 
     #[test]
-    fn at_most_nine_tabs_can_be_added() {
+    fn adding_a_panel_to_an_arranged_tab_makes_it_automatic() {
         let mut e = editor();
-        for _ in 0..10 {
+        e.layout = Layout::parse("A=spend,tokens|models").unwrap();
+        e.tab = 0;
+        e.row = ALL.iter().position(|p| *p == PanelId::Live).unwrap();
+
+        e.key(KeyCode::Enter);
+
+        assert_eq!(e.layout.tabs[0].rows, None);
+        assert_eq!(e.layout.tabs[0].panels.len(), 4);
+    }
+
+    #[test]
+    fn at_most_twelve_tabs_can_be_added() {
+        let mut e = editor();
+        for _ in 0..MAX_TABS + 1 {
             e.key(KeyCode::Char('n'));
         }
 

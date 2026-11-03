@@ -79,7 +79,7 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         "usage.ui.layout" => match value.as_str() {
             Some("") => Ok(()),
             Some(text) => crate::tui::layout::Layout::parse(text).map(|_| ()),
-            None => Err("expected text like Charts=spend,tokens;Numbers=models".into()),
+            None => Err("expected text like Charts=spend,tokens|burnup;Numbers=models".into()),
         },
         "usage.ui.state" => match value.as_str() {
             Some(text) if text.len() <= MAX_STATE_BYTES => Ok(()),
