@@ -4,6 +4,7 @@
 //! Lines 2 and 3 of the status line: model and context on one, session
 //! economics on the other. Each segment is `None` when it has nothing to say.
 
+use super::budget::Segment;
 use super::fmt::*;
 use crate::json::statusline::value_text;
 
@@ -217,4 +218,133 @@ pub(super) fn line_3(s: &Session, o: &Opts) -> Option<String> {
         render_session_age(s, o),
         render_rate_7d(s, o),
     ])
+}
+
+/// Columns taken by the ` | ` between two segments, once colour is stripped.
+const SEPARATOR_WIDTH: usize = 3;
+
+/// Columns the plain texts take side by side.
+fn joined_width(texts: &[&str]) -> usize {
+    let gaps = texts.len().saturating_sub(1) * SEPARATOR_WIDTH;
+    texts.iter().map(|t| t.chars().count()).sum::<usize>() + gaps
+}
+
+/// Line 4: budget projections, fitted to `width` columns. Fitting works on the
+/// plain texts, before any colour is added. When the line is too wide the
+/// lowest priority segments first take their short form, then the lowest
+/// priority segments are dropped. The most important segment always stays.
+/// `None` when there is nothing to say.
+pub(super) fn line_4(segments: &[Segment], width: usize) -> Option<String> {
+    let mut ordered: Vec<&Segment> = segments.iter().collect();
+    ordered.sort_by_key(|s| s.priority);
+    let mut texts: Vec<&str> = ordered.iter().map(|s| s.text.as_str()).collect();
+    let fits = |texts: &[&str]| joined_width(texts) <= width;
+    for (i, segment) in ordered.iter().enumerate().rev() {
+        if fits(&texts) {
+            break;
+        }
+        if let Some(short) = &segment.short {
+            texts[i] = short;
+        }
+    }
+    while texts.len() > 1 && !fits(&texts) {
+        texts.pop();
+    }
+    let parts: Vec<String> = ordered
+        .iter()
+        .zip(&texts)
+        .map(|(segment, text)| {
+            let color = if segment.alarm { RED } else { DIM };
+            format!("{color}{text}{RESET}")
+        })
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(&sep()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::statusline::budget::{Segment, PRIORITY_SEVEN_DAY};
+
+    const STAND_IN_PRIORITY: u8 = PRIORITY_SEVEN_DAY + 1;
+
+    fn seven_day() -> Segment {
+        Segment {
+            text: "! 7d CAP HIT".into(),
+            short: None,
+            priority: PRIORITY_SEVEN_DAY,
+            alarm: true,
+        }
+    }
+
+    fn stand_in() -> Segment {
+        Segment {
+            text: "stand-in 12345".into(),
+            short: Some("stand-in".into()),
+            priority: STAND_IN_PRIORITY,
+            alarm: false,
+        }
+    }
+
+    /// The fitted line without colour, ` | ` between segments.
+    fn plain(segments: &[Segment], width: usize) -> Option<String> {
+        let line = line_4(segments, width)?;
+        let (bytes, _) = percent_b(&line);
+        let text = String::from_utf8(bytes).unwrap();
+        let mut out = String::new();
+        let mut rest = text.as_str();
+        while let Some(start) = rest.find('\x1b') {
+            out.push_str(&rest[..start]);
+            rest = &rest[start..];
+            let end = rest.find('m').unwrap();
+            rest = &rest[end + 1..];
+        }
+        out.push_str(rest);
+        Some(out)
+    }
+
+    #[test]
+    fn no_segments_make_no_line() {
+        assert_eq!(line_4(&[], 120), None);
+    }
+
+    #[test]
+    fn the_line_shrinks_from_the_lowest_priority_up() {
+        // The input order does not matter, priority does.
+        let segments = [stand_in(), seven_day()];
+        let rows = [
+            (120, "! 7d CAP HIT | stand-in 12345"),
+            (29, "! 7d CAP HIT | stand-in 12345"),
+            (28, "! 7d CAP HIT | stand-in"),
+            (23, "! 7d CAP HIT | stand-in"),
+            (22, "! 7d CAP HIT"),
+            (5, "! 7d CAP HIT"),
+            (0, "! 7d CAP HIT"),
+        ];
+        for (width, want) in rows {
+            assert_eq!(plain(&segments, width).as_deref(), Some(want), "{width}");
+        }
+    }
+
+    #[test]
+    fn a_lone_segment_is_never_dropped() {
+        assert_eq!(
+            plain(&[stand_in()], 3).as_deref(),
+            Some("stand-in"),
+            "the short form is kept when even it does not fit"
+        );
+    }
+
+    #[test]
+    fn alarms_are_red_and_the_rest_dim() {
+        let line = line_4(&[seven_day(), stand_in()], 120).unwrap();
+        assert!(
+            line.contains(&format!("{RED}! 7d CAP HIT{RESET}")),
+            "{line}"
+        );
+        assert!(
+            line.contains(&format!("{DIM}stand-in 12345{RESET}")),
+            "{line}"
+        );
+    }
 }

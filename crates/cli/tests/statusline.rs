@@ -7,7 +7,7 @@
 
 mod common;
 
-use common::{bin, have, run, Scratch};
+use common::{bin, have, run, strip_ansi, Scratch};
 use playbook::common::par;
 use playbook::statusline::{render, Env};
 use std::path::{Path, PathBuf};
@@ -857,4 +857,110 @@ fn a_history_file_that_cannot_be_appended_to_still_exits_zero_and_is_left_alone(
 
     assert!(status.success(), "{status:?}");
     assert!(can_write || std::fs::read_to_string(&file).unwrap() == before);
+}
+
+// ---- line 4: budget projections --------------------------------------------
+
+const BUDGET_NOW: i64 = 1_000_000;
+const DAY_SECS: i64 = 86_400;
+const SEVEN_DAYS_SECS: i64 = 7 * DAY_SECS;
+
+/// The colour-stripped lines for a 7 day window at `used` percent that has run
+/// for `elapsed` seconds of its seven days, at a fixed clock.
+fn seven_day_lines(used: f64, elapsed: i64, columns: Option<&str>) -> Vec<String> {
+    let s = Scratch::new();
+    let resets_at = BUDGET_NOW + SEVEN_DAYS_SECS - elapsed;
+    let body = payload(
+        &s.0,
+        &format!(
+            r#""rate_limits":{{"seven_day":{{"used_percentage":{used},"resets_at":{resets_at}}}}}"#
+        ),
+    );
+    let home = s.0.to_str().unwrap();
+    let mut pairs = vec![
+        ("HOME", home),
+        ("CLAUDE_CONFIG_DIR", home),
+        ("PWD", home),
+        ("PATH", ""),
+    ];
+    if let Some(c) = columns {
+        pairs.push(("COLUMNS", c));
+    }
+    let out = render(&body, &Env::from_pairs(pairs), BUDGET_NOW);
+    strip_ansi(&text(&out))
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn a_reached_seven_day_cap_adds_a_fourth_line_and_leaves_line_three_alone() {
+    let lines = seven_day_lines(100.0, 3 * DAY_SECS, None);
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert_eq!(lines[1], "Rate 7d: 100%");
+    assert_eq!(lines[2], "! 7d CAP HIT");
+}
+
+#[test]
+fn a_seven_day_pace_past_the_cap_names_the_time_left() {
+    // 60 percent after 3 of 7 days is 20 percent a day, so 40 left lasts 2 days.
+    let lines = seven_day_lines(60.0, 3 * DAY_SECS, None);
+    assert_eq!(lines.last().unwrap(), "! 7d cap in 2d", "{lines:?}");
+    assert_eq!(lines[1], "Rate 7d: 60%");
+}
+
+#[test]
+fn a_seven_day_window_within_the_cap_adds_no_line() {
+    for (used, elapsed) in [(0.0, 3 * DAY_SECS), (49.9, 3 * DAY_SECS + DAY_SECS / 2)] {
+        let lines = seven_day_lines(used, elapsed, None);
+        assert!(lines.iter().all(|l| !l.starts_with('!')), "{lines:?}");
+    }
+}
+
+#[test]
+fn a_seven_day_window_already_reset_adds_no_line() {
+    let s = Scratch::new();
+    let body = payload(
+        &s.0,
+        r#""rate_limits":{"seven_day":{"used_percentage":100,"resets_at":1000}}"#,
+    );
+    let out = strip_ansi(&text(&render(&body, &env_for(&s.0), BUDGET_NOW)));
+    assert_eq!(out.lines().count(), 2, "{out:?}");
+}
+
+#[test]
+fn input_without_rate_limits_keeps_the_three_line_layout() {
+    let s = Scratch::new();
+    let full = FULL.replace(
+        r#","rate_limits":{"five_hour":{"used_percentage":55.4,"resets_at":1000},"seven_day":{"used_percentage":60}}"#,
+        "",
+    );
+    let body = payload(&s.0, &full);
+    let out = strip_ansi(&text(&render(&body, &env_for(&s.0), BUDGET_NOW)));
+    assert_eq!(out.lines().count(), 3, "{out:?}");
+}
+
+#[test]
+fn the_seven_day_alarm_survives_any_terminal_width() {
+    for columns in [None, Some("5"), Some("not-a-number")] {
+        let lines = seven_day_lines(100.0, 3 * DAY_SECS, columns);
+        assert_eq!(lines.last().unwrap(), "! 7d CAP HIT", "{columns:?}");
+    }
+}
+
+#[test]
+fn the_budget_line_is_red_and_never_relies_on_colour_alone() {
+    let s = Scratch::new();
+    let body = payload(
+        &s.0,
+        &format!(
+            r#""rate_limits":{{"seven_day":{{"used_percentage":100,"resets_at":{}}}}}"#,
+            BUDGET_NOW + DAY_SECS
+        ),
+    );
+    let out = text(&render(&body, &env_for(&s.0), BUDGET_NOW));
+    assert!(
+        out.ends_with(&format!("{RED}! 7d CAP HIT{RESET}\n")),
+        "{out:?}"
+    );
 }

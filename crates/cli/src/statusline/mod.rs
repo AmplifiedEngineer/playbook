@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook statusline`: a byte-for-byte port of `statusline.sh`. Reads
-//! Claude Code's session JSON on stdin and prints up to three ANSI lines. Not
+//! Claude Code's session JSON on stdin and prints up to four ANSI lines, the fourth only when a usage cap needs saying. Not
 //! wired into any settings file yet; the shell script is still what runs.
 
+pub mod budget;
 mod fmt;
 pub(crate) mod gh;
 mod git;
@@ -489,9 +490,11 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
         home,
         now,
     };
+    let budget = budget::build(input, now);
     for line in [
         lines::line_2(&session, &opts),
         lines::line_3(&session, &opts),
+        lines::line_4(&budget, width as usize),
     ]
     .into_iter()
     .flatten()
