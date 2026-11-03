@@ -1,0 +1,63 @@
+version	1
+q001	tune	ferry-timetable-cache-expiry	why does the ferry schedule still show old departure times
+q002	tune	harbor-crane-queue-backpressure	crane lifts refused because too many are waiting
+q003	tune	lighthouse-beam-calibration	lamp rotation period is drifting what raises the alarm
+q004	tune	tide-table-import-format	are tide heights in centimetres or metres
+q005	tune	buoy-telemetry-retention	how long are raw buoy readings stored before rollup
+q006	tune	dockworker-shift-rotation	swap a night shift with another crew member
+q007	tune	customs-manifest-validation	manifest rejected check digit container number
+q008	tune	pilot-boarding-protocol	where does the pilot board when the wind is strong
+q009	tune	berth-allocation-solver	overlapping berth assignment conflict resolution
+q010	tune	fuel-bunkering-permit-window	bunkering permit expires renewal certificate
+q011	score	radar-sweep-noise-filter	ghost echoes on the radar screen
+q012	score	tug-fleet-dispatch-rules	which tug is dispatched to a big vessel
+q013	score	quay-wall-inspection-cycle	how often are quay walls inspected by divers
+q014	score	refrigerated-container-alarms	reefer box too warm alarm yard team
+q015	score	gate-truck-appointment-slots	truck arrived late missed its slot
+q016	score	vessel-eta-prediction-model	predicted arrival time is wrong retrains nightly
+q017	score	ballast-water-reporting	ballast form missing exchange position
+q018	score	lock-gate-hydraulic-sequence	lock gate halts pressure interlock
+q019	score	mooring-line-tension-sensors	load cell on the bollard disagrees
+q020	score	dredging-survey-schedule	multibeam sonar survey channel depth
+q021	score	ship-agent-invoice-export	semicolon separated invoice file for the agent
+q022	score	fog-signal-activation-rules	when does the foghorn start sounding
+q023	score	harbour-master-radio-channels	emergency calls which radio channel
+q024	score	oil-spill-response-checklist	spill reported close storm drains boom deployment
+q025	score	passenger-terminal-boarding-queue	overflow passengers covered walkway east side
+q026	score	warehouse-pallet-slotting	fast moving pallets near the doors reassign weekly
+q027	score	anchorage-zone-boundaries	anchor drag alert two cables
+q028	score	port-fee-tariff-lookup	green rated ship discount port dues
+q029	score	rail-siding-shunting-plan	wagons batched by destination shunting twice a shift
+q030	score	cargo-scanner-image-retention	how long are scanner images retained
+q031	score	emergency-generator-test-log	backup power test monthly thirty minutes oil pressure
+q032	score	seagull-deterrent-trial-notes	birds nesting on the stacks falcon patrol
+q033	score	pier-lighting-energy-saving	lamps dim when no motion for ten minutes
+q034	score	customs-hold-release-codes	release code expires seventy two hours duty officer
+q035	score	freight-forwarder-api-keys	forwarder gets 401 revoked key rotation
+q036	score	crew-change-visa-checks	crew joining transit visa seafarer card
+q037	score	harbour-patrol-boat-fuel	patrol boat refuel north pontoon coxswain
+q038	score	water-taxi-fare-zones	water taxi zone line flat charge
+q039	score	sea-level-alert-thresholds	flood alert too often wind surge forecast
+q040	score	engineering-spares-reorder-point	reorder point lead time safety stock of two
+q041	tune	tidal-gate-maintenance-window	gate servicing at neap tide notice seven days
+q042	tune	incident-review-2025-spring	twist locks sticking because they were stored wet
+q043	tune	onboarding-first-week-notes	radio tested at the gatehouse before entering the yard
+q044	tune	meeting-notes-quarterly-planning	repainting waits until the migratory birds leave
+q045	tune	supplier-contact-sheet	rope splicing who to call rigging shop
+q046	tune	shared-drive-folder-layout	damage photographs kept beside the repair ticket
+q047	tune	canteen-opening-hours	hot food stops at two kitchen closed Sundays
+q048	tune	parking-permit-notes	red permit may not park behind the fuel store
+q049	tune	first-aid-room-locations	eye wash station checked each Friday
+q050	tune	winter-gritting-routes	salt not used on the timber deck damages boards
+q051	score	radio-callsign-glossary	Otter is the lock office
+q052	score	training-course-catalogue	confined space course refresher after three years
+q053	score	lost-property-handling	unclaimed found items passed to charity after sixty days
+q054	score	visitor-escort-rules	visitors wear yellow vest never alone near the quay edge
+q055	score	rodent-control-schedule	bait stations along the warehouse wall checked monthly
+q056	score	calendar-of-annual-events	open day second Saturday of June
+q057	score	uniform-and-ppe-sizes	reflective strip peels replace the jacket
+q058	score	old-server-migration-leftovers	pallet labels print from the second office
+q059	score	tool-crib-borrowing-rules	torque wrenches go to calibration every six months
+q060	score	noise-complaint-log	night pile driving complaints north terrace
+q061	score	flag-etiquette-notes	port flag half mast lifeboat loss
+q062	score	spare-key-register	spare keys lock office sealed box
