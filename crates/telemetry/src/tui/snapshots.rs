@@ -1046,7 +1046,7 @@ fn an_enterprise_account_shows_the_cached_spend_limit_and_says_the_windows_are_n
 }
 
 #[test]
-fn a_stale_cached_limit_is_labeled_with_its_age() {
+fn a_stale_cached_limit_is_labeled_with_its_age_and_says_used_is_this_machine_only() {
     let a = with_sources(
         tabbed(1),
         &enterprise_sources(46 * 3600),
@@ -1055,7 +1055,10 @@ fn a_stale_cached_limit_is_labeled_with_its_age() {
 
     let text = draw(&a, 140, 40);
 
-    assert!(text.contains("[cached, stale 1d 22h ago]"), "{text}");
+    assert!(
+        text.contains("[limit cached 1d 22h ago, used is this machine only]"),
+        "{text}"
+    );
 }
 
 #[test]

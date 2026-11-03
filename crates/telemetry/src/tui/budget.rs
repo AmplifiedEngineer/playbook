@@ -133,8 +133,14 @@ fn tag(origin: Origin, stale: bool, cache_age: Option<i64>) -> String {
         (Origin::Measured, _) => "measured".to_string(),
         (Origin::Manual, _) => "manual".to_string(),
         (Origin::Cached, _) => match cache_age {
+            // Past the freshness limit the cache's used amount is dropped and
+            // the bar shows this machine's estimate, which misses other
+            // machines and the web apps.
             Some(a) if a > STALE_SECONDS => {
-                format!("cached, stale {} ago", elapsed_text(a))
+                format!(
+                    "limit cached {} ago, used is this machine only",
+                    elapsed_text(a)
+                )
             }
             Some(a) => format!("cached {} ago", elapsed_text(a)),
             None => "cached".to_string(),

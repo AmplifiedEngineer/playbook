@@ -230,7 +230,7 @@ Notes:
 **Which monthly limit wins**, in order:
 
 1. A detected monthly limit: a monthly spend limit from the statusline (behind a gateway), or a cached spend limit fetched after that reading, whatever its age.
-2. With no statusline reading, the cached spend limit however old. Over six hours old it is tagged `cached, stale` with its age.
+2. With no statusline reading, the cached spend limit however old. Over six hours old it is tagged `limit cached <age> ago, used is this machine only`, because the cache's used amount is dropped and the bar shows this machine's estimate.
 3. `usage.budget.monthlyUsd`, only when nothing is detected. It is not shown beside a detected limit.
 
 Cache rules:
@@ -257,7 +257,7 @@ You set no limit for any of these. The rows come from what Claude Code reports o
 | D. No windows, dollar cap known | The cache `spend` block, or the statusline `spend_limit`. | One dollar row, tagged `measured` or `cached`. When a reported figure and this machine's estimate both exist, a line next to it shows both, the reported one labeled "reported by Claude". | Monthly spend, the projection to the end of the period and the cutoff lines. |
 | E. Cap not reported | Nothing. | One line on what is missing: a window plan is told to run a session with the playbook statusline, a dollar or unknown plan that the cap is not reported by Claude Code on this login. Local spend and burn still show. | Spend and projection, and no cutoff lines. A limit of zero is never drawn. |
 | F. API key, Bedrock, Vertex or Foundry | Nothing. | As E, and the `usage.budget.*` lines when you set them. | As E, or with the budget as the 100 percent line. |
-| G. Reading over 6 hours old | Any. | A statusline reading stays, tagged `measured, stale`. A cached dollar limit over 6 hours old is still used when nothing newer was detected, tagged `cached, stale`. A cached window over 6 hours old is dropped. The comparison line says "stale, read N ago". | The monthly dollar chart marks the time of the reported figure. A window chart ends at the last reading, and its saved readings stay as they were. |
+| G. Reading over 6 hours old | Any. | A statusline reading stays, tagged `measured, stale`. A cached dollar limit over 6 hours old is still used when nothing newer was detected, tagged `limit cached <age> ago, used is this machine only`. A cached window over 6 hours old is dropped. The comparison line says "stale, read N ago". | The monthly dollar chart marks the time of the reported figure. A window chart ends at the last reading, and its saved readings stay as they were. |
 | H. Window already reset | Any. | The window is dropped, as Claude Code drops it. | None. |
 | I. A rate limit error seen | An `api_error` with status 429 in the Claude Code telemetry. | A line "Claude Code was rate limited at T (HTTP 429)" with the newest time. A 429 counts for the line and the reason for 7 days. When a window plan has no reading and a 429 was seen, the reason is `rate-limited-seen`; other reasons keep their word. | A `×` marker at each 429 inside the period shown. A 429 before the period starts or at its end is not drawn. A retried call counts once. |
 
