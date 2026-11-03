@@ -1,6 +1,6 @@
 # ADR 0004: Graph-first memory retrieval and triggered capture
 
-- **Status:** Accepted. Amended 2026-10-19: the memory graph now lives in `~/.config/playbook/data/memory.db` (moved there in #925), not in `memory.graph.json` or `graph.json`. `playbook memory rebuild` rebuilds it and `playbook memory stats` shows what it holds. The fact files stay in `~/.config/playbook/memory/`. Paths below are as they were when this record was written.
+- **Status:** Accepted. Alternative D is revisited by [ADR 0057](0057-index-memory-fact-bodies-with-fts5.md), proposed. Amended 2026-10-19: the memory graph now lives in `~/.config/playbook/data/memory.db` (moved there in #925), not in `memory.graph.json` or `graph.json`. `playbook memory rebuild` rebuilds it and `playbook memory stats` shows what it holds. The fact files stay in `~/.config/playbook/memory/`. Paths below are as they were when this record was written.
 - **Date created:** 2026-08-10
 - **Date modified:** 2026-10-19
 
