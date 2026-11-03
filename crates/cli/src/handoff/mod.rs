@@ -240,14 +240,17 @@ fn prune_loaded(dir: &Path, now: SystemTime) {
 /// Moves a loaded handoff to `used/`. If the move fails the file is removed
 /// instead, so a stuck file can never re-inject on every session start.
 fn archive(dir: &Path, path: &Path) {
-    let used = dir.join(USED_DIR);
-    let moved = ensure_private_dir(&used).is_ok()
-        && path
-            .file_name()
-            .is_some_and(|name| fs::rename(path, used.join(name)).is_ok());
-    if !moved {
+    if !move_to_used(dir, path) {
         let _ = fs::remove_file(path);
     }
+}
+
+fn move_to_used(dir: &Path, path: &Path) -> bool {
+    let used = dir.join(USED_DIR);
+    ensure_private_dir(&used).is_ok()
+        && path
+            .file_name()
+            .is_some_and(|name| fs::rename(path, used.join(name)).is_ok())
 }
 
 /// The read side of a session start: up to `MAX_INJECTED` fresh handoffs for
@@ -388,7 +391,8 @@ pub fn take_session_in(
 }
 
 /// Reads a tagged handoff and moves it to `used/`. An empty file is removed
-/// and yields nothing.
+/// and yields nothing. When the move fails the file stays where it is, so the
+/// pointer to the full text stays valid; the tag expires it after a day.
 fn load_and_archive(dir: &Path, entry: Entry) -> Option<Resumed> {
     let text = fs::read_to_string(&entry.path)
         .ok()
@@ -398,9 +402,11 @@ fn load_and_archive(dir: &Path, entry: Entry) -> Option<Resumed> {
         return None;
     };
     let name = entry.path.file_name()?.to_owned();
-    archive(dir, &entry.path);
-    let used = dir.join(USED_DIR).join(name);
-    let path = if used.is_file() { used } else { entry.path };
+    let path = if move_to_used(dir, &entry.path) {
+        dir.join(USED_DIR).join(name)
+    } else {
+        entry.path
+    };
     Some(Resumed { text, path })
 }
 
@@ -760,6 +766,20 @@ mod tests {
         assert_eq!(taken.text, "# Newer");
         assert_eq!(unread(&dir, SLUG).len(), 0, "the older one is retired too");
         assert!(take_session_in(&dir, SLUG, SESSION, SystemTime::now()).is_none());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_failed_move_to_used_keeps_the_file_the_pointer_names() {
+        let dir = scratch_dir("handoff-move-fails");
+        let saved = save_in(&dir, SLUG, "# Long", 100, 7, &session_tag(SESSION)).unwrap();
+        fs::write(dir.join(USED_DIR), "blocks the folder").unwrap();
+
+        let taken = take_session_in(&dir, SLUG, SESSION, SystemTime::now()).unwrap();
+
+        assert_eq!(taken.text, "# Long");
+        assert_eq!(taken.path, saved);
+        assert!(taken.path.is_file(), "the pointer must name a real file");
         let _ = fs::remove_dir_all(dir);
     }
 
