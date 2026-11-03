@@ -420,6 +420,23 @@ fn real_main() {
                 std::process::exit(1);
             }
         }
+        Command::Gc {
+            yes,
+            restore,
+            build_output,
+        } => {
+            if yes || restore.is_some() || build_output {
+                eprintln!(
+                    "gc: applying changes is not available yet; run `playbook gc` for the report"
+                );
+                std::process::exit(2);
+            }
+            let root = playbook::common::paths::playbook_root();
+            let clock = playbook::gc::default_clock();
+            let registry = playbook::gc::registry(&root);
+            let report = playbook::gc::report::report(&registry, clock.now());
+            print!("{}", playbook::gc::report::render(&report));
+        }
         Command::Statusline => std::process::exit(statusline::run()),
         Command::Version => print!("{}", Cli::command().render_version()),
         Command::Completions { shell } => {

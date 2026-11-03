@@ -98,6 +98,7 @@ pub const TOOLS: &[Tool] = &[
         "config get autoReview.enabled",
     ),
     t("list-plans", "plans", "", "--json", "plans --json"),
+    t("gc-report", "gc", "", "", "gc"),
     t("pr-prepare", "pr", "prepare", "", "pr prepare"),
     t(
         "pr-create",

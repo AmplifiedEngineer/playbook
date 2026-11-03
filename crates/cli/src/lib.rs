@@ -389,6 +389,23 @@ pub enum Command {
         #[arg(long)]
         remove_binary: bool,
     },
+    /// Show what playbook state takes space on disk
+    ///
+    /// Lists each store of on-disk state with its size, item count, age and
+    /// the action a cleanup would take. It changes nothing and takes no lock.
+    ///
+    /// Example: `playbook gc`
+    Gc {
+        /// Apply the cleanup (not available yet)
+        #[arg(long, hide = true)]
+        yes: bool,
+        /// Restore a tombstoned item by id (not available yet)
+        #[arg(long, hide = true, value_name = "ID")]
+        restore: Option<String>,
+        /// Also clean build output in unmanaged worktrees, after a prompt (not available yet)
+        #[arg(long, hide = true)]
+        build_output: bool,
+    },
     /// Update playbook to a published release
     ///
     /// Downloads the release, checks its SHA256 sum and, when `gh` is
