@@ -7,9 +7,9 @@
 //! file inside a transaction per batch. A file is the atomic unit: an error in
 //! one file rolls back only that file.
 
-use super::db::{self, OpenMode};
+use super::db::{self, OpenMode, TxHooks};
 use super::host;
-use super::lang;
+use super::lang::{self, Lang};
 use super::walker::{self, Skipped};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{HashMap, HashSet};
@@ -29,6 +29,9 @@ pub struct Options {
     pub max_threads: usize,
     /// Lines per text chunk.
     pub chunk_lines: usize,
+    /// The parser key stored with each content row. A manifest row whose
+    /// content has another key counts as changed.
+    pub parser: String,
     #[cfg(test)]
     pub hooks: Hooks,
 }
@@ -40,6 +43,7 @@ impl Default for Options {
             batch_size: 200,
             max_threads: MAX_WORKERS,
             chunk_lines: 60,
+            parser: lang::parser_key(),
             #[cfg(test)]
             hooks: Hooks::default(),
         }
@@ -110,6 +114,8 @@ struct Prepared {
     size: u64,
     mtime_ns: i64,
     status: &'static str,
+    /// The content row's grammar: the language, or `text` with none.
+    grammar: &'static str,
     chunks: Vec<Chunk>,
     lang: Option<&'static str>,
     symbols: Vec<lang::Symbol>,
@@ -140,6 +146,8 @@ pub(crate) struct Existing {
     pub(crate) error: Option<String>,
     pub(crate) size: i64,
     pub(crate) mtime_ns: i64,
+    /// The parser key of the manifest row's content, `None` without content.
+    pub(crate) parser: Option<String>,
 }
 
 fn now_ms() -> i64 {
@@ -268,7 +276,10 @@ fn prepare(root: &Path, path: &str, existing: Option<&Existing>, opts: &Options)
     let size = bytes.len() as u64;
     let mtime = walker::mtime_ns(&meta);
     if let Some(old) = existing {
-        if old.sha == sha && (old.status == "ok" || old.status == "partial") {
+        if old.sha == sha
+            && (old.status == "ok" || old.status == "partial")
+            && old.parser.as_deref() == Some(opts.parser.as_str())
+        {
             if i64::try_from(size).ok() == Some(old.size) && old.mtime_ns == mtime {
                 return Outcome::Unchanged;
             }
@@ -305,6 +316,7 @@ fn prepare(root: &Path, path: &str, existing: Option<&Existing>, opts: &Options)
         } else {
             "partial"
         },
+        grammar: Lang::for_path(path).map_or(lang::TEXT_GRAMMAR, Lang::grammar_id),
         chunks: make_chunks(&text, opts.chunk_lines),
         lang: syntax.lang,
         symbols: syntax.symbols,
@@ -362,6 +374,100 @@ fn upsert_file(
     }
 }
 
+/// A manifest row to write.
+struct ManifestRow<'a> {
+    path: &'a str,
+    content: Option<i64>,
+    lang: Option<&'a str>,
+    sha: &'a str,
+    size: u64,
+    mtime_ns: i64,
+    status: &'a str,
+    error: Option<&'a str>,
+}
+
+/// Stores the content row for `(sha, grammar, parser)` once and returns its
+/// id. The key is the bytes, so a second path with the same bytes reuses it.
+fn ensure_content(conn: &Connection, p: &Prepared, parser: &str) -> rusqlite::Result<i64> {
+    conn.execute(
+        "INSERT INTO content(sha256, grammar, parser, partial) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(sha256, grammar, parser) DO NOTHING",
+        params![p.sha, p.grammar, parser, p.status == "partial"],
+    )?;
+    conn.query_row(
+        "SELECT id FROM content WHERE sha256 = ?1 AND grammar = ?2 AND parser = ?3",
+        params![p.sha, p.grammar, parser],
+        |r| r.get(0),
+    )
+}
+
+/// Deletes a content row that no manifest row references. The children still
+/// hang off `files` in this change; they move to the content key with the
+/// reader change, and are cleared here then.
+fn drop_unreferenced_content(conn: &Connection, content: i64) -> rusqlite::Result<()> {
+    conn.execute(
+        "DELETE FROM content WHERE id = ?1
+           AND NOT EXISTS (SELECT 1 FROM manifest WHERE content = ?1)",
+        [content],
+    )?;
+    Ok(())
+}
+
+/// Writes one manifest row. When it moves to other content, the same
+/// transaction drops the old content row if nothing else uses it.
+fn upsert_manifest(conn: &Connection, wt: i64, row: &ManifestRow) -> rusqlite::Result<()> {
+    let old: Option<Option<i64>> = conn
+        .query_row(
+            "SELECT content FROM manifest WHERE worktree = ?1 AND path = ?2",
+            params![wt, row.path],
+            |r| r.get(0),
+        )
+        .optional()?;
+    conn.execute(
+        "INSERT INTO manifest(worktree, path, content, lang, sha256, size, mtime_ns, status, error)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(worktree, path) DO UPDATE SET content = excluded.content,
+             lang = excluded.lang, sha256 = excluded.sha256, size = excluded.size,
+             mtime_ns = excluded.mtime_ns, status = excluded.status, error = excluded.error",
+        params![
+            wt,
+            row.path,
+            row.content,
+            row.lang,
+            row.sha,
+            i64::try_from(row.size).unwrap_or(i64::MAX),
+            row.mtime_ns,
+            row.status,
+            row.error
+        ],
+    )?;
+    if let Some(Some(previous)) = old {
+        if row.content != Some(previous) {
+            drop_unreferenced_content(conn, previous)?;
+        }
+    }
+    Ok(())
+}
+
+/// Deletes a manifest row and its content row when nothing else uses it.
+fn delete_manifest(conn: &Connection, wt: i64, path: &str) -> rusqlite::Result<()> {
+    let content: Option<Option<i64>> = conn
+        .query_row(
+            "SELECT content FROM manifest WHERE worktree = ?1 AND path = ?2",
+            params![wt, path],
+            |r| r.get(0),
+        )
+        .optional()?;
+    conn.execute(
+        "DELETE FROM manifest WHERE worktree = ?1 AND path = ?2",
+        params![wt, path],
+    )?;
+    if let Some(Some(id)) = content {
+        drop_unreferenced_content(conn, id)?;
+    }
+    Ok(())
+}
+
 /// Stores a file's symbols and imports; `parent_id` follows the extractor's parent index.
 fn insert_syntax(conn: &Connection, file_id: i64, p: &Prepared) -> rusqlite::Result<()> {
     let to_i64 = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
@@ -398,13 +504,35 @@ fn insert_syntax(conn: &Connection, file_id: i64, p: &Prepared) -> rusqlite::Res
     Ok(())
 }
 
-fn apply(conn: &Connection, outcome: &Outcome, opts: &Options, now_s: i64) -> Result<(), String> {
+fn apply(
+    conn: &Connection,
+    outcome: &Outcome,
+    opts: &Options,
+    wt: i64,
+    now_s: i64,
+) -> Result<(), String> {
     let sql = |e: rusqlite::Error| e.to_string();
     match outcome {
         Outcome::Write(p) => {
             opts.before_file(&p.path)?;
             let id = upsert_file(
                 conn, &p.path, &p.sha, p.size, p.mtime_ns, p.status, None, p.lang, now_s,
+            )
+            .map_err(sql)?;
+            let content = ensure_content(conn, p, &opts.parser).map_err(sql)?;
+            upsert_manifest(
+                conn,
+                wt,
+                &ManifestRow {
+                    path: &p.path,
+                    content: Some(content),
+                    lang: p.lang,
+                    sha: &p.sha,
+                    size: p.size,
+                    mtime_ns: p.mtime_ns,
+                    status: p.status,
+                    error: None,
+                },
             )
             .map_err(sql)?;
             insert_syntax(conn, id, p).map_err(sql)?;
@@ -435,6 +563,21 @@ fn apply(conn: &Connection, outcome: &Outcome, opts: &Options, now_s: i64) -> Re
                 now_s,
             )
             .map_err(sql)?;
+            upsert_manifest(
+                conn,
+                wt,
+                &ManifestRow {
+                    path: &s.path,
+                    content: None,
+                    lang: None,
+                    sha: "",
+                    size: s.size,
+                    mtime_ns: s.mtime_ns,
+                    status: "skipped",
+                    error: Some(s.reason.as_str()),
+                },
+            )
+            .map_err(sql)?;
         }
         Outcome::Touch {
             path,
@@ -446,13 +589,24 @@ fn apply(conn: &Connection, outcome: &Outcome, opts: &Options, now_s: i64) -> Re
                 params![path, i64::try_from(*size).unwrap_or(i64::MAX), mtime_ns],
             )
             .map_err(sql)?;
+            conn.execute(
+                "UPDATE manifest SET size = ?3, mtime_ns = ?4 WHERE worktree = ?1 AND path = ?2",
+                params![wt, path, i64::try_from(*size).unwrap_or(i64::MAX), mtime_ns],
+            )
+            .map_err(sql)?;
         }
         Outcome::Unchanged | Outcome::Missing(_) | Outcome::Failed { .. } => {}
     }
     Ok(())
 }
 
-fn mark_failed(conn: &Connection, path: &str, error: &str, now_s: i64) -> rusqlite::Result<()> {
+fn mark_failed(
+    conn: &Connection,
+    wt: i64,
+    path: &str,
+    error: &str,
+    now_s: i64,
+) -> rusqlite::Result<()> {
     let changed = conn.execute(
         "UPDATE files SET status = 'failed', error = ?2 WHERE path = ?1",
         params![path, error],
@@ -464,6 +618,18 @@ fn mark_failed(conn: &Connection, path: &str, error: &str, now_s: i64) -> rusqli
             params![path, error, now_s],
         )?;
     }
+    // A failed path that had content keeps it, as it keeps its children.
+    let changed = conn.execute(
+        "UPDATE manifest SET status = 'failed', error = ?3 WHERE worktree = ?1 AND path = ?2",
+        params![wt, path, error],
+    )?;
+    if changed == 0 {
+        conn.execute(
+            "INSERT INTO manifest(worktree, path, content, sha256, size, mtime_ns, status, error)
+             VALUES (?1, ?2, NULL, '', 0, 0, 'failed', ?3)",
+            params![wt, path, error],
+        )?;
+    }
     Ok(())
 }
 
@@ -471,10 +637,12 @@ fn write_batch(
     conn: &mut Connection,
     batch: &[Outcome],
     opts: &Options,
+    wt: i64,
     report: &mut Report,
 ) -> Result<(), String> {
     let now_s = now_ms() / 1000;
-    let mut tx = conn.transaction().map_err(|e| e.to_string())?;
+    let hooks = TxHooks::default();
+    let mut tx = db::write_tx(conn, &hooks).map_err(|e| e.to_string())?;
     let mut failures: Vec<(String, String)> = Vec::new();
     for outcome in batch {
         let path = match outcome {
@@ -488,7 +656,7 @@ fn write_batch(
             Outcome::Unchanged | Outcome::Missing(_) => continue,
         };
         let sp = tx.savepoint().map_err(|e| e.to_string())?;
-        match apply(&sp, outcome, opts, now_s) {
+        match apply(&sp, outcome, opts, wt, now_s) {
             Ok(()) => {
                 sp.commit().map_err(|e| e.to_string())?;
                 if let Outcome::Write(p) = outcome {
@@ -505,10 +673,10 @@ fn write_batch(
         }
     }
     for (path, error) in failures {
-        mark_failed(&tx, &path, &error, now_s).map_err(|e| e.to_string())?;
+        mark_failed(&tx, wt, &path, &error, now_s).map_err(|e| e.to_string())?;
         report.failed += 1;
     }
-    tx.commit().map_err(|e| e.to_string())
+    db::commit_tx(tx, &hooks).map_err(|e| e.to_string())
 }
 
 pub(crate) fn load_existing(conn: &Connection) -> Result<HashMap<String, Existing>, String> {
@@ -525,6 +693,7 @@ pub(crate) fn load_existing(conn: &Connection) -> Result<HashMap<String, Existin
                     error: r.get(3)?,
                     size: r.get(4)?,
                     mtime_ns: r.get(5)?,
+                    parser: None,
                 },
             ))
         })
@@ -541,6 +710,61 @@ fn set_meta(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
     )
     .map(|_| ())
     .map_err(|e| e.to_string())
+}
+
+/// Adds this worktree's row, or refreshes it, and returns its id. The id of an
+/// existing row stays, so its manifest rows stay attached.
+fn register_worktree(conn: &mut Connection, root: &Path, started: i64) -> Result<i64, String> {
+    let key = host::worktree_id();
+    let hooks = TxHooks::default();
+    let tx = db::write_tx(conn, &hooks).map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO worktrees(key, root, created_at, tool_version, last_run_started)
+         VALUES (?1, ?2, ?3, ?4, ?3)
+         ON CONFLICT(key) DO UPDATE SET root = excluded.root,
+             tool_version = excluded.tool_version,
+             last_run_started = excluded.last_run_started",
+        params![
+            key,
+            root.display().to_string(),
+            started,
+            host::tool_version()
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    let id = tx
+        .query_row("SELECT id FROM worktrees WHERE key = ?1", [&key], |r| {
+            r.get(0)
+        })
+        .map_err(|e| e.to_string())?;
+    db::commit_tx(tx, &hooks).map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+/// Fills `Existing::parser` from the worktree's manifest and content rows.
+fn attach_parsers(
+    conn: &Connection,
+    wt: i64,
+    existing: &mut HashMap<String, Existing>,
+) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT m.path, c.parser FROM manifest m JOIN content c ON c.id = m.content
+             WHERE m.worktree = ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([wt], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        let (path, parser) = row.map_err(|e| e.to_string())?;
+        if let Some(old) = existing.get_mut(&path) {
+            old.parser = Some(parser);
+        }
+    }
+    Ok(())
 }
 
 /// The lock file beside the index. Held for the whole run and released by the
@@ -586,13 +810,15 @@ pub fn run(root: &Path, index: &Path, rebuild: bool, opts: &Options) -> Result<R
     }
     let mut conn = db::open_index(index, OpenMode::Index).map_err(|e| e.to_string())?;
     let started = now_ms();
+    let wt = register_worktree(&mut conn, root, started)?;
     set_meta(&conn, "last_run_started", &started.to_string())?;
     set_meta(&conn, "repo_root", &root.display().to_string())?;
     set_meta(&conn, "worktree_id", &host::worktree_id())?;
     set_meta(&conn, "tool_version", host::tool_version())?;
 
     let found = walker::discover(root, &opts.limits)?;
-    let existing = load_existing(&conn)?;
+    let mut existing = load_existing(&conn)?;
+    attach_parsers(&conn, wt, &mut existing)?;
     let mut report = Report {
         skipped: found.skipped.len(),
         ..Report::default()
@@ -644,7 +870,7 @@ pub fn run(root: &Path, index: &Path, rebuild: bool, opts: &Options) -> Result<R
             if batch.is_empty() {
                 return Ok(());
             }
-            write_batch(&mut conn, batch, opts, report)?;
+            write_batch(&mut conn, batch, opts, wt, report)?;
             batch.clear();
             batch_no += 1;
             opts.after_batch(batch_no)
@@ -699,7 +925,7 @@ pub fn run(root: &Path, index: &Path, rebuild: bool, opts: &Options) -> Result<R
         return Err(e);
     }
 
-    report.removed = remove_unlisted(&mut conn, &listed)?;
+    report.removed = remove_unlisted(&mut conn, wt, &listed)?;
     report.indexed = conn
         .query_row(
             "SELECT COUNT(*) FROM files WHERE status IN ('ok', 'partial')",
@@ -708,16 +934,22 @@ pub fn run(root: &Path, index: &Path, rebuild: bool, opts: &Options) -> Result<R
         )
         .map_err(|e| e.to_string())
         .map(|n| usize::try_from(n).unwrap_or(0))?;
-    set_meta(
-        &conn,
-        "last_run_completed",
-        &now_ms().max(started).to_string(),
-    )?;
+    let completed = now_ms().max(started);
+    set_meta(&conn, "last_run_completed", &completed.to_string())?;
+    conn.execute(
+        "UPDATE worktrees SET last_run_completed = ?2 WHERE id = ?1",
+        params![wt, completed],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(report)
 }
 
 /// Drops rows (FTS rows first) for files that are no longer listed.
-fn remove_unlisted(conn: &mut Connection, listed: &HashSet<String>) -> Result<usize, String> {
+fn remove_unlisted(
+    conn: &mut Connection,
+    wt: i64,
+    listed: &HashSet<String>,
+) -> Result<usize, String> {
     let rows: Vec<(i64, String)> = {
         let mut stmt = conn
             .prepare("SELECT id, path FROM files")
@@ -729,18 +961,19 @@ fn remove_unlisted(conn: &mut Connection, listed: &HashSet<String>) -> Result<us
             .collect::<Result<_, _>>()
             .map_err(|e| e.to_string())?
     };
-    let gone: Vec<i64> = rows
+    let gone: Vec<(i64, String)> = rows
         .into_iter()
         .filter(|(_, path)| !listed.contains(path))
-        .map(|(id, _)| id)
         .collect();
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    for id in &gone {
+    let hooks = TxHooks::default();
+    let tx = db::write_tx(conn, &hooks).map_err(|e| e.to_string())?;
+    for (id, path) in &gone {
         clear_children(&tx, *id).map_err(|e| e.to_string())?;
         tx.execute("DELETE FROM files WHERE id = ?1", [id])
             .map_err(|e| e.to_string())?;
+        delete_manifest(&tx, wt, path).map_err(|e| e.to_string())?;
     }
-    tx.commit().map_err(|e| e.to_string())?;
+    db::commit_tx(tx, &hooks).map_err(|e| e.to_string())?;
     Ok(gone.len())
 }
 
@@ -1510,5 +1743,276 @@ impl P { fn go(&self) {} }
     #[test]
     fn extractor_history_only_grows_in_revision_order() {
         assert!(EXTRACTOR_HISTORY.windows(2).all(|w| w[0].0 < w[1].0));
+    }
+
+    fn count(conn: &Connection, sql: &str) -> i64 {
+        conn.query_row(sql, [], |r| r.get(0)).expect("count")
+    }
+
+    #[test]
+    fn two_paths_with_the_same_bytes_share_one_content_row() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-share-bytes");
+        write(&f.root, "a.rs", b"fn same() {}\n");
+        write(&f.root, "b.rs", b"fn same() {}\n");
+
+        // Act
+        f.run();
+
+        // Assert
+        let conn = f.conn();
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM content"), 1);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM manifest"), 2);
+        assert_eq!(
+            count(&conn, "SELECT COUNT(DISTINCT content) FROM manifest"),
+            1
+        );
+    }
+
+    #[test]
+    fn a_syntax_error_makes_partial_content_and_a_partial_manifest_row() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-partial-content");
+        write(&f.root, "a.rs", b"fn good() {}\nfn broken( {\n");
+
+        // Act
+        f.run();
+
+        // Assert
+        let conn = f.conn();
+        assert_eq!(count(&conn, "SELECT partial FROM content"), 1);
+        let status: String = conn
+            .query_row("SELECT status FROM manifest", [], |r| r.get(0))
+            .expect("status");
+        assert_eq!(status, "partial");
+    }
+
+    #[test]
+    fn a_repo_with_nothing_to_index_has_no_content_row() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-no-content");
+        write(&f.root, "bin.dat", b"a\0b");
+
+        // Act
+        let report = f.run();
+
+        // Assert
+        assert_eq!(report.indexed, 0);
+        let conn = f.conn();
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM content"), 0);
+    }
+
+    #[test]
+    fn typescript_and_tsx_with_the_same_bytes_get_two_content_rows() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-tsx-apart");
+        write(&f.root, "a.ts", b"export const x = 1;\n");
+        write(&f.root, "a.tsx", b"export const x = 1;\n");
+
+        // Act
+        f.run();
+
+        // Assert
+        let conn = f.conn();
+        let grammars: Vec<String> = conn
+            .prepare("SELECT grammar FROM content ORDER BY grammar")
+            .expect("prepare")
+            .query_map([], |r| r.get(0))
+            .expect("query")
+            .map(|r| r.expect("row"))
+            .collect();
+        assert_eq!(grammars, vec!["tsx", "typescript"]);
+        let langs: Vec<String> = conn
+            .prepare("SELECT lang FROM manifest ORDER BY path")
+            .expect("prepare")
+            .query_map([], |r| r.get(0))
+            .expect("query")
+            .map(|r| r.expect("row"))
+            .collect();
+        assert_eq!(langs, vec!["typescript", "typescript"]);
+    }
+
+    #[test]
+    fn a_file_with_no_grammar_takes_the_text_grammar_and_still_gets_chunks() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-text-grammar");
+        write(&f.root, "notes.txt", b"plain words here\n");
+
+        // Act
+        f.run();
+
+        // Assert
+        let conn = f.conn();
+        let grammar: String = conn
+            .query_row("SELECT grammar FROM content", [], |r| r.get(0))
+            .expect("grammar");
+        assert_eq!(grammar, lang::TEXT_GRAMMAR);
+        assert_eq!(fts_paths(&conn, "plain"), vec!["notes.txt"]);
+    }
+
+    #[test]
+    fn a_skipped_and_a_failed_new_path_have_a_manifest_row_without_content() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-no-content-rows");
+        write(&f.root, "bin.dat", b"a\0b");
+        write(&f.root, "bad.rs", b"fn bad() {}\n");
+        let opts = Options {
+            hooks: Hooks {
+                after_batch_commit: None,
+                before_file_insert: Some(Box::new(|path| {
+                    if path == "bad.rs" {
+                        Err("injected".to_string())
+                    } else {
+                        Ok(())
+                    }
+                })),
+            },
+            ..Options::default()
+        };
+
+        // Act
+        f.run_with(&opts);
+
+        // Assert
+        let conn = f.conn();
+        let rows: Vec<(String, String, Option<i64>)> = conn
+            .prepare("SELECT path, status, content FROM manifest ORDER BY path")
+            .expect("prepare")
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .expect("query")
+            .map(|r| r.expect("row"))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("bad.rs".to_string(), "failed".to_string(), None),
+                ("bin.dat".to_string(), "skipped".to_string(), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_edit_points_the_manifest_at_new_content_and_drops_the_old_row() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-repoint");
+        write(&f.root, "a.rs", b"fn one() {}\n");
+        f.run();
+        let first = count(&f.conn(), "SELECT id FROM content");
+
+        // Act
+        write(&f.root, "a.rs", b"fn two() {}\n");
+        f.set_mtime("a.rs", 2_000_000);
+        f.run();
+
+        // Assert
+        let conn = f.conn();
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM content"), 1);
+        assert!(count(&conn, "SELECT id FROM content") > first);
+        let linked = count(
+            &conn,
+            "SELECT COUNT(*) FROM manifest m JOIN content c ON c.id = m.content",
+        );
+        assert_eq!(linked, 1);
+    }
+
+    #[test]
+    fn a_removed_path_drops_its_manifest_row_and_unused_content() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-drop-content");
+        write(&f.root, "gone.rs", b"fn gone() {}\n");
+        write(&f.root, "stay.rs", b"fn stay() {}\n");
+        f.run();
+        std::fs::remove_file(f.root.join("gone.rs")).expect("remove");
+
+        // Act
+        let report = f.run();
+
+        // Assert
+        assert_eq!(report.removed, 1);
+        let conn = f.conn();
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM manifest"), 1);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM content"), 1);
+    }
+
+    #[test]
+    fn content_of_another_parser_counts_as_changed() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-parser-key");
+        write(&f.root, "a.rs", b"fn a() {}\n");
+        let old = Options {
+            parser: "old-parser".to_string(),
+            ..Options::default()
+        };
+        f.run_with(&old);
+
+        // Act
+        let same = f.run_with(&old);
+        let other = f.run();
+
+        // Assert
+        assert_eq!((same.changed, same.unchanged), (0, 1));
+        assert_eq!((other.changed, other.unchanged), (1, 0));
+        let conn = f.conn();
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM content"), 1);
+    }
+
+    #[test]
+    fn a_run_records_its_worktree_row_once() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-worktree-row");
+        write(&f.root, "a.rs", b"fn a() {}\n");
+
+        // Act
+        f.run();
+        f.run();
+
+        // Assert
+        let conn = f.conn();
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM worktrees"), 1);
+        let (key, started, completed): (String, i64, i64) = conn
+            .query_row(
+                "SELECT key, last_run_started, last_run_completed FROM worktrees",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("row");
+        assert_eq!(key, host::worktree_id());
+        assert!(completed >= started);
+    }
+
+    #[test]
+    fn no_other_module_begins_a_transaction_by_hand() {
+        let sources = [
+            include_str!("index.rs"),
+            include_str!("lib.rs"),
+            include_str!("search.rs"),
+            include_str!("ranked.rs"),
+            include_str!("refs.rs"),
+            include_str!("context.rs"),
+            include_str!("status.rs"),
+        ];
+        for source in sources {
+            let production = source
+                .split("\n#[cfg(test)]\nmod tests")
+                .next()
+                .expect("production part");
+            for banned in [
+                ".transaction(",
+                "unchecked_transaction",
+                "transaction_with_behavior",
+            ] {
+                assert!(!production.contains(banned), "found {banned}");
+            }
+        }
     }
 }
