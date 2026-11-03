@@ -70,6 +70,7 @@ pub mod eval;
 pub mod fastpath;
 pub mod flags_snapshot;
 pub mod gate;
+pub mod gc;
 pub mod handoff;
 pub mod heal;
 pub mod hooks;
