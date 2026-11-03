@@ -86,6 +86,19 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `update.mode` | `notify` | `notify`, `auto`, `off` |
 | `update.checkIntervalHours` | `24` | a number, see the config keys page for the range |
 | `update.plugin` | `auto` | `auto`, `ask`, `off` |
+| `gc.enabled` | `true` | `true`, `false` |
+| `gc.graceDays` | `7` | a number, see the config keys page for the range |
+| `gc.handoffGraceDays` | `14` | a number, see the config keys page for the range |
+| `gc.sessionDirIdleDays` | `14` | a number, see the config keys page for the range |
+| `gc.logMaxDays` | `30` | a number, see the config keys page for the range |
+| `gc.logMaxMiB` | `5` | a number, see the config keys page for the range |
+| `gc.leftoverDays` | `90` | a number, see the config keys page for the range |
+| `gc.gateDbIdleDays` | `30` | a number, see the config keys page for the range |
+| `gc.buildOutputIdleDays` | `7` | a number, see the config keys page for the range |
+| `gc.buildOutputPressureIdleDays` | `1` | a number, see the config keys page for the range |
+| `gc.buildOutputActiveMinutes` | `15` | a number, see the config keys page for the range |
+| `gc.freeSpaceWarnGiB` | `10` | a number, see the config keys page for the range |
+| `gc.freeSpaceWarnPercent` | `5` | a number, see the config keys page for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands

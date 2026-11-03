@@ -209,6 +209,9 @@ fn usd(cents: i64) -> String {
 /// The most `docs.maxBytes` may be: the converter's own input ceiling.
 const DOCS_MAX_BYTES_CEILING: i64 = keys::HARD_MAX_INPUT_BYTES as i64;
 
+/// Every `gc.*` number has its own range; the config keys page lists them.
+const GC_RANGE_HINT: &str = "a whole number inside the range on the config keys page";
+
 const DOCS_DISPLAY_CHARS_MIN: i64 = 1_000;
 const DOCS_DISPLAY_CHARS_MAX: i64 = 120_000;
 
@@ -262,6 +265,13 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
         | "review.suggest.packageSpan"
         | "review.suggest.untestedLines"
         | "update.checkIntervalHours" => (whole.is_some_and(|n| n >= 1), "a positive integer"),
+        gc_key if keys::gc_number(gc_key).is_some() => {
+            let entry = keys::gc_number(gc_key).expect("checked by the guard");
+            (
+                whole.is_some_and(|n| (entry.min..=entry.max).contains(&n)),
+                GC_RANGE_HINT,
+            )
+        }
         "docs.maxBytes" => (
             whole.is_some_and(|n| (1..=DOCS_MAX_BYTES_CEILING).contains(&n)),
             "a whole number from 1 to 104857600 (the 100 MiB ceiling)",
