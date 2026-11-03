@@ -12,6 +12,7 @@
 
 use crate::common::re::static_regex;
 use crate::pr::shared::{gh, git, reject_option_like};
+use crate::pr::stack::Gh;
 use crate::pr::triage::Review;
 use regex::Regex;
 use serde::Serialize;
@@ -538,22 +539,40 @@ fn local_facts(base: Option<&str>) -> Result<Facts, String> {
     })
 }
 
-fn pr_facts(number: &str) -> Result<Facts, String> {
+/// One PR's files, label names and author login. The login of the caller is
+/// not read here, so a stack run can fetch it once.
+type PrPart = (Vec<File>, Vec<String>, String);
+
+fn pr_part(run: Gh, number: &str) -> Result<PrPart, String> {
     let files_jq =
         ".[] | {path:.filename,added:.additions,removed:.deletions,renamed:(.status==\"renamed\")}";
     let endpoint = format!("repos/{{owner}}/{{repo}}/pulls/{number}/files?per_page=100");
-    let calls: [Vec<&str>; 3] = [
+    let calls: [Vec<&str>; 2] = [
         vec!["api", "--paginate", &endpoint, "--jq", files_jq],
         vec!["pr", "view", number, "--json", "labels,author"],
-        vec!["api", "/user", "-q", ".login"],
     ];
     let mut results =
-        crate::common::par::map(&calls, crate::common::par::MAX_CONCURRENT, |a| gh(a)).into_iter();
-    let (Some(files), Some(meta), Some(me)) = (results.next(), results.next(), results.next())
-    else {
+        crate::common::par::map(&calls, crate::common::par::MAX_CONCURRENT, |a| run(a))
+            .into_iter();
+    let (Some(files), Some(meta)) = (results.next(), results.next()) else {
         return Err("gh returned fewer results than calls".to_string());
     };
-    parse_pr(&files?, &meta?, me.ok().as_deref())
+    parse_part(&files?, &meta?)
+}
+
+/// The caller's login, or `None` when it could not be read.
+fn login(run: Gh) -> Option<String> {
+    run(&["api", "/user", "-q", ".login"]).ok()
+}
+
+fn pr_facts(run: Gh, number: &str) -> Result<Facts, String> {
+    let (files, labels, author) = pr_part(run, number)?;
+    let me = login(run);
+    Ok(Facts {
+        files,
+        labels,
+        own: me.map(|m| m == author),
+    })
 }
 
 #[derive(serde::Deserialize)]
@@ -580,10 +599,10 @@ struct PrAuthor {
     login: String,
 }
 
-/// The facts from the three `gh` outputs: one JSON object per file line, the
-/// `pr view` JSON, and the caller's login (`None` when it could not be read).
-/// A missing field is an error, never a silent zero.
-fn parse_pr(files: &str, meta: &str, me: Option<&str>) -> Result<Facts, String> {
+/// The files, labels and author from the two per-PR `gh` outputs: one JSON
+/// object per file line, and the `pr view` JSON. A missing field is an error,
+/// never a silent zero.
+fn parse_part(files: &str, meta: &str) -> Result<PrPart, String> {
     let files = files
         .lines()
         .filter(|l| !l.trim().is_empty())
@@ -600,18 +619,15 @@ fn parse_pr(files: &str, meta: &str, me: Option<&str>) -> Result<Facts, String> 
         .collect::<Result<Vec<_>, String>>()?;
     let meta: PrMeta =
         serde_json::from_str(meta).map_err(|e| format!("gh pr view returned bad JSON: {e}"))?;
-    Ok(Facts {
-        files,
-        labels: meta.labels.into_iter().map(|l| l.name).collect(),
-        own: me.map(|m| m == meta.author.login),
-    })
+    let labels = meta.labels.into_iter().map(|l| l.name).collect();
+    Ok((files, labels, meta.author.login))
 }
 
 /// Collect the facts for PR `pr`, or for the branch against its base when
 /// `pr` is `None`, and decide.
 pub fn run(pr: Option<&str>, base: Option<&str>) -> Result<Suggestion, String> {
     let facts = match pr.map(|p| p.trim_start_matches('#')) {
-        Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => pr_facts(n)?,
+        Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => pr_facts(&|a| gh(a), n)?,
         Some(other) => return Err(format!("`{other}` is not a PR number")),
         None => local_facts(base)?,
     };
@@ -832,16 +848,55 @@ mod tests {
     }
 
     #[test]
-    fn gh_output_becomes_facts_and_a_missing_field_is_an_error() {
+    fn gh_output_becomes_parts_and_a_missing_field_is_an_error() {
         let files = "{\"path\":\"a.rs\",\"added\":3,\"removed\":1,\"renamed\":false}\n\n{\"path\":\"b.rs\",\"added\":0,\"removed\":0,\"renamed\":true}\n";
         let meta = r#"{"labels":[{"name":"security"}],"author":{"login":"ann"}}"#;
-        let f = parse_pr(files, meta, Some("ann")).unwrap();
-        assert_eq!((f.files.len(), f.files[1].renamed), (2, true));
-        assert_eq!((f.labels, f.own), (vec!["security".to_string()], Some(true)));
-        assert_eq!(parse_pr(files, meta, Some("bob")).unwrap().own, Some(false));
-        assert_eq!(parse_pr(files, meta, None).unwrap().own, None);
-        assert!(parse_pr("{\"path\":\"a.rs\"}", meta, None).unwrap_err().contains("bad file JSON"));
-        assert!(parse_pr(files, "{}", None).unwrap_err().contains("bad JSON"));
+        let (f, labels, author) = parse_part(files, meta).unwrap();
+        assert_eq!((f.len(), f[1].renamed), (2, true));
+        assert_eq!((labels, author.as_str()), (vec!["security".to_string()], "ann"));
+        assert!(parse_part("{\"path\":\"a.rs\"}", meta).unwrap_err().contains("bad file JSON"));
+        assert!(parse_part(files, "{}").unwrap_err().contains("bad JSON"));
+    }
+
+    const FILES_LINE: &str = "{\"path\":\"a.rs\",\"added\":3,\"removed\":1,\"renamed\":false}";
+    const META: &str = r#"{"labels":[{"name":"security"}],"author":{"login":"ann"}}"#;
+
+    /// A fake `gh` that records every call and serves one PR.
+    fn seam<'a>(calls: &'a std::sync::Mutex<Vec<String>>, me: Option<&'static str>) -> impl Fn(&[&str]) -> Result<String, String> + Sync + 'a {
+        move |args: &[&str]| {
+            calls.lock().unwrap().push(args.join(" "));
+            match args {
+                ["api", "--paginate", ..] => Ok(FILES_LINE.to_string()),
+                ["pr", "view", ..] => Ok(META.to_string()),
+                ["api", "/user", ..] => me.map(str::to_string).ok_or_else(|| "no login".to_string()),
+                _ => Err("unexpected gh call".to_string()),
+            }
+        }
+    }
+
+    #[test]
+    fn pr_part_returns_files_labels_and_author_without_asking_for_the_login() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        let (files, labels, author) = pr_part(&seam(&calls, Some("ann")), "7").unwrap();
+        assert_eq!(files, [File { path: "a.rs".into(), added: 3, removed: 1, renamed: false }]);
+        assert_eq!((labels, author.as_str()), (vec!["security".to_string()], "ann"));
+        assert!(calls.lock().unwrap().iter().all(|c| !c.contains("/user")));
+    }
+
+    #[test]
+    fn login_returns_the_fake_login_and_none_on_failure() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        assert_eq!(login(&seam(&calls, Some("bob"))).as_deref(), Some("bob"));
+        assert_eq!(login(&seam(&calls, None)), None);
+    }
+
+    #[test]
+    fn pr_facts_combines_the_part_and_the_login() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        let mine = pr_facts(&seam(&calls, Some("ann")), "7").unwrap();
+        assert_eq!((mine.own, mine.files.len(), mine.labels), (Some(true), 1, vec!["security".to_string()]));
+        assert_eq!(pr_facts(&seam(&calls, Some("bob")), "7").unwrap().own, Some(false));
+        assert_eq!(pr_facts(&seam(&calls, None), "7").unwrap().own, None);
     }
 
     #[test]
