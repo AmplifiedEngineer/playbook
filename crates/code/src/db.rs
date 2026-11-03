@@ -7,15 +7,56 @@
 
 use super::host;
 use playbook_common::sqlite::{retry_busy, OPEN_BUDGET};
-use rusqlite::{Connection, ErrorCode};
+use rusqlite::{Connection, ErrorCode, Transaction, TransactionBehavior};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Bumped when the table layout changes. A different non-zero value in
 /// `PRAGMA user_version` makes the next `index` run rebuild the file.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
+
+/// Largest size the WAL file keeps on disk after a checkpoint, in bytes.
+pub const WAL_SIZE_LIMIT: i64 = 64 * 1024 * 1024;
+
+/// Test hooks for [`write_tx`]. Production passes [`TxHooks::default`], which
+/// holds none. A `fail_*` hook returns the error to inject.
+#[derive(Default)]
+pub struct TxHooks {
+    /// Runs each time a write transaction is about to begin.
+    pub on_write_tx: Option<Box<dyn Fn() + Send + Sync>>,
+    /// Makes the transaction fail at `BEGIN` when it returns an error.
+    pub fail_begin: Option<Box<dyn Fn() -> rusqlite::Result<()> + Send + Sync>>,
+    /// Makes [`commit_tx`] fail, and roll back, when it returns an error.
+    pub fail_commit: Option<Box<dyn Fn() -> rusqlite::Result<()> + Send + Sync>>,
+}
+
+/// Begins a write transaction in `IMMEDIATE` mode. A deferred transaction that
+/// reads and then writes gets `SQLITE_BUSY_SNAPSHOT` when a sibling connection
+/// commits in between, and the busy timeout does not retry that error. Every
+/// write path begins its transaction here and nowhere else.
+pub fn write_tx<'c>(
+    conn: &'c mut Connection,
+    hooks: &TxHooks,
+) -> rusqlite::Result<Transaction<'c>> {
+    if let Some(hook) = &hooks.on_write_tx {
+        hook();
+    }
+    if let Some(fail) = &hooks.fail_begin {
+        fail()?;
+    }
+    conn.transaction_with_behavior(TransactionBehavior::Immediate)
+}
+
+/// Commits a transaction from [`write_tx`]. When `fail_commit` injects an
+/// error the transaction is dropped, which rolls it back.
+pub fn commit_tx(tx: Transaction<'_>, hooks: &TxHooks) -> rusqlite::Result<()> {
+    if let Some(fail) = &hooks.fail_commit {
+        fail()?;
+    }
+    tx.commit()
+}
 
 /// How a caller opens the index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,6 +107,36 @@ CREATE TABLE IF NOT EXISTS files (
     status TEXT NOT NULL CHECK (status IN ('ok', 'partial', 'failed', 'skipped')),
     error TEXT
 );
+CREATE TABLE IF NOT EXISTS worktrees (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    root TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    tool_version TEXT NOT NULL,
+    last_run_started INTEGER,
+    last_run_completed INTEGER
+) STRICT;
+CREATE TABLE IF NOT EXISTS content (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sha256 TEXT NOT NULL,
+    grammar TEXT NOT NULL,
+    parser TEXT NOT NULL,
+    partial INTEGER NOT NULL CHECK (partial IN (0, 1)),
+    UNIQUE (sha256, grammar, parser)
+) STRICT;
+CREATE TABLE IF NOT EXISTS manifest (
+    worktree INTEGER NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    content INTEGER REFERENCES content(id) ON DELETE RESTRICT,
+    lang TEXT,
+    sha256 TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    mtime_ns INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('ok', 'partial', 'failed', 'skipped')),
+    error TEXT,
+    PRIMARY KEY (worktree, path)
+) STRICT;
+CREATE INDEX IF NOT EXISTS manifest_content ON manifest(content, worktree);
 CREATE TABLE IF NOT EXISTS symbols (
     id INTEGER PRIMARY KEY,
     file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
@@ -214,9 +285,31 @@ fn try_open(path: &Path, mode: OpenMode) -> Result<Connection, DbError> {
         }
         host::make_file_private(path).map_err(DbError::Failed)?;
     }
+    if mode == OpenMode::Query && std::fs::metadata(path).is_ok_and(|m| m.len() == 0) {
+        return Err(DbError::Missing);
+    }
     let conn = Connection::open(path).map_err(|e| step(path, "open the database", &e))?;
     conn.busy_timeout(BUSY_TIMEOUT)
         .map_err(|e| step(path, "set busy_timeout", &e))?;
+    // Read the version before any pragma that writes the header, so a query on
+    // an empty or foreign file leaves its bytes alone.
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(|e| step(path, "read user_version", &e))?;
+    if version != 0 && version != SCHEMA_VERSION {
+        return Err(DbError::NeedsRebuild(rebuild_hint(
+            path,
+            &format!("has schema version {version}, this build uses {SCHEMA_VERSION}"),
+        )));
+    }
+    if version == 0 && mode == OpenMode::Query {
+        return Err(DbError::Missing);
+    }
+    if version == 0 {
+        // Only a new file takes this; it must come before the WAL header.
+        conn.pragma_update(None, "auto_vacuum", "INCREMENTAL")
+            .map_err(|e| step(path, "set auto_vacuum", &e))?;
+    }
     retry_busy(
         || conn.pragma_update(None, "journal_mode", "WAL"),
         OPEN_BUDGET,
@@ -226,28 +319,27 @@ fn try_open(path: &Path, mode: OpenMode) -> Result<Connection, DbError> {
         .map_err(|e| step(path, "set foreign_keys", &e))?;
     conn.pragma_update(None, "synchronous", "NORMAL")
         .map_err(|e| step(path, "set synchronous", &e))?;
+    conn.pragma_update(None, "journal_size_limit", WAL_SIZE_LIMIT)
+        .map_err(|e| step(path, "set journal_size_limit", &e))?;
     if !fts5_available(&conn) {
         return Err(DbError::Failed(
             "this build has no SQLite FTS5; rebuild with FTS5 enabled".to_string(),
         ));
     }
-    let version: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .map_err(|e| step(path, "read user_version", &e))?;
     if version == SCHEMA_VERSION {
         return Ok(conn);
     }
-    if version != 0 {
-        return Err(DbError::NeedsRebuild(rebuild_hint(
-            path,
-            &format!("has schema version {version}, this build uses {SCHEMA_VERSION}"),
-        )));
-    }
-    if mode == OpenMode::Query {
-        return Err(DbError::NeedsRebuild(rebuild_hint(path, "is empty")));
-    }
     retry_busy(|| conn.execute_batch(SCHEMA_SQL), OPEN_BUDGET)
         .map_err(|e| step(path, "create the schema", &e))?;
+    let vacuum: i64 = conn
+        .query_row("PRAGMA auto_vacuum", [], |row| row.get(0))
+        .map_err(|e| step(path, "read auto_vacuum", &e))?;
+    if vacuum != 2 {
+        // The pragma had no effect on this file; the store is still empty, so
+        // a VACUUM applies it cheaply.
+        retry_busy(|| conn.execute_batch("VACUUM"), OPEN_BUDGET)
+            .map_err(|e| step(path, "apply auto_vacuum", &e))?;
+    }
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(|e| step(path, "set user_version", &e))?;
     Ok(conn)
@@ -489,6 +581,267 @@ mod tests {
 
         // Assert
         assert!(got.is_ok());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn pragma(conn: &Connection, name: &str) -> i64 {
+        conn.query_row(&format!("PRAGMA {name}"), [], |r| r.get(0))
+            .expect("pragma")
+    }
+
+    #[test]
+    fn a_fresh_store_has_the_pragmas_and_strict_tables_the_blueprint_names() {
+        // Arrange
+        let dir = scratch_dir("code-db-pragmas");
+        let conn = open_index(&dir.join("index.sqlite3"), OpenMode::Index).expect("open");
+
+        // Act and assert, one row per pragma
+        let version: String = conn
+            .query_row("SELECT sqlite_version()", [], |r| r.get(0))
+            .expect("version");
+        let parts: Vec<u32> = version
+            .split('.')
+            .map(|p| p.parse().expect("num"))
+            .collect();
+        assert!((parts[0], parts[1]) >= (3, 43), "sqlite {version}");
+        assert_eq!(pragma(&conn, "foreign_keys"), 1);
+        assert_eq!(pragma(&conn, "auto_vacuum"), 2);
+        assert_eq!(pragma(&conn, "journal_size_limit"), WAL_SIZE_LIMIT);
+        for table in ["worktrees", "content", "manifest"] {
+            let strict: i64 = conn
+                .query_row(
+                    "SELECT strict FROM pragma_table_list WHERE name = ?1",
+                    [table],
+                    |r| r.get(0),
+                )
+                .expect("table_list");
+            assert_eq!(strict, 1, "{table}");
+        }
+        let wrong_type = conn.execute(
+            "INSERT INTO content(sha256, grammar, parser, partial) VALUES ('h', 'rust', 'p', 'x')",
+            [],
+        );
+        assert!(wrong_type.is_err(), "text in an integer column must fail");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_deleted_content_id_and_a_deleted_chunk_id_are_never_reused() {
+        // Arrange
+        let dir = scratch_dir("code-db-autoincrement");
+        let conn = open_index(&dir.join("index.sqlite3"), OpenMode::Index).expect("open");
+        let insert = |sha: &str| {
+            conn.execute(
+                "INSERT INTO content(sha256, grammar, parser, partial) VALUES (?1, 'rust', 'p', 0)",
+                [sha],
+            )
+            .expect("insert");
+            conn.last_insert_rowid()
+        };
+        let top = insert("a");
+        conn.execute("DELETE FROM content WHERE id = ?1", [top])
+            .expect("delete");
+
+        // Act
+        let next = insert("b");
+
+        // Assert
+        assert!(next > top);
+        conn.execute(
+            "INSERT INTO files(id, path, sha256, size, mtime_ns, indexed_at, status)
+             VALUES (1, 'a.rs', 'h', 1, 1, 1, 'ok')",
+            [],
+        )
+        .expect("file");
+        conn.execute(
+            "INSERT INTO chunks(file_id, start_line, end_line) VALUES (1, 1, 1)",
+            [],
+        )
+        .expect("chunk");
+        let chunk = conn.last_insert_rowid();
+        conn.execute("DELETE FROM chunks WHERE id = ?1", [chunk])
+            .expect("delete chunk");
+        conn.execute(
+            "INSERT INTO chunks(file_id, start_line, end_line) VALUES (1, 1, 1)",
+            [],
+        )
+        .expect("chunk again");
+        assert!(conn.last_insert_rowid() > chunk);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_version_2_file_is_rebuilt_in_index_mode_and_kept_in_query_mode() {
+        // Arrange
+        let dir = scratch_dir("code-db-v2");
+        let path = dir.join("index.sqlite3");
+        std::fs::create_dir_all(&dir).expect("dir");
+        {
+            let conn = Connection::open(&path).expect("raw db");
+            conn.execute_batch("CREATE TABLE files(x); PRAGMA user_version = 2;")
+                .expect("seed");
+        }
+
+        // Act
+        let query = open_index(&path, OpenMode::Query);
+
+        // Assert
+        let message = query.expect_err("query must not open v2").to_string();
+        assert!(message.contains("--rebuild"), "{message}");
+        assert!(path.exists(), "query mode must not delete the file");
+
+        // Act
+        let conn = open_index(&path, OpenMode::Index).expect("rebuild");
+
+        // Assert
+        assert_eq!(pragma(&conn, "user_version"), 3);
+        assert_eq!(count(&conn, "worktrees"), 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_query_on_an_empty_file_or_version_0_file_is_missing_and_writes_nothing() {
+        // Arrange
+        let dir = scratch_dir("code-db-empty");
+        std::fs::create_dir_all(&dir).expect("dir");
+        let empty = dir.join("empty.sqlite3");
+        std::fs::write(&empty, b"").expect("empty");
+        let zero = dir.join("zero.sqlite3");
+        {
+            let conn = Connection::open(&zero).expect("raw db");
+            conn.execute_batch("CREATE TABLE t(x);").expect("seed");
+        }
+        let before = std::fs::read(&zero).expect("bytes");
+
+        // Act
+        let empty_got = open_index(&empty, OpenMode::Query);
+        let zero_got = open_index(&zero, OpenMode::Query);
+
+        // Assert
+        assert_eq!(empty_got.err(), Some(DbError::Missing));
+        assert_eq!(zero_got.err(), Some(DbError::Missing));
+        assert_eq!(std::fs::read(&empty).expect("empty again"), b"");
+        assert_eq!(std::fs::read(&zero).expect("bytes again"), before);
+        let created = open_index(&empty, OpenMode::Index).expect("index mode creates");
+        assert_eq!(pragma(&created, "auto_vacuum"), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_immediate_write_tx_makes_a_sibling_writer_wait_instead_of_failing_the_reader() {
+        // Arrange
+        let dir = scratch_dir("code-db-write-tx");
+        let path = dir.join("index.sqlite3");
+        let mut first = open_index(&path, OpenMode::Index).expect("open");
+        let second = open_index(&path, OpenMode::Index).expect("second");
+        second.busy_timeout(Duration::ZERO).expect("no wait");
+        let hooks = TxHooks::default();
+
+        // Act
+        let tx = write_tx(&mut first, &hooks).expect("begin");
+        let _: i64 = tx
+            .query_row("SELECT COUNT(*) FROM worktrees", [], |r| r.get(0))
+            .expect("read");
+        let sibling = second.execute(
+            "INSERT INTO worktrees(key, root, created_at, tool_version) VALUES ('k', 'r', 1, 'v')",
+            [],
+        );
+
+        // Assert
+        let err = sibling.expect_err("the sibling write must be refused");
+        assert_eq!(err.sqlite_error_code(), Some(ErrorCode::DatabaseBusy));
+        commit_tx(tx, &hooks).expect("the first transaction commits");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_tx_hooks_run_and_can_fail_the_begin_and_the_commit() {
+        // Arrange
+        let dir = scratch_dir("code-db-tx-hooks");
+        let mut conn = open_index(&dir.join("index.sqlite3"), OpenMode::Index).expect("open");
+        let seen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = seen.clone();
+        let busy = || {
+            Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                None,
+            ))
+        };
+        let observe = TxHooks {
+            on_write_tx: Some(Box::new(move || {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            })),
+            ..TxHooks::default()
+        };
+        let begin = TxHooks {
+            fail_begin: Some(Box::new(busy)),
+            ..TxHooks::default()
+        };
+        let commit = TxHooks {
+            fail_commit: Some(Box::new(busy)),
+            ..TxHooks::default()
+        };
+
+        // Act and assert
+        drop(write_tx(&mut conn, &observe).expect("begin"));
+        assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(write_tx(&mut conn, &begin).is_err());
+        let tx = write_tx(&mut conn, &commit).expect("begin");
+        tx.execute(
+            "INSERT INTO worktrees(key, root, created_at, tool_version) VALUES ('k', 'r', 1, 'v')",
+            [],
+        )
+        .expect("insert");
+        assert!(commit_tx(tx, &commit).is_err());
+        assert_eq!(count(&conn, "worktrees"), 0, "a failed commit rolls back");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_content_row_that_a_manifest_row_uses_cannot_be_deleted() {
+        // Arrange
+        let dir = scratch_dir("code-db-restrict");
+        let conn = open_index(&dir.join("index.sqlite3"), OpenMode::Index).expect("open");
+        conn.execute_batch(
+            "INSERT INTO worktrees(id, key, root, created_at, tool_version) VALUES (1, 'k', 'r', 1, 'v');
+             INSERT INTO content(id, sha256, grammar, parser, partial) VALUES (1, 'h', 'rust', 'p', 0);
+             INSERT INTO manifest(worktree, path, content, sha256, size, mtime_ns, status)
+                 VALUES (1, 'a.rs', 1, 'h', 1, 1, 'ok');",
+        )
+        .expect("seed");
+
+        // Act
+        let blocked = conn.execute("DELETE FROM content WHERE id = 1", []);
+        conn.execute("DELETE FROM worktrees WHERE id = 1", [])
+            .expect("the cascade removes the manifest");
+
+        // Assert
+        assert!(blocked.is_err(), "RESTRICT must refuse the delete");
+        assert_eq!(count(&conn, "manifest"), 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_repoint_check_uses_the_manifest_content_index() {
+        // Arrange
+        let dir = scratch_dir("code-db-plan");
+        let conn = open_index(&dir.join("index.sqlite3"), OpenMode::Index).expect("open");
+
+        // Act
+        let plan: Vec<String> = conn
+            .prepare("EXPLAIN QUERY PLAN SELECT 1 FROM manifest WHERE content = ?1")
+            .expect("prepare")
+            .query_map([1], |r| r.get::<_, String>(3))
+            .expect("plan")
+            .map(|r| r.expect("row"))
+            .collect();
+
+        // Assert
+        let text = plan.join(" | ");
+        assert!(
+            text.contains("SEARCH") && text.contains("manifest_content"),
+            "{text}"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 }
