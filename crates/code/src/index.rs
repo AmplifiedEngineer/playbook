@@ -2015,4 +2015,36 @@ impl P { fn go(&self) {} }
             }
         }
     }
+
+    #[test]
+    fn a_failed_edit_keeps_the_manifest_content_and_marks_the_row_failed() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-failed-keeps-content");
+        write(&f.root, "a.rs", b"fn keepme() {}\n");
+        f.run();
+        let before = count(&f.conn(), "SELECT content FROM manifest");
+        write(&f.root, "a.rs", b"fn keepme2() {}\n");
+        let opts = Options {
+            hooks: Hooks {
+                after_batch_commit: None,
+                before_file_insert: Some(Box::new(|_| Err("injected".to_string()))),
+            },
+            ..Options::default()
+        };
+
+        // Act
+        let report = f.run_with(&opts);
+
+        // Assert
+        assert_eq!(report.failed, 1);
+        let conn = f.conn();
+        let (status, content): (String, i64) = conn
+            .query_row("SELECT status, content FROM manifest", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .expect("row");
+        assert_eq!((status.as_str(), content), ("failed", before));
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM content"), 1);
+    }
 }
