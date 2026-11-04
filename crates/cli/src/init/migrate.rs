@@ -432,26 +432,32 @@ pub fn registry() -> Vec<Migration> {
 /// and the index under the worktree state folder when its schema is older
 /// than this build's. A current file at that state path is the fallback store
 /// of a repo with no safe data folder path, so it stays, and so does a file
-/// that is not SQLite or comes from a newer build.
+/// that is not SQLite or comes from a newer build. The walk never follows a
+/// symlink, so a link in the data folder cannot lead a delete outside it.
 fn code_index_per_worktree_files(ctx: &Ctx) -> Outcome {
     const STEP: &str = "code index files";
     let root = playbook_root_from(&ctx.home);
     let mut doomed = per_worktree_code_files(&playbook_data::data_dir_from(&ctx.home));
     doomed.extend(old_state_indexes(&root.join("repos")));
     let mut removed = 0;
+    let mut failed: Vec<String> = Vec::new();
     for file in doomed {
         for path in with_sidecars(&file) {
             match fs::remove_file(&path) {
                 Ok(()) => removed += 1,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => {
-                    return Outcome::Failed(StepReport::failed(
-                        STEP,
-                        format!("could not delete {}: {e}", path.display()),
-                    ))
-                }
+                Err(e) => failed.push(format!("{}: {e}", path.display())),
             }
         }
+    }
+    if let Some(first) = failed.first() {
+        return Outcome::Failed(StepReport::failed(
+            STEP,
+            format!(
+                "could not delete {} file(s), the first is {first}; the rest were deleted",
+                failed.len()
+            ),
+        ));
     }
     if removed == 0 {
         return Outcome::Done(StepReport::skipped(
@@ -481,8 +487,8 @@ fn subdirs(dir: &Path) -> Vec<PathBuf> {
         .into_iter()
         .flatten()
         .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
         .map(|e| e.path())
-        .filter(|p| p.is_dir())
         .collect()
 }
 
@@ -495,7 +501,8 @@ fn per_worktree_code_files(data: &Path) -> Vec<PathBuf> {
                 let path = entry.path();
                 let is_db = path.extension().is_some_and(|x| x == "db");
                 let is_lock = path.file_name().is_some_and(|n| n == "index.lock");
-                if path.is_file() && (is_db || is_lock) {
+                let is_file = entry.file_type().is_ok_and(|t| t.is_file());
+                if is_file && (is_db || is_lock) {
                     out.push(path);
                 }
             }
@@ -514,8 +521,10 @@ fn old_state_indexes(repos: &Path) -> Vec<PathBuf> {
                 let file = worktree
                     .join("code")
                     .join(playbook_code::host::FALLBACK_FILE);
-                if file.is_file()
-                    && schema_version(&file).is_some_and(|v| v < playbook_code::db::SCHEMA_VERSION)
+                let is_file = fs::symlink_metadata(&file).is_ok_and(|m| m.is_file());
+                if is_file
+                    && schema_version(&file)
+                        .is_some_and(|v| v != 0 && v < playbook_code::db::SCHEMA_VERSION)
                 {
                     out.push(file);
                 }
@@ -528,7 +537,7 @@ fn old_state_indexes(repos: &Path) -> Vec<PathBuf> {
 /// `PRAGMA user_version` of a SQLite file, or `None` for any other file.
 fn schema_version(file: &Path) -> Option<i64> {
     let conn =
-        rusqlite::Connection::open_with_flags(file, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+        rusqlite::Connection::open_with_flags(file, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .ok()?;
     conn.query_row("PRAGMA user_version", [], |r| r.get(0)).ok()
 }
@@ -3161,7 +3170,10 @@ mod tests {
         let outcome = code_index_per_worktree_files(&ctx(&h));
 
         // Assert
-        assert!(matches!(outcome, Outcome::Done(_)));
+        let Outcome::Done(step) = outcome else {
+            panic!("the migration finishes");
+        };
+        assert_eq!(step.status, crate::init::run::StepStatus::Wired);
         assert!(!state_index(&h, "older-1").exists());
         assert!(!state_index(&h, "older-2").exists());
         for kept in ["current", "newer", "not-sqlite"] {
@@ -3196,5 +3208,84 @@ mod tests {
             panic!("the migration finishes");
         };
         assert_eq!(step.status, crate::init::run::StepStatus::Skipped);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_folder_or_file_is_never_followed_or_deleted() {
+        // Arrange: an owner folder and a repo file that link outside the data folder.
+        use std::os::unix::fs::symlink;
+        let h = home("code-index-symlinks");
+        let data = playbook_root_from(&h).join("data");
+        let outside = home("code-index-symlinks-outside");
+        plain_file(&outside.join("r/app.db"));
+        plain_file(&outside.join("lone.db"));
+        fs::create_dir_all(data.join("code/linked-repo-parent/r")).unwrap();
+        fs::create_dir_all(data.join("code")).unwrap();
+        symlink(&outside, data.join("code/o")).unwrap();
+        symlink(
+            outside.join("lone.db"),
+            data.join("code/linked-repo-parent/r/wt.db"),
+        )
+        .unwrap();
+        let state = playbook_root_from(&h).join("repos/o/r");
+        fs::create_dir_all(&state).unwrap();
+        symlink(&outside, state.join("wt")).unwrap();
+
+        // Act
+        let outcome = code_index_per_worktree_files(&ctx(&h));
+
+        // Assert
+        assert!(matches!(outcome, Outcome::Done(_)));
+        assert!(outside.join("r/app.db").exists());
+        assert!(outside.join("lone.db").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_delete_that_fails_reports_it_and_still_removes_the_other_files() {
+        // Arrange: one old file in a folder that cannot be changed.
+        use std::os::unix::fs::PermissionsExt;
+        // Root ignores folder permissions, so the delete cannot be made to fail.
+        if std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .is_ok_and(|o| o.stdout == b"0\n")
+        {
+            return;
+        }
+        let h = home("code-index-delete-fails");
+        let data = playbook_root_from(&h).join("data");
+        let locked = data.join("code/o/locked");
+        let open = data.join("code/o/open");
+        plain_file(&locked.join("wt.db"));
+        plain_file(&open.join("wt.db"));
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+
+        // Act
+        let outcome = code_index_per_worktree_files(&ctx(&h));
+
+        // Assert
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        let Outcome::Failed(step) = outcome else {
+            panic!("a failed delete is reported as a failure");
+        };
+        assert!(step.detail.contains("wt.db"), "{}", step.detail);
+        assert!(locked.join("wt.db").exists());
+        assert!(!open.join("wt.db").exists());
+    }
+
+    #[test]
+    fn a_state_index_with_no_version_yet_stays() {
+        // Arrange: a store another process is still creating reads version 0.
+        let h = home("code-index-state-v0");
+        sqlite_file(&state_index(&h, "fresh"), 0);
+
+        // Act
+        let outcome = code_index_per_worktree_files(&ctx(&h));
+
+        // Assert
+        assert!(matches!(outcome, Outcome::Done(_)));
+        assert!(state_index(&h, "fresh").exists());
     }
 }
