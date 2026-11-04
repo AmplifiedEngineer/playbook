@@ -189,8 +189,11 @@ fn tombstoned(dir: &Path, slug: &str, index: &Path, state: State) -> Vec<(Record
         .into_iter()
         .filter(|rec| rec.state == state)
         .filter_map(|rec| {
+            // A handoff that an older version parked in `used/` was moved to
+            // a tombstone by the init migration, with that path as its origin.
+            let used = dir.join("used");
             let original = rec.paths.iter().find(|path| {
-                path.parent() == Some(dir)
+                (path.parent() == Some(dir) || path.parent() == Some(used.as_path()))
                     && path
                         .file_name()
                         .and_then(|name| name.to_str())
@@ -1109,6 +1112,26 @@ mod tests {
             Ok(crate::gc::lock::RunOutcome::Ran(count)) => count,
             _ => panic!("the gc lock should be free"),
         }
+    }
+
+    #[test]
+    fn a_handoff_tombstoned_from_the_old_used_folder_still_counts_as_loaded() {
+        // Arrange
+        let dir = scratch_dir("handoff-from-used");
+        let live = save_in(&dir, SLUG, "# a\n", 100, 7, "").unwrap();
+        let used = dir.join("used");
+        fs::create_dir_all(&used).unwrap();
+        let parked = used.join(live.file_name().unwrap());
+        fs::rename(&live, &parked).unwrap();
+
+        // Act
+        with_archive(&dir, &SystemClock, |a| super::archive(a, &parked));
+
+        // Assert
+        let found = loaded(&dir, SLUG);
+        assert_eq!(found.len(), 1);
+        assert_eq!(fs::read_to_string(&found[0].path).unwrap(), "# a\n");
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
