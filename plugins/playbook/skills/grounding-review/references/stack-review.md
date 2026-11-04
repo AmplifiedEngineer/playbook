@@ -27,7 +27,9 @@ If the PR you were given is `context` or `skip`, say so in one line and stop: th
 
 If `ask` is false, the PR is not in a stack: there is no question and nothing changes. A PR in a stack always gets the question, even when only one PR in the stack is still open. Merged PRs are never reviewed, but are always read as background context.
 
-If `ask` is true, say it plainly first, in two lines. Line one: `Stack of <n> PRs (<open_count> open, <merged_count> merged), <open_lines> changed lines in the open PRs.` Line two names this PR's neighbours from `prs` by `position`: `This is #<PR_NUMBER>. Below: #<a> (<head>), #<b>. Above: #<c>, #<d>. Own diff base: <base>.` Write `none` for an empty side. `<base>` is this PR's own `base` (the parent PR's branch, not the default branch). Then pick the scope:
+`/playbook:review` asks the scope itself and passes `--this-pr` or `--whole-stack`. The two summary lines, the three options and the hand-over below therefore run only when this review is called directly, without either flag.
+
+If `ask` is true and the arguments hold neither flag, say it plainly first, in two lines. Line one: `Stack of <n> PRs (<open_count> open, <merged_count> merged), <open_lines> changed lines in the open PRs.` Line two names this PR's neighbours from `prs` by `position`: `This is #<PR_NUMBER>. Below: #<a> (<head>), #<b>. Above: #<c>, #<d>. Own diff base: <base>.` Write `none` for an empty side. `<base>` is this PR's own `base` (the parent PR's branch, not the default branch). Then pick the scope:
 
 - `--this-pr` in the arguments: this PR only, no question.
 - `--whole-stack` in the arguments: the whole stack, no question.
