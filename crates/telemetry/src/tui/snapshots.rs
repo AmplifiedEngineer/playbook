@@ -283,7 +283,7 @@ fn the_daily_table_marks_today_and_the_peak_day() {
     let p = panels();
     // Newest first, so today is the first row.
     let today = &buf[(p.spend.x + 2, p.spend.y + 2)];
-    let hi = rgb(0xb5, 0x40, 0x40);
+    let hi = rgb(0x56, 0xb4, 0xe9);
     assert_eq!(today.fg, hi);
     assert!(today
         .modifier
@@ -299,7 +299,7 @@ fn the_daily_table_marks_today_and_the_peak_day() {
             row.contains("$6.01")
         })
         .expect("the peak day is in the table");
-    assert_eq!(buf[(p.spend.x + 2, peak_row)].fg, rgb(0xff, 0xb8, 0x14));
+    assert_eq!(buf[(p.spend.x + 2, peak_row)].fg, rgb(0xe6, 0x9f, 0x00));
 }
 
 fn with_limits(
@@ -481,8 +481,8 @@ fn the_default_theme_paints_a_black_ground_and_gray_text() {
     let buf = buffer(&app(Theme::Standard), 100, 30);
     // Every cell has the black ground.
     assert!(buf.content().iter().all(|c| c.bg == rgb(0, 0, 0)
-        || c.bg == rgb(0x6a, 0x2f, 0x2f)
-        || c.bg == rgb(0xb5, 0x40, 0x40)));
+        || c.bg == rgb(0x1f, 0x4e, 0x79)
+        || c.bg == rgb(0x56, 0xb4, 0xe9)));
     // The header's totals use the main text color.
     let (x, y) = find(&buf, "$", 2);
     assert_eq!(buf[(x, y)].fg, rgb(0xcc, 0xcc, 0xcc));
@@ -519,13 +519,13 @@ fn each_box_has_its_own_outline_color() {
         );
         buf[(r.x, r.y)].fg
     };
-    assert_eq!(corner(p.header), rgb(0x55, 0x6d, 0x59)); // header: cpu
-    assert_eq!(corner(p.spend), rgb(0x55, 0x6d, 0x59)); // spend: cpu
-    assert_eq!(corner(p.tokens), rgb(0x5c, 0x58, 0x8d)); // tokens: net
-    assert_eq!(corner(p.models), rgb(0x6c, 0x6c, 0x4b)); // models: mem
-    assert_eq!(corner(p.projects), rgb(0x6c, 0x6c, 0x4b)); // projects: mem
-    assert_eq!(corner(p.live), rgb(0x80, 0x52, 0x52)); // live: proc
-    assert_eq!(corner(p.sessions), rgb(0x80, 0x52, 0x52)); // sessions: proc
+    assert_eq!(corner(p.header), rgb(0x3f, 0x89, 0xb8)); // header: cpu
+    assert_eq!(corner(p.spend), rgb(0x3f, 0x89, 0xb8)); // spend: cpu
+    assert_eq!(corner(p.tokens), rgb(0xa0, 0x67, 0x8a)); // tokens: net
+    assert_eq!(corner(p.models), rgb(0xb0, 0x7d, 0x00)); // models: mem
+    assert_eq!(corner(p.projects), rgb(0xb0, 0x7d, 0x00)); // projects: mem
+    assert_eq!(corner(p.live), rgb(0x8a, 0x8a, 0x8a)); // live: proc
+    assert_eq!(corner(p.sessions), rgb(0x8a, 0x8a, 0x8a)); // sessions: proc
 }
 
 #[test]
@@ -534,12 +534,12 @@ fn titles_carry_a_hint_in_the_accent_color() {
     let p = panels();
     // The hint follows the corner, a dash and the `┤`.
     let (x, y) = find(&buf, "\u{b9}", p.spend.y);
-    assert_eq!(buf[(x, y)].fg, rgb(0xb5, 0x40, 0x40));
+    assert_eq!(buf[(x, y)].fg, rgb(0x56, 0xb4, 0xe9));
     assert_eq!(buf[(x - 1, y)].symbol(), "\u{2524}");
     assert_eq!(buf[(x + 1, y)].fg, rgb(0xee, 0xee, 0xee));
     // The focused panel (models, hint 3) wears a badge: title on accent.
     let (x, y) = find(&buf, "\u{b3}", p.models.y);
-    assert_eq!(buf[(x, y)].bg, rgb(0xb5, 0x40, 0x40));
+    assert_eq!(buf[(x, y)].bg, rgb(0x56, 0xb4, 0xe9));
 }
 
 #[test]
@@ -575,8 +575,8 @@ fn the_selected_row_of_the_focused_panel_is_highlighted() {
     let p = panels();
     let first = p.models.y + 2;
     // Models is focused: its first data row has the selection ground.
-    assert_eq!(buf[(2, first)].bg, rgb(0x6a, 0x2f, 0x2f));
-    assert_eq!(buf[(2, first)].fg, rgb(0xee, 0xee, 0xee));
+    assert_eq!(buf[(2, first)].bg, rgb(0x1f, 0x4e, 0x79));
+    assert_eq!(buf[(2, first)].fg, rgb(0xff, 0xff, 0xff));
     assert_eq!(buf[(2, first + 1)].bg, rgb(0, 0, 0));
     // The projects panel is not focused, so it shows no selection.
     assert_eq!(buf[(p.projects.x + 2, first)].bg, rgb(0, 0, 0));
@@ -589,7 +589,7 @@ fn meters_use_the_gradient_and_the_dim_color_for_the_rest() {
     let first = p.models.y + 2;
     // The haiku share is tiny: a dim dot at the end of its row.
     let (x, y) = find(&buf, "\u{b7}", first + 2);
-    assert_eq!(buf[(x, y)].fg, rgb(0x40, 0x40, 0x40));
+    assert_eq!(buf[(x, y)].fg, rgb(0x6b, 0x6b, 0x6b));
     // The opus share fills most of its row with colored squares.
     let squares: Vec<Color> = (0..50)
         .filter(|x| buf[(*x, first)].symbol() == "\u{25a0}")
@@ -958,7 +958,7 @@ fn tabbed(tab: usize) -> App {
 }
 
 #[test]
-fn the_charts_tab_stacks_the_three_charts_at_100x30() {
+fn the_charts_tab_splits_spend_above_full_width_tokens_at_100x30() {
     let a = with_limits(
         tabbed(0),
         None,
@@ -967,6 +967,102 @@ fn the_charts_tab_stacks_the_three_charts_at_100x30() {
     );
 
     check("tab_charts_100x30", &draw(&a, 100, 30));
+}
+
+#[test]
+fn two_pinned_spend_views_draw_side_by_side_and_only_the_focused_one_is_bold() {
+    // Arrange
+    let mut a = app(Theme::Standard);
+    a.layout = crate::tui::layout::Layout::parse("A=spend.total,spend.model|tokens").unwrap();
+    a.go_tab(0);
+    a.focus = crate::tui::sort::Panel::Spend;
+    a.key(ratatui::crossterm::event::KeyEvent::new(
+        ratatui::crossterm::event::KeyCode::Tab,
+        ratatui::crossterm::event::KeyModifiers::NONE,
+    ));
+
+    // Act
+    let (text, buf) = draw_with(100, 30, |f| render(f, &a));
+
+    // Assert
+    let title = text.lines().find(|l| l.contains("Spend per")).unwrap_or("");
+    assert!(title.contains("Spend per day, USD"), "{text}");
+    assert!(title.contains("Spend per day by model, USD"), "{text}");
+    assert!(!text.contains("view:"), "{text}");
+    let at = |needle: &str| {
+        let (y, line) = text
+            .lines()
+            .enumerate()
+            .find(|(_, l)| l.contains(needle))
+            .unwrap_or((0, ""));
+        let x = line[..line.find(needle).unwrap_or(0)].chars().count();
+        buf[(x as u16, y as u16)]
+            .modifier
+            .contains(ratatui::style::Modifier::BOLD)
+    };
+    assert!(!at("Spend per day, USD"));
+    assert!(at("Spend per day by model"));
+    check("split_spend_100x30", &text);
+}
+
+#[test]
+fn two_pinned_breakdown_views_each_draw_their_own_table() {
+    // Arrange
+    let mut a = agents_app(true);
+    a.layout =
+        crate::tui::layout::Layout::parse("A=breakdown.agents,breakdown.skills|tokens").unwrap();
+    a.go_tab(0);
+
+    // Act
+    let text = draw(&a, 100, 30);
+
+    // Assert
+    let title = text
+        .lines()
+        .find(|l| l.contains("Agents"))
+        .unwrap_or_default();
+    assert!(title.contains("Skills"), "{text}");
+    assert!(
+        text.contains("general-purpose") && text.contains("review"),
+        "{text}"
+    );
+    assert!(!text.contains("view:"), "{text}");
+    check("split_breakdown_100x30", &text);
+}
+
+#[test]
+fn a_pinned_breakdown_slot_without_the_focus_does_not_scroll_with_its_sibling() {
+    // Arrange
+    let mut a = agents_app(true);
+    let rows = |prefix: &str| -> Vec<crate::aggregate::Group> {
+        (0..30)
+            .map(|i| crate::aggregate::Group {
+                key: format!("{prefix}{i:02}"),
+                messages: 30 - i,
+                cost_usd: 1.0 + (30 - i) as f64,
+                ..crate::aggregate::Group::default()
+            })
+            .collect()
+    };
+    let data = a.data.as_mut().unwrap();
+    data.agents.rows = rows("agent-");
+    data.skills.rows = rows("skill-");
+    a.layout = crate::tui::layout::Layout::parse("A=breakdown.agents,breakdown.skills").unwrap();
+    a.go_tab(0);
+    a.focus = Panel::Projects;
+    for _ in 0..25 {
+        a.key(ratatui::crossterm::event::KeyEvent::from(
+            ratatui::crossterm::event::KeyCode::Down,
+        ));
+    }
+
+    // Act
+    let text = draw(&a, 100, 30);
+
+    // Assert
+    assert!(text.contains("agent-25"), "{text}");
+    assert!(text.contains("skill-00"), "{text}");
+    assert!(!text.contains("skill-25"), "{text}");
 }
 
 #[test]
@@ -985,6 +1081,16 @@ fn the_layout_editor_window_at_100x30() {
     a.editor = Some(crate::tui::editor::Editor::new(&a.layout, 0));
 
     check("layout_editor_100x30", &draw(&a, 100, 30));
+}
+
+#[test]
+fn the_layout_editor_picker_at_100x30() {
+    let mut a = tabbed(0);
+    let mut editor = crate::tui::editor::Editor::new(&a.layout, 0);
+    editor.key(ratatui::crossterm::event::KeyCode::Char('a'));
+    a.editor = Some(editor);
+
+    check("layout_editor_picker_100x30", &draw(&a, 100, 30));
 }
 
 #[test]
@@ -1176,11 +1282,20 @@ fn window_case() -> (crate::burnup::Burnup, Vec<crate::limits::Limit>) {
 }
 
 fn draw_burnup(kind: &str, theme: Theme, w: u16, h: u16) -> (String, Buffer) {
+    let dots = crate::tui::burnup::braille_ok(
+        crate::tui::icon::Icon::Wide,
+        theme.palette(ColorDepth::True).mono,
+        false,
+    );
+    draw_burnup_dots(kind, theme, w, h, dots)
+}
+
+fn draw_burnup_dots(kind: &str, theme: Theme, w: u16, h: u16, dots: bool) -> (String, Buffer) {
     crate::tz::set(crate::tz::Zone::Utc);
     let (b, limits) = burn_case(kind);
     let pal = theme.palette(ColorDepth::True);
     draw_with(w, h, |f| {
-        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal, dots);
     })
 }
 
@@ -1213,8 +1328,8 @@ fn the_burnup_panel_shows_the_windows_and_the_exceeded_limit() {
 }
 
 #[test]
-fn the_burnup_chart_names_every_line_and_marks_the_crossings() {
-    let (text, _) = draw_burnup("limit", Theme::Standard, 100, 30);
+fn the_solid_burnup_chart_names_every_line_and_marks_the_crossings() {
+    let (text, _) = draw_burnup_dots("limit", Theme::Standard, 100, 30, false);
 
     let legend = text
         .lines()
@@ -1252,10 +1367,126 @@ fn the_burnup_chart_names_every_line_and_marks_the_crossings() {
 #[test]
 fn mono_carries_every_burnup_line_without_color() {
     let (mono, buf) = draw_burnup("limit", Theme::Mono, 100, 30);
-    let (standard, _) = draw_burnup("limit", Theme::Standard, 100, 30);
+    let (standard, _) = draw_burnup_dots("limit", Theme::Standard, 100, 30, false);
 
     assert_eq!(mono, standard);
     assert!(buf.content().iter().all(|c| c.fg == Color::Reset));
+}
+
+fn braille_cells(text: &str) -> usize {
+    text.chars()
+        .filter(|c| ('\u{2800}'..='\u{28ff}').contains(c))
+        .count()
+}
+
+#[test]
+fn the_dot_chart_draws_braille_and_keeps_the_point_glyphs_whole() {
+    // Arrange
+    let kind = "limit";
+
+    // Act
+    let (text, _) = draw_burnup_dots(kind, Theme::Standard, 100, 30, true);
+
+    // Assert
+    assert!(braille_cells(&text) > 0, "{text}");
+    assert!(text.contains("\u{28ff} spent"), "{text}");
+    for glyph in ['\u{25b2}', '\u{25c6}'] {
+        assert!(text.contains(glyph), "{glyph} missing\n{text}");
+    }
+    assert!(!text.contains('\u{2588}'), "{text}");
+}
+
+#[test]
+fn the_used_area_is_denser_in_the_danger_zone_than_below_it() {
+    // Arrange
+    let pal = Theme::Standard.palette(ColorDepth::True);
+    let (b, limits) = burn_case("exceeded");
+    crate::tz::set(crate::tz::Zone::Utc);
+
+    // Act
+    let (_, buf) = draw_with(100, 30, |f| {
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal, true);
+    });
+    let dots_in = |ink| -> Vec<u32> {
+        buf.content()
+            .iter()
+            .filter(|c| c.fg == pal.color(ink))
+            .filter_map(|c| c.symbol().chars().next())
+            .filter(|ch| ('\u{2800}'..='\u{28ff}').contains(ch))
+            .map(|ch| (ch as u32 - 0x2800).count_ones())
+            .collect()
+    };
+    let (green, red) = (dots_in(pal.live), dots_in(pal.error));
+
+    // Assert
+    assert!(
+        !green.is_empty() && green.iter().all(|n| *n <= 4),
+        "{green:?}"
+    );
+    assert!(red.contains(&8), "no full red cell: {red:?}");
+}
+
+#[test]
+fn the_dot_chart_colors_the_used_area_green_yellow_then_red_by_height() {
+    // Arrange
+    let pal = Theme::Standard.palette(ColorDepth::True);
+    let (b, limits) = burn_case("exceeded");
+    crate::tz::set(crate::tz::Zone::Utc);
+
+    // Act
+    let (_, buf) = draw_with(100, 30, |f| {
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal, true);
+    });
+    let colors: std::collections::HashSet<_> = buf
+        .content()
+        .iter()
+        .filter(|c| {
+            c.symbol()
+                .chars()
+                .any(|ch| ('\u{2800}'..='\u{28ff}').contains(&ch))
+        })
+        .map(|c| c.fg)
+        .collect();
+
+    // Assert
+    for ink in [pal.live, pal.caution, pal.error, pal.hi] {
+        assert!(colors.contains(&pal.color(ink)), "{ink:?} not drawn");
+    }
+}
+
+#[test]
+fn no_braille_is_drawn_where_the_dots_are_off() {
+    // Arrange
+    let cases = [
+        ("mono theme", Theme::Mono, true),
+        ("symbols off", Theme::Standard, false),
+    ];
+    for (name, theme, symbols) in cases {
+        // Act
+        let icon = if symbols {
+            crate::tui::icon::Icon::Wide
+        } else {
+            crate::tui::icon::Icon::Off
+        };
+        let dots = crate::tui::burnup::braille_ok(icon, theme == Theme::Mono, false);
+        let (text, _) = draw_burnup_dots("limit", theme, 100, 30, dots);
+
+        // Assert
+        assert_eq!(braille_cells(&text), 0, "{name}\n{text}");
+        assert!(text.contains('\u{2588}'), "{name}\n{text}");
+    }
+}
+
+#[test]
+fn the_dots_switch_follows_symbols_color_and_the_env_override() {
+    use crate::tui::burnup::braille_ok;
+    use crate::tui::icon::Icon;
+
+    assert!(braille_ok(Icon::Wide, false, false));
+    assert!(braille_ok(Icon::Narrow, false, false));
+    assert!(!braille_ok(Icon::Off, false, false));
+    assert!(!braille_ok(Icon::Wide, true, false));
+    assert!(!braille_ok(Icon::Wide, false, true));
 }
 
 #[test]
@@ -1281,14 +1512,14 @@ fn before_the_period_starts_the_panel_says_so() {
     let pal = Theme::Mono.palette(ColorDepth::True);
 
     let (text, _) = draw_with(80, 12, |f| {
-        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &[], &pal);
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &[], &pal, false);
     });
 
     assert!(text.contains("the period has not started"), "{text}");
 }
 
 #[test]
-fn the_charts_tab_draws_the_burnup_beside_the_other_charts_at_140x40() {
+fn the_charts_tab_draws_the_burnup_on_its_own_row_at_140x40() {
     let a = with_limits(
         tabbed(0),
         Some(&plan_snapshot()),
@@ -1328,7 +1559,7 @@ fn the_burnup_dates_follow_the_zone_of_its_days_not_the_global_zone() {
     let pal = Theme::Mono.palette(ColorDepth::True);
 
     let (text, _) = draw_with(100, 30, |f| {
-        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal, false);
     });
 
     assert!(text.contains("09-01"), "{text}");
@@ -1343,7 +1574,7 @@ fn a_percent_window_is_charted_from_its_readings_with_percent_labels() {
     let pal = Theme::Standard.palette(ColorDepth::True);
 
     let (text, _) = draw_with(100, 30, |f| {
-        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal, false);
     });
 
     assert!(text.contains("5 hour window used, UTC"), "{text}");
@@ -1366,7 +1597,7 @@ fn a_rate_limit_is_marked_on_the_chart_with_its_line_and_legend_entry() {
     let (b, limits) = window_case();
     let pal = Theme::Mono.palette(ColorDepth::True);
     let plain = draw_with(100, 30, |f| {
-        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal, false);
     })
     .0;
     let end = b.end;
@@ -1378,7 +1609,7 @@ fn a_rate_limit_is_marked_on_the_chart_with_its_line_and_legend_entry() {
     ]);
 
     let (text, _) = draw_with(100, 30, |f| {
-        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal, false);
     });
 
     assert!(!plain.contains('\u{00d7}'), "{plain}");

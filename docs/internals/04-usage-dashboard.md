@@ -20,11 +20,11 @@ Every command that shows data reads new history first. You never ingest by hand.
 
 ## The terminal view
 
-The view is styled after a classic terminal system monitor, and the `default` theme is that look: black ground, rounded boxes with the key hint and title in the top border (`╭─┤¹Spend per day├──╮`), gradients on graphs and meters, a highlighted selected row. Box outlines: spend uses the cpu green, tokens the net purple, models and projects the mem olive, sessions and messages the proc red.
+The view is styled after a classic terminal system monitor: black ground, rounded boxes with the key hint and title in the top border (`╭─┤¹Spend per day├──╮`), gradients on graphs and meters, a highlighted selected row. The `default` theme uses the Okabe and Ito (2008) color-blind safe palette on black: sky blue for the accent, orange for warnings, vermilion for errors. Text and lines meet the WCAG contrast ratios, and unit tests check the contrast and the distance between series colors under simulated color blindness. State is never color alone: limit states carry a mark and a word, and the selected row and the editor cursor carry a marker.
 
 It needs at least 80 columns by 24 rows. Below that it says so and draws nothing else. Every redraw reads the current size, so resizing needs no handling.
 
-**Tabs.** Three by default: Charts (spend and tokens), Numbers (models, breakdown, the Budget panel and the Projection panel, see [Spending limits and budget headroom](#spending-limits-and-budget-headroom)) and Sessions (live sessions and sessions per day). Every tab has a header (range, cost, tokens, messages) and a tab bar under it. The tabs and panels come from the `usage.ui.layout` config key (see the [config keys page](../reference/config-keys.md)). A layout with one tab keeps the old single screen, with the Budget panel from 36 rows.
+**Tabs.** Three by default: Charts (cost per day beside cost per model per day, then tokens and the burn-up), Numbers (models, breakdown, the Budget panel and the Projection panel, see [Spending limits and budget headroom](#spending-limits-and-budget-headroom)) and Sessions (live sessions and sessions per day). Every tab has a header (range, cost, tokens, messages) and a tab bar under it. The tabs and panels come from the `usage.ui.layout` config key (see the [config keys page](../reference/config-keys.md)): up to 12 tabs, `F1` to `F12` select them, a `|` in a tab starts a new row of one or two panels, and a word like `spend.model` or `breakdown.agents` pins a panel to one view while `spend` and `breakdown` switch with `v`. A pinned panel ignores `v` and says so in the footer. `]` and `[` walk every panel on screen, even two views of the same panel, and the number key picks the first. A layout with one tab keeps the old single screen, with the Budget panel from 36 rows.
 
 **Header.** For `today`, `week` and `month` it is a comparison. It names the two spans and says they cover the same elapsed span (see [Period comparison](#period-comparison)), then shows cost, tokens and messages for both with the change in amount and percent (`new` when the previous value was zero). Increases are yellow and decreases green, and the sign carries it without color. The other ranges show their own totals and say `(no previous period to compare)`. Everything is UTC and the header says so, with the first day of the week when the range is a week.
 
@@ -49,7 +49,7 @@ Both charts use eighth blocks, one bar per UTC day. Idle days are zero and days 
 - **x axis.** With one bar a day (a week, a month that fits, today's seven days) the weekday is on one row and the day of the month, 1 to 31, directly below it, when each cell fits the label and a gap. The weekday row needs a letter and a gap in every cell, so a month in a narrow panel has only the numbers. When the numbers do not fit, every second, third or seventh day is labeled, always with the first and the last bar (a number that would touch the last one is left out). No full dates sit on the axis: the header carries the period's UTC dates (`this week Oct 6 to Oct 12 until 12:00`, `last 30 days Sep 13 to Oct 12, 2026`), and the readout line names the day under the cursor in full. When a bar holds several days (a wide range), the axis keeps the short first, middle and last date. Today's labels are bold and underlined, the peak day's are yellow, and the cursor's are highlighted.
 - **Totals line.** The total, the peak (with its date) and the average per day that has happened, for the range.
 - **Cursor.** `Left` and `Right` move it one bar, `Home` and `End` jump to the first and last bar while a chart has the focus. A readout line gives the day, cost, messages, tokens and top model with its share (the token chart leads with tokens). It starts on today, both charts share it, and a new range resets it.
-- **Legend.** Bar color follows height along the theme gradient (green to red for cost), and the legend in the bottom border says so. The mono theme has neither.
+- **Legend.** Bar color follows height along the theme gradient (dark to light blue for cost), and the legend in the bottom border says so. The mono theme has neither.
 - **Fill.** A week or more of bars always fills the width of the plot, and fewer bars are never wider than 16 columns.
 - **Wide ranges.** When the range has more days than the chart has columns, days are added up into equal bars (the title says `Spend per 3 days`) and nothing is cut off. The axis, readout and cursor then speak of those bars.
 - **Small panels.** When the panel is short, rows go in this order: weekday letters, totals line, readout, day numbers. The plot keeps three rows. With no totals line the peak sits in the bottom border, which leaves the top border room for the `v view: <name>` tag. The y axis goes when the panel is narrower than 16 columns, leaving the bars.
@@ -71,8 +71,8 @@ Keys:
 | Key | Action |
 |---|---|
 | `Tab`, `Shift-Tab` | Show the next or previous tab. With one tab they move the panel focus instead. |
-| `F1` to `F9` | Show a tab by its number. |
-| `e` | Open the layout editor: `Left`, `Right` pick the tab, `j`, `k` pick a panel, `Space` adds or removes it, `J`, `K` reorder panels, `<`, `>` reorder tabs, `n` adds a tab, `x` deletes one, `r` renames, `w` saves, `R` resets to the default tabs (an empty layout), `Esc` cancels. Saving writes `usage.ui.layout`. With no config store the footer shows the command to run instead, until the next key. |
+| `F1` to `F12` | Show a tab by its number. |
+| `e` | Open the layout editor. It draws the tab as rows of cells and keeps a cursor on one panel: `h`, `l` move the cursor along the panels and `j`, `k` between rows, `H`, `L` swap the panel with its neighbour in the row, `J`, `K` with the cell below or above, `f` splits a row of two or joins a row of one with its neighbour, `a` opens a picker of the panels the tab lacks and `Enter` adds one after the cursor, or on a row of its own after the cursor's row in an arranged tab, `d` removes the panel, `u` undoes the last 20 changes, `Left`, `Right` pick the tab, `<`, `>` reorder tabs, `n` adds a tab, `x` deletes one, `r` renames. Every change shows on the tab behind the window and is saved to `usage.ui.layout` within 200 ms, and anything still pending is saved when the editor closes or `pbtop` quits; `Esc` or `q` close the window. A failed write is retried and the footer says why. With no config store the footer shows the command to run, once. `R` asks `[y/N]` and on `y` resets the layout and the saved view settings (`usage.ui.state`: tab, range, views, sorts, filter) to the defaults; the theme and every other setting stay. |
 | `1` to `6`, `]`, `[` | Focus a panel of the current tab by number, or the next or previous one. The focused panel's hint is a badge. |
 | `Left`, `Right` | Move the chart cursor one day (or one bar). `Home`, `End`, `g`, `G` jump to the ends while a chart has the focus. |
 | `Up`, `Down`, `j`, `k`, `PageUp`, `PageDown`, `Home`, `End`, `g`, `G` | Move the selected row of the focused table. |
@@ -128,14 +128,14 @@ Each period (`today`, `week`, `month`) is compared with the one before it (yeste
 
 | Theme | Look |
 |---|---|
-| `default` | The default look: black ground, `#cc` text, `#ee` titles, `#b54040` key hints, `#6a2f2f` selected row, per box outline colors, and three point gradients (start, mid, end) for the graphs and meters. |
+| `default` | The default look: black ground, `#cc` text, `#ee` titles, `#56b4e9` key hints, `#1f4e79` selected row with white text, per box outline colors, and three point gradients (start, mid, end) for the graphs and meters. |
 | `dark` | The terminal's own ground with single colors. |
 | `light` | The same with darker colors for a white ground. |
 | `mono` | No color. The selected row is shown in reverse video. |
 
 The theme comes from the `usage.theme` config key (`default`, `dark`, `light`, `mono`; see [config keys](../reference/config-keys.md)) and `t` changes it for the session. `NO_COLOR` set to anything but empty forces `mono` and locks it.
 
-Colors follow the terminal. With `COLORTERM=truecolor` or `24bit` the `default` values are drawn exactly. Otherwise, when `TERM` names `256color`, each value goes to the nearest of the 256 color cube and gray ramp, and with neither to the nearest of the 16 basic colors. The values are adapted from a third party theme under the Apache License 2.0, like playbook, and the attribution is in `NOTICE`.
+Colors follow the terminal. With `COLORTERM=truecolor` or `24bit` the `default` values are drawn exactly. Otherwise, when `TERM` names `256color`, each value goes to the nearest of the 256 color cube and gray ramp, and with neither to the nearest of the 16 basic colors. The values come from the Okabe and Ito (2008) color universal design palette, which stays readable with common color vision differences.
 
 **TV icon.** A small TV icon shows before the title in the top-left corner of the dashboard and the Sessions screen, in a fixed three-cell block that holds at emoji width 1 or 2. Set `PBTOP_ICON_WIDTH=1` if your terminal draws it one cell wide. With a non-UTF-8 locale, `NO_COLOR` set or `TERM` `dumb`, the icon is left out and only plain text shows.
 
@@ -288,6 +288,8 @@ The state is one of:
 | `under` | Below 80 percent. |
 | `too early to project` | Before the first hour. |
 
+Each state also starts with a mark, so it reads without color: `▲` for `limit reached` and `will exceed` (bold), `◆` for `on track`, `●` for `under` and `○` for `too early to project`. Where the icon is left out (non-UTF-8 locale, `NO_COLOR` or `TERM` `dumb`) the marks are `!`, `~`, `+` and `?`. A refusal in the layout editor starts with the alert mark in the same way.
+
 A month has 28 to 31 days (a leap February has 29) and a period ends at the next UTC midnight, so there is no daylight saving. The same math serves the 5 hour and weekly windows, where the limit is 100 percent and rates are percent per hour and per day.
 
 For the period on screen (today, this week or this month, this week for other ranges) the panel also shows the average cost per hour and per day against the previous period over the same elapsed span, the same rule as the period comparison.
@@ -347,11 +349,13 @@ A limit that is a percentage of a window (the 5 hour and weekly windows of a pla
 
 ### The burn-up panel
 
-The Burn-up panel is on the Charts tab. It plots the spend of the period so far against a limit that Claude Code reported, with a dotted projection at the current pace, a cutoff line for the limit and lines for 50, 80 and 100 percent, each marked where it is or will be crossed. It uses the most used limit that has a burn-up.
+The Burn-up panel is on the Charts tab. It plots the spend of the period so far against a limit that Claude Code reported, with a dotted projection at the current pace, a cutoff line for the limit and lines for 50, 80 and 100 percent, each marked where it is or will be crossed. It uses the most used limit that has a burn-up. Where the terminal shows Braille the plot is drawn as dots, four times as fine vertically: the used area is green below 60 percent of the limit, yellow to 80 and vermilion above, half-filled below 80 percent and fully filled from there so the danger zone reads without color. Crossing markers stay whole cell glyphs. `PBTOP_DOTS=0` keeps the solid chart for a font that draws Braille badly, and the mono theme, `NO_COLOR`, `TERM=dumb` and a non UTF-8 locale use it too.
 
 - A monthly dollar limit is drawn from the daily cost of this machine.
 - A window in percent is drawn from the readings saved in `rate_limits.jsonl`, or as a straight line from the start of the window to the figure Claude Code reported when none were saved.
 - With no limit known the panel says so and charts the spend alone.
+
+The used area is drawn as Braille dots, four times as fine as a whole cell in height. It is green below 60 percent of the limit, yellow from 60 and red from 80, and from 80 percent every dot of a cell is set, so the danger zone reads denser without color. Set `PBTOP_DOTS=0` if your font draws Braille badly; the chart then keeps the solid glyphs, as it does in the mono theme and when symbols are off.
 
 Nothing here is set by hand: the limit and the used figure come from what Claude Code reports. The math is in `crates/telemetry/src/burnup.rs` and the drawing in `crates/telemetry/src/tui/burnup.rs`.
 
