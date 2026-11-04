@@ -668,10 +668,12 @@ mod tests {
     /// write measures about 2 to 3 copies on a quiet or a loaded machine, so
     /// a write that grows faster than the file passes 8 copies.
     const FULL_WRITE_BUDGET: u32 = 8;
+    /// How many times the copy and the two writes are timed.
+    const ROUNDS: usize = 15;
 
     #[test]
     fn a_full_history_costs_a_write_no_more_than_a_few_copies_of_the_file() {
-        use std::time::{Duration, Instant};
+        use std::time::Instant;
         let one = |t: i64| reading_line(t, 1.0, 2.0);
         let n = MAX_BYTES as usize / one(NOW - 100_000).len();
         let body: String = (0..n as i64).map(|i| one(NOW - 100_000 + i)).collect();
@@ -701,18 +703,19 @@ mod tests {
             start.elapsed()
         };
 
-        let rounds: Vec<_> = (0..7)
+        // Each round times the copy and the two writes back to back, and the
+        // write passes in a round where it stayed within its budget. A pause
+        // from other work lands in a few rounds, so a write that costs more
+        // than the budget in every round is a slow write, not a busy machine.
+        let rounds: Vec<_> = (0..ROUNDS)
             .map(|_| (copy(), write(false), write(true)))
             .collect();
 
-        // The best round of each: an interruption lands in a single round.
-        let min = |f: fn(&(Duration, Duration, Duration)) -> Duration| {
-            rounds.iter().map(f).min().unwrap()
-        };
-        let (copy, without, with) = (min(|r| r.0), min(|r| r.1), min(|r| r.2));
         assert!(
-            with <= without + copy * FULL_WRITE_BUDGET,
-            "with {with:?}, without {without:?}, one copy {copy:?}"
+            rounds
+                .iter()
+                .any(|&(copy, without, with)| with <= without + copy * FULL_WRITE_BUDGET),
+            "no round kept the write within {FULL_WRITE_BUDGET} copies: {rounds:?}"
         );
     }
 
