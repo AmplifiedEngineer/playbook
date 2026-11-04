@@ -474,6 +474,8 @@ fn a_ui_layout_takes_tabs_of_known_panels_and_nothing_else() {
     assert_rejected("usage.ui.layout", &json!("A=bogus"), "tabs like");
     assert_written("usage.ui.layout", &json!(""));
     assert_written("usage.ui.layout", &json!("Money=budget,models"));
+    assert_written("usage.ui.layout", &json!("A=spend,tokens|burnup"));
+    assert_rejected("usage.ui.layout", &json!("A=spend|"), "tabs like");
 }
 
 #[test]

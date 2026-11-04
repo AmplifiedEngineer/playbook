@@ -95,7 +95,7 @@ pub struct Tab {
     pub rows: Option<Vec<u8>>,
 }
 
-/// The most tabs, so the tab bar fits and each has a number key.
+/// The most tabs, so the tab bar fits.
 pub const MAX_TABS: usize = 12;
 /// The most panels in one row of an arranged tab.
 pub const MAX_ROW_PANELS: usize = 2;
@@ -149,6 +149,11 @@ impl Tab {
         let Some(rows) = &self.rows else {
             return words.collect::<Vec<_>>().join(",");
         };
+        debug_assert_eq!(
+            rows.iter().map(|n| usize::from(*n)).sum::<usize>(),
+            self.panels.len(),
+            "the row counts must cover the panel list"
+        );
         let mut words = words;
         rows.iter()
             .map(|n| {

@@ -297,6 +297,19 @@ mod tests {
     }
 
     #[test]
+    fn removing_a_panel_from_an_arranged_tab_makes_it_automatic() {
+        let mut e = editor();
+        e.layout = Layout::parse("A=spend,tokens|models").unwrap();
+        e.tab = 0;
+        e.row = ALL.iter().position(|p| *p == PanelId::Models).unwrap();
+
+        e.key(KeyCode::Enter);
+
+        assert_eq!(e.layout.tabs[0].rows, None);
+        assert_eq!(e.layout.tabs[0].panels.len(), 2);
+    }
+
+    #[test]
     fn adding_a_panel_to_an_arranged_tab_makes_it_automatic() {
         let mut e = editor();
         e.layout = Layout::parse("A=spend,tokens|models").unwrap();

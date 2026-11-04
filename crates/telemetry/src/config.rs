@@ -373,6 +373,8 @@ mod tests {
         let fits = "x".repeat(MAX_STATE_BYTES);
 
         assert!(validate("usage.ui.layout", &Value::from("Money=budget,models")).is_ok());
+        assert!(validate("usage.ui.layout", &Value::from("A=spend,tokens|burnup")).is_ok());
+        assert!(validate("usage.ui.layout", &Value::from("A=spend|")).is_err());
         assert!(validate("usage.ui.layout", &Value::from("A=bogus")).is_err());
         assert!(validate("usage.ui.layout", &Value::from(5)).is_err());
         assert!(validate("usage.ui.state", &Value::from(fits)).is_ok());
