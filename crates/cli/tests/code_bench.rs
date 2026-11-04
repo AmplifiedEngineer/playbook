@@ -14,7 +14,8 @@ use std::process::Command;
 use std::time::Instant;
 
 use code_fixture::{
-    correctness, generate, stale_without_flag, verdict, which, Harness, Kind, Numbers, Repo, Task,
+    correctness, generate_with, stale_without_flag, verdict, which, Harness, Kind, Numbers, Repo,
+    Task,
 };
 use serde_json::{json, Value};
 
@@ -90,6 +91,35 @@ fn arm_b_bytes(h: &Harness, task: &Task) -> f64 {
     rg(h, &["-n", flag, "-C", "30", &task.query]).len() as f64
 }
 
+/// Arm d, the plan's agent baseline: the first 200 `rg` hit lines, then 100
+/// lines around each of the first 5 matches.
+fn arm_d_bytes(h: &Harness, task: &Task) -> f64 {
+    let flag = if task.kind == Kind::References {
+        "-w"
+    } else {
+        "-F"
+    };
+    let hits = rg(h, &["-n", flag, &task.query]);
+    let listing: usize = hits.lines().take(200).map(|l| l.len() + 1).sum();
+    let windows: usize = hits
+        .lines()
+        .take(5)
+        .filter_map(|l| {
+            let mut parts = l.splitn(3, ':');
+            let (file, line) = (parts.next()?, parts.next()?.parse::<usize>().ok()?);
+            let text = fs::read_to_string(h.repo.join(file)).ok()?;
+            Some(
+                text.lines()
+                    .skip(line.saturating_sub(50))
+                    .take(100)
+                    .map(|l| l.len() + 1)
+                    .sum::<usize>(),
+            )
+        })
+        .sum();
+    (listing + windows) as f64
+}
+
 fn arm_c_args(task: &Task) -> Vec<&str> {
     match task.kind {
         Kind::Declaration => vec!["code", "symbol", &task.query, "--json"],
@@ -136,7 +166,8 @@ fn bars(files: usize, p50s: [f64; 3], index_s: (f64, f64), sizes: (f64, f64)) ->
 
 fn measure(files: usize) -> Value {
     let h = Harness::new(&format!("bench-{files}"), true);
-    let repo = generate(&h.repo, files, 7);
+    let realistic = std::env::var("BENCH_CODE_REALISTIC").is_ok_and(|v| v == "1");
+    let repo = generate_with(&h.repo, files, 7, realistic);
     h.init_and_commit();
 
     let start = Instant::now();
@@ -146,13 +177,30 @@ fn measure(files: usize) -> Value {
     let warm_s = percentile(&warm, 0.5) / 1000.0;
     let db = db_bytes(&h) as f64;
 
-    let (mut a, mut b, mut c): (Vec<f64>, Vec<f64>, Vec<f64>) = (vec![], vec![], vec![]);
+    let (mut a, mut b, mut c, mut d): (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) =
+        (vec![], vec![], vec![], vec![]);
     for task in &repo.tasks {
         a.push(arm_a_bytes(&h, task));
         b.push(arm_b_bytes(&h, task));
         c.push(arm_c_bytes(&h, task));
+        d.push(arm_d_bytes(&h, task));
     }
-    let (r_a, r_b) = (savings(&mut c.clone(), &mut a), savings(&mut c, &mut b));
+    let r_a = savings(&mut c.clone(), &mut a.clone());
+    let r_b = savings(&mut c.clone(), &mut b.clone());
+    let r_d = savings(&mut c.clone(), &mut d.clone());
+    // The two common-identifier tasks come last in realistic mode.
+    let common = if realistic {
+        let n = repo.tasks.len() - 2;
+        json!({
+            "tasks": repo.tasks[n..].iter().map(|t| &t.query).collect::<Vec<_>>(),
+            "rg_reads_bytes": &a[n..],
+            "rg_context_bytes": &b[n..],
+            "rg_window_bytes": &d[n..],
+            "index_bytes": &c[n..],
+        })
+    } else {
+        Value::Null
+    };
 
     let symbol = timings(&h, &["code", "symbol", &repo.declarations[0].1, "--json"]);
     let search = timings(
@@ -181,7 +229,7 @@ fn measure(files: usize) -> Value {
         db_size_bar_met: ok.db_size,
         large_bars_met: ok.large,
     };
-    report_entry(
+    let mut entry = report_entry(
         &numbers,
         &repo,
         &[
@@ -192,7 +240,11 @@ fn measure(files: usize) -> Value {
         cold_s,
         warm_s,
         db,
-    )
+    );
+    entry["realistic"] = json!(realistic);
+    entry["savings_vs_rg_window_pct"] = json!(r_d);
+    entry["common_identifier_tasks"] = common;
+    entry
 }
 
 fn report_entry(
@@ -258,7 +310,7 @@ fn bench_code() {
 fn a_report_entry_carries_every_bar_and_a_verdict() {
     // Arrange
     let h = Harness::new("schema", false);
-    let repo = generate(&h.repo, 20, 1);
+    let repo = generate_with(&h.repo, 20, 1, false);
     let n = Numbers {
         files: 20,
         r_a: 10.0,

@@ -91,8 +91,70 @@ fn function(ext: &str, name: &str, callee: &str) -> [String; 3] {
     }
 }
 
+/// Number of filler helpers per file in realistic mode (about 5 KB a file).
+const FILLER_FNS: usize = 14;
+
+/// Identifiers that appear in every realistic file, so `rg` returns many hits.
+pub const COMMON_CALL: &str = "parse_config";
+pub const COMMON_PHRASE: &str = "validate the input before use";
+
+/// Filler helpers that call common identifiers, in the file's language.
+fn filler(ext: &str, file: usize, i: usize) -> Vec<String> {
+    let name = format!("helper_{file}_{i}");
+    let note = format!("{COMMON_PHRASE} and log the result of step {i}");
+    let (head, tail, comment) = match ext {
+        "rs" => (
+            format!("fn {name}(input: &str) -> Result<usize, Error> {{"),
+            "}",
+            "//",
+        ),
+        "ts" => (
+            format!("function {name}(input: string): number {{"),
+            "}",
+            "//",
+        ),
+        "js" => (format!("function {name}(input) {{"), "}", "//"),
+        _ => (format!("def {name}(input):"), "", "#"),
+    };
+    let semi = if ext == "py" { "" } else { ";" };
+    let ind = "    ";
+    let kw = match ext {
+        "rs" => "let",
+        "ts" | "js" => "const",
+        _ => "",
+    };
+    let bind = |var: &str, expr: &str| {
+        if kw.is_empty() {
+            format!("{ind}{var} = {expr}{semi}")
+        } else {
+            format!("{ind}{kw} {var} = {expr}{semi}")
+        }
+    };
+    let mut out = vec![head, format!("{ind}{comment} {note}")];
+    out.push(bind("config", &format!("{COMMON_CALL}(input)")));
+    out.push(bind("request", "handle_request(config, input)"));
+    out.push(bind("checked", "validate_input(request)"));
+    out.push(bind("result", "render_view(checked, config.value)"));
+    out.push(format!(
+        "{ind}{comment} fall back to the default value when the result is empty"
+    ));
+    out.push(bind("total", &format!("result.length + {i}")));
+    out.push(format!("{ind}return total{semi}"));
+    if !tail.is_empty() {
+        out.push(tail.to_string());
+    }
+    out.push(String::new());
+    out
+}
+
 /// Writes `files` source files under `root` and returns the ground truth.
 pub fn generate(root: &Path, files: usize, seed: u64) -> Repo {
+    generate_with(root, files, seed, false)
+}
+
+/// Like `generate`; with `realistic` every file also holds filler helpers
+/// that repeat common identifiers, and two extra tasks query those.
+pub fn generate_with(root: &Path, files: usize, seed: u64, realistic: bool) -> Repo {
     let mut rng = Rng(seed | 1);
     let total = files * DECLS_PER_FILE;
     let comment = |ext: &str, text: &str| match ext {
@@ -124,6 +186,11 @@ pub fn generate(root: &Path, files: usize, seed: u64) -> Repo {
             }
             calls[callee_index].push((path_of(file), first + 1));
         }
+        if realistic {
+            for i in 0..FILLER_FNS {
+                lines.extend(filler(ext, file, i));
+            }
+        }
         phrases.push((path_of(file), phrase));
         let path = root.join(path_of(file));
         fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
@@ -151,6 +218,18 @@ pub fn generate(root: &Path, files: usize, seed: u64) -> Repo {
             kind: Kind::Phrase,
             query: phrases[file].1.clone(),
             expected: vec![(phrases[file].0.clone(), 1)],
+        });
+    }
+    if realistic {
+        tasks.push(Task {
+            kind: Kind::References,
+            query: COMMON_CALL.to_string(),
+            expected: Vec::new(),
+        });
+        tasks.push(Task {
+            kind: Kind::Phrase,
+            query: COMMON_PHRASE.to_string(),
+            expected: Vec::new(),
         });
     }
     let declarations = (0..files)
