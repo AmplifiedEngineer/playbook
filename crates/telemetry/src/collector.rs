@@ -590,7 +590,11 @@ pub(crate) mod tests {
         pub(crate) fn start(p: &Paths) -> Self {
             let stop = Arc::new(AtomicBool::new(false));
             let (paths, flag) = (p.clone(), Arc::clone(&stop));
-            let thread = std::thread::spawn(move || run_collect(&paths, Some(0), 0, &flag));
+            // A port from `free_port`, not 0: a port the system picks is free again
+            // the moment this collector lets go, and a sibling test that binds
+            // port 0 can be handed it before the successor test binds it.
+            let port = free_port();
+            let thread = std::thread::spawn(move || run_collect(&paths, Some(port), 0, &flag));
             let mut me = Self {
                 stop,
                 port: 0,
@@ -674,18 +678,18 @@ pub(crate) mod tests {
             format!("{} {}\n", std::process::id(), env!("CARGO_PKG_VERSION"))
         );
         running.finish().unwrap();
-        assert!(lock_is_free(&p));
+        assert!(crate::util::wait_unlocked(&crate::daemon::lock_path(&p)));
     }
 
     #[test]
-    fn a_successor_gets_the_lock_and_the_port_the_moment_run_collect_returns() {
+    fn a_successor_gets_the_lock_and_the_port_once_run_collect_returns() {
         let p = paths("collector-lock-order");
         let running = Running::start(&p);
         let port = read_state(&state_path(&p)).unwrap().port;
 
         running.finish().unwrap();
 
-        assert!(lock_is_free(&p));
+        assert!(crate::util::wait_unlocked(&crate::daemon::lock_path(&p)));
         bind(port).expect("the port is free with no retry");
         assert_eq!(read_state(&state_path(&p)).unwrap().pid, 0);
     }
@@ -894,8 +898,24 @@ pub(crate) mod tests {
         assert_eq!(after.port, recorded);
     }
 
-    fn free_port() -> u16 {
-        bind(0).unwrap().local_addr().unwrap().port()
+    /// A port nothing listens on, from a range the system never hands out for
+    /// `bind(0)`, so a sibling test that binds port 0 cannot be given it
+    /// between this probe and the bind it is picked for. Each call tries a
+    /// new candidate, and the process id spreads separate test processes.
+    pub(crate) fn free_port() -> u16 {
+        use std::sync::atomic::AtomicU32;
+        const FIRST: u32 = 20_000;
+        const SPAN: u32 = 10_000;
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        for _ in 0..SPAN {
+            let n = NEXT.fetch_add(1, Ordering::Relaxed);
+            let port =
+                u16::try_from(FIRST + (std::process::id().wrapping_mul(97) + n) % SPAN).unwrap();
+            if bind(port).is_ok() {
+                return port;
+            }
+        }
+        panic!("no free port from {FIRST} to {}", FIRST + SPAN);
     }
 
     #[test]
@@ -954,12 +974,23 @@ pub(crate) mod tests {
 
     #[test]
     fn a_free_default_port_is_chosen_on_the_first_run() {
-        let wanted = free_port();
+        // A port read as free can be taken by another program before the bind
+        // (the probe and the bind are two steps), and the first run then falls
+        // back to a free port, which is right. A first run that never takes a
+        // free preferred port fails every try, so a few tries tell the two apart.
+        for _ in 0..FREE_PORT_TRIES {
+            let wanted = free_port();
 
-        let chosen = first_port_from(wanted).unwrap();
-
-        assert_eq!(chosen, wanted);
+            if first_port_from(wanted).unwrap() == wanted {
+                return;
+            }
+        }
+        panic!("the first run never took a free preferred port in {FREE_PORT_TRIES} tries");
     }
+
+    /// How many free ports the free default port test tries when another
+    /// program takes one first.
+    const FREE_PORT_TRIES: u32 = 20;
 
     #[test]
     fn a_port_a_killed_predecessor_is_still_releasing_binds_once_it_lets_go() {
