@@ -288,6 +288,8 @@ The state is one of:
 | `under` | Below 80 percent. |
 | `too early to project` | Before the first hour. |
 
+Each state also starts with a mark, so it reads without color: `▲` for `limit reached` and `will exceed` (bold), `◆` for `on track`, `●` for `under` and `○` for `too early to project`. Where the icon is left out (non-UTF-8 locale, `NO_COLOR` or `TERM` `dumb`) the marks are `!`, `~`, `+` and `?`. A refusal in the layout editor starts with the alert mark in the same way.
+
 A month has 28 to 31 days (a leap February has 29) and a period ends at the next UTC midnight, so there is no daylight saving. The same math serves the 5 hour and weekly windows, where the limit is 100 percent and rates are percent per hour and per day.
 
 For the period on screen (today, this week or this month, this week for other ranges) the panel also shows the average cost per hour and per day against the previous period over the same elapsed span, the same rule as the period comparison.

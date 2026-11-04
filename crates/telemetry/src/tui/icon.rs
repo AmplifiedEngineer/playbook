@@ -100,21 +100,42 @@ fn utf8(locale: [Option<&str>; 3]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn every_cue_has_its_own_mark_in_both_alphabets() {
-        let cues = [Cue::Alert, Cue::Watch, Cue::Fine, Cue::Unknown];
-        for icon in [Icon::Off, Icon::Wide] {
-            let marks: std::collections::HashSet<&str> =
-                cues.iter().map(|c| icon.mark(*c)).collect();
-            assert_eq!(marks.len(), cues.len(), "{icon:?}");
-        }
-        assert!(Icon::Off.mark(Cue::Alert).is_ascii());
-        assert_eq!(Icon::Narrow.mark(Cue::Alert), Icon::Wide.mark(Cue::Alert));
-    }
-
     use super::*;
 
     const UTF8: [Option<&str>; 3] = [None, None, Some("en_US.UTF-8")];
+
+    #[test]
+    fn every_cue_has_its_own_mark_in_both_alphabets() {
+        // Arrange
+        let cues = [Cue::Alert, Cue::Watch, Cue::Fine, Cue::Unknown];
+
+        for icon in [Icon::Off, Icon::Wide] {
+            // Act
+            let marks: std::collections::HashSet<&str> =
+                cues.iter().map(|c| icon.mark(*c)).collect();
+
+            // Assert
+            assert_eq!(marks.len(), cues.len(), "{icon:?}");
+        }
+    }
+
+    #[test]
+    fn the_off_marks_are_ascii_and_the_others_are_not() {
+        // Arrange
+        let cues = [Cue::Alert, Cue::Watch, Cue::Fine, Cue::Unknown];
+
+        for cue in cues {
+            // Act
+            let off = Icon::Off.mark(cue);
+            let wide = Icon::Wide.mark(cue);
+
+            // Assert
+            assert!(off.is_ascii(), "{cue:?}");
+            assert!(!wide.is_ascii(), "{cue:?}");
+            assert_eq!(wide, Icon::Narrow.mark(cue), "{cue:?}");
+            assert!(off.ends_with(' ') && wide.ends_with(' '), "{cue:?}");
+        }
+    }
 
     #[test]
     fn wide_mode_pads_one_cell() {
