@@ -93,15 +93,22 @@ fn aged_item(store: &Store, path: PathBuf, now: i64) -> Option<Item> {
     })
 }
 
-/// Each entry directly under a root of `store`, except symlinks.
-fn scan_children(store: &Store, now: i64) -> Vec<Item> {
+/// The runtime folder also holds the handoff and learn queue folders, which
+/// are not sessions and must never be aged out with them.
+const NOT_SESSIONS: [&str; 2] = ["handoff", "to-learn"];
+
+/// The session folders directly under a root of `store`: real directories
+/// only, so neither a symlink nor a log file is ever an item.
+fn scan_sessions(store: &Store, now: i64) -> Vec<Item> {
     let mut items = Vec::new();
     for root in &store.roots {
         let Ok(entries) = fs::read_dir(root) else {
             continue;
         };
         for entry in entries.flatten() {
-            if entry.file_type().is_ok_and(|kind| !kind.is_symlink()) {
+            let is_session = entry.file_type().is_ok_and(|kind| kind.is_dir())
+                && !NOT_SESSIONS.iter().any(|name| entry.file_name() == *name);
+            if is_session {
                 items.extend(aged_item(store, entry.path(), now));
             }
         }
@@ -177,7 +184,7 @@ pub fn small_stores(home: &Path) -> Vec<Store> {
         store(
             "session folders",
             playbook_root_from(home).join("runtime"),
-            scan_children,
+            scan_sessions,
             "gc.sessionDirIdleDays",
             home,
         ),
@@ -251,7 +258,7 @@ mod tests {
             backdate(&dir.join("state"), age);
             backdate(&dir, age);
         }
-        let store = test_store(&root, scan_children, 14);
+        let store = test_store(&root, scan_sessions, 14);
 
         // Act
         let items = store.items(NOW);
@@ -272,7 +279,7 @@ mod tests {
         backdate(&dir.join("deep/fresh"), DAY);
         backdate(&dir.join("deep"), 30 * DAY);
         backdate(&dir, 30 * DAY);
-        let store = test_store(&root, scan_children, 14);
+        let store = test_store(&root, scan_sessions, 14);
 
         // Act
         let items = store.items(NOW);
@@ -280,6 +287,27 @@ mod tests {
         // Assert
         assert!(items[0].due.is_none());
         assert_eq!(items[0].newest_mtime, NOW - DAY);
+    }
+
+    #[test]
+    fn runtime_folder_keeps_the_handoff_queue_and_log_files() {
+        // Arrange
+        let root = scratch("stores-not-sessions");
+        for name in ["handoff", "to-learn"] {
+            fs::create_dir_all(root.join(name)).unwrap();
+            fs::write(root.join(name).join("queued"), "x").unwrap();
+            backdate(&root.join(name).join("queued"), 400 * DAY);
+            backdate(&root.join(name), 400 * DAY);
+        }
+        fs::write(root.join("compactions.log"), "x").unwrap();
+        backdate(&root.join("compactions.log"), 400 * DAY);
+        let store = test_store(&root, scan_sessions, 14);
+
+        // Act
+        let items = store.items(NOW);
+
+        // Assert
+        assert!(items.is_empty());
     }
 
     #[test]
@@ -291,7 +319,7 @@ mod tests {
         for n in 0..=AGE_WALK_MAX_ENTRIES {
             fs::write(dir.join(n.to_string()), "").unwrap();
         }
-        let store = test_store(&root, scan_children, 1);
+        let store = test_store(&root, scan_sessions, 1);
         backdate(&dir, 30 * DAY);
 
         // Act
@@ -340,7 +368,7 @@ mod tests {
         fs::write(outside.join("keep"), "x").unwrap();
         std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
         std::os::unix::fs::symlink(&outside, root.join("MOVED.txt")).unwrap();
-        let sessions = test_store(&root, scan_children, 1);
+        let sessions = test_store(&root, scan_sessions, 1);
         let leftovers = test_store(&root, scan_leftovers, 1);
 
         // Act
