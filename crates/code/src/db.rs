@@ -1362,6 +1362,29 @@ mod tests {
     }
 
     #[test]
+    fn the_busy_timeout_env_seam_is_read_only_in_debug_builds() {
+        // Arrange
+        let production = include_str!("db.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production part");
+
+        // Act
+        let gated = production.contains(
+            "if cfg!(debug_assertions) {\n        if let Some(ms) = std::env::var(\"PLAYBOOK_CODE_BUSY_TIMEOUT_MS\")",
+        );
+        let reads = production
+            .matches("PLAYBOOK_CODE_BUSY_TIMEOUT_MS\")")
+            .count();
+
+        // Assert
+        assert!(gated);
+        assert_eq!(reads, 1);
+        #[cfg(not(debug_assertions))]
+        assert_eq!(busy_timeout(), BUSY_TIMEOUT);
+    }
+
+    #[test]
     fn an_open_store_holds_the_shared_lock_in_both_modes() {
         // Arrange
         let dir = scratch_dir("code-db-shared");

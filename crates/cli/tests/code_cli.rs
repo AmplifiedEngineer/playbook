@@ -785,6 +785,30 @@ impl Fixture {
     }
 }
 
+/// A spawned `playbook` that is killed and reaped when the test ends early.
+struct Running(std::process::Child);
+
+impl Running {
+    /// Waits for the process to end, at most `limit`.
+    fn finish(&mut self, limit: std::time::Duration) -> std::process::ExitStatus {
+        let start = std::time::Instant::now();
+        loop {
+            if let Some(status) = self.0.try_wait().expect("poll") {
+                return status;
+            }
+            assert!(start.elapsed() < limit, "the index run did not end");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// Waits for the first stdout line of `child`, at most `limit`.
 fn first_line(child: &mut std::process::Child, limit: std::time::Duration) -> Option<String> {
     use std::io::BufRead;
@@ -811,28 +835,45 @@ fn two_worktrees_index_at_the_same_time_once_the_write_lock_frees() {
     b.write("b.rs", "fn b() {}\n");
     let first = json_of(&a.playbook(&["code", "index", "--json"]));
     let store = PathBuf::from(first["index"]["path"].as_str().expect("path"));
+    let completed = |worktree_files: &str| -> i64 {
+        rusqlite::Connection::open(&store)
+            .expect("probe")
+            .query_row(
+                "SELECT COALESCE(MAX(last_run_completed), 0) FROM worktrees WHERE root LIKE ?1",
+                [format!("%{worktree_files}")],
+                |r| r.get(0),
+            )
+            .expect("completed")
+    };
+    let a_root = a
+        .repo
+        .file_name()
+        .expect("name")
+        .to_string_lossy()
+        .into_owned();
+    let a_before = completed(&a_root);
     let holder = rusqlite::Connection::open(&store).expect("holder");
     holder.execute_batch("BEGIN IMMEDIATE").expect("hold");
     let limit = std::time::Duration::from_secs(10);
 
     // Act
-    let mut run_a = a.spawn_index();
-    let mut run_b = b.spawn_index();
-    let marker_a = first_line(&mut run_a, limit);
-    let marker_b = first_line(&mut run_b, limit);
+    let mut run_a = Running(a.spawn_index());
+    let mut run_b = Running(b.spawn_index());
+    let marker_a = first_line(&mut run_a.0, limit);
+    let marker_b = first_line(&mut run_b.0, limit);
 
     // Assert
     assert_eq!(marker_a.as_deref(), Some("marker: ready\n"));
     assert_eq!(marker_b.as_deref(), Some("marker: ready\n"));
-    assert!(run_a.try_wait().expect("poll").is_none(), "a waits");
-    assert!(run_b.try_wait().expect("poll").is_none(), "b waits");
+    assert!(run_a.0.try_wait().expect("poll").is_none(), "a waits");
+    assert!(run_b.0.try_wait().expect("poll").is_none(), "b waits");
 
     // Act
     holder.execute_batch("COMMIT").expect("commit");
 
     // Assert
-    assert!(run_a.wait().expect("a ends").success());
-    assert!(run_b.wait().expect("b ends").success());
+    assert!(run_a.finish(limit).success());
+    assert!(run_b.finish(limit).success());
     let check = rusqlite::Connection::open(&store).expect("check");
     let rows: i64 = check
         .query_row("SELECT COUNT(*) FROM worktrees", [], |r| r.get(0))
@@ -847,10 +888,14 @@ fn two_worktrees_index_at_the_same_time_once_the_write_lock_frees() {
         .expect("rows")
         .count();
     assert_eq!((rows, integrity.as_str(), broken), (2, "ok", 0));
+    assert!(completed(&a_root) > a_before, "a recorded its second run");
 }
 
+/// CI runs this in a debug build, where the marker must show. A release run of
+/// the test (`cargo test --release`) checks the other half: no marker. The
+/// source checks in `db.rs` and `cli.rs` pin the gate in both profiles.
 #[test]
-fn the_debug_only_seams_do_nothing_in_a_release_build() {
+fn the_debug_only_marker_follows_the_build_profile() {
     // Arrange
     let fx = Fixture::new("seams", true);
     fx.write("a.rs", "fn a() {}\n");

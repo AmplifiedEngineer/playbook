@@ -761,4 +761,23 @@ mod tests {
         assert_eq!(normalize_prefix("lib\\pay"), "lib/pay");
         assert_eq!(normalize_prefix("lib/"), "lib/");
     }
+
+    #[test]
+    fn the_test_marker_env_seam_is_read_only_in_debug_builds() {
+        // Arrange
+        let production = include_str!("cli.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production part");
+
+        // Act
+        let gated = production.contains(
+            "cfg!(debug_assertions) && std::env::var_os(\"PLAYBOOK_CODE_TEST_MARKER\").is_some()",
+        );
+        let reads = production.matches("PLAYBOOK_CODE_TEST_MARKER\")").count();
+
+        // Assert
+        assert!(gated);
+        assert_eq!(reads, 1);
+    }
 }
