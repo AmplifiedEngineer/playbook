@@ -23,7 +23,7 @@ A detached, silent process (`playbook cc housekeep`) runs these best-effort step
 3. `git worktree prune`.
 4. Set upstream: track the remote branch if it exists, else `git push -u <remote> <branch>`, which starts CI without a manual push. Skip the push with `--no-push` or `WORKTREE_NO_PUSH=1`.
 5. Reuse `node_modules` (below).
-6. `playbook worktree sweep`: remove worktrees of any creation convention that have landed and are not locked or in use. It is gated by `worktreeCleanup.enabled`, and a new worktree is protected from it. For a branch worktree, a merged pull request (read with `gh`, and only when its head is the local branch tip) counts as landed, so a squash merge is caught; an open pull request keeps the worktree. Without `gh`, it falls back to local history and the idle age.
+6. `playbook worktree sweep`: remove worktrees of any creation convention that have landed and are not locked or in use. It is gated by `worktreeCleanup.enabled`, and a new worktree is protected from it. For a branch worktree, a merged pull request (read with `gh`, and only when it targeted the default branch and its head is the local branch tip) counts as landed, so a squash merge is caught; an open pull request keeps the worktree. Without `gh`, it falls back to local history and the idle age.
 
 ### node_modules
 

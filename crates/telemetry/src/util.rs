@@ -250,11 +250,36 @@ pub mod git {
 pub(crate) fn scratch_dir(tag: &str) -> PathBuf {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
+    // A scratch folder is not removed after a run, and a process id comes
+    // back after enough forks, so the id alone could name a folder an
+    // earlier run left behind. The start time tells the two runs apart.
+    static STARTED: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    let started = STARTED.get_or_init(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    });
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
-        "playbook-telemetry-test-{}-{tag}-{n}",
+        "playbook-telemetry-test-{}-{started}-{tag}-{n}",
         std::process::id()
     ))
+}
+
+/// How long a test waits for a file lock it has released to read as free.
+#[cfg(test)]
+pub(crate) const UNLOCK_BOUND: Duration = Duration::from_secs(10);
+
+/// Waits until nobody holds a lock on `path`. A thread of the same test
+/// process that spawns a child lends it a copy of every open file until the
+/// child execs, and a copy keeps an `flock` after its owner closed the file.
+/// A lock a test has released therefore reads as free only once the copy is
+/// gone, which takes longer on a loaded machine.
+#[cfg(test)]
+pub(crate) fn wait_unlocked(path: &std::path::Path) -> bool {
+    within(UNLOCK_BOUND, || {
+        std::fs::File::open(path).is_ok_and(|f| f.try_lock().is_ok())
+    })
 }
 
 /// Paths under a fresh scratch home, with the database inside it.
