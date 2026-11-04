@@ -50,8 +50,8 @@ CREATE INDEX IF NOT EXISTS facts_fts_map_by_scope ON facts_fts_map (scope, proje
 /// The full text index over fact text. It is contentless, so the text itself
 /// is not stored and `facts_fts_map` maps a row back to its fact. It is not
 /// part of [`SCHEMA_SQL`] because a build without FTS5 must still be able to
-/// write the graph. The tokenizer matches the recall matcher, which splits
-/// words on every non-alphanumeric character.
+/// write the graph. The tokenizer matches the recall matcher, which only
+/// lowercases and splits words on every non-alphanumeric character.
 pub const FACTS_FTS_SQL: &str = "\
 CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
     name,
@@ -59,7 +59,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
     body,
     content='',
     contentless_delete=1,
-    tokenize='unicode61'
+    tokenize='unicode61 remove_diacritics 0'
 );";
 
 /// Whether the SQLite build can create FTS5 tables.
