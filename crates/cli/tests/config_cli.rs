@@ -505,6 +505,7 @@ fn set_writes_valid_auto_and_fix_values_including_a_fractional_budget() {
         ("auto.sessionCeilingUsd", "200"),
         ("auto.sessionCeilingUsd", "4000"),
         ("auto.warnPct", "100"),
+        ("watch.limits.usdPerDay", "0.5"),
         ("fix.maxFiles", "99"),
         ("fix.maxLines", "1"),
     ];

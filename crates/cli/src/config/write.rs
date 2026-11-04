@@ -252,7 +252,7 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
                 .is_some_and(|n| n.is_finite() && (n == 0.0 || n >= 0.01)),
             "0 (ten times auto.budgetUsd) or a number of at least 0.01 that is not below auto.budgetUsd or auto.agentBudgetUsd",
         ),
-        "usage.budget.monthlyUsd" | "usage.budget.weeklyUsd" => (
+        "usage.budget.monthlyUsd" | "usage.budget.weeklyUsd" | "watch.limits.usdPerDay" => (
             value
                 .as_f64()
                 .is_some_and(|n| n.is_finite() && (0.0..=1_000_000_000.0).contains(&n)),
