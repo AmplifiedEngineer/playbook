@@ -1,6 +1,6 @@
 # ADR-0057: Index Memory Fact Bodies with SQLite FTS5
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date created:** 2026-11-04
 - **Date modified:** 2026-11-04
 - **Amends:** [ADR 0004](0004-graph-first-memory.md) alternative D (a searchable index over fact bodies). It replaces the reason 0004 gave for rejecting that option. The rest of 0004 stands.
@@ -30,7 +30,7 @@ Add an FTS5 index over fact name, description and body to `memory.db`, and let t
 6. **Mid-session freshness.** Reading the index live means a fact saved in this session becomes recallable at once. ADR 0004's session cache did not do that. This ADR adopts the new behaviour deliberately. A prompt that takes the fallback still sees the session snapshot.
 7. **Evidence first.** A synthetic fixture and a regression harness land before any reader, so each later change shows what it did to recall.
 
-The schema version stays at `"1"`. A bump would make an older binary refuse the newer file.
+`SCHEMA_VERSION` moves from `"1"` to `"2"` in the change that first creates the table. An older binary then refuses the newer file with an upgrade message instead of writing rows beside an index it does not know about. `memory.db` is derived, so `playbook memory rebuild` recreates it.
 
 ## Considered alternatives
 
@@ -50,9 +50,11 @@ The schema version stays at `"1"`. A bump would make an older binary refuse the 
 - Two retrieval paths exist, so a differential test runs both over a static store until bodies join the index. After that a weaker containment test replaces it.
 - The similarity pass that builds `possible_relates_to` edges is quadratic and is the largest cost at scale. It is out of scope here and needs its own plan, and probably its own ADR against ADR 0011.
 
-## Decisions this ADR needs from a maintainer
+## Decisions
 
-- Accept ADR 0004 alternative D as revisited.
-- Accept mid-session freshness for the recall hook.
-- Accept leaving `SCHEMA_VERSION` unchanged.
-- Accept that indexing bodies changes which facts are recalled.
+A maintainer accepted each of these on 2026-11-04.
+
+- ADR 0004 alternative D is revisited as described above.
+- The recall hook reads the index live, so a fact saved in this session is recallable at once.
+- `SCHEMA_VERSION` moves to `"2"`.
+- Indexing bodies changes which facts are recalled.
