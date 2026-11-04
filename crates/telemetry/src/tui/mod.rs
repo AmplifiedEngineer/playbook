@@ -37,8 +37,9 @@ use super::run::Paths;
 use app::{App, Effect};
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 use sessions_view::SessionsView;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use theme::{ColorDepth, Theme};
+use ui_state::{Autosave, Flushed};
 use worker::{Update, Worker};
 
 /// How long the loop waits for a key before it checks for new data.
@@ -109,6 +110,7 @@ fn event_loop(
     app.apply_ui_state(&saved);
     app.note = layout_warning;
     let mut last_saved = state_to_save(&app, flag, &saved);
+    let mut autosave = Autosave::default();
     app.sources = paths.claude_projects.display().to_string();
     app.week_start = super::entry::configured_week_start();
     // NO_COLOR counts when it is set to anything but empty.
@@ -158,14 +160,20 @@ fn event_loop(
                 Event::Key(key) if key.kind == KeyEventKind::Press => match app.key(key) {
                     Effect::Requery => worker.ask(app.range, &app.filter),
                     Effect::Sessions => sessions.open(),
-                    Effect::SaveLayout(text) => {
-                        let result = ui_state::save_layout(&home, &text);
-                        app.note = ui_state::save_notice(result, &text);
-                    }
+                    Effect::SaveLayout(text) => autosave.push(text),
                     Effect::None => {}
                 },
                 _ => {}
             }
+        }
+        // Pending layout changes go out every 200 ms while the editor is open,
+        // and at once when it closes or the program quits.
+        let force = app.editor.is_none() || app.quit;
+        match autosave.flush(Instant::now(), force, |text| {
+            ui_state::save_layout(&home, text)
+        }) {
+            Flushed::Idle | Flushed::Saved => {}
+            Flushed::Notice(text) | Flushed::Failed(text) => app.note = Some(text),
         }
         let now_state = state_to_save(&app, flag, &saved);
         if now_state != last_saved {

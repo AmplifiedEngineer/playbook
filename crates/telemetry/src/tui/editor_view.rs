@@ -59,7 +59,7 @@ pub fn render(frame: &mut Frame, area: Rect, ed: &Editor, pal: &Palette) {
     for keys in [
         " Left/Right tab   h/l j/k move cursor   H/J/K/L move panel   f width",
         " a add   d remove   u undo   < > move tab   n new   x delete   r rename",
-        " w save   R reset   esc cancel",
+        " R reset   esc or q close   changes are saved as you make them",
     ] {
         lines.push(Line::styled(keys, plain));
     }

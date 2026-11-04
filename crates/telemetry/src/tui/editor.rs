@@ -3,9 +3,9 @@
 
 //! The layout editor: a small window to add, remove, rename and reorder tabs
 //! and to arrange the panels each tab shows. It works on a copy of the
-//! layout; nothing changes until the user saves. The cursor sits on a panel
-//! slot, a picker adds the panels the tab does not show, and the last changes
-//! can be undone.
+//! layout, and the app applies and stores it after every change. The cursor
+//! sits on a panel slot, a picker adds the panels the tab does not show, and
+//! the last changes can be undone.
 
 use super::arrange;
 use super::layout::{Layout, PanelId, Tab, ALL, MAX_NAME, MAX_TABS};
@@ -18,10 +18,8 @@ const UNDO_DEPTH: usize = 20;
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     Stay,
-    /// Close without saving.
-    Cancel,
-    /// Apply and store the edited layout.
-    Save,
+    /// Close the editor; every change was already applied.
+    Close,
     /// Go back to the default layout and clear the stored one.
     Reset,
 }
@@ -101,7 +99,7 @@ impl Editor {
         }
         self.message = None;
         match code {
-            KeyCode::Esc | KeyCode::Char('q') => return Outcome::Cancel,
+            KeyCode::Esc | KeyCode::Char('q') => return Outcome::Close,
             KeyCode::Down | KeyCode::Char('j') => self.look(1),
             KeyCode::Up | KeyCode::Char('k') => self.look(-1),
             KeyCode::Right => self.go(1),
@@ -121,15 +119,6 @@ impl Editor {
             KeyCode::Char('x') => self.delete_tab(),
             KeyCode::Char('r') => {
                 self.rename = self.layout.tabs.get(self.tab).map(|t| t.name.clone());
-            }
-            KeyCode::Char('w') | KeyCode::Char('s') => {
-                return match Layout::parse(&self.layout.to_text()) {
-                    Ok(_) => Outcome::Save,
-                    Err(why) => {
-                        self.message = Some(why);
-                        Outcome::Stay
-                    }
-                };
             }
             KeyCode::Char('R') => return Outcome::Reset,
             _ => {}
@@ -604,15 +593,19 @@ mod tests {
     }
 
     #[test]
-    fn save_returns_a_layout_that_parses_and_escape_cancels() {
+    fn escape_and_q_close_the_editor_and_w_and_s_do_nothing() {
+        // Arrange
         let mut e = editor();
 
-        let save = e.key(KeyCode::Char('w'));
-        let cancel = e.key(KeyCode::Esc);
+        // Act
+        let saves = [KeyCode::Char('w'), KeyCode::Char('s')].map(|k| e.key(k));
+        let esc = e.key(KeyCode::Esc);
+        let q = e.key(KeyCode::Char('q'));
 
-        assert_eq!(save, Outcome::Save);
-        assert_eq!(cancel, Outcome::Cancel);
-        assert!(Layout::parse(&e.layout.to_text()).is_ok());
+        // Assert
+        assert_eq!(saves, [Outcome::Stay, Outcome::Stay]);
+        assert_eq!((esc, q), (Outcome::Close, Outcome::Close));
+        assert_eq!(e.layout, Layout::parse(THREE_TABS).unwrap());
     }
 
     #[test]

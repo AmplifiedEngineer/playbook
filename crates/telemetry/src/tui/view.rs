@@ -1708,27 +1708,32 @@ mod tests {
     }
 
     #[test]
-    fn e_opens_the_layout_editor_and_escape_closes_it_without_changes() {
+    fn e_opens_the_layout_editor_and_escape_closes_it_with_the_layout_as_it_was() {
+        // Arrange
         let mut app = tabbed_app();
 
+        // Act
         app.key(press(KeyCode::Char('e')));
         let open = app.editor.is_some();
-        app.key(press(KeyCode::Char('x')));
-        app.key(press(KeyCode::Esc));
+        let effect = app.key(press(KeyCode::Esc));
 
+        // Assert
         assert!(open);
         assert!(app.editor.is_none());
+        assert_eq!(effect, crate::tui::app::Effect::None);
         assert_eq!(app.layout, Layout::default());
     }
 
     #[test]
-    fn saving_in_the_editor_applies_the_layout_and_asks_to_store_it() {
+    fn a_change_in_the_editor_shows_behind_it_at_once_and_asks_to_store_it() {
+        // Arrange
         let mut app = tabbed_app();
         app.key(press(KeyCode::Char('e')));
-        app.key(press(KeyCode::Char('x')));
 
-        let effect = app.key(press(KeyCode::Char('w')));
+        // Act
+        let effect = app.key(press(KeyCode::Char('x')));
 
+        // Assert
         assert_eq!(
             effect,
             crate::tui::app::Effect::SaveLayout(
@@ -1737,7 +1742,38 @@ mod tests {
         );
         assert_eq!(app.layout.tabs.len(), 2);
         assert_eq!(app.tab, 0);
-        assert!(app.editor.is_none());
+        assert!(app.editor.is_some());
+    }
+
+    #[test]
+    fn a_key_that_changes_nothing_in_the_editor_stores_nothing() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.key(press(KeyCode::Char('e')));
+
+        // Act
+        let moved = app.key(press(KeyCode::Char('l')));
+        let refused = app.key(press(KeyCode::Char('L')));
+
+        // Assert
+        assert_eq!(moved, crate::tui::app::Effect::None);
+        assert_eq!(refused, crate::tui::app::Effect::None);
+    }
+
+    #[test]
+    fn the_old_save_keys_do_nothing_in_the_editor() {
+        for key in ['w', 's'] {
+            // Arrange
+            let mut app = tabbed_app();
+            app.key(press(KeyCode::Char('e')));
+
+            // Act
+            let effect = app.key(press(KeyCode::Char(key)));
+
+            // Assert
+            assert_eq!(effect, crate::tui::app::Effect::None, "{key}");
+            assert!(app.editor.is_some(), "{key}");
+        }
     }
 
     #[test]
@@ -1774,7 +1810,10 @@ mod tests {
         assert_eq!(rows[first + 1].matches("[  burnup").count(), 1, "{text}");
         assert!(text.contains("Layout: tabs and panels"), "{text}");
         assert!(text.contains("spend: cost per day"), "{text}");
-        assert!(text.contains("w save"), "{text}");
+        assert!(
+            text.contains("changes are saved as you make them"),
+            "{text}"
+        );
     }
 
     #[test]

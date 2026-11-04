@@ -635,25 +635,35 @@ impl App {
         let Some(editor) = self.editor.as_mut() else {
             return Effect::None;
         };
-        match editor.key(code) {
-            super::editor::Outcome::Stay => Effect::None,
-            super::editor::Outcome::Cancel => {
+        let outcome = editor.key(code);
+        let (edited, tab) = (editor.layout.clone(), editor.tab);
+        match outcome {
+            super::editor::Outcome::Close => {
                 self.editor = None;
                 Effect::None
-            }
-            super::editor::Outcome::Save => {
-                let edited = editor.layout.clone();
-                let tab = editor.tab;
-                self.editor = None;
-                self.use_layout(edited, tab);
-                Effect::SaveLayout(self.layout.to_text())
             }
             super::editor::Outcome::Reset => {
                 self.editor = None;
                 self.use_layout(super::layout::Layout::default(), 0);
                 Effect::SaveLayout(String::new())
             }
+            super::editor::Outcome::Stay if edited == self.layout => Effect::None,
+            super::editor::Outcome::Stay => self.apply_edit(edited, tab),
         }
+    }
+
+    /// Shows the edited layout behind the editor at once and asks for it to be
+    /// stored. A layout the text form cannot hold is refused in the editor.
+    fn apply_edit(&mut self, edited: super::layout::Layout, tab: usize) -> Effect {
+        let text = edited.to_text();
+        if let Err(why) = super::layout::Layout::parse(&text) {
+            if let Some(editor) = self.editor.as_mut() {
+                editor.message = Some(why);
+            }
+            return Effect::None;
+        }
+        self.use_layout(edited, tab);
+        Effect::SaveLayout(text)
     }
 
     /// Switches to `layout`, showing tab `tab` of it.

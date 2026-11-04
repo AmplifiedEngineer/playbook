@@ -11,6 +11,7 @@ use super::app::{ProjectsView, SpendView};
 use super::sort::{Panel, Sort, PANELS};
 use serde_json::{json, Value};
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 /// The key that holds the state.
 pub const KEY: &str = "usage.ui.state";
@@ -165,6 +166,74 @@ pub fn save_notice(result: Result<bool, String>, text: &str) -> Option<String> {
     }
 }
 
+/// How soon after a write the next one may follow.
+const WRITE_EVERY: Duration = Duration::from_millis(200);
+
+/// What a flush tells the user.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Flushed {
+    /// Nothing was due.
+    Idle,
+    /// The layout was stored, or there is nothing to store.
+    Saved,
+    /// There is no config store: said once per run.
+    Notice(String),
+    /// The write failed; the layout stays pending and the next flush retries.
+    Failed(String),
+}
+
+/// The layout text waiting to be stored. Changes arrive faster than they need
+/// writing, so only the newest text is kept and it is written at most every
+/// 200 ms, and at once when the editor closes or the program quits.
+#[derive(Debug, Default)]
+pub struct Autosave {
+    dirty: Option<String>,
+    last_write: Option<Instant>,
+    told_no_store: bool,
+}
+
+impl Autosave {
+    /// Remembers `text` as the layout to store, replacing an older one.
+    pub fn push(&mut self, text: String) {
+        self.dirty = Some(text);
+    }
+
+    /// Writes the pending text through `write` when it is due: `force`, or
+    /// 200 ms after the last write.
+    pub fn flush(
+        &mut self,
+        now: Instant,
+        force: bool,
+        write: impl FnOnce(&str) -> Result<bool, String>,
+    ) -> Flushed {
+        let Some(text) = self.dirty.clone() else {
+            return Flushed::Idle;
+        };
+        let waiting = self
+            .last_write
+            .is_some_and(|at| now.duration_since(at) < WRITE_EVERY);
+        if waiting && !force {
+            return Flushed::Idle;
+        }
+        self.last_write = Some(now);
+        let result = write(&text);
+        let notice = match &result {
+            Ok(false) if !self.told_no_store => save_notice(result.clone(), &text),
+            _ => None,
+        };
+        match result {
+            Err(e) => Flushed::Failed(format!("Layout not saved: {e}")),
+            Ok(stored) => {
+                self.dirty = None;
+                if !stored {
+                    self.told_no_store = true;
+                }
+                notice.map_or(Flushed::Saved, Flushed::Notice)
+            }
+        }
+    }
+}
+
 /// The stored layout text and the layout it gives, with a message when the
 /// stored text is invalid.
 pub fn load_layout(home: &Path) -> (super::layout::Layout, Option<String>) {
@@ -305,6 +374,101 @@ mod tests {
         assert!(wrote);
         assert!(warning.is_none());
         assert_eq!(layout.to_text(), "Money=budget;Live=live");
+    }
+
+    fn after(start: Instant, ms: u64) -> Instant {
+        start + Duration::from_millis(ms)
+    }
+
+    #[test]
+    fn ten_changes_inside_the_window_are_written_as_the_first_and_then_the_last() {
+        // Arrange
+        let start = Instant::now();
+        let mut auto = Autosave::default();
+        let mut written: Vec<String> = Vec::new();
+
+        // Act
+        for i in 0..10 {
+            auto.push(format!("text {i}"));
+            auto.flush(after(start, i * 10), false, |t| {
+                written.push(t.to_string());
+                Ok(true)
+            });
+        }
+        auto.flush(after(start, 250), false, |t| {
+            written.push(t.to_string());
+            Ok(true)
+        });
+
+        // Assert
+        assert_eq!(written, ["text 0", "text 9"]);
+    }
+
+    #[test]
+    fn a_forced_flush_writes_at_once_and_an_empty_one_writes_nothing() {
+        // Arrange
+        let start = Instant::now();
+        let mut auto = Autosave::default();
+        auto.push("a".into());
+        auto.flush(start, false, |_| Ok(true));
+        auto.push("b".into());
+        let mut written = Vec::new();
+
+        // Act
+        let forced = auto.flush(after(start, 1), true, |t| {
+            written.push(t.to_string());
+            Ok(true)
+        });
+        let nothing = auto.flush(after(start, 2), true, |_| Err("unused".into()));
+
+        // Assert
+        assert_eq!((forced, nothing), (Flushed::Saved, Flushed::Idle));
+        assert_eq!(written, ["b"]);
+    }
+
+    #[test]
+    fn a_failed_write_keeps_the_text_and_the_next_success_clears_it() {
+        // Arrange
+        let start = Instant::now();
+        let mut auto = Autosave::default();
+        auto.push("a".into());
+
+        // Act
+        let failed = auto.flush(start, false, |_| Err("disk full".into()));
+        let waiting = auto.flush(after(start, 50), false, |_| Ok(true));
+        let retried = auto.flush(after(start, 300), false, |_| Ok(true));
+        let after_success = auto.flush(after(start, 600), false, |_| Err("unused".into()));
+
+        // Assert
+        assert_eq!(
+            failed,
+            Flushed::Failed("Layout not saved: disk full".into())
+        );
+        assert_eq!(waiting, Flushed::Idle);
+        assert_eq!(retried, Flushed::Saved);
+        assert_eq!(after_success, Flushed::Idle);
+    }
+
+    #[test]
+    fn without_a_store_the_notice_comes_once_for_many_changes() {
+        // Arrange
+        let start = Instant::now();
+        let mut auto = Autosave::default();
+        let mut results = Vec::new();
+
+        // Act
+        for i in 0..10 {
+            auto.push(format!("Charts=spend{i}"));
+            results.push(auto.flush(after(start, i * 300), false, |_| Ok(false)));
+        }
+
+        // Assert
+        let notices = results
+            .iter()
+            .filter(|r| matches!(r, Flushed::Notice(_)))
+            .count();
+        assert_eq!(notices, 1);
+        assert!(matches!(&results[0], Flushed::Notice(n) if n.contains("this run only")));
     }
 
     #[test]
