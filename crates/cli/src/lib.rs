@@ -190,11 +190,11 @@ pub enum EffortCommand {
     ///
     /// Example: `playbook effort resolve agents reviewer --cap medium --json`
     Resolve {
-        /// agents, commands or skills
+        /// One of agents, commands or skills
         kind: String,
-        /// The component name, such as `reviewer` or `deep-review`
+        /// Component name, such as `reviewer` or `deep-review`
         name: String,
-        /// An extra ceiling from the caller: low, medium, high, xhigh or max
+        /// Extra ceiling from the caller: low, medium, high, xhigh or max
         #[arg(long)]
         cap: Option<String>,
         /// Print JSON
@@ -212,7 +212,7 @@ pub enum EffortCommand {
     ///
     /// Example: `playbook effort suggest --range 90d --json`
     Suggest {
-        /// 30d, 60d, 90d, month or all
+        /// One of 30d, 60d, 90d, month or all
         #[arg(long, default_value = "30d")]
         range: String,
         /// Print JSON
@@ -234,16 +234,16 @@ pub enum EffortCommand {
     ///
     /// Example: `playbook effort apply --range 90d`
     Apply {
-        /// 30d, 60d, 90d, month or all
+        /// One of 30d, 60d, 90d, month or all
         #[arg(long, default_value = "30d")]
         range: String,
         /// Approve without asking
         #[arg(long)]
         yes: bool,
     },
-    /// Choose an effort for one dispatch from the diff, when `effort.auto` allows
+    /// Choose an effort for one dispatch from its diff
     ///
-    /// Does nothing while `effort.auto` is `off` (the default). With `suggest`
+    /// Acts only when `effort.auto` allows it. Does nothing while `effort.auto` is `off` (the default). With `suggest`
     /// it logs what it would pick and the dispatch keeps the default. With
     /// `on` it names the `subagent_type` to spawn: an existing variant, picked
     /// strictly between the agent's quality floor and every ceiling, raised for
@@ -253,7 +253,7 @@ pub enum EffortCommand {
     ///
     /// Example: `playbook effort choose reviewer --base origin/main --json`
     Choose {
-        /// The agent, such as `reviewer`
+        /// Agent name, such as `reviewer`
         agent: String,
         /// Read the diff shape from `git diff --numstat <ref>`
         #[arg(long)]
@@ -267,10 +267,10 @@ pub enum EffortCommand {
         /// Diff size in bytes
         #[arg(long)]
         bytes: Option<u64>,
-        /// A touched path (repeat for several), when not using --base
+        /// Touched path, repeated for several. Used when --base is not given
         #[arg(long = "path")]
         paths: Vec<String>,
-        /// The review lens, such as `security`
+        /// Review lens, such as `security`
         #[arg(long)]
         lens: Option<String>,
         /// Print JSON
@@ -554,7 +554,7 @@ pub enum Command {
         #[command(subcommand)]
         sub: ModeCommand,
     },
-    /// Read and change playbook settings
+    /// Read and change your playbook settings
     ///
     /// Settings come from tiers, highest first: repo, org, global, then the
     /// built-in default. `get` and `list` show which tier supplied a value.
@@ -615,7 +615,7 @@ pub enum Command {
     Effort {
         #[command(subcommand)]
         sub: Option<EffortCommand>,
-        /// auto, low, medium, high, xhigh or max
+        /// One of auto, low, medium, high, xhigh or max
         level: Option<String>,
         /// Print the status as JSON (with no level)
         #[arg(long)]
@@ -1305,10 +1305,12 @@ pub enum MemoryCommand {
         #[arg(long)]
         from: Option<PathBuf>,
     },
-    /// Print the repo-scoped markdown slice of the memory graph (facts in
-    /// scope, typed edges, anchor index). When there is nothing to show it
-    /// prints one `Memory context: none (<reason>)` line, exit 0. A missing
-    /// default graph is rebuilt from the fact files first.
+    /// Print the repo's slice of the memory graph as markdown
+    ///
+    /// Shows the facts in scope, typed edges and the anchor index. When there
+    /// is nothing to show it prints one `Memory context: none (<reason>)`
+    /// line and exits 0. A missing default graph is rebuilt from the fact
+    /// files first.
     Context {
         /// Repo slug (`owner/name`); defaults to the origin remote's slug.
         #[arg(long)]
@@ -1932,6 +1934,8 @@ pub enum GateCommand {
 #[derive(Subcommand, Debug)]
 pub enum ConfigCommand {
     /// Show a setting's value and which tier it came from
+    ///
+    /// Example: `playbook config get autoReview.enabled`
     Get {
         /// Dotted setting name, such as `autoReview.enabled`
         key: String,
@@ -1941,6 +1945,8 @@ pub enum ConfigCommand {
     /// Writes to the repo tier unless you pass `--org` or `--global`. The
     /// per-user `update.*` keys go to the global tier, and `--org` is
     /// refused for them.
+    ///
+    /// Example: `playbook config set autoReview.enabled true`
     Set {
         /// Dotted setting name, such as `autoReview.enabled`
         key: String,
@@ -1969,7 +1975,7 @@ pub enum ConfigCommand {
     ///
     /// Example: `playbook config import playbook-config.json`
     Import {
-        /// The JSON file to read, or `-` for standard input
+        /// JSON file to read, or `-` for standard input
         file: String,
     },
 }

@@ -387,7 +387,7 @@ Example: `playbook completions zsh`
 
 ### `playbook config`
 
-Read and change playbook settings
+Read and change your playbook settings
 
 Settings come from tiers, highest first: repo, org, global, then the built-in default. `get` and `list` show which tier supplied a value.
 
@@ -407,6 +407,8 @@ Example: `playbook config export > playbook-config.json`
 
 Show a setting's value and which tier it came from
 
+Example: `playbook config get autoReview.enabled`
+
 - `<KEY>`: Dotted setting name, such as `autoReview.enabled`
 
 ### `playbook config import`
@@ -417,7 +419,7 @@ Every key and value is checked first, and nothing is stored if any is invalid. U
 
 Example: `playbook config import playbook-config.json`
 
-- `<FILE>`: The JSON file to read, or `-` for standard input
+- `<FILE>`: JSON file to read, or `-` for standard input
 
 ### `playbook config list`
 
@@ -428,6 +430,8 @@ List every setting with its value and source tier
 Change a setting
 
 Writes to the repo tier unless you pass `--org` or `--global`. The per-user `update.*` keys go to the global tier, and `--org` is refused for them.
+
+Example: `playbook config set autoReview.enabled true`
 
 - `<KEY>`: Dotted setting name, such as `autoReview.enabled`
 - `<VALUE>`: New value; it is read as the type the setting expects
@@ -596,7 +600,7 @@ The ceiling caps the agent variants the launcher renders, the default effort it 
 
 Example: `playbook effort xhigh`
 
-- `<LEVEL>`: auto, low, medium, high, xhigh or max
+- `<LEVEL>`: One of auto, low, medium, high, xhigh or max
 - `--json`: Print the status as JSON (with no level)
 
 Subcommands: `apply`, `choose`, `list`, `log`, `reset`, `resolve`, `suggest`
@@ -609,24 +613,24 @@ Builds the same patch as `suggest --patch`, shows it, and asks `y/N`. `--yes` ap
 
 Example: `playbook effort apply --range 90d`
 
-- `--range <RANGE>`: 30d, 60d, 90d, month or all
+- `--range <RANGE>`: One of 30d, 60d, 90d, month or all
 - `--yes`: Approve without asking
 
 ### `playbook effort choose`
 
-Choose an effort for one dispatch from the diff, when `effort.auto` allows
+Choose an effort for one dispatch from its diff
 
-Does nothing while `effort.auto` is `off` (the default). With `suggest` it logs what it would pick and the dispatch keeps the default. With `on` it names the `subagent_type` to spawn: an existing variant, picked strictly between the agent's quality floor and every ceiling, raised for risky or large diffs and lowered only for small clean ones. An agent marked costly to miss is never lowered. Any error gives the default. Every choice is appended to a local log (`playbook effort log`).
+Acts only when `effort.auto` allows it. Does nothing while `effort.auto` is `off` (the default). With `suggest` it logs what it would pick and the dispatch keeps the default. With `on` it names the `subagent_type` to spawn: an existing variant, picked strictly between the agent's quality floor and every ceiling, raised for risky or large diffs and lowered only for small clean ones. An agent marked costly to miss is never lowered. Any error gives the default. Every choice is appended to a local log (`playbook effort log`).
 
 Example: `playbook effort choose reviewer --base origin/main --json`
 
-- `<AGENT>`: The agent, such as `reviewer`
+- `<AGENT>`: Agent name, such as `reviewer`
 - `--base <BASE>`: Read the diff shape from `git diff --numstat <ref>`
 - `--lines <LINES>`: Changed lines, when not using --base
 - `--files <FILES>`: Changed files, when not using --base
 - `--bytes <BYTES>`: Diff size in bytes
-- `--path <PATHS>`: A touched path (repeat for several), when not using --base
-- `--lens <LENS>`: The review lens, such as `security`
+- `--path <PATHS>`: Touched path, repeated for several. Used when --base is not given
+- `--lens <LENS>`: Review lens, such as `security`
 - `--json`: Print JSON
 
 ### `playbook effort list`
@@ -666,9 +670,9 @@ For an agent it also names the file to dispatch and every file allowed under the
 
 Example: `playbook effort resolve agents reviewer --cap medium --json`
 
-- `<KIND>`: agents, commands or skills
-- `<NAME>`: The component name, such as `reviewer` or `deep-review`
-- `--cap <CAP>`: An extra ceiling from the caller: low, medium, high, xhigh or max
+- `<KIND>`: One of agents, commands or skills
+- `<NAME>`: Component name, such as `reviewer` or `deep-review`
+- `--cap <CAP>`: Extra ceiling from the caller: low, medium, high, xhigh or max
 - `--json`: Print JSON
 
 ### `playbook effort suggest`
@@ -679,7 +683,7 @@ Reads the local usage store and the quality floor table and prints, for each age
 
 Example: `playbook effort suggest --range 90d --json`
 
-- `--range <RANGE>`: 30d, 60d, 90d, month or all
+- `--range <RANGE>`: One of 30d, 60d, 90d, month or all
 - `--json`: Print JSON
 - `--patch`: Print a proposed config patch instead (still read only)
 
@@ -876,7 +880,9 @@ Subcommands: `context`, `export`, `import-claude`, `rebuild`, `stats`
 
 ### `playbook memory context`
 
-Print the repo-scoped markdown slice of the memory graph (facts in scope, typed edges, anchor index). When there is nothing to show it prints one `Memory context: none (<reason>)` line, exit 0. A missing default graph is rebuilt from the fact files first
+Print the repo's slice of the memory graph as markdown
+
+Shows the facts in scope, typed edges and the anchor index. When there is nothing to show it prints one `Memory context: none (<reason>)` line and exits 0. A missing default graph is rebuilt from the fact files first.
 
 - `--repo <REPO>`: Repo slug (`owner/name`); defaults to the origin remote's slug
 - `--graph <GRAPH>`: Graph JSON file; defaults to the graph in `~/.config/playbook/data/memory.db`
