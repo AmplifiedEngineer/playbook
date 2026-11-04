@@ -1,8 +1,8 @@
 # ADR-0055: A Polling Watch Mode for GitHub Events, With Rules, Autonomy Levels and a Durable Queue
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date created:** 2026-10-25
-- **Date modified:** 2026-10-25
+- **Date modified:** 2026-11-04
 - **Extends:** [ADR 0025](0025-self-improving-playbook.md), for GitHub actions. ADR 0025 says a level above `propose` needs a track record and a new ADR. For `triage_issue` and `update_branch` this record replaces the new ADR step with the machine-checked ladder in decision 3, and this ADR is that approval. Learn changes keep the ADR 0025 rules unchanged.
 - **Relates to:** [ADR 0025](0025-self-improving-playbook.md) (autonomy ceiling and trust ladder), [ADR 0048](0048-collector-daemon-started-by-commands.md) (the lifetime lock), [ADR 0024](0024-session-management-view-and-lifecycle.md) (a `propose` default and an `auto` that stays off until earned), [ADR 0053](0053-windows-experimental-cli.md) (Windows scope)
 
@@ -28,7 +28,7 @@ Issue #534 asks for `playbook watch`: a process on your machine that listens to 
 | Data and log folders | `docs/internals/11-data-folder.md` | Databases live in `~/.config/playbook/data` (mode 0700). Logs and per-session files live in `~/.config/playbook/runtime`. |
 | Service files | `crates/cli/src/service_manager.rs` | Only removes the retired collector service files. [ADR 0048](0048-collector-daemon-started-by-commands.md) deleted the service because the service and the on-demand collector fought over a port and the service cost 2436 lines. |
 | Command names | `playbook commands` | No `watch`, `once`, `pause` or `resume`. `status` exists under `usage`, and `log` under `effort`. A subcommand of `watch` does not clash with them. |
-| unsafe code | `Cargo.toml:19` sets only `undocumented_unsafe_blocks = "warn"`. A search of `crates/**/*.rs` finds 65 lines that contain `unsafe`, and `libc` is a dependency | The rule for this work is no `unsafe`. The workspace does not yet forbid it. See the open questions. |
+| unsafe code | When this ADR was written, `Cargo.toml` set only `undocumented_unsafe_blocks = "warn"` and the tree had `unsafe` and `libc`. The workspace now sets `unsafe_code = "forbid"` | The rule for this work is no `unsafe`, and the lint now enforces it. See the maintainer answers. |
 
 ### What GitHub gives a poller (read from the GitHub REST docs on 2026-10-25)
 
@@ -363,10 +363,12 @@ stateDiagram-v2
   done --> [*]
 ```
 
-## Open questions for the maintainer
+## Maintainer answers
 
-1. Is `unsafe` forbidden workspace-wide? `Cargo.toml` does not set `unsafe_code = "forbid"`, and the tree has `unsafe` and `libc`. This design adds none. Pid liveness probes are avoided for that reason (the lock replaces them).
-2. `install-service` installs a timer that runs `watch once` every 60 seconds, so no process stays resident. Do you accept a timer, or do you want a resident unit?
-3. Is `propose` through a local queue and `watch approve` acceptable, or do you want proposals to be visible on GitHub (a draft comment or a draft PR) first?
-4. Do you accept the ladder for `auto` (10 approved proposals of a class over 28 days, none failed or rolled back), with `label` and fixed text comments exempt from day one? Or should `auto` wait for a later ADR for every class?
-5. Is a polling latency of 60 s enough, or should S12 (webhooks) move earlier?
+On 2026-11-04 the maintainer delegated these questions and took the recommended answer for each.
+
+1. `unsafe` is forbidden workspace wide, since the build change that set `unsafe_code = "forbid"` in `Cargo.toml`. Watch mode adds none and uses the lock in place of pid probes. It stops a process group by running `kill`.
+2. `install-service` installs a timer that runs `watch once` every 60 seconds. No resident unit.
+3. `propose` goes through the local queue and `watch approve`. Proposals are not mirrored to GitHub first.
+4. The ladder for `auto` is accepted: 10 approved proposals of a class over 28 days with none failed or rolled back. `label` and fixed text comments are exempt from day one. Every other class waits for the ladder.
+5. A polling latency of 60 seconds is enough. S12 (webhooks) stays last.
