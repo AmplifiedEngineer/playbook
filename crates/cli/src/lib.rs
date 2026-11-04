@@ -123,7 +123,7 @@ pub use usage::command::UsageCommand;
 /// Configure and support Claude Code from the command line.
 ///
 /// playbook installs hooks and a session launcher, shows the Agent Budget Dashboard,
-/// and helps with pull requests, reviews, worktrees and session handoffs.
+/// and helps with PRs, reviews, worktrees and session handoffs.
 #[derive(Parser, Debug)]
 #[command(
     name = "playbook",
@@ -141,10 +141,12 @@ pub struct Cli {
 /// `playbook skills` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum SkillsCommand {
-    /// Copy the playbook skills into another agent's skill folder
+    /// Copy the playbook skills into another agent's skill directory
     ///
     /// Without `--agent`, every agent found on this machine is synced. A
     /// second run with nothing new changes nothing.
+    ///
+    /// Example: `playbook skills sync --agent codex`
     Sync {
         /// Sync only this agent
         #[arg(long, value_parser = ["codex"])]
@@ -190,11 +192,11 @@ pub enum EffortCommand {
     ///
     /// Example: `playbook effort resolve agents reviewer --cap medium --json`
     Resolve {
-        /// agents, commands or skills
+        /// One of agents, commands or skills
         kind: String,
-        /// The component name, such as `reviewer` or `deep-review`
+        /// Component name, such as `reviewer` or `deep-review`
         name: String,
-        /// An extra ceiling from the caller: low, medium, high, xhigh or max
+        /// Extra ceiling from the caller: low, medium, high, xhigh or max
         #[arg(long)]
         cap: Option<String>,
         /// Print JSON
@@ -212,7 +214,7 @@ pub enum EffortCommand {
     ///
     /// Example: `playbook effort suggest --range 90d --json`
     Suggest {
-        /// 30d, 60d, 90d, month or all
+        /// One of 30d, 60d, 90d, month or all
         #[arg(long, default_value = "30d")]
         range: String,
         /// Print JSON
@@ -234,14 +236,14 @@ pub enum EffortCommand {
     ///
     /// Example: `playbook effort apply --range 90d`
     Apply {
-        /// 30d, 60d, 90d, month or all
+        /// One of 30d, 60d, 90d, month or all
         #[arg(long, default_value = "30d")]
         range: String,
         /// Approve without asking
         #[arg(long)]
         yes: bool,
     },
-    /// Choose an effort for one dispatch from the diff, when `effort.auto` allows
+    /// Choose an effort for one dispatch from its diff
     ///
     /// Does nothing while `effort.auto` is `off` (the default). With `suggest`
     /// it logs what it would pick and the dispatch keeps the default. With
@@ -253,7 +255,7 @@ pub enum EffortCommand {
     ///
     /// Example: `playbook effort choose reviewer --base origin/main --json`
     Choose {
-        /// The agent, such as `reviewer`
+        /// Agent name, such as `reviewer`
         agent: String,
         /// Read the diff shape from `git diff --numstat <ref>`
         #[arg(long)]
@@ -267,10 +269,10 @@ pub enum EffortCommand {
         /// Diff size in bytes
         #[arg(long)]
         bytes: Option<u64>,
-        /// A touched path (repeat for several), when not using --base
+        /// Touched path, repeated for several, when not using --base
         #[arg(long = "path")]
         paths: Vec<String>,
-        /// The review lens, such as `security`
+        /// Review lens, such as `security`
         #[arg(long)]
         lens: Option<String>,
         /// Print JSON
@@ -442,7 +444,7 @@ pub enum Command {
     ///
     /// Example: `playbook completions zsh`
     Completions {
-        /// The shell to print the script for
+        /// Shell to print the script for
         #[arg(value_enum)]
         shell: completions::CompletionShell,
     },
@@ -465,14 +467,12 @@ pub enum Command {
         #[command(subcommand)]
         sub: DocCommand,
     },
-    /// Read single facts that the health check uses
+    /// Check the playbook setup, or read one fact the check uses
     ///
-    /// The full health check is the `/playbook:doctor` command inside Claude
-    /// Code. These subcommands print one fact each, such as pending
-    /// migrations, plugin version or hook wiring, and help when a layer
-    /// reports a miss.
-    ///
-    /// Example: `playbook doctor pending-migrations`
+    /// `playbook doctor check` runs the full health check, the same one the
+    /// `/playbook:doctor` command uses. The other subcommands print one fact
+    /// each, such as pending migrations, plugin version or hook wiring, and
+    /// help when a layer reports a miss.
     ///
     /// `playbook doctor --fix` repairs playbook's own files after an upgrade
     /// and prints the list of what still needs you, the same as
@@ -480,6 +480,8 @@ pub enum Command {
     /// attribution OFF, the default, by adding the missing `attribution`
     /// keys; that yes is the only Claude Code setting it writes. A no stores
     /// attribution ON.
+    ///
+    /// Example: `playbook doctor pending-migrations`
     #[command(args_conflicts_with_subcommands = true, subcommand_required = false)]
     Doctor {
         /// Run the safe migrations for playbook's own files, then list what needs you
@@ -513,7 +515,7 @@ pub enum Command {
     ///
     /// Example: `playbook migrate --status`
     Migrate {
-        /// List each migration with the release that ships it, its scope and state, the recorded and running versions, and what needs you, writing nothing
+        /// List each migration with its release, scope and state, writing nothing
         #[arg(long, conflicts_with = "dry_run")]
         status: bool,
         /// Show the migrations a run would start and what needs you, writing nothing
@@ -528,19 +530,20 @@ pub enum Command {
         #[arg(long)]
         no_plugin: bool,
     },
-    /// Read the run mode and effort ceiling a command's Step 0 needs, in one call
+    /// Read the run mode and effort ceiling
     ///
-    /// Reads `--auto` and `--ask` from the command's arguments (exit 2 when
-    /// both are present), and prints one JSON object: `mode`, `source`,
-    /// `hook_mode`, `warning`, and `ceiling` when `--command` names the
-    /// command. `ceiling` is the highest effort the user allows, or null.
+    /// Gives a command's Step 0 the mode and the ceiling in one call. Reads
+    /// `--auto` and `--ask` from the command's arguments (exit 2 when both are
+    /// present), and prints one JSON object: `mode`, `source`, `hook_mode`,
+    /// `warning`, and `ceiling` when `--command` names the command. `ceiling`
+    /// is the highest effort the user allows, or null.
     ///
     /// Example: `playbook run-context --command implement --args "--auto"`
     RunContext {
-        /// The command's name, such as `implement`; adds the effort ceiling
+        /// Command name, such as `implement`. Adds the effort ceiling
         #[arg(long)]
         command: Option<String>,
-        /// The command's raw arguments, as one string
+        /// Raw arguments of the command, as one string
         #[arg(long, default_value = "", allow_hyphen_values = true)]
         args: String,
     },
@@ -554,7 +557,7 @@ pub enum Command {
         #[command(subcommand)]
         sub: ModeCommand,
     },
-    /// Read and change playbook settings
+    /// Read and change playbook settings in any tier
     ///
     /// Settings come from tiers, highest first: repo, org, global, then the
     /// built-in default. `get` and `list` show which tier supplied a value.
@@ -615,7 +618,7 @@ pub enum Command {
     Effort {
         #[command(subcommand)]
         sub: Option<EffortCommand>,
-        /// auto, low, medium, high, xhigh or max
+        /// One of auto, low, medium, high, xhigh or max
         level: Option<String>,
         /// Print the status as JSON (with no level)
         #[arg(long)]
@@ -634,9 +637,9 @@ pub enum Command {
     ///
     /// Example: `playbook route implement --tier medium --json`
     Route {
-        /// mechanical, classify, check, review, implement or design
+        /// One of mechanical, classify, check, review, implement or design
         kind: String,
-        /// low, medium or high (implement only)
+        /// One of low, medium or high. Only `implement` reads it
         #[arg(long, default_value = "low")]
         tier: String,
         /// How many times this task already failed
@@ -699,22 +702,23 @@ pub enum Command {
         /// Print the text summary and exit (every recorded session unless `--range` is given)
         #[arg(long, conflicts_with_all = ["json"])]
         summary: bool,
-        /// Date range (days in the chosen time zone): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
+        /// Date range, counted in days of the chosen time zone. One of today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
         #[arg(long, value_name = "RANGE")]
         range: Option<String>,
-        /// Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+        /// Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
         #[arg(long, global = true, conflicts_with = "local")]
         utc: bool,
-        /// Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+        /// Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
         #[arg(long, global = true, conflicts_with = "utc")]
         local: bool,
     },
-    /// List recent agent sessions with repo, branch, worktree, linked PR, state, context size and cost
+    /// List recent agent sessions and their state
     ///
-    /// Read only. A session is done when the pull request of its branch is
-    /// merged or closed, and stale after `sessions.staleAfterDays` without
-    /// activity. Suggestions are printed, never acted on, and a worktree with
-    /// uncommitted changes is flagged, never removed.
+    /// Shows the repo, branch, worktree, linked PR, state, context size and
+    /// cost of each session. Read only. A session is done when the PR of its
+    /// branch is merged or closed, and stale after `sessions.staleAfterDays`
+    /// without activity. Suggestions are printed, never acted on, and a
+    /// worktree with uncommitted changes is flagged, never removed.
     ///
     /// Example: `playbook sessions --json`
     Sessions {
@@ -724,9 +728,9 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Check how well the review triage classifier sorts real pull requests
+    /// Check how well the review triage classifier sorts real PRs
     ///
-    /// Each case is a pull request with a known answer per review lens. Costs
+    /// Each case is a PR with a known answer per review lens. Costs
     /// one `gh pr diff` fetch and one live `claude` call per case, so run it
     /// by hand or on a schedule.
     ///
@@ -735,7 +739,7 @@ pub enum Command {
         #[command(subcommand)]
         sub: EvalCommand,
     },
-    /// Prepare and open pull requests, and pick a review depth
+    /// Prepare and open PRs, and pick a review depth
     ///
     /// These are the mechanical steps behind `/playbook:create-pull-request`.
     ///
@@ -758,7 +762,7 @@ pub enum Command {
         #[command(subcommand)]
         sub: MemoryCommand,
     },
-    /// Save and show notes that carry a session over to the next one
+    /// Save and show notes that carry over to the next session
     ///
     /// A handoff is a markdown note for one directory. The next session started
     /// there loads it when the SessionStart hook is installed and runs, and
@@ -838,27 +842,30 @@ pub enum Command {
         #[arg(long)]
         dir: Option<String>,
     },
-    /// Print the path of one of this repo's playbook storage folders, or of the plugin
+    /// Print the path of a playbook storage directory
     ///
-    /// First moves any legacy folders from the old repo-local location.
-    /// `plugin-root` prints the installed playbook plugin folder instead. It
+    /// Prints one of this repo's storage directories. For those kinds it
+    /// first moves any legacy directories from the old repo-local location.
+    /// `data` and `plugin-root` skip that move. `plugin-root` prints the installed playbook plugin directory instead. It
     /// looks at `PLAYBOOK_PLUGIN_DIR`, then the `installPath` Claude Code
     /// recorded, then `CLAUDE_PLUGIN_ROOT`, then the newest plugin cache
-    /// folder. When none is usable it prints one line naming each place tried
-    /// and exits 1. `--create` does not apply to it.
+    /// directory. When none is usable it prints one line naming each place
+    /// tried and exits 1. `--create` does not apply to it.
+    ///
+    /// Example: `playbook path plans`
     Path {
-        /// Which folder to print
+        /// Which directory to print
         kind: PathKind,
-        /// Create the folder when it does not exist
+        /// Create the directory when it does not exist
         #[arg(long)]
         create: bool,
     },
-    /// Helpers for `/playbook:plan`
+    /// Save plan checkpoints, write Work Unit briefs, clear scratch files
     Plan {
         #[command(subcommand)]
         sub: PlanCommand,
     },
-    /// Append to the repo's `GLOSSARY.md`
+    /// Append entries to the repo's `GLOSSARY.md` file
     Glossary {
         #[command(subcommand)]
         sub: GlossaryCommand,
@@ -878,13 +885,13 @@ pub enum Command {
     ///
     /// Example: `playbook commands pr`
     Commands {
-        /// A command or group, such as `pr` or `worktree review`
+        /// Command or group to list, such as `pr` or `worktree review`
         group: Vec<String>,
         /// Print a JSON array with one object per command: command, purpose, access, args, subcommands, intents
         #[arg(long)]
         json: bool,
     },
-    /// ADR helpers
+    /// Work with ADRs, such as the next free record number
     Adr {
         #[command(subcommand)]
         sub: AdrCommand,
@@ -894,22 +901,22 @@ pub enum Command {
         #[command(subcommand)]
         sub: ProseCommand,
     },
-    /// Checks for the `playbook:atlassian` skill
+    /// Check the Atlassian tools the `playbook:atlassian` skill uses
     Atlassian {
         #[command(subcommand)]
         sub: AtlassianCommand,
     },
-    /// Helpers for `/playbook:learn-project`
+    /// Gather the repo facts that `/playbook:learn-project` reads
     Learn {
         #[command(subcommand)]
         sub: LearnCommand,
     },
-    /// The git steps of `/playbook:commit-and-push`
+    /// Run the git steps of `/playbook:commit-and-push`
     Commit {
         #[command(subcommand)]
         sub: CommitCommand,
     },
-    /// Commit, push and open or update a pull request from any worktree
+    /// Commit, push and open or update a PR from any worktree
     ///
     /// Stages per flag, commits when something is staged (message from
     /// `--message` or `--message-file`), rebases onto the base, pushes, then
@@ -983,12 +990,12 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Setup for the review commands
+    /// Run the mechanical steps behind the review commands
     Review {
         #[command(subcommand)]
         sub: ReviewCommand,
     },
-    /// The git recipes `/playbook:implement` runs for a Segment
+    /// Run the git recipes `/playbook:implement` uses for a Segment
     Segment {
         #[command(subcommand)]
         sub: SegmentCommand,
@@ -1015,6 +1022,8 @@ pub enum Command {
     /// Writes to `~/.claude.json` so Claude Code's first-launch trust prompt
     /// does not block `playbook cc` or `playbook ccd`. Always exits 0, even on failure, so a
     /// script can call it without checking.
+    ///
+    /// Example: `playbook trust /Users/me/project`
     Trust {
         /// Absolute path of the directory to trust
         path: String,
@@ -1064,11 +1073,12 @@ impl Command {
 /// `playbook eval` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum EvalCommand {
-    /// Run the review triage classifier on each case and compare with the known answers
+    /// Run the review triage classifier on each case
     ///
-    /// Needs network access, a logged-in `gh`, and a working `claude` with a
-    /// live API key. Exits 0 when no lens was wrongly skipped and no case
-    /// errored, and 1 otherwise. Re-run it whenever the triage prompt changes.
+    /// Compares each result with the known answer. Needs network access, a
+    /// logged-in `gh`, and a working `claude` with a live API key. Exits 0 when
+    /// no lens was wrongly skipped and no case errored, and 1 otherwise. Re-run
+    /// it whenever the triage prompt changes.
     ///
     /// Example: `playbook eval review-triage`
     ReviewTriage {
@@ -1122,8 +1132,8 @@ pub enum EvalCommand {
         /// List the cases and exit
         #[arg(long)]
         list: bool,
-        /// Run the `tdd_repo` implementer cases with tools in a scratch git repo, one
-        /// dispatch per TDD step (`per-step`) or one per Work Unit (`per-wu`)
+        /// Run the `tdd_repo` implementer cases with tools in a scratch git repo.
+        /// Use one dispatch per TDD step (`per-step`) or one per Work Unit (`per-wu`)
         #[arg(long, value_delimiter = ',')]
         strategy: Vec<String>,
     },
@@ -1199,9 +1209,9 @@ pub enum PathKind {
     Worktrees,
     /// Where session handoffs for this repo are saved
     Handoff,
-    /// The shared data folder holding every database (not tied to a repo)
+    /// The shared data directory holding every database (not tied to a repo)
     Data,
-    /// The installed playbook plugin folder, for skills and agents that need
+    /// The installed playbook plugin directory, for skills and agents that need
     /// a plugin file (not tied to a repo)
     PluginRoot,
 }
@@ -1309,10 +1319,12 @@ pub enum MemoryCommand {
         #[arg(long)]
         from: Option<PathBuf>,
     },
-    /// Print the repo-scoped markdown slice of the memory graph (facts in
-    /// scope, typed edges, anchor index). When there is nothing to show it
-    /// prints one `Memory context: none (<reason>)` line, exit 0. A missing
-    /// default graph is rebuilt from the fact files first.
+    /// Print the repo's slice of the memory graph as markdown
+    ///
+    /// Shows the facts in scope, typed edges and the anchor index. When there
+    /// is nothing to show it prints one `Memory context: none (<reason>)`
+    /// line and exits 0. A missing default graph is rebuilt from the fact
+    /// files first.
     Context {
         /// Repo slug (`owner/name`); defaults to the origin remote's slug.
         #[arg(long)]
@@ -1400,6 +1412,8 @@ pub enum PrCommand {
     ///
     /// Finds the branch and base, checks the repo is ready, writes the diff
     /// to a scratch file, and prints labeled lines for the PR drafter.
+    ///
+    /// Example: `playbook pr prepare --base main`
     Prepare {
         /// Base branch for the PR (default: the repo's default branch)
         #[arg(long)]
@@ -1414,6 +1428,8 @@ pub enum PrCommand {
     /// Push the branch and open a PR from a drafted title and body
     ///
     /// Opens a draft unless the `pr.draft` setting is `false`.
+    ///
+    /// Example: `playbook pr create --title "fix(x): y" --body-file /tmp/body.md`
     Create {
         /// PR title, at most 72 characters
         #[arg(long)]
@@ -1438,6 +1454,8 @@ pub enum PrCommand {
     ///
     /// Asks a small model three times. Anything but a unanimous `quick`
     /// becomes `deep`.
+    ///
+    /// Example: `playbook pr review-triage --pr 12`
     ReviewTriage {
         /// PR number (default: the current branch against its base)
         #[arg(long)]
@@ -1472,28 +1490,28 @@ pub enum PrCommand {
     /// Prints the PR, head SHA, your login and the flags, and writes the
     /// threads and issue comments as JSON under `/tmp`.
     Comments {
-        /// The command's arguments, as one string
+        /// Command arguments as one string, such as `#12 --bots`
         #[arg(default_value = "")]
         args: String,
     },
-    /// Post one reply on a pull request, from a file
+    /// Post one reply on a PR, from a file
     ///
     /// `--thread ID` replies in a review thread (ID is the `databaseId` of the
     /// thread's first comment, as `pr comments` writes it); `--issue` comments
-    /// on the pull request itself. The body is read from `--body-file`, so
+    /// on the PR itself. The body is read from `--body-file`, so
     /// quotes, backticks and newlines need no shell escaping. It refuses an
     /// empty body, an em or en dash, and AI attribution. Prints `Posted:
     /// <url>` and the body.
     ///
     /// Example: `playbook pr reply --pr 12 --thread 345 --body-file /tmp/reply.md`
     Reply {
-        /// The pull request number
+        /// PR number
         #[arg(long)]
         pr: String,
         /// Reply in the review thread whose first comment has this `databaseId`
         #[arg(long, conflicts_with = "issue", required_unless_present = "issue")]
         thread: Option<String>,
-        /// Comment on the pull request itself
+        /// Comment on the PR itself
         #[arg(long)]
         issue: bool,
         /// File holding the reply text
@@ -1503,7 +1521,7 @@ pub enum PrCommand {
         #[arg(long)]
         repo: Option<String>,
     },
-    /// Find the pull requests stacked with a PR
+    /// Find the PRs stacked with a PR
     ///
     /// Reads the GitHub stack API, then falls back to the branch chain. Takes
     /// the arguments as one string (`#12 --json --max-prs 6 --max-lines 3000`).
@@ -1511,7 +1529,7 @@ pub enum PrCommand {
     /// review context under `/tmp/pr-stack-<pr>`. `map --stack <file> --findings
     /// <file>` gives each finding to the PR whose diff holds the line.
     Stack {
-        /// The command's arguments, as one string
+        /// Command arguments as one string, such as `#12 --json`
         #[arg(default_value = "")]
         args: String,
     },
@@ -1519,6 +1537,8 @@ pub enum PrCommand {
     ///
     /// Prints a `checks total=.. pending=.. fail=.. cancel=..` line per read,
     /// then `CI_VERDICT=` one of NONE, FAIL, CANCELLED, PASS or TIMEOUT.
+    ///
+    /// Example: `playbook pr ci-wait 12 --timeout 600`
     CiWait {
         /// PR number
         pr: String,
@@ -1540,6 +1560,8 @@ pub enum PrCommand {
     /// Prints a status line per read (state, merge state, review, auto-merge),
     /// then `LAND_VERDICT=` one of MERGED, REVIEW_GATE, CHANGES_REQUESTED,
     /// RESTATE or TIMEOUT.
+    ///
+    /// Example: `playbook pr land-wait 12`
     LandWait {
         /// PR number
         pr: String,
@@ -1554,6 +1576,8 @@ pub enum PrCommand {
     ///
     /// Prints `merge_rc=<code>` (or `admin_rc=`) and then what `gh` said.
     /// Always exits 0, so the caller reads the code.
+    ///
+    /// Example: `playbook pr merge 12 --admin`
     Merge {
         /// PR number
         pr: String,
@@ -1571,10 +1595,12 @@ pub enum PrCommand {
 pub enum PlanCommand {
     /// Print a topic's checkpoint path, or save the checkpoint
     ///
-    /// Without `--write` it creates the plans folder and prints the path, then
+    /// Without `--write` it creates the plans directory and prints the path, then
     /// `found` or `not-found`. With `--write` it replaces the checkpoint with
     /// stdin under a directory lock. A failed save prints a one-line notice and
     /// still exits 0, so planning continues without resume safety.
+    ///
+    /// Example: `playbook plan checkpoint my-topic`
     Checkpoint {
         /// Kebab-case topic slug, or the ticket id in lower case
         slug: String,
@@ -1582,13 +1608,13 @@ pub enum PlanCommand {
         #[arg(long)]
         write: bool,
     },
-    /// Remove the scratch files a finished plan leaves in the plans folder
+    /// Remove the scratch files a finished plan leaves in the plans directory
     ///
     /// Removes exactly `<slug>.checkpoint.md`, `<slug>.checkpoint.md.lock` and
     /// `<slug>.gate-source*.md` from `playbook path plans`, never the final plan
     /// or its quality report. Prints the removed file names, one per line. Safe
     /// to repeat: nothing to remove exits 0. Exit 1 for a bad slug or flags, 2
-    /// when a symlink leaves the folder or a removal fails (nothing removed
+    /// when a symlink leaves the directory or a removal fails (nothing removed
     /// after a refusal). `--stale` lists leftovers of every slug that already
     /// has a final plan and deletes them only with `--yes`.
     ///
@@ -1606,16 +1632,16 @@ pub enum PlanCommand {
         /// Clear leftovers for every slug that already has a final plan; dry run unless `--yes`
         #[arg(long)]
         stale: bool,
-        /// With `--stale`, only files at least this many days old (default 1, so a plan being re-planned today is left alone)
+        /// Only clear files at least this many days old. Needs `--stale`. By default a plan being re-planned today is left alone, because files under one day old are kept
         #[arg(long, default_value_t = 1, requires = "stale")]
         older_than: u64,
         /// With `--stale`, actually delete
         #[arg(long, requires = "stale")]
         yes: bool,
     },
-    /// Write the per-Work-Unit brief files `/playbook:implement` gives its subagents
+    /// Write the brief file for each Work Unit
     ///
-    /// Each `<OUT>/<wu-id>.brief.md` holds a short header (plan, worktree,
+    /// `/playbook:implement` gives these files to its subagents. Each `<OUT>/<wu-id>.brief.md` holds a short header (plan, worktree,
     /// scoped verify), the Work Unit's own section of the plan verbatim, and a
     /// "Relevant memory" list of the facts anchored to its files or matching
     /// its title. Every id is checked first: a missing one writes nothing and
@@ -1623,18 +1649,18 @@ pub enum PlanCommand {
     ///
     /// Example: `playbook plan brief docs/plan.md WU-1 WU-2 --out /tmp/briefs --verify 'cargo test {tests}'`
     Brief {
-        /// The plan or blueprint file
+        /// Plan or blueprint file
         plan: PathBuf,
         /// Work Unit ids, such as `WU-1`
         #[arg(required = true)]
         wus: Vec<String>,
-        /// Folder to write the briefs into
+        /// Directory to write the briefs into
         #[arg(long)]
         out: PathBuf,
         /// One worktree path for every brief
         #[arg(long, conflicts_with = "worktree_base")]
         worktree: Option<String>,
-        /// Folder holding one worktree per Work Unit, named by its lower case id
+        /// Directory holding one worktree per Work Unit, named by its lower case id
         #[arg(long)]
         worktree_base: Option<String>,
         /// Scoped verify command; `{tests}` and `{files}` become the Work Unit's paths
@@ -1653,8 +1679,10 @@ pub enum PlanCommand {
 #[derive(Subcommand, Debug)]
 pub enum GlossaryCommand {
     /// Append one entry line to `GLOSSARY.md` at the repo root
+    ///
+    /// Example: `playbook glossary add "WU: Work Unit"`
     Add {
-        /// The entry text
+        /// Entry text to append
         #[arg(allow_hyphen_values = true)]
         entry: String,
     },
@@ -1669,6 +1697,8 @@ pub enum ProseCommand {
     /// code, URLs, file paths and quoted lines are skipped. Exits 0 unless
     /// `--strict` is given and a hard finding exists, or a file cannot be
     /// read. With `GITHUB_ACTIONS=true` it prints annotations.
+    ///
+    /// Example: `playbook prose check README.md`
     Check {
         /// Files to check
         #[arg(required = true)]
@@ -1692,7 +1722,7 @@ pub enum AdrCommand {
 /// `playbook atlassian` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum AtlassianCommand {
-    /// Check that `acli` meets the minimum version and whether `twg` is installed
+    /// Check the `acli` version and whether `twg` is installed
     ///
     /// Prints one line for `acli` (`ok`, `too old` with the
     /// `brew upgrade atlassian/acli/acli` hint, `version unreadable` or
@@ -1707,9 +1737,9 @@ pub enum AtlassianCommand {
 pub enum LearnCommand {
     /// Name the repo and memory store, probe the tools, and tally JIRA keys
     Preflight,
-    /// Count the git history or the repo layout for the learn-project collectors
+    /// Count the git history or the repo layout
     ///
-    /// `git` prints contributors, churn hotspots, commit types, remote branch
+    /// Feeds the `/playbook:learn-project` collectors. `git` prints contributors, churn hotspots, commit types, remote branch
     /// prefixes, recent tags and commits per month. `structure` prints the
     /// top level, languages, entry points, build manifests with their scripts
     /// and targets, test and lint config, Dockerfiles, CI, infrastructure as
@@ -1731,6 +1761,8 @@ pub enum CommitCommand {
     ///
     /// Refuses the repo's default branch. Prints `NO_STAGED_CHANGES` when there
     /// is nothing to commit, else `BRANCH=`, the changed files and the diff.
+    ///
+    /// Example: `playbook commit prepare -A`
     Prepare {
         /// Stage everything first (`git add -A`)
         #[arg(short = 'A')]
@@ -1747,6 +1779,8 @@ pub enum CommitCommand {
     /// Reads the message from stdin, or from `--message-file`. Adds a
     /// sign-off per `commit.signOff` and signs when `user.signingkey` is set.
     /// A rejected push is never forced. Exits 1 on any failure.
+    ///
+    /// Example: `playbook commit run --message-file /tmp/msg.txt`
     Run {
         /// File with the commit message (default: read stdin)
         #[arg(long)]
@@ -1760,12 +1794,12 @@ pub enum CommitCommand {
         /// Leave the sign-off trailer off
         #[arg(long)]
         no_signoff: bool,
-        /// Skip the check that the commit type fits the files (a docs-only
-        /// change is not `feat`, a lock-file bump is not `fix`)
+        /// Skip the check that the commit type fits the files. A docs-only
+        /// change is not `feat`, and a lock-file bump is not `fix`
         #[arg(long)]
         no_type_check: bool,
-        /// Skip the prose check (a dash, a curly quote, a banned word or a
-        /// contrast phrase in the message)
+        /// Skip the prose check. It flags a dash, a curly quote, a banned word
+        /// or a contrast phrase in the message
         #[arg(long)]
         no_prose_check: bool,
     },
@@ -1786,7 +1820,7 @@ pub enum ReviewCommand {
         /// Which review: `quick` or `deep`
         #[arg(value_parser = ["quick", "deep"])]
         kind: String,
-        /// The review command's arguments, as one string
+        /// Review command arguments as one string, such as `#12 --self`
         #[arg(default_value = "")]
         args: String,
         /// Accepted for compatibility; auto mode does not skip the post question
@@ -1814,8 +1848,8 @@ pub enum ReviewCommand {
     Suggest {
         /// PR number (default: the current branch against the default branch)
         pr: Option<String>,
-        /// Base branch when no PR number is given (default: the repo's default
-        /// branch; pass the parent branch for a stacked change)
+        /// Base branch when no PR number is given. Defaults to the repo's default
+        /// branch; pass the parent branch for a stacked change
         #[arg(long)]
         base: Option<String>,
         /// Work in this directory instead of the current one
@@ -1828,8 +1862,10 @@ pub enum ReviewCommand {
     /// Run a project's own type check, lint and tests in a directory
     ///
     /// Prints their output. A failing check is output, not an error.
+    ///
+    /// Example: `playbook review checks /tmp/review-wt`
     Checks {
-        /// The review worktree to run in
+        /// Review worktree to run in
         dir: PathBuf,
     },
     /// Measure a diff and say which review path it takes
@@ -1841,16 +1877,16 @@ pub enum ReviewCommand {
     ///
     /// Example: `playbook review size --base main`
     Size {
-        /// The ref the diff starts from
+        /// Ref the diff starts from
         #[arg(long)]
         base: String,
-        /// The ref the diff ends at
+        /// Ref the diff ends at
         #[arg(long, default_value = "HEAD")]
         head: String,
         /// Always take the swarm path
         #[arg(long)]
         all_lenses: bool,
-        /// The repository to measure in; defaults to the current directory
+        /// Repo directory to measure in. Defaults to the current directory
         #[arg(long)]
         dir: Option<PathBuf>,
     },
@@ -1882,6 +1918,8 @@ pub enum GateCommand {
     /// Save a phase verdict for a plan
     ///
     /// Reads a phase agent's output, finds its `VERDICT:` line, and stores it.
+    ///
+    /// Example: `playbook gate record my-plan plan adversarial out.md`
     Record {
         /// Plan slug the phase belongs to
         plan_slug: String,
@@ -1891,12 +1929,12 @@ pub enum GateCommand {
         phase: String,
         /// File with the phase agent's output, or "-" to read stdin
         input: String,
-        /// File with the source content the verdict covers, used to spot a stale verdict later;
-        /// defaults to the phase's snapshot, `<plans>/<slug>.gate-source.<phase>.md`
+        /// File with the source content the verdict covers. Used to spot a stale verdict later.
+        /// Defaults to the phase's snapshot, `<plans>/<slug>.gate-source.<phase>.md`
         #[arg(long)]
         source: Option<String>,
-        /// Store a FAIL report as STUCK: the revise and re-run loop stopped because the
-        /// blocking findings made no progress. Refused for any other verdict
+        /// Store a FAIL report as STUCK. Use it when the revise and re-run loop stopped
+        /// because the blocking findings made no progress. Refused for any other verdict
         #[arg(long)]
         stuck: bool,
     },
@@ -1919,6 +1957,8 @@ pub enum GateCommand {
     ///
     /// Exits 0 only if every named phase is PASS or WARN and its source is
     /// unchanged. Exits 1 on any other verdict, a stale one, or no phases.
+    ///
+    /// Example: `playbook gate check my-plan plan adversarial test-review`
     Check {
         /// Plan slug to check
         plan_slug: String,
@@ -1926,8 +1966,8 @@ pub enum GateCommand {
         command: String,
         /// Phase names to check
         phases: Vec<String>,
-        /// File with the current source content, compared against what each verdict saw;
-        /// defaults to the shared draft, `<plans>/<slug>.gate-source.md`
+        /// File with the current source content, compared against what each verdict saw.
+        /// Defaults to the shared draft, `<plans>/<slug>.gate-source.md`
         #[arg(long)]
         source: Option<String>,
         /// Print one JSON object instead of text (exit codes stay the same)
@@ -1940,6 +1980,8 @@ pub enum GateCommand {
 #[derive(Subcommand, Debug)]
 pub enum ConfigCommand {
     /// Show a setting's value and which tier it came from
+    ///
+    /// Example: `playbook config get autoReview.enabled`
     Get {
         /// Dotted setting name, such as `autoReview.enabled`
         key: String,
@@ -1949,6 +1991,8 @@ pub enum ConfigCommand {
     /// Writes to the repo tier unless you pass `--org` or `--global`. The
     /// per-user `update.*` keys go to the global tier, and `--org` is
     /// refused for them.
+    ///
+    /// Example: `playbook config set autoReview.enabled true`
     Set {
         /// Dotted setting name, such as `autoReview.enabled`
         key: String,
@@ -1977,7 +2021,7 @@ pub enum ConfigCommand {
     ///
     /// Example: `playbook config import playbook-config.json`
     Import {
-        /// The JSON file to read, or `-` for standard input
+        /// JSON file to read, or `-` for standard input
         file: String,
     },
 }
@@ -2004,36 +2048,44 @@ pub enum DoctorCommand {
         #[arg(long)]
         json: bool,
     },
-    /// List files you edited after playbook placed them
+    /// List the manual migration findings that need you
     ///
     /// Prints one line per finding, or nothing when none is pending.
     PendingMigrations,
     /// Print the version from a plugin manifest
     ///
     /// Prints an empty line if the file is missing, unreadable, or has no version.
+    ///
+    /// Example: `playbook doctor plugin-version plugin.json`
     PluginVersion {
-        /// Plugin manifest to read
+        /// Path of the plugin manifest to read
         path: PathBuf,
     },
     /// Print the status line command from a settings.json
     ///
     /// Prints an empty line if the file is missing, unreadable, or has none.
+    ///
+    /// Example: `playbook doctor statusline-command settings.json`
     StatuslineCommand {
-        /// settings.json to read
+        /// Path of the settings.json to read
         path: PathBuf,
     },
     /// List every hook command in a settings.json, one per line
     ///
     /// Prints nothing if the file is unreadable, invalid, or has no hooks.
+    ///
+    /// Example: `playbook doctor hook-commands settings.json`
     HookCommands {
-        /// settings.json to read
+        /// Path of the settings.json to read
         path: PathBuf,
     },
     /// Count the commands wired to each named guard for one event
     ///
     /// Prints one `guard=count` line per guard.
+    ///
+    /// Example: `playbook doctor hook-commands-for-event settings.json PreToolUse rm-workspace-guard`
     HookCommandsForEvent {
-        /// settings.json to read
+        /// Path of the settings.json to read
         path: PathBuf,
         /// Event name, such as `PreToolUse`
         event: String,
@@ -2043,12 +2095,14 @@ pub enum DoctorCommand {
     /// Count hook commands that match a pattern
     ///
     /// Counts across every event, or only one if you name it.
+    ///
+    /// Example: `playbook doctor hook-commands-matching settings.json guard`
     HookCommandsMatching {
-        /// settings.json to read
+        /// Path of the settings.json to read
         path: PathBuf,
         /// Regex to look for anywhere in a command
         pattern: String,
-        /// Only count this event (default: every event)
+        /// Event to count, every event when left out
         event: Option<String>,
     },
 }
@@ -2060,8 +2114,10 @@ pub enum DocCommand {
     ///
     /// Supports pdf, docx, doc, odt, rtf, epub, pptx, ppt, odp, xlsx, ods
     /// and csv. A scanned PDF with no text layer reports that it needs OCR.
+    ///
+    /// Example: `playbook doc read report.pdf --section 2`
     Read {
-        /// The document to read
+        /// Document to read
         file: PathBuf,
         /// Print one JSON object instead of the framed text
         #[arg(long)]
@@ -2098,13 +2154,17 @@ pub enum ToolsCommand {
 /// `playbook deps` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum DepsCommand {
-    /// Keep each tool on PATH and install only the missing ones with
-    /// Homebrew, from the `brew` and `tap` lines of a Brewfile.
+    /// Install missing Brewfile tools with Homebrew
+    ///
+    /// Leaves each tool already on PATH alone, and reads the `brew` and `tap`
+    /// lines of the Brewfile.
+    ///
+    /// Example: `playbook deps ensure --builtin`
     Ensure {
-        /// Brewfile to read; defaults to `Brewfile` in the current directory.
+        /// Brewfile to read, `Brewfile` in the current directory by default
         #[arg(conflicts_with = "builtin")]
         brewfile: Option<PathBuf>,
-        /// Read the Brewfile built into this binary instead of a file.
+        /// Read the Brewfile built into this binary instead of a file
         #[arg(long)]
         builtin: bool,
     },
@@ -2147,12 +2207,15 @@ pub enum WorktreeCommand {
         dry_run: bool,
     },
     /// Remove one worktree if it has landed and is not in use
+    ///
+    /// Example: `playbook worktree remove ../.worktrees/my-repo/my-branch`
     Remove {
         /// Worktree path, as shown by `git worktree list`
         path: PathBuf,
     },
-    /// Create or remove the locked review worktrees `/playbook:quick-review`
-    /// and `/playbook:deep-review` run in
+    /// Create or remove the locked review worktrees
+    ///
+    /// `/playbook:quick-review` and `/playbook:deep-review` run in them.
     Review {
         #[command(subcommand)]
         sub: ReviewWorktreeCommand,
@@ -2162,17 +2225,25 @@ pub enum WorktreeCommand {
 /// `playbook worktree review` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum ReviewWorktreeCommand {
-    /// Fetch a PR head, add a locked detached worktree for it, and print its
-    /// absolute path on stdout (warnings go to stderr).
+    /// Add a locked worktree for a PR head and print its path
+    ///
+    /// Fetches the PR head, adds a locked detached worktree for it, and
+    /// prints its absolute path on stdout. Warnings go to stderr.
+    ///
+    /// Example: `playbook worktree review setup 12 0123456789abcdef0123456789abcdef01234567`
     Setup {
-        /// Pull request number.
+        /// PR number
         pr: String,
-        /// Head commit the review was resolved against.
+        /// Full head commit sha the review was resolved against
         head_sha: String,
     },
-    /// Remove a review worktree, even a dirty one. Always exits 0.
+    /// Remove a review worktree, even a dirty one
+    ///
+    /// Always exits 0, and skips any path outside the review worktrees.
+    ///
+    /// Example: `playbook worktree review teardown .git/review-worktrees/12-0123456`
     Teardown {
-        /// Worktree path printed by `setup`.
+        /// Worktree path printed by `setup`
         path: PathBuf,
     },
 }
@@ -2345,22 +2416,31 @@ pub enum HooksCommand {
 /// `playbook cc` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum CcCommand {
-    /// Mode of the `playbook cc` launcher: clean up and resume (no action by itself)
+    /// Clean up and resume a session
+    ///
+    /// Clones the session named for this directory with its settings overrides
+    /// stripped, then resumes the clone in `claude`, so settings, plugins and
+    /// hooks reload from the current config. Starts a fresh session when none
+    /// matches. The same as `playbook cc --clean`.
     Clean {
         /// Arguments passed through to claude
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Mode of the `playbook cc` launcher: start a fresh session (no action by itself)
+    /// Start a fresh session
+    ///
+    /// Starts a new `claude` session without resuming an earlier one, with the
+    /// current settings applied. The same as `playbook cc --fresh`.
     Fresh {
         /// Arguments passed through to claude
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Mode of the `playbook cc` launcher: resume a session as it was (no action by itself)
+    /// Resume a session as it was
     ///
-    /// The launcher handles these modes. Running this command directly
-    /// does nothing and exits 0.
+    /// Resumes a session in `claude` as it was, with no fork and its settings
+    /// overrides kept. Starts a fresh session when none matches. The same as
+    /// `playbook cc --raw`.
     Raw {
         /// Session id to resume (default: the most recent), then arguments for claude
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -2386,23 +2466,29 @@ pub enum CcCommand {
     /// Background half of the worktree launch, spawned by the launcher
     #[command(hide = true)]
     Housekeep {
+        /// Path of the repo root
         #[arg(long)]
         repo_root: String,
+        /// Path of the worktree to tidy
         #[arg(long)]
         worktree: String,
+        /// Branch of the worktree
         #[arg(long)]
         branch: String,
+        /// Skip pushing the branch
         #[arg(long)]
         no_push: bool,
     },
     /// Create a git worktree for a branch and print its path
     ///
     /// Prints only the path, so a shell can run `cd "$(playbook cc worktree my-branch)"`.
+    ///
+    /// Example: `playbook cc worktree my-branch`
     #[command(alias = "new")]
     Worktree {
         /// Branch to create the worktree for
         branch: String,
-        /// Folder (relative to the repo root) holding the `.env` to copy in
+        /// Directory (relative to the repo root) holding the `.env` to copy in
         env_base: Option<String>,
     },
 }
@@ -2731,19 +2817,19 @@ pub struct SegmentNaming {
     /// Conventional commit type for the branch name, such as feat
     #[arg(long = "type")]
     pub kind: String,
-    /// The plan slug
+    /// Plan slug
     #[arg(long)]
     pub plan_slug: String,
-    /// The Segment number
+    /// Segment number
     #[arg(long)]
     pub n: u32,
-    /// The Segment title, kebab-cased and truncated into the branch name
+    /// Segment title, kebab-cased and truncated into the branch name
     #[arg(long)]
     pub title: String,
-    /// The repository's default branch
+    /// Default branch of the repo
     #[arg(long, default_value = "main")]
     pub default_branch: String,
-    /// The repository to run in; defaults to the current directory
+    /// Repo directory to run in. Defaults to the current directory
     #[arg(long)]
     pub dir: Option<PathBuf>,
 }
@@ -2765,13 +2851,13 @@ pub enum SegmentCommand {
     Branch {
         #[command(flatten)]
         naming: SegmentNaming,
-        /// stacked, independent or single
+        /// How the plan's Segments are delivered
         #[arg(long, value_enum)]
         topology: SegmentTopology,
-        /// The previous Segment's branch, for a stacked Segment past the first
+        /// Previous Segment's branch, for a stacked Segment past the first
         #[arg(long)]
         prev_branch: Option<String>,
-        /// The land boundary: branch off the fetched origin default branch
+        /// Branch off the fetched origin default branch, at the land boundary
         #[arg(long)]
         land: bool,
     },
@@ -2782,13 +2868,13 @@ pub enum SegmentCommand {
     ///
     /// Example: `playbook segment size --base main`
     Size {
-        /// The Segment's base ref
+        /// Base ref of the Segment
         #[arg(long)]
         base: String,
         /// Changed lines at which a Segment is over budget
         #[arg(long, default_value_t = 1500)]
         limit: u64,
-        /// The repository to run in; defaults to the current directory
+        /// Repo directory to run in. Defaults to the current directory
         #[arg(long)]
         dir: Option<PathBuf>,
     },
@@ -2805,7 +2891,7 @@ pub enum SegmentCommand {
     Resplit {
         #[command(flatten)]
         naming: SegmentNaming,
-        /// The Segment's base ref
+        /// Base ref of the Segment
         #[arg(long)]
         base: String,
         /// Changed lines at which a Segment is over budget

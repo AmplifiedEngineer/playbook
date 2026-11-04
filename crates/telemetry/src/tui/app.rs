@@ -7,6 +7,7 @@
 use super::chart::Plot;
 use super::data::Data;
 use super::keys::{self, Cmd};
+use super::layout::PanelId;
 use super::panels;
 use super::sort::{
     day_rows, group_rows, pair_rows, session_day_rows, session_rows, Panel, Sort, PANELS,
@@ -133,11 +134,17 @@ pub struct App {
     pub no_color: bool,
     /// How the header icon is drawn, or off for plain text.
     pub icon: super::icon::Icon,
+    /// `PBTOP_DOTS=0` is set: charts keep their solid glyphs instead of Braille dots.
+    pub dots_off: bool,
     /// True while the filter is being typed; keys then edit `draft`.
     pub editing: bool,
     pub draft: String,
     /// The panel the keys act on.
     pub focus: Panel,
+    /// Which of the tab's slots showing `focus` has the focus, counting from
+    /// the first. Two pinned views of one panel (`spend.total` beside
+    /// `spend.model`) share a `Panel`, so `focus` alone cannot tell them apart.
+    pub focus_nth: usize,
     /// The selected row of each panel, by `Panel::index`.
     pub selected: [usize; 6],
     pub sorts: [Sort; 6],
@@ -173,7 +180,12 @@ pub enum Effect {
     Sessions,
     /// Store the layout text (empty means back to the default).
     SaveLayout(String),
+    /// Clear the stored layout and screen setup, then call `reset_done`.
+    ResetPrefs,
 }
+
+/// What `v` says on a panel pinned to one view.
+const PINNED_NOTE: &str = "This panel shows one view. Press e to add an unpinned one";
 
 impl App {
     pub fn new(range: Range) -> App {
@@ -191,9 +203,11 @@ impl App {
             depth: ColorDepth::default(),
             no_color: false,
             icon: super::icon::Icon::default(),
+            dots_off: false,
             editing: false,
             draft: String::new(),
             focus: Panel::Models,
+            focus_nth: 0,
             selected: [0; 6],
             sorts: PANELS.map(Panel::default_sort),
             area: Rect::new(0, 0, 100, 30),
@@ -261,14 +275,22 @@ impl App {
         let Some(d) = &self.data else { return 0 };
         match panel {
             Panel::Models => pair_groups(&d.models, &d.models_before).len(),
-            Panel::Projects if self.projects_view == ProjectsView::Agents => d.agents.rows.len(),
-            Panel::Projects if self.projects_view == ProjectsView::Skills => d.skills.rows.len(),
-            Panel::Projects if self.projects_view == ProjectsView::Tools => d.health.tools.len(),
-            Panel::Projects if self.projects_view == ProjectsView::Health => panels::HEALTH_ROWS,
+            Panel::Projects if self.projects_slot_view() == ProjectsView::Agents => {
+                d.agents.rows.len()
+            }
+            Panel::Projects if self.projects_slot_view() == ProjectsView::Skills => {
+                d.skills.rows.len()
+            }
+            Panel::Projects if self.projects_slot_view() == ProjectsView::Tools => {
+                d.health.tools.len()
+            }
+            Panel::Projects if self.projects_slot_view() == ProjectsView::Health => {
+                panels::HEALTH_ROWS
+            }
             Panel::Projects => d.repos.len(),
             Panel::Live => d.live.active.len(),
             Panel::Sessions => d.sessions.len(),
-            Panel::Spend if self.spend_view == SpendView::Daily => {
+            Panel::Spend if self.spend_slot_view() == SpendView::Daily => {
                 let today = crate::tz::day_of(d.now);
                 d.series.iter().filter(|p| p.day <= today).count()
             }
@@ -276,10 +298,44 @@ impl App {
         }
     }
 
+    /// The Breakdown view the keys act on: the focused slot's, or the first
+    /// Breakdown slot of the tab while another panel has the focus.
+    fn projects_slot_view(&self) -> ProjectsView {
+        let slot = if self.focus == Panel::Projects {
+            self.focus_slot()
+        } else {
+            self.tab_ids()
+                .iter()
+                .copied()
+                .find(|id| id.panel() == Some(Panel::Projects))
+        };
+        slot.and_then(PanelId::projects_view)
+            .unwrap_or(self.projects_view)
+    }
+
+    /// The Spend view of the slot `id`: its pinned view, else the switcher's.
+    fn spend_view_of(&self, id: PanelId) -> SpendView {
+        id.spend_view().unwrap_or(self.spend_view)
+    }
+
+    /// The Spend view the keys act on: the focused slot's, or the first
+    /// Spend slot of the tab while another panel has the focus.
+    fn spend_slot_view(&self) -> SpendView {
+        let slot = if self.focus == Panel::Spend {
+            self.focus_slot()
+        } else {
+            self.tab_ids()
+                .iter()
+                .copied()
+                .find(|id| id.panel() == Some(Panel::Spend))
+        };
+        slot.map_or(self.spend_view, |id| self.spend_view_of(id))
+    }
+
     /// Whether the panel is showing a table right now.
     pub fn is_table(&self, panel: Panel) -> bool {
         match panel {
-            Panel::Spend => self.spend_view == SpendView::Daily,
+            Panel::Spend => self.spend_slot_view() == SpendView::Daily,
             Panel::Tokens => false,
             _ => true,
         }
@@ -312,7 +368,7 @@ impl App {
                 .map(|p| p.key)
                 .collect(),
             Panel::Projects => {
-                let groups = match self.projects_view {
+                let groups = match self.projects_slot_view() {
                     ProjectsView::Agents => &d.agents.rows,
                     ProjectsView::Skills => &d.skills.rows,
                     ProjectsView::Projects => &d.repos,
@@ -335,7 +391,7 @@ impl App {
                 .iter()
                 .map(|s| format!("{}/{}", s.day, s.id))
                 .collect(),
-            Panel::Spend if self.spend_view == SpendView::Daily => {
+            Panel::Spend if self.spend_slot_view() == SpendView::Daily => {
                 let today = crate::tz::day_of(d.now);
                 day_rows(&d.series, today, sort)
                     .iter()
@@ -359,7 +415,7 @@ impl App {
                 .nth(at)
                 .map(|p| p.key),
             // An agent, skill, tool or figure is not a field of a usage event, so it cannot filter.
-            Panel::Projects if self.projects_view != ProjectsView::Projects => None,
+            Panel::Projects if self.projects_slot_view() != ProjectsView::Projects => None,
             Panel::Projects => group_rows(&d.repos, sort).get(at).map(|g| g.key.clone()),
             Panel::Live => session_rows(&d.live.active, sort)
                 .get(at)
@@ -399,17 +455,73 @@ impl App {
             .map_or(&[][..], |t| t.panels.as_slice())
     }
 
+    /// The panel count of each row of the selected tab, `None` for an
+    /// automatic tab.
+    pub fn tab_rows(&self) -> Option<&[u8]> {
+        self.layout
+            .tabs
+            .get(self.tab)
+            .or_else(|| self.layout.tabs.first())
+            .and_then(|t| t.rows.as_deref())
+    }
+
     /// The focusable panels of the selected tab, in the order they are drawn.
+    /// A panel drawn twice, like `spend` beside `spend.total`, counts once.
     fn tab_panels(&self) -> Vec<Panel> {
-        self.tab_ids().iter().filter_map(|id| id.panel()).collect()
+        let mut panels: Vec<Panel> = Vec::new();
+        for panel in self.tab_ids().iter().filter_map(|id| id.panel()) {
+            if !panels.contains(&panel) {
+                panels.push(panel);
+            }
+        }
+        panels
+    }
+
+    /// The slots of the selected tab that take focus, in the order they are
+    /// drawn. Unlike `tab_panels`, two views of one panel are two slots.
+    fn tab_slots(&self) -> Vec<PanelId> {
+        self.tab_ids()
+            .iter()
+            .copied()
+            .filter(|id| id.panel().is_some())
+            .collect()
+    }
+
+    /// The slot that has the focus, `None` when the tab shows no focusable panel.
+    pub fn focus_slot(&self) -> Option<PanelId> {
+        let same: Vec<PanelId> = self
+            .tab_ids()
+            .iter()
+            .copied()
+            .filter(|id| id.panel() == Some(self.focus))
+            .collect();
+        same.get(self.focus_nth).or(same.first()).copied()
+    }
+
+    /// Moves the focus to `slot` of the selected tab.
+    fn focus_on(&mut self, slot: PanelId) {
+        let panel = slot.panel();
+        self.focus_nth = self
+            .tab_slots()
+            .iter()
+            .take_while(|id| **id != slot)
+            .filter(|id| id.panel() == panel)
+            .count();
+        if let Some(panel) = panel {
+            self.focus = panel;
+        }
     }
 
     /// Keeps the focus on a panel the selected tab shows.
     fn fix_focus(&mut self) {
-        let shown = self.tab_panels();
-        if !shown.contains(&self.focus) {
-            if let Some(first) = shown.first() {
-                self.focus = *first;
+        let shown = self.tab_slots();
+        // Re-count the slot so a stale index from another tab cannot linger.
+        match self.focus_slot() {
+            Some(slot) => self.focus_on(slot),
+            None => {
+                if let Some(first) = shown.first() {
+                    self.focus_on(*first);
+                }
             }
         }
     }
@@ -422,30 +534,47 @@ impl App {
     }
 
     fn focus_next(&mut self, by: isize) {
-        let shown = self.tab_panels();
+        let shown = self.tab_slots();
         if shown.is_empty() {
             return;
         }
-        let at = shown.iter().position(|p| *p == self.focus).unwrap_or(0) as isize;
-        self.focus = shown[(at + by).rem_euclid(shown.len() as isize) as usize];
+        let at = self
+            .focus_slot()
+            .and_then(|slot| shown.iter().position(|id| *id == slot))
+            .unwrap_or(0) as isize;
+        self.focus_on(shown[(at + by).rem_euclid(shown.len() as isize) as usize]);
+    }
+
+    /// The slot whose chart the cursor keys move: the focused Spend slot when
+    /// it charts, else the first slot of the tab that charts `panel`. A Spend
+    /// slot on the daily table has no chart.
+    fn chart_slot(&self, panel: Panel) -> Option<PanelId> {
+        let charts = |id: &PanelId| {
+            id.panel() == Some(panel)
+                && (panel != Panel::Spend || self.spend_view_of(*id) != SpendView::Daily)
+        };
+        self.focus_slot()
+            .filter(charts)
+            .or_else(|| self.tab_ids().iter().copied().find(charts))
     }
 
     /// The laid out chart of a chart panel, once there is data to chart.
     fn plot(&self, panel: Panel) -> Option<Plot> {
         let data = self.data.as_ref()?;
         if data.series.is_empty()
-            || (panel == Panel::Spend && self.spend_view == SpendView::Daily)
             || self.area.width < view::MIN_WIDTH
             || self.area.height < view::MIN_HEIGHT
         {
             return None;
         }
-        let id = if panel == Panel::Tokens {
-            super::layout::PanelId::Tokens
-        } else {
-            super::layout::PanelId::Spend
-        };
-        let area = view::panel_rect(self.area, self.tab_ids(), self.layout.tabs.len() > 1, id)?;
+        let id = self.chart_slot(panel)?;
+        let area = view::panel_rect(
+            self.area,
+            self.tab_ids(),
+            self.tab_rows(),
+            self.layout.tabs.len() > 1,
+            id,
+        )?;
         Some(panels::chart_plot(area, data, panel))
     }
 
@@ -453,8 +582,12 @@ impl App {
     /// `isize::MIN` or `isize::MAX` steps. With no cursor yet it starts from today's bar.
     fn move_cursor(&mut self, by: isize) {
         let shown = self.tab_panels();
-        // The daily table owns the cursor keys while it has the focus;
-        // otherwise the chart that is shown moves the shared cursor.
+        // The daily table owns the cursor keys while it has the focus, even
+        // when another Spend slot of the tab charts; otherwise the chart that
+        // is shown moves the shared cursor.
+        if self.focus == Panel::Spend && self.is_table(Panel::Spend) {
+            return;
+        }
         let chart = if shown.contains(&Panel::Spend)
             && (!self.is_table(Panel::Spend)
                 || self.focus == Panel::Spend
@@ -516,23 +649,56 @@ impl App {
             return Effect::None;
         };
         match editor.key(code) {
-            super::editor::Outcome::Stay => Effect::None,
-            super::editor::Outcome::Cancel => {
+            super::editor::Outcome::Close => {
                 self.editor = None;
                 Effect::None
             }
-            super::editor::Outcome::Save => {
-                let edited = editor.layout.clone();
-                let tab = editor.tab;
-                self.editor = None;
-                self.use_layout(edited, tab);
-                Effect::SaveLayout(self.layout.to_text())
+            super::editor::Outcome::ResetAll => Effect::ResetPrefs,
+            super::editor::Outcome::Stay if editor.layout == self.layout => Effect::None,
+            super::editor::Outcome::Stay => {
+                let (edited, tab) = (editor.layout.clone(), editor.tab);
+                self.apply_edit(edited, tab)
             }
-            super::editor::Outcome::Reset => {
-                self.editor = None;
-                self.use_layout(super::layout::Layout::default(), 0);
-                Effect::SaveLayout(String::new())
+        }
+    }
+
+    /// Shows the edited layout behind the editor at once and asks for it to be
+    /// stored. A layout the text form cannot hold is refused in the editor.
+    fn apply_edit(&mut self, edited: super::layout::Layout, tab: usize) -> Effect {
+        let text = edited.to_text();
+        if let Err(why) = super::layout::Layout::parse(&text) {
+            if let Some(editor) = self.editor.as_mut() {
+                editor.message = Some(why);
             }
+            return Effect::None;
+        }
+        self.use_layout(edited, tab);
+        Effect::SaveLayout(text)
+    }
+
+    /// Finishes a reset once the stored layout and setup were cleared. On
+    /// success the layout, tab, range, views, sorts and filter go back to the
+    /// defaults and the editor closes. On a failure nothing changes here.
+    pub fn reset_done(&mut self, cleared: Result<(), String>) -> Effect {
+        if let Err(why) = cleared {
+            self.note = Some(format!("Reset failed: {why}"));
+            return Effect::None;
+        }
+        let range = Range::ThisWeek(self.week_start);
+        let query_changed = self.range != range || !self.filter.is_empty();
+        self.editor = None;
+        self.range = range;
+        self.filter.clear();
+        self.spend_view = SpendView::default();
+        self.projects_view = ProjectsView::default();
+        self.sorts = PANELS.map(Panel::default_sort);
+        self.selected = [0; 6];
+        self.cursor = None;
+        self.use_layout(super::layout::Layout::default(), 0);
+        if query_changed {
+            Effect::Requery
+        } else {
+            Effect::None
         }
     }
 
@@ -627,8 +793,12 @@ impl App {
             Cmd::FocusPanel => {
                 if let KeyCode::Char(c @ '1'..='6') = code {
                     let panel = PANELS[usize::from(c as u8 - b'1')];
-                    if self.tab_panels().contains(&panel) {
-                        self.focus = panel;
+                    if let Some(slot) = self
+                        .tab_slots()
+                        .into_iter()
+                        .find(|id| id.panel() == Some(panel))
+                    {
+                        self.focus_on(slot);
                     }
                 }
             }
@@ -639,7 +809,7 @@ impl App {
             Cmd::NextTab => self.go_tab(self.tab as isize + 1),
             Cmd::PrevTab => self.go_tab(self.tab as isize - 1),
             Cmd::GoTab => {
-                if let KeyCode::F(n @ 1..=9) = code {
+                if let KeyCode::F(n @ 1..=12) = code {
                     if usize::from(n) <= self.layout.tabs.len() {
                         self.go_tab(isize::from(n) - 1);
                     }
@@ -662,7 +832,21 @@ impl App {
             Cmd::PageDown => self.step(focus, 5),
             Cmd::PageUp => self.step(focus, -5),
             Cmd::NextView => match focus {
+                Panel::Projects
+                    if self
+                        .focus_slot()
+                        .is_some_and(|id| id.projects_view().is_some()) =>
+                {
+                    self.note = Some(PINNED_NOTE.to_string());
+                }
                 Panel::Projects => self.projects_view = self.projects_view.next(),
+                Panel::Spend
+                    if self
+                        .focus_slot()
+                        .is_some_and(|id| id.spend_view().is_some()) =>
+                {
+                    self.note = Some(PINNED_NOTE.to_string());
+                }
                 Panel::Spend => self.spend_view = self.spend_view.next(),
                 _ => {}
             },
@@ -1085,6 +1269,119 @@ mod tests {
 
     fn today() -> i64 {
         NOW.div_euclid(DAY)
+    }
+
+    fn two_spend_slots() -> App {
+        let mut app = charted(Range::LastDays(30), 30);
+        app.layout = crate::tui::layout::Layout::parse("A=spend.total,spend.model,tokens").unwrap();
+        app.go_tab(0);
+        app.focus = Panel::Spend;
+        app
+    }
+
+    #[test]
+    fn tab_walks_each_slot_when_two_pinned_views_share_a_panel() {
+        // Arrange
+        let mut app = two_spend_slots();
+        let mut seen = vec![app.focus_slot()];
+
+        // Act
+        for _ in 0..3 {
+            app.key(press(KeyCode::Tab));
+            seen.push(app.focus_slot());
+        }
+
+        // Assert
+        use crate::tui::layout::PanelId::{SpendModel, SpendTotal, Tokens};
+        assert_eq!(seen, [SpendTotal, SpendModel, Tokens, SpendTotal].map(Some));
+        assert_eq!(app.focus, Panel::Spend);
+    }
+
+    #[test]
+    fn v_on_a_pinned_spend_view_keeps_the_view_and_says_why() {
+        // Arrange
+        let mut app = two_spend_slots();
+        app.key(press(KeyCode::Tab));
+        let before = app.spend_view;
+
+        // Act
+        app.key(press(KeyCode::Char('v')));
+
+        // Assert
+        assert_eq!(app.spend_view, before);
+        assert!(app.note.as_deref().is_some_and(|n| n.contains("one view")));
+    }
+
+    #[test]
+    fn the_daily_table_owns_the_row_and_cursor_keys_only_while_its_slot_has_the_focus() {
+        // Arrange
+        let mut app = charted(Range::LastDays(30), 30);
+        app.layout = crate::tui::layout::Layout::parse("A=spend.daily,spend.total").unwrap();
+        app.go_tab(0);
+        app.focus = Panel::Spend;
+        let on_table = app.is_table(Panel::Spend);
+        app.key(press(KeyCode::Left));
+        let cursor_on_table = app.cursor;
+
+        // Act
+        app.key(press(KeyCode::Tab));
+        app.key(press(KeyCode::Left));
+
+        // Assert
+        assert!(on_table);
+        assert_eq!(cursor_on_table, None);
+        assert!(!app.is_table(Panel::Spend));
+        assert_eq!(app.cursor, Some(today() - 1));
+    }
+
+    #[test]
+    fn row_counts_and_the_v_key_follow_the_focused_pinned_breakdown_view() {
+        // Arrange
+        let mut app = charted(Range::LastDays(30), 30);
+        app.layout =
+            crate::tui::layout::Layout::parse("A=breakdown.projects,breakdown.health").unwrap();
+        app.go_tab(0);
+        app.focus = Panel::Projects;
+        let projects_rows = app.rows(Panel::Projects);
+
+        // Act
+        app.key(press(KeyCode::Tab));
+        let health_rows = app.rows(Panel::Projects);
+        app.key(press(KeyCode::Char('v')));
+
+        // Assert
+        assert_eq!(health_rows, panels::HEALTH_ROWS);
+        assert_ne!(projects_rows, health_rows);
+        assert_eq!(app.projects_view, ProjectsView::default());
+        assert!(app.note.as_deref().is_some_and(|n| n.contains("one view")));
+    }
+
+    #[test]
+    fn the_number_key_focuses_the_first_slot_of_its_panel() {
+        // Arrange
+        let mut app = two_spend_slots();
+        app.key(press(KeyCode::Tab));
+
+        // Act
+        app.key(press(KeyCode::Char('1')));
+
+        // Assert
+        assert_eq!(
+            app.focus_slot(),
+            Some(crate::tui::layout::PanelId::SpendTotal)
+        );
+    }
+
+    #[test]
+    fn the_chart_cursor_moves_on_a_tab_that_draws_spend_only_as_a_pinned_word() {
+        let mut app = charted(Range::LastDays(30), 30);
+        app.layout = crate::tui::layout::Layout::parse("A=spend.total,tokens").unwrap();
+        app.go_tab(0);
+        app.focus = Panel::Spend;
+
+        app.key(press(KeyCode::Left));
+
+        assert_eq!(app.cursor, Some(today() - 1));
     }
 
     #[test]

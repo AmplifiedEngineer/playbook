@@ -218,7 +218,7 @@ pub(crate) const META: &[Meta] = &[
         .purpose("Change a setting; protected keys such as `pr.rules.*` are the user's"),
     free("deliver").for_agents(),
     user("deps").for_users(),
-    user("deps ensure").purpose("Install the missing tools of a Brewfile with Homebrew"),
+    user("deps ensure"),
     ro("doc")
         .purpose("Read a PDF or Office file as text with the bundled converter")
         .for_agents(),
@@ -254,9 +254,7 @@ pub(crate) const META: &[Meta] = &[
         .purpose("Append one term to the repo's `GLOSSARY.md`")
         .for_agents(),
     free("glossary add"),
-    free("handoff")
-        .purpose("Save and show the notes that carry a session to the next")
-        .for_agents(),
+    free("handoff").for_agents(),
     ro("handoff check"),
     ro("handoff facts"),
     free("handoff save"),
@@ -286,7 +284,7 @@ pub(crate) const META: &[Meta] = &[
     user("mode auto"),
     ro("mode status"),
     free("path")
-        .purpose("Print a playbook storage folder of this repo, or the plugin folder")
+        .purpose("Print a playbook storage directory of this repo, or the plugin directory")
         .for_agents(),
     free("plan")
         .purpose("Plan helpers: checkpoints, Work Unit briefs and scratch cleanup")
@@ -355,9 +353,8 @@ pub(crate) const META: &[Meta] = &[
     ro("version").for_users(),
     free("worktree").for_agents(),
     free("worktree remove"),
-    free("worktree review").purpose("Create or remove the locked worktrees a review runs in"),
-    free("worktree review setup")
-        .purpose("Fetch a PR head into a locked worktree and print its path"),
+    free("worktree review"),
+    free("worktree review setup"),
     free("worktree review teardown"),
     free("worktree sweep"),
 ];

@@ -1002,9 +1002,16 @@ fn real_main() {
             } => match gate_source(source, &plan_slug, Some(&phase)).and_then(|source| {
                 gate::record::run_with(&plan_slug, &command, &phase, &input, &source, stuck)
             }) {
-                Ok(round) => println!(
-                    "gate record: recorded {phase} verdict for {plan_slug} (round {round})"
-                ),
+                Ok(round) => {
+                    let slug = common::repo_slug();
+                    let cap = gate::max_rounds(
+                        &common::home_dir(),
+                        (!slug.is_empty()).then_some(slug.as_str()),
+                    );
+                    println!(
+                        "gate record: recorded {phase} verdict for {plan_slug} (round {round} of {cap})"
+                    );
+                }
                 Err(err) => {
                     eprintln!("gate record: {err}");
                     std::process::exit(1);
@@ -2096,7 +2103,7 @@ fn real_main() {
                 }
                 None => {
                     eprintln!(
-                        "playbook path: could not resolve the storage folder; this repo needs \
+                        "playbook path: could not resolve the storage directory; this repo needs \
                      a git 'origin' remote, refusing to fall back to a repo-local path"
                     );
                     std::process::exit(1);

@@ -5,11 +5,13 @@
 //! cases ported from the retired shell suite, and a determinism run over
 //! every fixture.
 
+mod common;
+
+use common::{bin, have, run, strip_ansi, Scratch};
 use playbook::common::par;
 use playbook::statusline::{render, Env};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 const GREEN: &str = "\x1b[38;2;166;227;161m";
 const YELLOW: &str = "\x1b[38;2;249;226;175m";
@@ -17,80 +19,6 @@ const RED: &str = "\x1b[38;2;243;139;168m";
 const DIM: &str = "\x1b[38;2;127;132;156m";
 const ORANGE: &str = "\x1b[38;2;250;179;135m";
 const RESET: &str = "\x1b[0m";
-
-static N: AtomicU64 = AtomicU64::new(0);
-
-/// A throwaway directory removed on drop.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new() -> Self {
-        let n = N.fetch_add(1, Ordering::Relaxed);
-        let p =
-            std::env::temp_dir().join(format!("statusline-{}-{n}", playbook::testing::run_id()));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        Scratch(p)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ =
-            std::fs::set_permissions(&self.0, std::os::unix::fs::PermissionsExt::from_mode(0o700));
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn bin() -> &'static str {
-    env!("CARGO_BIN_EXE_playbook")
-}
-
-/// Whether `tool` exists on the PATH the runs get, so a skip matches what would run.
-fn have(tool: &str) -> bool {
-    ["/usr/bin", "/bin"]
-        .iter()
-        .any(|d| Path::new(d).join(tool).is_file())
-}
-
-/// A `gh` that always fails, first on PATH, so no run touches the network.
-fn stub_dir(root: &Path) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-    let dir = root.join("stub");
-    std::fs::create_dir_all(&dir).unwrap();
-    let gh = dir.join("gh");
-    std::fs::write(&gh, "#!/bin/sh\nexit 1\n").unwrap();
-    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
-    dir
-}
-
-fn path_for(root: &Path) -> String {
-    let bin_dir = Path::new(bin()).parent().unwrap().display().to_string();
-    format!("{}:{bin_dir}:/usr/bin:/bin", stub_dir(root).display())
-}
-
-fn run(mut cmd: Command, home: &Path, root: &Path, payload: &str, env: &[(&str, &str)]) -> Vec<u8> {
-    use std::io::Write;
-    cmd.env_clear()
-        .env("HOME", home)
-        .env("PWD", home)
-        .env("PATH", path_for(root))
-        .env("STATUSLINE_PR_CACHE_TTL", "9999999")
-        .env("STATUSLINE_CI_CACHE_TTL", "9999999")
-        .envs(env.iter().copied())
-        .current_dir(home)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    let mut child = cmd.spawn().unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(payload.as_bytes())
-        .unwrap();
-    child.wait_with_output().unwrap().stdout
-}
 
 fn rust(home: &Path, root: &Path, payload: &str, env: &[(&str, &str)]) -> Vec<u8> {
     let mut cmd = Command::new(bin());
@@ -441,11 +369,22 @@ fn the_jira_ticket_links_only_when_a_base_url_is_configured() {
 // ---- time-dependent segments, with an injected clock -----------------------
 
 fn env_for(home: &Path) -> Env {
-    Env::from_pairs([
-        ("HOME", home.to_str().unwrap()),
-        ("PWD", home.to_str().unwrap()),
+    env_with_columns(home, None)
+}
+
+/// A clean environment rooted at `home`, with COLUMNS set when given.
+fn env_with_columns(home: &Path, columns: Option<&str>) -> Env {
+    let home = home.to_str().unwrap();
+    let mut pairs = vec![
+        ("HOME", home),
+        ("CLAUDE_CONFIG_DIR", home),
+        ("PWD", home),
         ("PATH", ""),
-    ])
+    ];
+    if let Some(c) = columns {
+        pairs.push(("COLUMNS", c));
+    }
+    Env::from_pairs(pairs)
 }
 
 #[test]
@@ -928,4 +867,165 @@ fn a_history_file_that_cannot_be_appended_to_still_exits_zero_and_is_left_alone(
 
     assert!(status.success(), "{status:?}");
     assert!(can_write || std::fs::read_to_string(&file).unwrap() == before);
+}
+
+// ---- line 4: budget projections --------------------------------------------
+
+const BUDGET_NOW: i64 = 1_000_000;
+const DAY_SECS: i64 = 86_400;
+const SEVEN_DAYS_SECS: i64 = 7 * DAY_SECS;
+
+const FIVE_HOURS_SECS: i64 = 5 * 3600;
+
+/// The colour-stripped lines for the given `rate_limits` members at a fixed
+/// clock.
+fn budget_lines(members: &str, columns: Option<&str>) -> Vec<String> {
+    let s = Scratch::new();
+    let body = payload(&s.0, &format!(r#""rate_limits":{{{members}}}"#));
+    let out = render(&body, &env_with_columns(&s.0, columns), BUDGET_NOW);
+    strip_ansi(&text(&out))
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+/// A window member that is `used` percent spent after `elapsed` seconds of a
+/// window that is `length` seconds long.
+fn window(key: &str, used: f64, elapsed: i64, length: i64) -> String {
+    let resets_at = BUDGET_NOW + length - elapsed;
+    format!(r#""{key}":{{"used_percentage":{used},"resets_at":{resets_at}}}"#)
+}
+
+/// The colour-stripped lines for a 7 day window at `used` percent that has run
+/// for `elapsed` seconds of its seven days, at a fixed clock.
+fn seven_day_lines(used: f64, elapsed: i64, columns: Option<&str>) -> Vec<String> {
+    budget_lines(
+        &window("seven_day", used, elapsed, SEVEN_DAYS_SECS),
+        columns,
+    )
+}
+
+/// The same for a 5 hour window.
+fn five_hour_lines(used: f64, elapsed: i64) -> Vec<String> {
+    budget_lines(&window("five_hour", used, elapsed, FIVE_HOURS_SECS), None)
+}
+
+/// Both windows alarming: 7d cap in 2d3h and 5h cap in 1h20m.
+fn both_alarm_lines(columns: Option<&str>) -> Vec<String> {
+    let members = format!(
+        "{},{}",
+        window("seven_day", 60.0, 275_400, SEVEN_DAYS_SECS),
+        window("five_hour", 60.0, 2 * 3600, FIVE_HOURS_SECS),
+    );
+    budget_lines(&members, columns)
+}
+
+#[test]
+fn a_reached_seven_day_cap_adds_a_fourth_line_and_leaves_line_three_alone() {
+    let lines = seven_day_lines(100.0, 3 * DAY_SECS, None);
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert_eq!(lines[1], "Rate 7d: 100%");
+    assert_eq!(lines[2], "! 7d CAP HIT");
+}
+
+#[test]
+fn a_seven_day_pace_past_the_cap_names_the_time_left() {
+    // 60 percent after 3 of 7 days is 20 percent a day, so 40 left lasts 2 days.
+    let lines = seven_day_lines(60.0, 3 * DAY_SECS, None);
+    assert_eq!(lines.last().unwrap(), "! 7d cap in 2d", "{lines:?}");
+    assert_eq!(lines[1], "Rate 7d: 60%");
+}
+
+#[test]
+fn a_seven_day_window_within_the_cap_adds_no_line() {
+    // Only the first line prints, so a fourth would show as a longer output.
+    for (used, elapsed) in [(0.0, 3 * DAY_SECS), (49.9, 3 * DAY_SECS + DAY_SECS / 2)] {
+        let lines = seven_day_lines(used, elapsed, None);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+    }
+}
+
+#[test]
+fn a_seven_day_window_already_reset_adds_no_line() {
+    let s = Scratch::new();
+    let body = payload(
+        &s.0,
+        r#""rate_limits":{"seven_day":{"used_percentage":100,"resets_at":1000}}"#,
+    );
+    let out = strip_ansi(&text(&render(&body, &env_for(&s.0), BUDGET_NOW)));
+    assert_eq!(out.lines().count(), 2, "{out:?}");
+}
+
+#[test]
+fn expired_or_undated_windows_keep_the_three_line_layout() {
+    // In FULL the 5 hour window reset long before the clock and the 7 day
+    // window has no reset time, so neither can make a budget line.
+    let s = Scratch::new();
+    let body = payload(&s.0, FULL);
+    let out = strip_ansi(&text(&render(&body, &env_for(&s.0), BUDGET_NOW)));
+    assert_eq!(out.lines().count(), 3, "{out:?}");
+}
+
+#[test]
+fn the_seven_day_alarm_survives_any_terminal_width() {
+    for columns in [None, Some("5"), Some("not-a-number")] {
+        let lines = seven_day_lines(100.0, 3 * DAY_SECS, columns);
+        assert_eq!(lines.last().unwrap(), "! 7d CAP HIT", "{columns:?}");
+    }
+}
+
+#[test]
+fn the_budget_line_is_red_and_never_relies_on_colour_alone() {
+    let s = Scratch::new();
+    let body = payload(
+        &s.0,
+        &format!(
+            r#""rate_limits":{{"seven_day":{{"used_percentage":100,"resets_at":{}}}}}"#,
+            BUDGET_NOW + DAY_SECS
+        ),
+    );
+    let out = text(&render(&body, &env_for(&s.0), BUDGET_NOW));
+    assert!(
+        out.ends_with(&format!("{RED}! 7d CAP HIT{RESET}\n")),
+        "{out:?}"
+    );
+}
+
+#[test]
+fn a_reached_five_hour_cap_adds_a_fourth_line() {
+    let lines = five_hour_lines(100.0, 3600);
+    assert_eq!(lines.last().unwrap(), "! 5h CAP HIT", "{lines:?}");
+}
+
+#[test]
+fn a_five_hour_pace_past_the_cap_names_the_time_left() {
+    // 60 percent after 2 hours is 30 percent an hour, so 40 left lasts 1h20m.
+    let lines = five_hour_lines(60.0, 2 * 3600);
+    assert_eq!(lines.last().unwrap(), "! 5h cap in 1h20m", "{lines:?}");
+}
+
+#[test]
+fn a_five_hour_window_under_an_hour_in_adds_no_line() {
+    let lines = five_hour_lines(60.0, 1800);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+}
+
+#[test]
+fn both_alarms_share_line_four_with_the_seven_day_first() {
+    let lines = both_alarm_lines(None);
+    assert_eq!(
+        lines.last().unwrap(),
+        "! 7d cap in 2d3h | ! 5h cap in 1h20m",
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn the_five_hour_alarm_is_dropped_whole_when_the_line_is_too_narrow() {
+    // The joined line needs 36 columns; the 5h alarm has no short form.
+    let both = "! 7d cap in 2d3h | ! 5h cap in 1h20m";
+    let lines = both_alarm_lines(Some("36"));
+    assert_eq!(lines.last().unwrap(), both, "{lines:?}");
+    let lines = both_alarm_lines(Some("35"));
+    assert_eq!(lines.last().unwrap(), "! 7d cap in 2d3h", "{lines:?}");
 }

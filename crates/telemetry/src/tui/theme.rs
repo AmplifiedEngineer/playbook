@@ -4,11 +4,13 @@
 //! Colors for the terminal view. `t` cycles the themes. `Mono` uses no color
 //! at all, for terminals and pipes that cannot show it.
 //!
-//! The `default` theme is the default. Its values follow the look of a classic
-//! dark system monitor, adapted from a third party theme that NOTICE credits,
-//! mapped to the roles this view has: a two digit hex is a gray (`#cc` is 204,
-//! 204, 204), and a graph or meter colors a value from a start, mid and end
-//! color. See NOTICE.
+//! The `default` theme is the default. It uses the Okabe and Ito (2008)
+//! color universal design palette on black, so it stays readable with common
+//! color vision differences. Severity is not a green to red gradient: value
+//! ramps run one hue from dark to light, and state is also shown by glyphs.
+//! A two digit hex is a gray (`#cc` is 204, 204, 204), and a graph or meter
+//! colors a value from a start, mid and end color. The palette is a public
+//! scientific one, cited here and not copied from other software.
 
 use ratatui::style::Color;
 
@@ -112,6 +114,8 @@ pub struct Palette {
     pub avail: Fill,
     pub process: Fill,
     pub live: Ink,
+    /// The middle stop of a green, yellow, red ramp; `warn` is orange here.
+    pub caution: Ink,
     pub warn: Ink,
     pub error: Ink,
     /// One color per series, for what is told apart by name (a model).
@@ -128,6 +132,10 @@ const fn gray(v: u8) -> Rgb {
 const fn hex(rgb: u32) -> Rgb {
     Rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
 }
+
+/// Okabe and Ito (2008) sky blue and orange, the two hues of the value ramps.
+const SKY: Rgb = hex(0x56b4e9);
+const ORANGE: Rgb = hex(0xe69f00);
 
 const fn ink(rgb: Rgb) -> Ink {
     Ink::Rgb(rgb)
@@ -166,34 +174,35 @@ impl Theme {
                 bg: ink(gray(0x00)),
                 fg: ink(gray(0xcc)),
                 title: ink(gray(0xee)),
-                hi: ink(hex(0xb54040)),
-                sel_bg: ink(hex(0x6a2f2f)),
-                sel_fg: ink(gray(0xee)),
-                inactive: ink(gray(0x40)),
-                graph_text: ink(gray(0x60)),
-                meter_bg: ink(gray(0x40)),
-                div_line: ink(gray(0x30)),
-                box_cpu: ink(hex(0x556d59)),
-                box_mem: ink(hex(0x6c6c4b)),
-                box_net: ink(hex(0x5c588d)),
-                box_proc: ink(hex(0x805252)),
-                cpu: Fill::Gradient(hex(0x77ca9b), hex(0xcbc06c), hex(0xdc4c4c)),
-                down: Fill::Gradient(hex(0x291f75), hex(0x4f43a3), hex(0xb0a9de)),
-                cached: Fill::Gradient(hex(0x163350), hex(0x74e6fc), hex(0x26c5ff)),
-                avail: Fill::Gradient(hex(0x4e3f0e), hex(0xffd77a), hex(0xffb814)),
-                process: Fill::Gradient(hex(0x80d0a3), hex(0xdcd179), hex(0xd45454)),
-                live: ink(hex(0x0de756)),
-                warn: ink(hex(0xffb814)),
-                error: ink(hex(0xff4769)),
+                hi: ink(SKY),
+                sel_bg: ink(hex(0x1f4e79)),
+                sel_fg: ink(gray(0xff)),
+                inactive: ink(gray(0x76)),
+                graph_text: ink(gray(0x90)),
+                meter_bg: ink(gray(0x6b)),
+                div_line: ink(gray(0x6b)),
+                box_cpu: ink(hex(0x3f89b8)),
+                box_mem: ink(hex(0xb07d00)),
+                box_net: ink(hex(0xa0678a)),
+                box_proc: ink(gray(0x8a)),
+                cpu: Fill::Gradient(hex(0x1b6fb5), SKY, hex(0xb8e2f8)),
+                down: Fill::Gradient(hex(0x1b6fb5), hex(0x3f89b8), hex(0xb8e2f8)),
+                cached: Fill::Gradient(hex(0x1b6fb5), SKY, hex(0xb8e2f8)),
+                avail: Fill::Gradient(hex(0xb07d00), ORANGE, hex(0xffd27a)),
+                process: Fill::Gradient(hex(0xb07d00), ORANGE, hex(0xffd27a)),
+                live: ink(hex(0x009e73)),
+                caution: ink(hex(0xf0e442)),
+                warn: ink(ORANGE),
+                error: ink(hex(0xd55e00)),
                 series: [
-                    ink(hex(0x5fb3ff)),
-                    ink(hex(0xffb814)),
-                    ink(hex(0xd36bd8)),
-                    ink(hex(0x0de756)),
-                    ink(hex(0xff7a59)),
-                    ink(hex(0x74e6fc)),
-                    ink(hex(0xb0a9de)),
-                    ink(hex(0xcbc06c)),
+                    ink(SKY),
+                    ink(ORANGE),
+                    ink(hex(0xcc79a7)),
+                    ink(hex(0x009e73)),
+                    ink(hex(0xf0e442)),
+                    ink(hex(0x1b6fb5)),
+                    ink(hex(0xd55e00)),
+                    ink(gray(0xbb)),
                 ],
             },
             Theme::Dark => Palette {
@@ -219,6 +228,7 @@ impl Theme {
                 avail: Fill::Flat(Ink::Named(Color::Cyan)),
                 process: Fill::Flat(Ink::Default),
                 live: Ink::Named(Color::Green),
+                caution: Ink::Named(Color::Yellow),
                 warn: Ink::Named(Color::Yellow),
                 error: Ink::Named(Color::Red),
                 series: [
@@ -242,6 +252,7 @@ impl Theme {
                 cpu: Fill::Flat(Ink::Named(Color::Blue)),
                 cached: Fill::Flat(Ink::Named(Color::Blue)),
                 avail: Fill::Flat(Ink::Named(Color::Blue)),
+                caution: ink(Rgb(160, 100, 0)),
                 warn: ink(Rgb(160, 100, 0)),
                 series: [
                     Ink::Named(Color::Blue),
@@ -269,6 +280,7 @@ impl Theme {
                 cached: Fill::Flat(Ink::Default),
                 avail: Fill::Flat(Ink::Default),
                 live: Ink::Default,
+                caution: Ink::Default,
                 warn: Ink::Default,
                 error: Ink::Default,
                 series: [Ink::Default; SERIES],
@@ -394,15 +406,26 @@ mod tests {
     #[test]
     fn the_default_theme_uses_its_documented_values() {
         let p = Theme::Standard.palette(ColorDepth::True);
-        assert_eq!(p.color(p.bg), Color::Rgb(0, 0, 0));
-        assert_eq!(p.color(p.fg), Color::Rgb(0xcc, 0xcc, 0xcc));
-        assert_eq!(p.color(p.title), Color::Rgb(0xee, 0xee, 0xee));
-        assert_eq!(p.color(p.hi), Color::Rgb(0xb5, 0x40, 0x40));
-        assert_eq!(p.color(p.sel_bg), Color::Rgb(0x6a, 0x2f, 0x2f));
-        assert_eq!(p.color(p.box_cpu), Color::Rgb(0x55, 0x6d, 0x59));
-        assert_eq!(p.color(p.box_mem), Color::Rgb(0x6c, 0x6c, 0x4b));
-        assert_eq!(p.color(p.box_net), Color::Rgb(0x5c, 0x58, 0x8d));
-        assert_eq!(p.color(p.box_proc), Color::Rgb(0x80, 0x52, 0x52));
+        let rgb = |ink| p.color(ink);
+        assert_eq!(rgb(p.bg), Color::Rgb(0, 0, 0));
+        assert_eq!(rgb(p.fg), Color::Rgb(0xcc, 0xcc, 0xcc));
+        assert_eq!(rgb(p.title), Color::Rgb(0xee, 0xee, 0xee));
+        assert_eq!(rgb(p.hi), Color::Rgb(0x56, 0xb4, 0xe9));
+        assert_eq!(rgb(p.sel_bg), Color::Rgb(0x1f, 0x4e, 0x79));
+        assert_eq!(rgb(p.sel_fg), Color::Rgb(0xff, 0xff, 0xff));
+        assert_eq!(rgb(p.inactive), Color::Rgb(0x76, 0x76, 0x76));
+        assert_eq!(rgb(p.graph_text), Color::Rgb(0x90, 0x90, 0x90));
+        assert_eq!(rgb(p.warn), Color::Rgb(0xe6, 0x9f, 0x00));
+        assert_eq!(rgb(p.error), Color::Rgb(0xd5, 0x5e, 0x00));
+        assert_eq!(rgb(p.live), Color::Rgb(0x00, 0x9e, 0x73));
+        assert_eq!(rgb(p.div_line), Color::Rgb(0x6b, 0x6b, 0x6b));
+        assert_eq!(rgb(p.meter_bg), Color::Rgb(0x6b, 0x6b, 0x6b));
+        let g = |a, b, c| Fill::Gradient(hex(a), hex(b), hex(c));
+        assert_eq!(p.cpu, g(0x1b6fb5, 0x56b4e9, 0xb8e2f8));
+        assert_eq!(p.down, g(0x1b6fb5, 0x3f89b8, 0xb8e2f8));
+        assert_eq!(p.cached, g(0x1b6fb5, 0x56b4e9, 0xb8e2f8));
+        assert_eq!(p.avail, g(0xb07d00, 0xe69f00, 0xffd27a));
+        assert_eq!(p.process, g(0xb07d00, 0xe69f00, 0xffd27a));
     }
 
     #[test]
@@ -447,32 +470,134 @@ mod tests {
         assert_eq!(p.graded(p.process, 90.0), Color::Reset);
     }
 
-    /// The default theme's roles equal btop's built-in default theme
-    /// (`Default_theme` in btop's `src/btop_theme.cpp`, aristocratos/btop).
-    /// A two digit hex there is a gray.
-    #[test]
-    fn default_theme_matches_btop_default() {
-        let p = Theme::Standard.palette(ColorDepth::True);
-        let ink = |g: Rgb| Ink::Rgb(g);
-        assert_eq!(p.bg, ink(gray(0x00)));
-        assert_eq!(p.fg, ink(gray(0xcc)));
-        assert_eq!(p.title, ink(gray(0xee)));
-        assert_eq!(p.hi, ink(hex(0xb54040)));
-        assert_eq!(p.sel_bg, ink(hex(0x6a2f2f)));
-        assert_eq!(p.sel_fg, ink(gray(0xee)));
-        assert_eq!(p.inactive, ink(gray(0x40)));
-        assert_eq!(p.graph_text, ink(gray(0x60)));
-        assert_eq!(p.meter_bg, ink(gray(0x40)));
-        assert_eq!(p.div_line, ink(gray(0x30)));
-        assert_eq!(p.box_cpu, ink(hex(0x556d59)));
-        assert_eq!(p.box_mem, ink(hex(0x6c6c4b)));
-        assert_eq!(p.box_net, ink(hex(0x5c588d)));
-        assert_eq!(p.box_proc, ink(hex(0x805252)));
-        let g = |a, b, c| Fill::Gradient(hex(a), hex(b), hex(c));
-        assert_eq!(p.cpu, g(0x77ca9b, 0xcbc06c, 0xdc4c4c));
-        assert_eq!(p.down, g(0x291f75, 0x4f43a3, 0xb0a9de));
-        assert_eq!(p.cached, g(0x163350, 0x74e6fc, 0x26c5ff));
-        assert_eq!(p.avail, g(0x4e3f0e, 0xffd77a, 0xffb814));
-        assert_eq!(p.process, g(0x80d0a3, 0xdcd179, 0xd45454));
+    /// Contrast and color-blind checks. The method is WCAG 2.x contrast from
+    /// sRGB relative luminance, and the Machado et al. (2009) simulation at
+    /// full severity in linear RGB, compared with CIE76 delta E in CIELAB.
+    mod accessibility {
+        use super::*;
+        use crate::tui::a11y::{confusable, contrast, rgb_of, NON_TEXT_CONTRAST, TEXT_CONTRAST};
+
+        fn standard() -> Palette {
+            Theme::Standard.palette(ColorDepth::True)
+        }
+
+        fn series() -> Vec<Rgb> {
+            standard().series.iter().map(|i| rgb_of(*i)).collect()
+        }
+
+        #[test]
+        fn text_roles_meet_the_text_contrast_on_the_ground() {
+            let p = standard();
+            let bg = rgb_of(p.bg);
+            for (name, ink) in [
+                ("fg", p.fg),
+                ("title", p.title),
+                ("graph_text", p.graph_text),
+                ("inactive", p.inactive),
+                ("hi", p.hi),
+                ("warn", p.warn),
+                ("error", p.error),
+                ("live", p.live),
+            ] {
+                let ratio = contrast(rgb_of(ink), bg);
+                assert!(ratio >= TEXT_CONTRAST, "{name} is {ratio:.2}");
+            }
+        }
+
+        #[test]
+        fn the_selected_row_meets_the_text_contrast() {
+            let p = standard();
+            let ratio = contrast(rgb_of(p.sel_fg), rgb_of(p.sel_bg));
+            assert!(ratio >= TEXT_CONTRAST, "selection is {ratio:.2}");
+        }
+
+        #[test]
+        fn lines_boxes_and_series_meet_the_non_text_contrast() {
+            let p = standard();
+            let bg = rgb_of(p.bg);
+            let mut shapes = vec![p.div_line, p.meter_bg, p.box_cpu, p.box_mem, p.box_net];
+            shapes.push(p.box_proc);
+            shapes.extend(p.series);
+            for ink in shapes {
+                let ratio = contrast(rgb_of(ink), bg);
+                assert!(ratio >= NON_TEXT_CONTRAST, "{ink:?} is {ratio:.2}");
+            }
+            for fill in [p.cpu, p.down, p.cached, p.avail, p.process] {
+                let Fill::Gradient(a, b, c) = fill else {
+                    panic!("the Standard theme uses gradients, got {fill:?}");
+                };
+                for stop in [a, b, c] {
+                    let ratio = contrast(stop, bg);
+                    assert!(ratio >= NON_TEXT_CONTRAST, "{stop:?} is {ratio:.2}");
+                }
+            }
+        }
+
+        /// Costs are drawn as text in the `process` color, so its start must
+        /// read as text.
+        #[test]
+        fn the_cost_text_ramp_starts_readable() {
+            let Fill::Gradient(start, _, _) = standard().process else {
+                panic!("the Standard theme uses gradients");
+            };
+            assert!(contrast(start, Rgb(0, 0, 0)) >= TEXT_CONTRAST);
+        }
+
+        #[test]
+        fn the_state_colors_stay_apart_under_each_color_vision_type() {
+            let p = standard();
+            let states = [rgb_of(p.warn), rgb_of(p.error), rgb_of(p.live)];
+            assert_eq!(confusable(&states), None);
+        }
+
+        #[test]
+        fn text_and_shape_roles_hold_up_after_reduction_to_256_colors() {
+            let p = Theme::Standard.palette(ColorDepth::Ansi256);
+            let bg = Rgb(0, 0, 0);
+            let back = |ink: Ink| match p.color(ink) {
+                Color::Indexed(i) => indexed_rgb(i),
+                other => panic!("expected an indexed color, got {other:?}"),
+            };
+            for ink in [
+                p.fg,
+                p.graph_text,
+                p.inactive,
+                p.hi,
+                p.warn,
+                p.error,
+                p.live,
+            ] {
+                assert!(contrast(back(ink), bg) >= TEXT_CONTRAST, "{ink:?}");
+            }
+            for ink in [p.div_line, p.box_cpu, p.box_mem, p.box_net, p.box_proc] {
+                assert!(contrast(back(ink), bg) >= NON_TEXT_CONTRAST, "{ink:?}");
+            }
+        }
+
+        /// The xterm value of a 256 color index of 16 or more.
+        fn indexed_rgb(i: u8) -> Rgb {
+            if i >= 232 {
+                return gray(8 + 10 * (i - 232));
+            }
+            let level = |n: u8| if n == 0 { 0 } else { 55 + 40 * n };
+            let n = i - 16;
+            Rgb(level(n / 36), level(n / 6 % 6), level(n % 6))
+        }
+
+        #[test]
+        fn every_series_pair_stays_apart_under_each_color_vision_type() {
+            assert_eq!(confusable(&series()), None);
+        }
+
+        #[test]
+        fn the_checker_flags_two_near_grays() {
+            let grays = [gray(0x77), gray(0x7a)];
+            assert!(confusable(&grays).is_some());
+        }
+
+        #[test]
+        fn the_checker_rejects_a_low_contrast_gray() {
+            assert!(contrast(gray(0x60), Rgb(0, 0, 0)) < TEXT_CONTRAST);
+        }
     }
 }

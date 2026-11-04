@@ -358,7 +358,7 @@ The command copies the playbook skills and commands into `~/.agents/skills/playb
 
 It never touches a folder it did not write, or one you edited. Those are left as they are and listed in the output. When the plugin updates, playbook adds, updates and removes its own folders to match, and only for an agent you already synced. A folder you deleted is not written again. To opt out, do not run the command. `playbook uninstall` removes the folders that `skills sync` wrote and you did not edit.
 
-Codex has no subagents and no `AskUserQuestion` tool, so a command step that needs one is done by the agent itself or asked in chat. A rendered skill over 8,000 bytes is written as a short stub that tells the agent to read `references/playbook-body.md`. Whether a running Codex follows that line has not been verified. See [Codex skills](../internals/15-codex-skills.md).
+Codex has subagents, but playbook does not render its agents for Codex, because Codex cannot limit a subagent's tools. It also has no `AskUserQuestion` tool. When a command step needs an agent or a question, the Codex agent does the step itself or asks in chat. See the [Codex support matrix](../reference/codex-support.md). A rendered skill over 8,000 bytes is written as a short stub that tells the agent to read `references/playbook-body.md`. Whether a running Codex follows that line has not been verified. See [Codex skills](../internals/15-codex-skills.md).
 
 ## Settings merge
 

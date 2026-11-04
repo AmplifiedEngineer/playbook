@@ -11,6 +11,7 @@
 
 use super::data::{Data, LimitsView};
 use super::fmt::{fit, money};
+use super::icon::{Cue, Icon};
 use super::theme::{Ink, Palette};
 use crate::aggregate::date_key;
 use crate::limits::{Burn, Limit, LimitPeriod, Origin, State, Unit};
@@ -18,7 +19,7 @@ use crate::limits_source::STALE_SECONDS;
 use crate::period::elapsed_text;
 use crate::query::{clock, day_of};
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph};
 use ratatui::Frame;
@@ -108,21 +109,35 @@ fn join(mut segs: Vec<Seg>, width: usize) -> Line<'static> {
     Line::from(spans)
 }
 
-fn state_seg(pal: &Palette, l: &Limit, now: i64) -> (Seg, Option<State>) {
+fn state_seg(pal: &Palette, icon: Icon, l: &Limit, now: i64) -> (Seg, Option<State>) {
     let Some(h) = l.headroom(now) else {
         return (Seg::text(0, "no limit".into(), fg(pal, pal.inactive)), None);
     };
-    let (text, ink) = match h.state {
-        State::Exceeded => ("limit reached".to_string(), pal.error),
+    let (cue, text, ink) = match h.state {
+        State::Exceeded => (Cue::Alert, "limit reached".to_string(), pal.error),
         State::WillExceed { at } => (
+            Cue::Alert,
             format!("will exceed ~{} {}", stamp(at), crate::tz::label()),
             pal.error,
         ),
-        State::OnTrack => ("on track".to_string(), pal.warn),
-        State::Under => ("under".to_string(), pal.live),
-        State::Unknown => ("too early to project".to_string(), pal.inactive),
+        State::OnTrack => (Cue::Watch, "on track".to_string(), pal.warn),
+        State::Under => (Cue::Fine, "under".to_string(), pal.live),
+        State::Unknown => (
+            Cue::Unknown,
+            "too early to project".to_string(),
+            pal.inactive,
+        ),
     };
-    (Seg::text(2, text, fg(pal, ink)), Some(h.state))
+    let weight = if cue == Cue::Alert {
+        Modifier::BOLD
+    } else {
+        Modifier::empty()
+    };
+    let text = format!("{}{text}", icon.mark(cue));
+    (
+        Seg::text(2, text, fg(pal, ink).add_modifier(weight)),
+        Some(h.state),
+    )
 }
 
 /// The source label of a limit: where it came from, and how old when that
@@ -150,6 +165,7 @@ fn tag(origin: Origin, stale: bool, cache_age: Option<i64>) -> String {
 
 fn limit_line(
     pal: &Palette,
+    icon: Icon,
     l: &Limit,
     now: i64,
     stale: bool,
@@ -193,7 +209,7 @@ fn limit_line(
         drop: 1,
         spans: bar,
     });
-    let (state, _) = state_seg(pal, l, now);
+    let (state, _) = state_seg(pal, icon, l, now);
     segs.push(state);
     if let Some(h) = l.headroom(now) {
         let plain = fg(pal, pal.fg);
@@ -269,7 +285,7 @@ fn burn_line(pal: &Palette, v: &LimitsView, width: usize) -> Line<'static> {
 }
 
 /// Draws the panel. Nothing is drawn when `area` is empty.
-pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette) {
+pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette, icon: Icon) {
     if area.height == 0 {
         return;
     }
@@ -319,7 +335,15 @@ pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette) {
         ));
     }
     for l in v.limits.iter().take(MAX_LIMITS) {
-        lines.push(limit_line(pal, l, data.now, v.stale, v.cache_age, width));
+        lines.push(limit_line(
+            pal,
+            icon,
+            l,
+            data.now,
+            v.stale,
+            v.cache_age,
+            width,
+        ));
     }
     if let Some(note) = v.windows_note.filter(|_| !v.limits.is_empty()) {
         lines.push(Line::styled(fit(note, width), fg(pal, pal.inactive)));
@@ -333,4 +357,71 @@ pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette) {
         lines.extend(burn);
     }
     frame.render_widget(Paragraph::new(lines).block(block), area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::theme::{ColorDepth, Theme};
+
+    const HOUR: i64 = 3600;
+
+    fn limit(used: f64) -> Limit {
+        Limit {
+            unit: Unit::Percent,
+            period: LimitPeriod::Monthly,
+            origin: Origin::Manual,
+            used,
+            limit: 100.0,
+            start: 0,
+            end: 100 * HOUR,
+        }
+    }
+
+    fn shown(icon: Icon, used: f64, now: i64) -> (String, Modifier) {
+        let pal = Theme::Standard.palette(ColorDepth::True);
+        let (seg, _) = state_seg(&pal, icon, &limit(used), now);
+        let span = &seg.spans[0];
+        (span.content.to_string(), span.style.add_modifier)
+    }
+
+    #[test]
+    fn each_state_starts_with_its_own_ascii_mark_when_the_icon_is_off() {
+        // Arrange
+        let ten_hours = 10 * HOUR;
+        let cases = [
+            (100.0, ten_hours, "! limit reached"),
+            (20.0, ten_hours, "! will exceed"),
+            (9.0, ten_hours, "~ on track"),
+            (5.0, ten_hours, "+ under"),
+            (5.0, HOUR / 2, "? too early to project"),
+        ];
+
+        for (used, now, want) in cases {
+            // Act
+            let (text, _) = shown(Icon::Off, used, now);
+
+            // Assert
+            assert!(
+                text.starts_with(want),
+                "{text:?} should start with {want:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_utf8_terminal_gets_symbols_and_only_alerts_are_bold() {
+        // Arrange
+        let ten_hours = 10 * HOUR;
+
+        // Act
+        let reached = shown(Icon::Wide, 100.0, ten_hours);
+        let watch = shown(Icon::Wide, 9.0, ten_hours);
+
+        // Assert
+        assert!(reached.0.starts_with("\u{25b2} limit reached"));
+        assert!(reached.1.contains(Modifier::BOLD));
+        assert!(watch.0.starts_with("\u{25c6} on track"));
+        assert!(!watch.1.contains(Modifier::BOLD));
+    }
 }
