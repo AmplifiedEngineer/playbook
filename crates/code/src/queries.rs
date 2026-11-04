@@ -1033,4 +1033,53 @@ mod tests {
             _ => panic!("expected a fallback"),
         }
     }
+
+    #[test]
+    fn a_go_file_is_answered_by_gopls_found_on_the_path() {
+        // Arrange
+        let s = setup("q-go");
+        crate::lsp::testkit::install_server(&s.bin, "gopls");
+        let file = s.root.join("m.go");
+        std::fs::write(&file, "package m\n\nfunc Run() {}\n").unwrap();
+        let answer = json!([{"uri": file_uri(&file),
+            "range": {"start": {"line": 2, "character": 5}, "end": {"line": 2, "character": 8}}}]);
+        let (client_side, server) = pipe_pair().unwrap();
+        let mut steps = script(
+            json!({"definitionProvider": true}),
+            vec![Step::Reply {
+                method: "textDocument/definition",
+                result: answer,
+            }],
+        );
+        steps.extend(clean_exit());
+        let fake = Fake::spawn(server, steps);
+        let launcher = FakeLauncher::new(Some(client_side));
+        let settings = trusted();
+        let dirs = [s.bin.clone()];
+        let opts = options(&s, &settings, &dirs);
+        let ctx = Ctx {
+            root: &s.root,
+            options: &opts,
+            launcher: &launcher,
+        };
+        let go_target = parse_target("m.go:3:6", &s.root, &s.root).unwrap();
+
+        // Act
+        let got = definition(&ctx, &go_target).unwrap();
+        let log = fake.finish();
+
+        // Assert
+        let Outcome::Answered(answered) = got else {
+            panic!("expected an answer");
+        };
+        assert_eq!(answered.server, "gopls");
+        assert_eq!(answered.value.items[0].path, "m.go");
+        assert_eq!(answered.value.items[0].line, 3);
+        assert_eq!(log[1]["method"], "initialized");
+        let open = log
+            .iter()
+            .find(|m| m["method"] == "textDocument/didOpen")
+            .unwrap();
+        assert_eq!(open["params"]["textDocument"]["languageId"], "go");
+    }
 }
