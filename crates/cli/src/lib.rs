@@ -389,18 +389,21 @@ pub enum Command {
         #[arg(long)]
         remove_binary: bool,
     },
-    /// Show what playbook state takes space on disk
+    /// Show what playbook state takes space on disk, or clean it up
     ///
     /// Lists each store of on-disk state with its size, item count, age and
     /// the action a cleanup would take. It changes nothing and takes no lock.
+    /// With `--yes` it repairs interrupted moves, tombstones items past their
+    /// limit and deletes tombstones past their grace period. With `--restore`
+    /// it puts a tombstoned item back where it came from.
     ///
     /// Example: `playbook gc`
     Gc {
-        /// Apply the cleanup (not available yet)
-        #[arg(long, hide = true)]
+        /// Apply the cleanup
+        #[arg(long, conflicts_with = "restore")]
         yes: bool,
-        /// Restore a tombstoned item by id (not available yet)
-        #[arg(long, hide = true, value_name = "ID")]
+        /// Restore a tombstoned item by id
+        #[arg(long, value_name = "ID")]
         restore: Option<String>,
         /// Also clean build output in unmanaged worktrees, after a prompt (not available yet)
         #[arg(long, hide = true)]

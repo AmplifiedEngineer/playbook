@@ -673,7 +673,7 @@ pub fn reconcile(env: &Env) -> Findings {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::gc::guard::{GuardError, RealFs};
     use crate::gc::lock::NoHook;
@@ -681,25 +681,25 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::time::{Duration, UNIX_EPOCH};
 
-    const NOW: i64 = 1_800_000_000;
-    const STALE: i64 = 3600;
+    pub(in crate::gc) const NOW: i64 = 1_800_000_000;
+    pub(in crate::gc) const STALE: i64 = 3600;
 
-    struct Fx {
-        root: PathBuf,
-        gc: PathBuf,
-        registry: Registry,
-        fs: TestFs,
+    pub(in crate::gc) struct Fx {
+        pub(in crate::gc) root: PathBuf,
+        pub(in crate::gc) gc: PathBuf,
+        pub(in crate::gc) registry: Registry,
+        pub(in crate::gc) fs: TestFs,
     }
 
     type AfterCopy = Box<dyn Fn(&Path)>;
 
-    struct TestFs {
-        real: RealFs,
-        rename_error: Cell<Option<io::ErrorKind>>,
-        rename_error_once: Cell<bool>,
-        copy_fails: Cell<bool>,
-        append_fails: Cell<bool>,
-        after_copy: RefCell<Option<AfterCopy>>,
+    pub(in crate::gc) struct TestFs {
+        pub(in crate::gc) real: RealFs,
+        pub(in crate::gc) rename_error: Cell<Option<io::ErrorKind>>,
+        pub(in crate::gc) rename_error_once: Cell<bool>,
+        pub(in crate::gc) copy_fails: Cell<bool>,
+        pub(in crate::gc) append_fails: Cell<bool>,
+        pub(in crate::gc) after_copy: RefCell<Option<AfterCopy>>,
     }
 
     impl FsOps for TestFs {
@@ -739,7 +739,7 @@ mod tests {
         }
     }
 
-    fn fx(tag: &str) -> Fx {
+    pub(in crate::gc) fn fx(tag: &str) -> Fx {
         let base = crate::common::test_support::scratch_dir(tag);
         let root = base.join("root");
         let gc = base.join("gc");
@@ -770,7 +770,7 @@ mod tests {
     }
 
     impl Fx {
-        fn run<T>(&self, now: i64, f: impl FnOnce(&Env) -> T) -> T {
+        pub(in crate::gc) fn run<T>(&self, now: i64, f: impl FnOnce(&Env) -> T) -> T {
             let clock = FixedClock(now);
             let ran = with_run_lock(&self.gc, Duration::ZERO, &clock, &NoHook, |guard| {
                 f(&Env {
@@ -785,14 +785,14 @@ mod tests {
             }
         }
 
-        fn file(&self, name: &str, body: &str) -> PathBuf {
+        pub(in crate::gc) fn file(&self, name: &str, body: &str) -> PathBuf {
             let path = self.root.join(name);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(&path, body).unwrap();
             path
         }
 
-        fn mv(&self, paths: &[&Path], mode: Option<Mode>) -> MoveOutcome {
+        pub(in crate::gc) fn mv(&self, paths: &[&Path], mode: Option<Mode>) -> MoveOutcome {
             let req = MoveRequest {
                 paths: paths.iter().map(|p| p.to_path_buf()).collect(),
                 reason: "idle".into(),
@@ -801,11 +801,11 @@ mod tests {
             self.run(NOW, |env| move_locked(env, &req, mode))
         }
 
-        fn records(&self) -> Vec<Record> {
+        pub(in crate::gc) fn records(&self) -> Vec<Record> {
             index::latest(index::read(&index::index_path(&self.gc)))
         }
 
-        fn state_of(&self, id: &str) -> State {
+        pub(in crate::gc) fn state_of(&self, id: &str) -> State {
             self.records()
                 .into_iter()
                 .find(|r| r.id == id)
@@ -814,7 +814,14 @@ mod tests {
         }
 
         /// Writes a record by hand, as a crashed run would have left it.
-        fn plant(&self, id: &str, state: State, mode: Mode, paths: &[&Path], at: i64) -> Record {
+        pub(in crate::gc) fn plant(
+            &self,
+            id: &str,
+            state: State,
+            mode: Mode,
+            paths: &[&Path],
+            at: i64,
+        ) -> Record {
             let dest = self.registry.tombstones_dir().join("2027-01-01").join(id);
             let rec = Record {
                 id: id.into(),
@@ -835,12 +842,12 @@ mod tests {
             rec
         }
 
-        fn reconcile(&self, now: i64) -> Findings {
+        pub(in crate::gc) fn reconcile(&self, now: i64) -> Findings {
             self.run(now, reconcile)
         }
     }
 
-    fn set_mtime(path: &Path, secs: i64) {
+    pub(in crate::gc) fn set_mtime(path: &Path, secs: i64) {
         let when = UNIX_EPOCH + Duration::from_secs(u64::try_from(secs).unwrap());
         fs::File::open(path).unwrap().set_modified(when).unwrap();
     }

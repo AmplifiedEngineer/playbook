@@ -785,11 +785,14 @@ Example: `playbook gate snapshot my-plan adversarial test-review`
 
 ### `playbook gc`
 
-Show what playbook state takes space on disk
+Show what playbook state takes space on disk, or clean it up
 
-Lists each store of on-disk state with its size, item count, age and the action a cleanup would take. It changes nothing and takes no lock.
+Lists each store of on-disk state with its size, item count, age and the action a cleanup would take. It changes nothing and takes no lock. With `--yes` it repairs interrupted moves, tombstones items past their limit and deletes tombstones past their grace period. With `--restore` it puts a tombstoned item back where it came from.
 
 Example: `playbook gc`
+
+- `--yes`: Apply the cleanup
+- `--restore <ID>`: Restore a tombstoned item by id
 
 ### `playbook glossary`
 
