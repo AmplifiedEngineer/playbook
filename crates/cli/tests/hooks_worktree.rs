@@ -784,6 +784,24 @@ fn create_leaves_no_partial_target_when_the_clone_fails() {
     assert!(!path.join("target").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn create_skips_the_clone_when_main_target_is_a_symlink() {
+    // Arrange: a target that links to a build folder elsewhere
+    let f = fixture("clone-symlink");
+    require_clone_fs!(f);
+    warm_target(&f.repo);
+    let elsewhere = f.root.join("shared-build");
+    fs::rename(f.repo.join("target"), &elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, f.repo.join("target")).unwrap();
+
+    // Act
+    let path = created_path(&create(&f.repo, "probe"));
+
+    // Assert: a link would let the worktree write into the shared artifacts
+    assert!(path.join("target").symlink_metadata().is_err());
+}
+
 #[test]
 fn create_does_not_touch_an_existing_target_in_a_reused_worktree() {
     // Arrange: a worktree that already has its own target
