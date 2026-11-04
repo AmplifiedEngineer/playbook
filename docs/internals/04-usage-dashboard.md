@@ -321,6 +321,21 @@ For the period on screen (today, this week or this month, this week for other ra
 - Percent window: `basis` (`readings` or `line`), `points` (`at` and `percent`) and `projected_end_percent`.
 - Both kinds list `rate_limited_at`, the UTC seconds of each 429 in the period.
 
+### The statusline budget line
+
+When the 7 day or 5 hour window is reached, or its pace reaches the cap before it resets, the statusline prints a fourth line. It uses the same pace maths as the Projection panel and reads only the `rate_limits` the statusline already receives on stdin, so it adds no network call and no database scan.
+
+| Window | Reached | On pace to reach it |
+|---|---|---|
+| 7 day | `! 7d CAP HIT` | `! 7d cap in 2d3h` |
+| 5 hour | `! 5h CAP HIT` | `! 5h cap in 1h20m` |
+
+- **Time left.** Days and hours when it is a day or more (`4d9h`, `2d`), hours and minutes under a day (`1h20m`, `3h`), minutes under an hour (`45m`) and `<1m` under a minute. Each rounds down.
+- **When it is absent.** On a window within its cap, in its first hour, past its reset time or with no reset time, the line is left out and the statusline keeps its three lines. Line 3 keeps its own percentages.
+- **Colour.** The line is red, and the leading `!` and the words carry the meaning, so it reads the same without colour.
+- **Width.** The line is fitted to `COLUMNS` (120 when unset or not a number). The 7 day segment comes first and is kept, and the 5 hour segment is dropped whole on a terminal too narrow for both.
+- **No switch.** There is no setting that hides the line.
+
 ### The Projection panel
 
 The Projection panel says when each limit is reached at your current pace, in the time zone shown in the panel title (UTC or local). Each limit gets one plain line. A dollar limit has two paces on it:
