@@ -241,7 +241,97 @@ pub fn write_graph(db: &Path, nodes: &[NodeRow], edges: &[EdgeRow]) -> Result<()
         [secs.to_string(), millis.to_string()],
     )
     .map_err(|e| e.to_string())?;
+    write_facts_index(&tx, nodes).map_err(|e| e.to_string())?;
+    write_graph_fault_point()?;
     tx.commit().map_err(|e| e.to_string())
+}
+
+/// Replaces the fact index with one row per fact of `nodes`, in fact id order
+/// so row ids repeat from one write to the next, and counts the write in
+/// `graph_generation`. The index is whole-graph like `nodes` (a write replaces
+/// both), so a fact that left `nodes` leaves the index too. An index that
+/// cannot be written is rolled back and left behind the graph, which readers
+/// see as stale.
+fn write_facts_index(conn: &Connection, nodes: &[NodeRow]) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('graph_generation', '1') \
+         ON CONFLICT (key) DO UPDATE SET value = CAST(value AS INTEGER) + 1",
+        [],
+    )?;
+    if !facts_index_present(conn) {
+        return Ok(());
+    }
+    conn.execute_batch("SAVEPOINT facts_index")?;
+    match fill_facts_index(conn, nodes) {
+        Ok(()) => conn.execute_batch("RELEASE facts_index"),
+        Err(_) => conn.execute_batch("ROLLBACK TO facts_index; RELEASE facts_index"),
+    }
+}
+
+fn fill_facts_index(conn: &Connection, nodes: &[NodeRow]) -> rusqlite::Result<()> {
+    conn.execute_batch("DELETE FROM facts_fts; DELETE FROM facts_fts_map;")?;
+    // A later row of the same id wins, as it does in `nodes`.
+    let facts: std::collections::BTreeMap<&str, &NodeRow> = nodes
+        .iter()
+        .filter(|n| n.scope != CODE_SCOPE)
+        .map(|n| (n.id.as_str(), n))
+        .collect();
+    let mut index = conn.prepare(
+        "INSERT INTO facts_fts (rowid, name, description, body) VALUES (?1, ?2, ?3, '')",
+    )?;
+    let mut map = conn.prepare(
+        "INSERT INTO facts_fts_map (rowid, fact_id, scope, project) VALUES (?1, ?2, ?3, ?4)",
+    )?;
+    for (row, node) in (1_i64..).zip(facts.values()) {
+        index.execute(rusqlite::params![
+            row,
+            node.name.as_deref().unwrap_or(""),
+            node.description.as_deref().unwrap_or("")
+        ])?;
+        map.execute(rusqlite::params![row, node.id, node.scope, node.project])?;
+    }
+    conn.execute(
+        "INSERT OR REPLACE INTO meta (key, value) \
+         SELECT 'facts_index_generation', value FROM meta WHERE key = 'graph_generation'",
+        [],
+    )?;
+    Ok(())
+}
+
+/// Whether the fact index was written by the latest graph write, so a reader
+/// can trust it. False when it is missing, was not filled, or trails the
+/// graph.
+pub fn facts_index_is_fresh(conn: &Connection) -> bool {
+    let generation = |key: &str| {
+        conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| {
+            r.get::<_, String>(0)
+        })
+        .ok()
+    };
+    facts_index_present(conn)
+        && generation("graph_generation")
+            .is_some_and(|g| generation("facts_index_generation") == Some(g))
+}
+
+/// A seam inside [`write_graph`]'s transaction, after every row is written
+/// and before the commit. A test makes it fail to prove the write rolls back
+/// whole.
+#[cfg(not(test))]
+fn write_graph_fault_point() -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_BEFORE_COMMIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn write_graph_fault_point() -> Result<(), String> {
+    if FAIL_BEFORE_COMMIT.with(std::cell::Cell::get) {
+        return Err("injected failure before commit".to_string());
+    }
+    Ok(())
 }
 
 /// When the graph in `db` was last written: the time the writer recorded in
@@ -653,5 +743,187 @@ mod tests {
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
         assert!(facts_index_present(&conn));
+    }
+
+    fn fact(id: &str, scope: &str, project: Option<&str>, name: &str, desc: &str) -> NodeRow {
+        NodeRow {
+            scope: scope.into(),
+            project: project.map(str::to_string),
+            name: Some(name.into()),
+            description: Some(desc.into()),
+            ..node(id)
+        }
+    }
+
+    fn open(db: &Path) -> Connection {
+        Connection::open(db).unwrap()
+    }
+
+    fn indexed_ids(conn: &Connection) -> Vec<String> {
+        let mut stmt = conn
+            .prepare("SELECT fact_id FROM facts_fts_map ORDER BY rowid")
+            .unwrap();
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn ids_matching(conn: &Connection, term: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT m.fact_id FROM facts_fts f JOIN facts_fts_map m ON m.rowid = f.rowid \
+                 WHERE facts_fts MATCH ?1 ORDER BY m.fact_id",
+            )
+            .unwrap();
+        stmt.query_map([term], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn generation(conn: &Connection) -> String {
+        conn.query_row(
+            "SELECT value FROM meta WHERE key = 'graph_generation'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_rebuild_indexes_every_fact_and_no_code_anchor() {
+        // Arrange
+        let db = db_in(&scratch_dir("mem-idx"));
+        let nodes = [
+            fact("b", "global", None, "ferry-timetable", "cache expiry"),
+            fact("a", "project", Some("o/r"), "crane-queue", "backpressure"),
+            NodeRow {
+                scope: CODE_SCOPE.into(),
+                ..anchor("code:~/x")
+            },
+        ];
+
+        // Act
+        write_graph(&db, &nodes, &[]).unwrap();
+
+        // Assert
+        let conn = open(&db);
+        assert_eq!(indexed_ids(&conn), ["a", "b"]);
+        assert_eq!(ids_matching(&conn, "ferry"), ["b"]);
+        assert_eq!(ids_matching(&conn, "backpressure"), ["a"]);
+        assert!(facts_index_is_fresh(&conn));
+    }
+
+    #[test]
+    fn a_fact_that_left_the_graph_leaves_the_index() {
+        // Arrange
+        let db = db_in(&scratch_dir("mem-idx-del"));
+        let keep = fact("keep", "global", None, "alpha", "d");
+        let gone = fact("gone", "global", None, "beta", "d");
+        write_graph(&db, &[keep.clone(), gone], &[]).unwrap();
+
+        // Act
+        write_graph(&db, &[keep], &[]).unwrap();
+
+        // Assert
+        let conn = open(&db);
+        assert_eq!(indexed_ids(&conn), ["keep"]);
+        assert!(ids_matching(&conn, "beta").is_empty());
+    }
+
+    #[test]
+    fn a_changed_fact_of_the_same_count_is_reindexed_under_a_new_generation() {
+        // Arrange
+        let db = db_in(&scratch_dir("mem-idx-chg"));
+        write_graph(&db, &[fact("a", "global", None, "old-name", "d")], &[]).unwrap();
+        let before = generation(&open(&db));
+
+        // Act
+        write_graph(&db, &[fact("a", "global", None, "new-name", "d")], &[]).unwrap();
+
+        // Assert
+        let conn = open(&db);
+        assert_ne!(generation(&conn), before);
+        assert!(ids_matching(&conn, "old").is_empty());
+        assert_eq!(ids_matching(&conn, "new"), ["a"]);
+        assert!(facts_index_is_fresh(&conn));
+    }
+
+    #[test]
+    fn rewriting_the_whole_graph_keeps_the_facts_of_every_repo() {
+        // Arrange: a rebuild that changes repo A writes repo B's facts too.
+        let db = db_in(&scratch_dir("mem-idx-two"));
+        let b = fact("b", "project", Some("o/b"), "repo-b-fact", "d");
+        let a_old = fact("a", "project", Some("o/a"), "repo-a-old", "d");
+        write_graph(&db, &[a_old, b.clone()], &[]).unwrap();
+        let a_new = fact("a", "project", Some("o/a"), "repo-a-new", "d");
+
+        // Act
+        write_graph(&db, &[a_new, b], &[]).unwrap();
+
+        // Assert
+        let conn = open(&db);
+        assert_eq!(indexed_ids(&conn), ["a", "b"]);
+        assert_eq!(ids_matching(&conn, "repo"), ["a", "b"]);
+        assert_eq!(ids_matching(&conn, "new"), ["a"]);
+    }
+
+    #[test]
+    fn two_rows_with_one_id_leave_one_index_row() {
+        // Arrange
+        let db = db_in(&scratch_dir("mem-idx-dup"));
+        let first = fact("a", "global", None, "first", "d");
+        let second = fact("a", "global", None, "second", "d");
+
+        // Act
+        write_graph(&db, &[first, second], &[]).unwrap();
+
+        // Assert
+        let conn = open(&db);
+        assert_eq!(indexed_ids(&conn), ["a"]);
+        assert_eq!(ids_matching(&conn, "second"), ["a"]);
+    }
+
+    #[test]
+    fn a_failure_before_the_commit_rolls_back_nodes_and_index_together() {
+        // Arrange
+        let db = db_in(&scratch_dir("mem-idx-fault"));
+        write_graph(&db, &[fact("a", "global", None, "kept", "d")], &[]).unwrap();
+        FAIL_BEFORE_COMMIT.with(|f| f.set(true));
+
+        // Act
+        let result = write_graph(&db, &[fact("z", "global", None, "lost", "d")], &[]);
+        FAIL_BEFORE_COMMIT.with(|f| f.set(false));
+
+        // Assert
+        assert!(result.is_err());
+        let conn = open(&db);
+        assert_eq!(indexed_ids(&conn), ["a"]);
+        assert_eq!(ids_matching(&conn, "kept"), ["a"]);
+        let nodes: i64 = conn
+            .query_row("SELECT count(*) FROM nodes WHERE id = 'z'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(nodes, 0);
+        assert!(facts_index_is_fresh(&conn));
+    }
+
+    #[test]
+    fn a_write_succeeds_and_the_index_is_not_fresh_when_the_table_is_unusable() {
+        // Arrange: a plain table holds the name, so the index cannot exist.
+        let db = db_in(&scratch_dir("mem-idx-plain"));
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        open(&db)
+            .execute_batch("CREATE TABLE facts_fts (x TEXT);")
+            .unwrap();
+
+        // Act
+        let result = write_graph(&db, &[fact("a", "global", None, "n", "d")], &[]);
+
+        // Assert
+        assert!(result.is_ok());
+        assert!(!facts_index_is_fresh(&open(&db)));
     }
 }
