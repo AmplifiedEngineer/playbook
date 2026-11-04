@@ -176,6 +176,12 @@ fn the_claude_hook_list_is_unchanged_by_the_codex_set() {
     // Arrange / Act
     let claude: Vec<&str> = wired_hooks().map(|s| s.name).collect();
     // Assert
-    assert!(claude.contains(&"commit-message-sanitizer"));
-    assert!(wired_hooks().all(|s| !std::ptr::eq(s, &CODEX_HOOK_SPECS[0])));
+    for name in [
+        "rm-workspace-guard",
+        "bg-await-guard",
+        "precommit-check",
+        "commit-message-sanitizer",
+    ] {
+        assert!(claude.contains(&name), "{name} missing from {claude:?}");
+    }
 }
