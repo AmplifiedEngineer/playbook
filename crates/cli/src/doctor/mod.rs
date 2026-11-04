@@ -5,6 +5,7 @@
 //! `commands/doctor.md` used to run as bash blocks, and `field` holds the small
 //! JSON field reads they need and used to get from `jq`.
 
+pub mod build;
 pub mod check;
 pub mod field;
 pub mod launchers;

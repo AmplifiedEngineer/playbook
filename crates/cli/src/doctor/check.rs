@@ -45,7 +45,7 @@ pub struct Row {
 }
 
 impl Row {
-    fn new(layer: &'static str, level: Level, message: impl Into<String>) -> Row {
+    pub(super) fn new(layer: &'static str, level: Level, message: impl Into<String>) -> Row {
         Row {
             layer,
             level,
@@ -54,7 +54,7 @@ impl Row {
         }
     }
 
-    fn hint(mut self, hint: impl Into<String>) -> Row {
+    pub(super) fn hint(mut self, hint: impl Into<String>) -> Row {
         self.hint = Some(hint.into());
         self
     }
@@ -126,7 +126,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 21] = [
+const PROBES: [Probe; 22] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -153,6 +153,7 @@ const PROBES: [Probe; 21] = [
     |env| vec![policy_guard_row(env)],
     doc_rows,
     completion_rows,
+    super::build::rows,
 ];
 
 /// Run every check. The probes only read, and several wait on child processes
