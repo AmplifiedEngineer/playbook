@@ -61,6 +61,7 @@ pub fn run(opts: &Options) -> Report {
     let stamp = crate::common::time::now_epoch_secs();
 
     let settings = settings_step(opts, &claude_home, stamp, &mut report);
+    codex_hooks_step(&opts.home, stamp, opts.dry_run, &mut report);
     rc_step(opts, stamp, &mut report);
     completion_step(
         &opts.home,
@@ -271,6 +272,25 @@ fn settings_step(
                 statusline_removed: false,
             }
         }
+    }
+}
+
+/// Removes the guards `playbook setup --codex-hooks` put in `~/.codex/hooks.json`
+/// and keeps every other entry. A failure is reported and stops nothing else.
+fn codex_hooks_step(home: &Path, stamp: u64, dry_run: bool, report: &mut Report) {
+    let file = crate::init::codex_hooks::hooks_path(home);
+    if !file.is_file() {
+        return;
+    }
+    let verb = if dry_run { "would remove" } else { "removed" };
+    match crate::init::codex_hooks::unwire(&file, stamp, dry_run) {
+        Ok(0) => {}
+        Ok(n) => report
+            .lines
+            .push(format!("{verb} {n} hook entries from {}", file.display())),
+        Err(err) => report
+            .errors
+            .push(format!("{} left unchanged: {err}", file.display())),
     }
 }
 

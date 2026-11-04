@@ -17,6 +17,7 @@
 use crate::claude_code::parse_iso8601_utc;
 use crate::limits::{LimitPeriod, Unit};
 use crate::limits_source::{self, Window};
+use crate::monthly_use;
 use crate::period::elapsed_text;
 use crate::spend::SpendFigure;
 use serde_json::Value;
@@ -351,6 +352,24 @@ pub fn read(path: &Path) -> Account {
     load(path).map_or_else(Account::default, |root| account(&root))
 }
 
+/// [`read`] for a caller that must stay cheap: the file is opened once, must be
+/// a regular file, and is read through at most `max_bytes`. A larger file, a
+/// pipe or a directory gives `None`, and so does an unreadable one.
+pub fn read_limited(path: &Path, max_bytes: u64) -> Option<Account> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    file.take(max_bytes + 1).read_to_string(&mut text).ok()?;
+    if text.len() as u64 > max_bytes {
+        return None;
+    }
+    let root = serde_json::from_str(&text).ok()?;
+    Some(account(&root))
+}
+
 /// What the last read of the config file returned, and which file state it
 /// came from.
 struct Seen {
@@ -508,6 +527,9 @@ fn cache_lines(root: &Value, now: i64, raw: bool) -> Vec<String> {
             ));
         }
     }
+    if raw {
+        out.extend(raw_cache_lines(root));
+    }
     let valued: Vec<String> = root
         .pointer("/cachedUsageUtilization/utilization")
         .and_then(Value::as_object)
@@ -519,6 +541,95 @@ fn cache_lines(root: &Value, now: i64, raw: bool) -> Vec<String> {
         })
         .unwrap_or_default();
     out.push(format!("    fields with a value: {}", list(&valued)));
+    out
+}
+
+/// The unprocessed facts about the cache: its fetch time as written and the
+/// JSON type of each field, never a value that could identify anyone.
+fn raw_cache_lines(root: &Value) -> Vec<String> {
+    let kind = |v: &Value| match v {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    };
+    let mut out = Vec::new();
+    if let Some(ms) = root.pointer("/cachedUsageUtilization/fetchedAtMs") {
+        out.push(format!("    raw: fetchedAtMs = {}", plain_value(ms)));
+    }
+    if let Some(u) = root
+        .pointer("/cachedUsageUtilization/utilization")
+        .and_then(Value::as_object)
+    {
+        let mut types: Vec<String> = u
+            .iter()
+            .filter(|(k, _)| plain_name(k))
+            .map(|(k, v)| format!("{k} {}", kind(v)))
+            .collect();
+        types.sort();
+        out.push(format!("    raw: field types: {}", types.join(", ")));
+    }
+    out
+}
+
+/// What the statusline budget line will show, and which source decided it.
+fn budget_lines(s: &limits_source::Sources, now: i64, raw: bool) -> Vec<String> {
+    let mut out = vec!["What the statusline budget line will show".to_string()];
+    let figure = monthly_use::monthly_use(s.snapshot.as_ref(), &s.account, &s.budgets, now);
+    match &figure {
+        None => out.push(
+            "  monthly: nothing to show (no dollar limit with an amount used this month)"
+                .to_string(),
+        ),
+        Some(m) => {
+            out.push(match m.source {
+                monthly_use::Source::Statusline => {
+                    "  monthly: from the statusline reading (fresh)".to_string()
+                }
+                monthly_use::Source::Cache { age, fresh: true } => format!(
+                    "  monthly: from the Claude Code cache, {} old (fresh)",
+                    elapsed_text(age)
+                ),
+                monthly_use::Source::Cache { age, fresh: false } => format!(
+                    "  monthly: from the Claude Code cache, {} old (stale: shown with its age and no projection; Claude Code writes the cache when it fetches usage, which the /usage view does)",
+                    elapsed_text(age)
+                ),
+            });
+            let in_force = limits_source::amount(Unit::Dollars, m.limit.limit);
+            out.push(if m.own_budget {
+                format!(
+                    "  limit in force: {in_force}, your usage.budget.monthlyUsd, which is lower than the {} Claude reports",
+                    limits_source::amount(Unit::Dollars, m.reported_usd)
+                )
+            } else {
+                format!("  limit in force: {in_force} as Claude reports it")
+            });
+        }
+    }
+    let has_five_hour = s.snapshot.as_ref().is_some_and(|sn| sn.five_hour.is_some())
+        || s.account
+            .cache
+            .as_ref()
+            .is_some_and(|c| c.five_hour.is_some());
+    if !has_five_hour {
+        out.push("  5 hour window: absent in the data, so the line leaves it out".to_string());
+    }
+    out.push(
+        "  order: statusline reading, then the Claude Code cache from this month, then nothing. Your monthly budget replaces the limit only when it is lower, and never supplies an amount used.".to_string(),
+    );
+    if let (true, Some(m)) = (raw, &figure) {
+        let own = s
+            .budgets
+            .iter()
+            .find(|(p, _)| *p == LimitPeriod::Monthly)
+            .map_or("none".to_string(), |(_, usd)| format!("${usd:.2}"));
+        out.push(format!(
+            "    raw: monthly used ${:.2} of reported limit ${:.2}, own budget {own}, limit in force ${:.2}",
+            m.limit.used, m.reported_usd, m.limit.limit
+        ));
+    }
     out
 }
 
@@ -637,6 +748,8 @@ pub fn report(
         limits_source::Sources::new(Some(usage_dir), claude_json, budgets.to_vec(), false);
     out.push(String::new());
     out.extend(verdict_lines(&sources, now));
+    out.push(String::new());
+    out.extend(budget_lines(&sources, now, raw));
     if !raw {
         out.push(String::new());
         out.push(

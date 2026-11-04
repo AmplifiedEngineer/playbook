@@ -107,12 +107,18 @@ pub struct Flags {
     /// Deprecated name for `--attribution`, from 0.36 and 0.37.
     #[arg(long, hide = true, overrides_with_all = ["attribution", "no_attribution", "attribution_off"])]
     pub no_attribution_off: bool,
+    /// Register the playbook Bash guards in the hooks.json of Codex (off unless asked)
+    #[arg(long, overrides_with = "no_codex_hooks")]
+    pub codex_hooks: bool,
+    /// Do not register guards in Codex
+    #[arg(long, overrides_with = "codex_hooks")]
+    pub no_codex_hooks: bool,
     #[arg(
         long,
         value_name = "PART",
         value_delimiter = ',',
         num_args = 1..,
-        help = "Run only these parts and ask nothing. Parts, comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution. Everything else stays untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
+        help = "Run only these parts and ask nothing. Parts, comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution, codex-hooks. Everything else stays untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
     )]
     pub only: Vec<String>,
     /// Never ask: use the default for every part you did not answer with a flag
@@ -141,6 +147,8 @@ pub struct Choices {
     pub policy_guard: bool,
     /// Attribution OFF (the default), ON, or left as it is.
     pub attribution: attribution::Choice,
+    /// Whether to register the Bash guards in Codex. Off unless chosen.
+    pub codex_hooks: bool,
 }
 
 fn pick(on: bool, off: bool) -> Option<bool> {
@@ -165,6 +173,7 @@ pub(crate) fn part_pair(flags: &Flags, id: &str) -> Option<(bool, bool)> {
         "completions" => (flags.completions, flags.no_completions),
         "policy-guard" => (flags.policy_guard, flags.no_policy_guard),
         "attribution" => (flags.attribution, flags.no_attribution),
+        "codex-hooks" => (flags.codex_hooks, flags.no_codex_hooks),
         _ => return None,
     })
 }
@@ -344,6 +353,7 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
             true => attribution_from_flags(flags).unwrap_or(attribution::Choice::Default),
             false => attribution::Choice::Skip,
         },
+        codex_hooks: has("codex-hooks"),
     }))
 }
 
@@ -554,6 +564,14 @@ pub fn resolve_with(
             false,
         ),
         attribution: attribution::Choice::Skip,
+        // It writes a file outside Claude Code and needs a trust step in Codex,
+        // so it stays off unless a flag or an answer says yes, `--yes` included.
+        codex_hooks: decide(
+            flags.codex_hooks,
+            flags.no_codex_hooks,
+            catalog::question("codex-hooks"),
+            false,
+        ),
     };
     // The question asks for ON, so a no, or Enter, is OFF that keeps the
     // user's own values.
@@ -679,7 +697,8 @@ mod tests {
                 short_name: false,
                 completions: false,
                 policy_guard: false,
-                attribution: attribution::Choice::Skip
+                attribution: attribution::Choice::Skip,
+                codex_hooks: false
             }
         );
     }
@@ -699,10 +718,10 @@ mod tests {
         });
         assert!(!c.hooks);
         assert!(c.path);
-        assert_eq!(asked.len(), 7, "{asked:?}");
+        assert_eq!(asked.len(), 8, "{asked:?}");
         assert!(asked
             .iter()
-            .all(|q| !q.contains("hooks") && q != catalog::question("path")));
+            .all(|q| q != catalog::question("hooks") && q != catalog::question("path")));
     }
 
     #[test]
@@ -926,7 +945,8 @@ mod tests {
                 short_name: true,
                 completions: true,
                 policy_guard: false,
-                attribution: attribution::Choice::Default
+                attribution: attribution::Choice::Default,
+                codex_hooks: false
             }
         );
     }
@@ -1021,7 +1041,8 @@ mod tests {
                 short_name: false,
                 completions: false,
                 policy_guard: false,
-                attribution: attribution::Choice::Skip
+                attribution: attribution::Choice::Skip,
+                codex_hooks: false
             }
         );
     }
@@ -1217,6 +1238,7 @@ mod tests {
             completions: false,
             policy_guard: false,
             attribution: attribution::Choice::Skip,
+            codex_hooks: false,
         }
     }
 

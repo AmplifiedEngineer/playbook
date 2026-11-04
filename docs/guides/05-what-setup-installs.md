@@ -77,6 +77,7 @@ Each part has a flag pair. With no flag, `setup` asks in a terminal and uses the
 | Shell completion | on, asked | `--completions`, `--no-completions` | small files in the shell's own completion folder (zsh: `~/.local/share/playbook/completions.zsh`), and for zsh one marked line in `~/.zshrc` |
 | Policy guard | off, asked | `--policy-guard`, `--no-policy-guard` | `~/.config/playbook` (the `hooks.policyGuard.enabled` key) |
 | Attribution | OFF, asked | `--attribution` (ON), `--no-attribution` (OFF) | `~/.claude/settings.json` (the `attribution` key), and `~/.config/playbook` (the `attribution.enabled` key) |
+| Codex hooks | off, asked, only when Codex is found | `--codex-hooks`, `--no-codex-hooks` | `~/.codex/hooks.json` (two guard entries, after a backup) |
 
 `--settings` and `--no-settings` no longer exist. Each option that part used to carry now sits behind the hooks, status line or security part, or is not shipped.
 

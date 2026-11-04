@@ -78,8 +78,11 @@ pub enum UsageCommand {
     /// on a machine where the limits look wrong and share the output. Add
     /// `--raw` to also print the values of six plan fields (billing type,
     /// organization type, seat tier, the two rate limit tiers and the extra
-    /// usage flag) and the cached monthly spend limit and amount used, in
-    /// dollars. It only reads files and creates nothing.
+    /// usage flag) and the numbers behind each choice: the cache fetch time as
+    /// written, the type of each cache field, and the monthly amount used
+    /// against the reported limit and your budget, in dollars. It also says
+    /// what the statusline budget line will show. It only reads files and
+    /// creates nothing.
     ///
     /// Example: `playbook usage doctor --raw`
     Doctor {

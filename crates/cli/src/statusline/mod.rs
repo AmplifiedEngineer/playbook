@@ -478,6 +478,11 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
         }
     }
 
+    let claude_json = env
+        .get("CLAUDE_CONFIG_DIR")
+        .map_or_else(|| PathBuf::from(&home), PathBuf::from)
+        .join(".claude.json");
+    let budget = budget::build(input, now, &claude_json, Path::new(&home));
     let opts = Opts {
         show_model: env.flag("STATUSLINE_SHOW_MODEL"),
         show_context: env.flag("STATUSLINE_SHOW_CONTEXT"),
@@ -492,7 +497,6 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
         home,
         now,
     };
-    let budget = budget::build(input, now);
     for line in [
         lines::line_2(&session, &opts),
         lines::line_3(&session, &opts),

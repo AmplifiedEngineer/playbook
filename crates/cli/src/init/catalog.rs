@@ -135,6 +135,16 @@ pub const PARTS: &[Part] = &[
         undo: "Run `playbook setup --only attribution` with the other flag: `--attribution` for ON, `--no-attribution` for OFF. A backup of settings.json is saved next to it.",
     },
     Part {
+        id: "codex-hooks",
+        asked: true,
+        default_on: false,
+        flags: "--codex-hooks, --no-codex-hooks",
+        question: "Register the playbook Bash guards in Codex? It adds the rm-workspace-guard and precommit-check entries to ~/.codex/hooks.json. Codex skips them until you trust them in /hooks.",
+        does: "Adds two PreToolUse entries on Bash to ~/.codex/hooks.json, keeping every other entry, after a backup. It runs only when Codex is found (a ~/.codex folder or a codex program on PATH). Codex continues when a hook fails, so the guards are best effort. It is off by default, and `--yes` leaves it off.",
+        changes: "~/.codex/hooks.json",
+        undo: "`playbook uninstall` removes the entries it wrote, after a backup. Or delete the two `playbook hook` entries by hand.",
+    },
+    Part {
         id: "memory-migration",
         asked: false,
         default_on: true,

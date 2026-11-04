@@ -754,6 +754,7 @@ fn real_main() {
                 ),
                 attribution: choices.attribution.resolve(&common::home_dir()),
                 policy_guard: choices.policy_guard,
+                codex_hooks: choices.codex_hooks,
             };
             if flags.dry_run {
                 print!("{}", init::preview::dry_run(&paths, &choices));
@@ -1046,6 +1047,13 @@ fn real_main() {
                 }
             }
         }
+        Command::Watch { sub } => match playbook::watch::run(sub.as_ref()) {
+            Ok(output) => print!("{output}"),
+            Err(err) => {
+                eprintln!("watch: {err}");
+                std::process::exit(1);
+            }
+        },
         Command::Gate { sub } => match sub {
             GateCommand::Snapshot { plan_slug, phases } => {
                 let result = gate_plans_dir()

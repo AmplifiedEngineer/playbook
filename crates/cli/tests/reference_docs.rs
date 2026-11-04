@@ -147,6 +147,7 @@ fn config_table() -> String {
         })
         .unwrap_or_default();
     let _ = writeln!(out, "| {family} | `auto` | {levels} |");
+    let _ = writeln!(out, "| `watch.rule.<id>` | empty | one rule as JSON text |");
     out
 }
 

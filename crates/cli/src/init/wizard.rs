@@ -68,6 +68,10 @@ fn extra_lines(id: &str) -> Vec<String> {
         "attribution" => {
             vec!["Claude Code reads the key in every session it starts after this.".to_string()]
         }
+        "codex-hooks" => vec![
+            "Open /hooks in Codex afterwards and trust the two entries, or Codex skips them."
+                .to_string(),
+        ],
         _ => Vec::new(),
     }
 }
@@ -85,6 +89,7 @@ pub fn decline_line(id: &str) -> &'static str {
         "completions" => "No completion files are written, and your shell files are not touched. Tab does not complete `playbook` or `pb` until you run `playbook setup --only completions`.",
         "policy-guard" => "The policy guard setting is not changed. It is off by default, and its hook entry allows every call while off. A guard you turned on stays on until `hooks.policyGuard.enabled` is set to false. Turn it on later with `playbook config set --global hooks.policyGuard.enabled true`.",
         "attribution" => "Attribution is OFF, the default: playbook adds the missing `attribution` keys to ~/.claude/settings.json and keeps your own values, so Claude Code adds no trailer, generated-by line or session link.",
+        "codex-hooks" => "~/.codex/hooks.json is not touched. Entries from an earlier run stay until `playbook uninstall`, and without them the playbook guards do not run in Codex. Register them later with `playbook setup --only codex-hooks`.",
         _ => "Nothing changes for this part.",
     }
 }
@@ -257,6 +262,7 @@ mod tests {
             completions: true,
             policy_guard: true,
             attribution: true,
+            codex_hooks: true,
             ..Flags::default()
         };
         for p in catalog::PARTS.iter().filter(|p| p.asked) {
