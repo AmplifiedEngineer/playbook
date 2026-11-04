@@ -1,0 +1,74 @@
+{
+ "data": {
+  "repository": {
+   "pullRequest": {
+    "stack": {
+     "entries": {
+      "nodes": [
+       {
+        "position": 1,
+        "pullRequest": {
+         "number": 1,
+         "title": "PR 1",
+         "state": "MERGED",
+         "isDraft": false,
+         "baseRefName": "main",
+         "headRefName": "b1",
+         "headRefOid": "sha1",
+         "additions": 10,
+         "deletions": 2,
+         "changedFiles": 1,
+         "author": {
+          "login": "ana"
+         },
+         "mergedAt": "2026-01-01T00:00:00Z",
+         "url": "https://github.com/o/r/pull/1"
+        }
+       },
+       {
+        "position": 2,
+        "pullRequest": {
+         "number": 2,
+         "title": "PR 2",
+         "state": "OPEN",
+         "isDraft": false,
+         "baseRefName": "b1",
+         "headRefName": "b2",
+         "headRefOid": "sha2",
+         "additions": 10,
+         "deletions": 2,
+         "changedFiles": 1,
+         "author": {
+          "login": "ana"
+         },
+         "mergedAt": null,
+         "url": "https://github.com/o/r/pull/2"
+        }
+       },
+       {
+        "position": 3,
+        "pullRequest": {
+         "number": 3,
+         "title": "PR 3",
+         "state": "OPEN",
+         "isDraft": false,
+         "baseRefName": "b2",
+         "headRefName": "b3",
+         "headRefOid": "sha3",
+         "additions": 10,
+         "deletions": 2,
+         "changedFiles": 1,
+         "author": {
+          "login": "ana"
+         },
+         "mergedAt": null,
+         "url": "https://github.com/o/r/pull/3"
+        }
+       }
+      ]
+     }
+    }
+   }
+  }
+ }
+}

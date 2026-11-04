@@ -22,7 +22,7 @@ Flags combine (`-Au`). After a rebase or amend it pushes with `--force-with-leas
 
 ## Review
 
-`/playbook:review` is the one command to use. It reads the diff, recommends a quick or a deep review, and asks which you want. The recommendation comes first and is marked `(Recommended)`, with the reasons in one line. In ask mode you always decide.
+`/playbook:review` is the one command to use. When the PR sits in a stack it first asks whether to review this PR only or the whole stack. It then reads the diff of that scope, recommends a quick or a deep review, and asks which you want. The recommendation comes first and is marked `(Recommended)`, with the reasons in one line. In ask mode you always decide.
 
 ```bash
 /playbook:review                # the PR for the current branch
@@ -30,9 +30,12 @@ Flags combine (`-Au`). After a rebase or amend it pushes with `--force-with-leas
 /playbook:review 4265 --deep    # no question, deep review
 /playbook:review --quick --self # no question, local quick review
 playbook review suggest 4265    # the recommendation alone, with its reasons
+playbook review suggest 4265 --scope stack   # measure every open PR in the stack together
 ```
 
 The recommendation is a fixed rule list, so the same diff gets the same answer. The full list is in the [review routing reference](../../plugins/playbook/skills/grounding-review/references/review-routing.md). `review.suggest.*` config keys move the cuts, see [config keys](../reference/config-keys.md). When no rule is decisive the answer has low confidence and one cheap Haiku pass gives a second opinion. In auto mode the command takes the recommendation.
+
+With `--scope stack` the files of every open PR in the stack are measured together, so a stack of small PRs can be recommended deep when the whole is large. Merged PRs never count and are never reviewed or commented on, and closed PRs are skipped. A stack with more open PRs than `review.stackMaxPrs` is answered deep without reading their files.
 
 `/playbook:quick-review` and `/playbook:deep-review` do the work and stay available as direct entry points. The two sections below describe them.
 
@@ -66,13 +69,13 @@ Use quick review for everyday PRs. Use deep review for large, risky or cross-lay
 
 A stack is a series of PRs where each one targets the branch of the PR below it. Playbook finds GitHub native stacks, and stacks made with Graphite, ghstack, git-town or by hand, by following the branch chain. Design: [ADR-0019](../adr/0019-pr-stack-review.md).
 
-A PR outside a stack is reviewed with no extra question. When the PR sits in a stack, even with a single open PR, both commands print the size and always ask:
+A PR outside a stack is reviewed with no extra question. When the PR sits in a stack, even with a single open PR, `/playbook:review` prints the size and asks the scope first, then recommends a depth for that scope and passes the scope on, so the review it runs does not ask again. When you call `/playbook:quick-review` or `/playbook:deep-review` directly, they print the size and always ask:
 
 1. This PR only. This is the default.
 2. Whole stack, quick review.
 3. Whole stack, deep review.
 
-Pass `--this-pr` or `--whole-stack` to skip the question. In auto mode the command takes option 1 and logs the assumption. Either way it first says which PRs are below and above and which branch the PR's own diff is taken against.
+Pass `--this-pr` or `--whole-stack` to skip the question, to any of the three commands. In auto mode the command takes option 1 and logs the assumption. Either way it first says which PRs are below and above and which branch the PR's own diff is taken against.
 
 ```bash
 /playbook:quick-review 123 --whole-stack   # quick review of the stack PR #123 belongs to

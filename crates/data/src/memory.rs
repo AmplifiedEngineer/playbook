@@ -38,7 +38,53 @@ CREATE TABLE IF NOT EXISTS edges (
     PRIMARY KEY (src, dst, relation)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS edges_by_dst ON edges (dst);
-CREATE INDEX IF NOT EXISTS nodes_by_scope ON nodes (scope, project);";
+CREATE INDEX IF NOT EXISTS nodes_by_scope ON nodes (scope, project);
+CREATE TABLE IF NOT EXISTS facts_fts_map (
+    rowid INTEGER PRIMARY KEY,
+    fact_id TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    project TEXT
+);
+CREATE INDEX IF NOT EXISTS facts_fts_map_by_scope ON facts_fts_map (scope, project);";
+
+/// The full text index over fact text. It is contentless, so the text itself
+/// is not stored and `facts_fts_map` maps a row back to its fact. It is not
+/// part of [`SCHEMA_SQL`] because a build without FTS5 must still be able to
+/// write the graph. The tokenizer matches the recall matcher, which only
+/// lowercases and splits words on every non-alphanumeric character.
+pub const FACTS_FTS_SQL: &str = "\
+CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
+    name,
+    description,
+    body,
+    content='',
+    contentless_delete=1,
+    tokenize='unicode61 remove_diacritics 0'
+);";
+
+/// Whether the SQLite build can create FTS5 tables.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fts5Support {
+    Available,
+    Unavailable,
+}
+
+impl Fts5Support {
+    /// What the SQLite behind `conn` was compiled with.
+    pub fn probe(conn: &Connection) -> Self {
+        let Ok(mut stmt) = conn.prepare("PRAGMA compile_options") else {
+            return Self::Unavailable;
+        };
+        let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) else {
+            return Self::Unavailable;
+        };
+        if rows.flatten().any(|opt| opt == "ENABLE_FTS5") {
+            Self::Available
+        } else {
+            Self::Unavailable
+        }
+    }
+}
 
 /// The `scope` of a node that stands for a code location (an `anchors:`
 /// target). Every other node is a fact.
@@ -48,9 +94,9 @@ pub const CODE_SCOPE: &str = "code";
 pub const FACT_SCOPES: [&str; 3] = ["global", "org", "project"];
 
 /// The schema version stored in `meta` under `schema_version`.
-pub const SCHEMA_VERSION: &str = "1";
+pub const SCHEMA_VERSION: &str = "2";
 
-const BUSY: Duration = Duration::from_millis(5000);
+pub(crate) const BUSY: Duration = Duration::from_millis(5000);
 
 /// `<data>/memory.db`.
 pub fn db_in(data: &Path) -> PathBuf {
@@ -82,11 +128,32 @@ pub struct EdgeRow {
     pub signals: Option<Vec<String>>,
 }
 
-/// Applies [`SCHEMA_SQL`] and records the schema version. Fails when the file
-/// was written by a newer schema (rebuild it with the newer playbook).
+/// Applies [`SCHEMA_SQL`], creates the fact index when the build has FTS5, and
+/// records the schema version. Fails when the file was written by a newer
+/// schema (rebuild it with the newer playbook).
 pub fn init(conn: &Connection) -> rusqlite::Result<()> {
+    init_with(conn, Fts5Support::probe(conn))
+}
+
+/// [`init`] with the FTS5 support given, so a test can make a build that has
+/// FTS5 behave as one that has not.
+pub fn init_with(conn: &Connection, fts5: Fts5Support) -> rusqlite::Result<()> {
     conn.busy_timeout(BUSY)?;
+    let conn_was_autocommit = conn.is_autocommit();
     conn.execute_batch(SCHEMA_SQL)?;
+    if fts5 == Fts5Support::Available {
+        // The index is derived and readers fall back without it, so a table
+        // that cannot be made must not stop the graph from being written.
+        let _ = conn.execute_batch(FACTS_FTS_SQL);
+        // A failed create can make SQLite roll the open transaction back by
+        // itself; going on would then write the graph outside any transaction.
+        if conn.is_autocommit() && !conn_was_autocommit {
+            return Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ABORT),
+                Some("creating the fact index rolled the transaction back".into()),
+            ));
+        }
+    }
     conn.execute(
         "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?1)",
         [SCHEMA_VERSION],
@@ -100,14 +167,78 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
         (Ok(f), Ok(ours)) if f > ours => Err(rusqlite::Error::InvalidParameterName(format!(
             "memory.db has schema version {f}, this build understands {ours}; upgrade"
         ))),
+        (Ok(f), Ok(ours)) if f < ours => conn
+            .execute(
+                "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+                [SCHEMA_VERSION],
+            )
+            .map(|_| ()),
         _ => Ok(()),
     }
+}
+
+/// Whether `conn` holds a usable `facts_fts` virtual table.
+pub fn facts_index_present(conn: &Connection) -> bool {
+    facts_index_exists(conn).unwrap_or(false)
+}
+
+/// [`facts_index_present`], telling "no such table" (`Ok(false)`) from a file
+/// that cannot be read at all (`Err`).
+pub fn facts_index_exists(conn: &Connection) -> rusqlite::Result<bool> {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'facts_fts' \
+         AND sql LIKE 'CREATE VIRTUAL TABLE%'",
+        [],
+        |_| Ok(()),
+    )
+    .optional()
+    .map(|found| found.is_some())
 }
 
 /// Replaces the whole graph in the database at `db` in one transaction, so a
 /// reader sees the old graph or the new one, never a mix. Creates the file
 /// and its folder (owner only) when missing.
 pub fn write_graph(db: &Path, nodes: &[NodeRow], edges: &[EdgeRow]) -> Result<(), String> {
+    write_graph_in_one_pass(db, nodes, edges, IndexFill::Complete).map(|_| ())
+}
+
+/// Like [`write_graph`], then fills the body column of the fact index in a
+/// second transaction, so a rebuild reads each fact file once and never holds
+/// all the bodies. The writer lock is held while the files are read.
+/// `body_of` gets a fact's file (relative to the memory folder) and returns its
+/// body, or `None` to leave the body empty.
+///
+/// Until the second transaction commits the index trails the graph, which
+/// readers see as stale and answer by scanning. A failure in the second step
+/// leaves it so until the next write; the graph itself is already stored.
+pub fn write_graph_with_bodies(
+    db: &Path,
+    nodes: &[NodeRow],
+    edges: &[EdgeRow],
+    mut body_of: impl FnMut(&str) -> Option<String>,
+) -> Result<(), String> {
+    let generation = write_graph_in_one_pass(db, nodes, edges, IndexFill::AwaitingBodies)?;
+    index_fill_fault_point()?;
+    let _ = fill_bodies(db, generation, &mut body_of);
+    Ok(())
+}
+
+/// Whether a graph write leaves the fact index trusted (its body column needs
+/// nothing more) or waits for [`fill_bodies`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IndexFill {
+    Complete,
+    AwaitingBodies,
+}
+
+/// The write behind [`write_graph`]; returns the graph generation it made.
+fn write_graph_in_one_pass(
+    db: &Path,
+    nodes: &[NodeRow],
+    edges: &[EdgeRow],
+    fill: IndexFill,
+) -> Result<i64, String> {
     if let Some(dir) = db.parent() {
         playbook_common::atomic::ensure_private_dir(dir)
             .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
@@ -166,7 +297,199 @@ pub fn write_graph(db: &Path, nodes: &[NodeRow], edges: &[EdgeRow]) -> Result<()
         [secs.to_string(), millis.to_string()],
     )
     .map_err(|e| e.to_string())?;
+    let generation = write_facts_index(&tx, nodes, fill).map_err(|e| e.to_string())?;
+    write_graph_fault_point()?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(generation)
+}
+
+/// Replaces the fact index with one row per fact of `nodes`, in fact id order
+/// so row ids repeat from one write to the next, and counts the write in
+/// `graph_generation`. The index is whole-graph like `nodes` (a write replaces
+/// both), so a fact that left `nodes` leaves the index too. An index that
+/// cannot be written is rolled back and left behind the graph, which readers
+/// see as stale. Returns the new generation.
+fn write_facts_index(
+    conn: &Connection,
+    nodes: &[NodeRow],
+    fill: IndexFill,
+) -> rusqlite::Result<i64> {
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('graph_generation', '1') \
+         ON CONFLICT (key) DO UPDATE SET value = CAST(value AS INTEGER) + 1",
+        [],
+    )?;
+    let generation: i64 = conn.query_row(
+        "SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'graph_generation'",
+        [],
+        |r| r.get(0),
+    )?;
+    if !facts_index_present(conn) {
+        return Ok(generation);
+    }
+    conn.execute_batch("SAVEPOINT facts_index")?;
+    match fill_facts_index(conn, nodes, fill) {
+        Ok(()) => conn.execute_batch("RELEASE facts_index")?,
+        Err(_) => conn.execute_batch("ROLLBACK TO facts_index; RELEASE facts_index")?,
+    }
+    Ok(generation)
+}
+
+fn fill_facts_index(conn: &Connection, nodes: &[NodeRow], fill: IndexFill) -> rusqlite::Result<()> {
+    conn.execute_batch("DELETE FROM facts_fts; DELETE FROM facts_fts_map;")?;
+    // A later row of the same id wins, as it does in `nodes`.
+    let facts: std::collections::BTreeMap<&str, &NodeRow> = nodes
+        .iter()
+        .filter(|n| n.scope != CODE_SCOPE)
+        .map(|n| (n.id.as_str(), n))
+        .collect();
+    let mut index = conn.prepare(
+        "INSERT INTO facts_fts (rowid, name, description, body) VALUES (?1, ?2, ?3, '')",
+    )?;
+    let mut map = conn.prepare(
+        "INSERT INTO facts_fts_map (rowid, fact_id, scope, project) VALUES (?1, ?2, ?3, ?4)",
+    )?;
+    for (row, node) in (1_i64..).zip(facts.values()) {
+        index.execute(rusqlite::params![
+            row,
+            node.name.as_deref().unwrap_or(""),
+            node.description.as_deref().unwrap_or("")
+        ])?;
+        map.execute(rusqlite::params![row, node.id, node.scope, node.project])?;
+    }
+    if fill == IndexFill::Complete {
+        mark_facts_index_current(conn)?;
+    }
+    Ok(())
+}
+
+fn mark_facts_index_current(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO meta (key, value) \
+         SELECT 'facts_index_generation', value FROM meta WHERE key = 'graph_generation'",
+        [],
+    )
+    .map(|_| ())
+}
+
+/// The second transaction of [`write_graph_with_bodies`]. Does nothing when a
+/// newer write has since replaced the graph: that write owns the index.
+fn fill_bodies(
+    db: &Path,
+    generation: i64,
+    body_of: &mut impl FnMut(&str) -> Option<String>,
+) -> Result<(), String> {
+    let mut conn = Connection::open(db).map_err(|e| e.to_string())?;
+    conn.busy_timeout(BUSY).map_err(|e| e.to_string())?;
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let current: Option<i64> = tx
+        .query_row(
+            "SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'graph_generation'",
+            [],
+            |r| r.get(0),
+        )
+        .ok();
+    if current != Some(generation) || !facts_index_present(&tx) {
+        return Ok(());
+    }
+    {
+        let mut facts = tx
+            .prepare(
+                "SELECT m.rowid, n.file, COALESCE(n.name, ''), COALESCE(n.description, '') \
+                 FROM facts_fts_map m JOIN nodes n ON n.id = m.fact_id ORDER BY m.rowid",
+            )
+            .map_err(|e| e.to_string())?;
+        let mut drop_row = tx
+            .prepare("DELETE FROM facts_fts WHERE rowid = ?1")
+            .map_err(|e| e.to_string())?;
+        let mut put_row = tx
+            .prepare(
+                "INSERT INTO facts_fts (rowid, name, description, body) VALUES (?1, ?2, ?3, ?4)",
+            )
+            .map_err(|e| e.to_string())?;
+        let mut rows = facts.query([]).map_err(|e| e.to_string())?;
+        while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            let (rowid, file, name, description): (i64, String, String, String) = (
+                row.get(0).map_err(|e| e.to_string())?,
+                row.get(1).map_err(|e| e.to_string())?,
+                row.get(2).map_err(|e| e.to_string())?,
+                row.get(3).map_err(|e| e.to_string())?,
+            );
+            let Some(body) = body_of(&file) else {
+                continue;
+            };
+            drop_row.execute([rowid]).map_err(|e| e.to_string())?;
+            put_row
+                .execute(rusqlite::params![rowid, name, description, body])
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    mark_facts_index_current(&tx).map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())
+}
+
+/// Whether the fact index was written by the latest graph write, so a reader
+/// can trust it. False when it is missing, was not filled, or trails the
+/// graph.
+pub fn facts_index_is_fresh(conn: &Connection) -> bool {
+    let generation = |key: &str| {
+        conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| {
+            r.get::<_, String>(0)
+        })
+        .ok()
+    };
+    facts_index_present(conn)
+        && generation("graph_generation")
+            .is_some_and(|g| generation("facts_index_generation") == Some(g))
+}
+
+/// A seam inside [`write_graph`]'s transaction, after every row is written
+/// and before the commit. A test makes it fail to prove the write rolls back
+/// whole.
+#[cfg(not(test))]
+fn write_graph_fault_point() -> Result<(), String> {
+    Ok(())
+}
+
+/// A seam between the two commits of [`write_graph_with_bodies`], where a
+/// test stops the write to look at a reader in the window between them.
+#[cfg(not(test))]
+fn index_fill_fault_point() -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_BEFORE_COMMIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+thread_local! {
+    static STOP_BEFORE_BODIES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Makes [`write_graph_with_bodies`] stop on this thread before the body pass.
+#[cfg(test)]
+pub(crate) fn stop_before_bodies(on: bool) {
+    STOP_BEFORE_BODIES.with(|f| f.set(on));
+}
+
+#[cfg(test)]
+fn index_fill_fault_point() -> Result<(), String> {
+    if STOP_BEFORE_BODIES.with(std::cell::Cell::get) {
+        return Err("injected stop before the body pass".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn write_graph_fault_point() -> Result<(), String> {
+    if FAIL_BEFORE_COMMIT.with(std::cell::Cell::get) {
+        return Err("injected failure before commit".to_string());
+    }
+    Ok(())
 }
 
 /// When the graph in `db` was last written: the time the writer recorded in
@@ -399,7 +722,7 @@ mod tests {
         Connection::open(&db)
             .unwrap()
             .execute(
-                "UPDATE meta SET value = '2' WHERE key = 'schema_version'",
+                "UPDATE meta SET value = '3' WHERE key = 'schema_version'",
                 [],
             )
             .unwrap();
@@ -482,5 +805,329 @@ mod tests {
             .unwrap();
         let recorded = std::time::UNIX_EPOCH + Duration::from_millis(stored.parse().unwrap());
         assert_eq!(touched_at(&db).unwrap(), Some(recorded));
+    }
+
+    fn open_memory() -> Connection {
+        Connection::open_in_memory().unwrap()
+    }
+
+    #[test]
+    fn init_without_fts5_succeeds_and_makes_no_fact_index() {
+        // Arrange
+        let conn = open_memory();
+
+        // Act
+        let result = init_with(&conn, Fts5Support::Unavailable);
+
+        // Assert
+        assert!(result.is_ok());
+        assert!(!facts_index_present(&conn));
+        assert!(conn.prepare("SELECT 1 FROM facts_fts_map").is_ok());
+    }
+
+    #[test]
+    fn init_succeeds_when_the_fact_index_cannot_be_created() {
+        // Arrange: a plain table already holds the name.
+        let conn = open_memory();
+        conn.execute_batch("CREATE TABLE facts_fts (x TEXT);")
+            .unwrap();
+
+        // Act
+        let result = init_with(&conn, Fts5Support::Available);
+
+        // Assert
+        assert!(result.is_ok());
+        assert!(!facts_index_present(&conn));
+    }
+
+    #[test]
+    fn init_creates_the_fact_index_once_and_is_then_a_no_op() {
+        // Arrange
+        let conn = open_memory();
+
+        // Act
+        init_with(&conn, Fts5Support::Available).unwrap();
+        conn.execute(
+            "INSERT INTO facts_fts (rowid, name) VALUES (1, 'alpha')",
+            [],
+        )
+        .unwrap();
+        init_with(&conn, Fts5Support::Available).unwrap();
+
+        // Assert
+        assert!(facts_index_present(&conn));
+        let hits: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM facts_fts WHERE facts_fts MATCH 'alpha'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hits, 1);
+    }
+
+    #[test]
+    fn the_bundled_sqlite_has_fts5() {
+        // Arrange, Act
+        let support = Fts5Support::probe(&open_memory());
+
+        // Assert
+        assert_eq!(support, Fts5Support::Available, "bundled SQLite lost FTS5");
+    }
+
+    #[test]
+    fn a_version_one_file_is_moved_to_the_current_version() {
+        // Arrange
+        let d = scratch_dir("mem-v1");
+        let db = db_in(&d);
+        write_graph(&db, &[node("a")], &[]).unwrap();
+        let conn = Connection::open(&db).unwrap();
+        conn.execute(
+            "UPDATE meta SET value = '1' WHERE key = 'schema_version'",
+            [],
+        )
+        .unwrap();
+
+        // Act
+        write_graph(&db, &[node("b")], &[]).unwrap();
+
+        // Assert
+        let version: String = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'schema_version'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        assert!(facts_index_present(&conn));
+    }
+
+    fn fact(id: &str, scope: &str, project: Option<&str>, name: &str, desc: &str) -> NodeRow {
+        NodeRow {
+            scope: scope.into(),
+            project: project.map(str::to_string),
+            name: Some(name.into()),
+            description: Some(desc.into()),
+            ..node(id)
+        }
+    }
+
+    fn open(db: &Path) -> Connection {
+        Connection::open(db).unwrap()
+    }
+
+    fn indexed_ids(conn: &Connection) -> Vec<String> {
+        let mut stmt = conn
+            .prepare("SELECT fact_id FROM facts_fts_map ORDER BY rowid")
+            .unwrap();
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn ids_matching(conn: &Connection, term: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT m.fact_id FROM facts_fts f JOIN facts_fts_map m ON m.rowid = f.rowid \
+                 WHERE facts_fts MATCH ?1 ORDER BY m.fact_id",
+            )
+            .unwrap();
+        stmt.query_map([term], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn generation(conn: &Connection) -> String {
+        conn.query_row(
+            "SELECT value FROM meta WHERE key = 'graph_generation'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_rebuild_indexes_every_fact_and_no_code_anchor() {
+        // Arrange
+        let db = db_in(&scratch_dir("mem-idx"));
+        let nodes = [
+            fact("b", "global", None, "ferry-timetable", "cache expiry"),
+            fact("a", "project", Some("o/r"), "crane-queue", "backpressure"),
+            NodeRow {
+                scope: CODE_SCOPE.into(),
+                ..anchor("code:~/x")
+            },
+        ];
+
+        // Act
+        write_graph(&db, &nodes, &[]).unwrap();
+
+        // Assert
+        let conn = open(&db);
+        assert_eq!(indexed_ids(&conn), ["a", "b"]);
+        assert_eq!(ids_matching(&conn, "ferry"), ["b"]);
+        assert_eq!(ids_matching(&conn, "backpressure"), ["a"]);
+        assert!(facts_index_is_fresh(&conn));
+    }
+
+    #[test]
+    fn a_fact_that_left_the_graph_leaves_the_index() {
+        // Arrange
+        let db = db_in(&scratch_dir("mem-idx-del"));
+        let keep = fact("keep", "global", None, "alpha", "d");
+        let gone = fact("gone", "global", None, "beta", "d");
+        write_graph(&db, &[keep.clone(), gone], &[]).unwrap();
+
+        // Act
+        write_graph(&db, &[keep], &[]).unwrap();
+
+        // Assert
+        let conn = open(&db);
+        assert_eq!(indexed_ids(&conn), ["keep"]);
+        assert!(ids_matching(&conn, "beta").is_empty());
+    }
+
+    #[test]
+    fn a_changed_fact_of_the_same_count_is_reindexed_under_a_new_generation() {
+        // Arrange
+        let db = db_in(&scratch_dir("mem-idx-chg"));
+        write_graph(&db, &[fact("a", "global", None, "old-name", "d")], &[]).unwrap();
+        let before = generation(&open(&db));
+
+        // Act
+        write_graph(&db, &[fact("a", "global", None, "new-name", "d")], &[]).unwrap();
+
+        // Assert
+        let conn = open(&db);
+        assert_ne!(generation(&conn), before);
+        assert!(ids_matching(&conn, "old").is_empty());
+        assert_eq!(ids_matching(&conn, "new"), ["a"]);
+        assert!(facts_index_is_fresh(&conn));
+    }
+
+    #[test]
+    fn rewriting_the_whole_graph_keeps_the_facts_of_every_repo() {
+        // Arrange: a rebuild that changes repo A writes repo B's facts too.
+        let db = db_in(&scratch_dir("mem-idx-two"));
+        let b = fact("b", "project", Some("o/b"), "repo-b-fact", "d");
+        let a_old = fact("a", "project", Some("o/a"), "repo-a-old", "d");
+        write_graph(&db, &[a_old, b.clone()], &[]).unwrap();
+        let a_new = fact("a", "project", Some("o/a"), "repo-a-new", "d");
+
+        // Act
+        write_graph(&db, &[a_new, b], &[]).unwrap();
+
+        // Assert
+        let conn = open(&db);
+        assert_eq!(indexed_ids(&conn), ["a", "b"]);
+        assert_eq!(ids_matching(&conn, "repo"), ["a", "b"]);
+        assert_eq!(ids_matching(&conn, "new"), ["a"]);
+    }
+
+    #[test]
+    fn two_rows_with_one_id_leave_one_index_row() {
+        // Arrange
+        let db = db_in(&scratch_dir("mem-idx-dup"));
+        let first = fact("a", "global", None, "first", "d");
+        let second = fact("a", "global", None, "second", "d");
+
+        // Act
+        write_graph(&db, &[first, second], &[]).unwrap();
+
+        // Assert
+        let conn = open(&db);
+        assert_eq!(indexed_ids(&conn), ["a"]);
+        assert_eq!(ids_matching(&conn, "second"), ["a"]);
+    }
+
+    #[test]
+    fn a_failure_before_the_commit_rolls_back_nodes_and_index_together() {
+        // Arrange
+        let db = db_in(&scratch_dir("mem-idx-fault"));
+        write_graph(&db, &[fact("a", "global", None, "kept", "d")], &[]).unwrap();
+        FAIL_BEFORE_COMMIT.with(|f| f.set(true));
+
+        // Act
+        let result = write_graph(&db, &[fact("z", "global", None, "lost", "d")], &[]);
+        FAIL_BEFORE_COMMIT.with(|f| f.set(false));
+
+        // Assert
+        assert!(result.is_err());
+        let conn = open(&db);
+        assert_eq!(indexed_ids(&conn), ["a"]);
+        assert_eq!(ids_matching(&conn, "kept"), ["a"]);
+        let nodes: i64 = conn
+            .query_row("SELECT count(*) FROM nodes WHERE id = 'z'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(nodes, 0);
+        assert!(facts_index_is_fresh(&conn));
+    }
+
+    #[test]
+    fn a_write_succeeds_and_the_index_is_not_fresh_when_the_table_is_unusable() {
+        // Arrange: a plain table holds the name, so the index cannot exist.
+        let db = db_in(&scratch_dir("mem-idx-plain"));
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        open(&db)
+            .execute_batch("CREATE TABLE facts_fts (x TEXT);")
+            .unwrap();
+
+        // Act
+        let result = write_graph(&db, &[fact("a", "global", None, "n", "d")], &[]);
+
+        // Assert
+        assert!(result.is_ok());
+        assert!(!facts_index_is_fresh(&open(&db)));
+    }
+
+    #[test]
+    fn bodies_are_indexed_in_a_second_pass_and_the_index_is_then_current() {
+        // Arrange
+        let db = db_in(&scratch_dir("mem-bodies"));
+        let nodes = [
+            fact("a", "global", None, "alpha-name", "d"),
+            fact("b", "global", None, "beta-name", "d"),
+        ];
+
+        // Act
+        write_graph_with_bodies(&db, &nodes, &[], |file| match file {
+            "a.md" => Some("mentions the quokka habitat".to_string()),
+            _ => None,
+        })
+        .unwrap();
+
+        // Assert
+        let conn = open(&db);
+        assert_eq!(ids_matching(&conn, "quokka"), ["a"]);
+        assert_eq!(ids_matching(&conn, "alpha"), ["a"]);
+        assert!(facts_index_is_fresh(&conn));
+    }
+
+    #[test]
+    fn the_index_reads_as_stale_between_the_node_commit_and_the_body_pass() {
+        // Arrange
+        let db = db_in(&scratch_dir("mem-window"));
+        stop_before_bodies(true);
+
+        // Act
+        let result =
+            write_graph_with_bodies(&db, &[fact("a", "global", None, "alpha", "d")], &[], |_| {
+                Some("never read".to_string())
+            });
+        stop_before_bodies(false);
+
+        // Assert
+        assert!(result.is_err());
+        let conn = open(&db);
+        let nodes: i64 = conn
+            .query_row("SELECT count(*) FROM nodes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(nodes, 1, "the graph itself is stored");
+        assert!(!facts_index_is_fresh(&conn));
     }
 }

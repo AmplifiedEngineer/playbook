@@ -130,7 +130,7 @@ impl Default for Limits {
 }
 
 impl Stack {
-    fn open(&self) -> impl Iterator<Item = &StackPr> {
+    pub(crate) fn open(&self) -> impl Iterator<Item = &StackPr> {
         self.prs.iter().filter(|p| p.state == State::Open)
     }
 
@@ -273,7 +273,7 @@ fn parse_pr(v: &Value) -> Option<StackPr> {
     })
 }
 
-pub(super) type Gh<'a> = &'a (dyn Fn(&[&str]) -> Result<String, String> + Sync);
+pub(crate) type Gh<'a> = &'a (dyn Fn(&[&str]) -> Result<String, String> + Sync);
 
 fn json_of(raw: &str, what: &str) -> Result<Value, String> {
     serde_json::from_str(raw).map_err(|e| format!("could not read {what} from gh: {e}"))

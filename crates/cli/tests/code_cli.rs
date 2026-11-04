@@ -77,6 +77,36 @@ impl Fixture {
         fs::write(path, text).expect("write");
     }
 
+    /// A second worktree of this repo, in its own folder and with the same
+    /// home. A repo needs one commit before it can have a second worktree.
+    fn add_worktree(&self, name: &str) -> Self {
+        self.git(&[
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "start",
+        ]);
+        let path = self.repo.parent().expect("base").join(name);
+        self.git(&[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            name,
+            path.to_str().expect("utf8"),
+        ]);
+        Self {
+            repo: path.canonicalize().expect("worktree"),
+            home: self.home.clone(),
+            bin: self.bin.clone(),
+        }
+    }
+
     fn playbook(&self, args: &[&str]) -> Output {
         Command::new(env!("CARGO_BIN_EXE_playbook"))
             .args(args)
@@ -119,6 +149,8 @@ fn index_prints_the_envelope_and_a_second_run_is_all_unchanged() {
     assert_eq!(first["command"], "index");
     assert_eq!(first["results"]["indexed"], 3);
     assert_eq!(first["results"]["changed"], 3);
+    assert_eq!(first["results"]["reused"], 0);
+    assert_eq!(first["results"]["cleanup"], "done");
     let second = json_of(&second);
     assert_eq!(second["results"]["unchanged"], 3);
     assert_eq!(second["results"]["changed"], 0);
@@ -175,6 +207,7 @@ fn the_index_lands_under_the_home_state_dir_and_not_in_the_repo() {
     );
     assert!(path.contains("test-owner/test-repo"), "{path}");
     assert!(path.contains("/data/code/"), "{path}");
+    assert!(path.ends_with("/store-v4.sqlite3"), "{path}");
     assert!(Path::new(&path).is_file());
     let listing = fs::read_dir(&fx.repo)
         .expect("repo")
@@ -527,61 +560,141 @@ fn context_json_bytes_count_snippet_text_only() {
     assert_eq!(doc["results"]["bytes"].as_u64(), Some(text_bytes as u64));
 }
 
-#[test]
-fn an_index_at_the_old_state_path_moves_into_the_data_folder() {
-    // Arrange: build an index, then put it back where earlier versions kept it.
-    let fx = Fixture::new("old-index", true);
-    fx.write("a.rs", "fn a() {}\n");
-    let doc = json_of(&fx.playbook(&["code", "index", "--json"]));
-    let new_path = PathBuf::from(doc["index"]["path"].as_str().expect("path"));
-    let worktree_id = new_path
-        .file_stem()
-        .expect("stem")
-        .to_string_lossy()
-        .into_owned();
-    let old_dir = fx
-        .home
-        .join(".config/playbook/repos/test-owner/test-repo")
-        .join(worktree_id)
-        .join("code");
-    fs::create_dir_all(&old_dir).expect("old dir");
-    let old = old_dir.join("index.sqlite3");
-    fs::rename(&new_path, &old).expect("put the index back at the old path");
+fn store_dir(doc: &serde_json::Value) -> PathBuf {
+    PathBuf::from(doc["index"]["path"].as_str().expect("path"))
+        .parent()
+        .expect("store folder")
+        .to_path_buf()
+}
 
-    // Act
-    let out = fx.playbook(&["code", "status", "--json"]);
+fn db_files(dir: &Path) -> Vec<String> {
+    fs::read_dir(dir)
+        .expect("store folder")
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".db"))
+        .collect()
+}
 
-    // Assert
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(new_path.is_file(), "moved into the data folder");
-    assert!(!old.exists(), "the old file is gone from its old name");
-    assert_eq!(json_of(&out)["index"]["state"], "fresh");
+fn run_lock_of_the_worktree(dir: &Path) -> PathBuf {
+    fs::read_dir(dir)
+        .expect("store folder")
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .find(|p| {
+            p.extension().is_some_and(|x| x == "lock")
+                && p.file_stem().is_some_and(|n| n != "store-v4")
+        })
+        .expect("a run lock")
 }
 
 #[test]
-fn a_corrupt_old_index_does_not_stop_a_fresh_build() {
+fn two_worktrees_share_one_store_and_see_only_their_own_files() {
     // Arrange
-    let fx = Fixture::new("old-index-junk", true);
+    let a = Fixture::new("share", true);
+    a.write("only_a.rs", "fn only_a() {}\n");
+    let b = a.add_worktree("share-b");
+    b.write("only_b.rs", "fn only_b() {}\n");
+
+    // Act
+    let in_a = json_of(&a.playbook(&["code", "index", "--json"]));
+    let in_b = json_of(&b.playbook(&["code", "index", "--json"]));
+    let miss = b.playbook(&["code", "symbol", "only_a", "--json"]);
+    let hit = b.playbook(&["code", "symbol", "only_b", "--json"]);
+
+    // Assert
+    assert_eq!(in_a["index"]["path"], in_b["index"]["path"]);
+    assert!(db_files(&store_dir(&in_a)).is_empty());
+    assert_eq!(json_of(&miss)["results"].as_array().map(Vec::len), Some(0));
+    assert_eq!(json_of(&hit)["results"].as_array().map(Vec::len), Some(1));
+}
+
+#[test]
+fn a_new_worktree_of_an_indexed_repo_has_no_index_yet() {
+    // Arrange
+    let a = Fixture::new("fresh-worktree", true);
+    a.write("a.rs", "fn a() {}\n");
+    let b = a.add_worktree("fresh-worktree-b");
+    json_of(&a.playbook(&["code", "index", "--json"]));
+
+    // Act
+    let status = b.playbook(&["code", "status", "--json"]);
+    let symbol = b.playbook(&["code", "symbol", "a"]);
+    let search = b.playbook(&["code", "search", "--text", "a"]);
+    let context = b.playbook(&["code", "context", "a"]);
+
+    // Assert
+    assert!(status.status.success());
+    assert_eq!(json_of(&status)["index"]["state"], "missing");
+    for out in [symbol, search, context] {
+        assert_eq!(out.status.code(), Some(1));
+        let err = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(err.contains("code index"), "{err}");
+    }
+}
+
+#[test]
+fn the_run_lock_is_per_worktree() {
+    // Arrange
+    let a = Fixture::new("lock-per-worktree", true);
+    a.write("a.rs", "fn a() {}\n");
+    let b = a.add_worktree("lock-per-worktree-b");
+    b.write("b.rs", "fn b() {}\n");
+    let first = json_of(&a.playbook(&["code", "index", "--json"]));
+    let lock = fs::OpenOptions::new()
+        .write(true)
+        .open(run_lock_of_the_worktree(&store_dir(&first)))
+        .expect("lock file");
+    lock.lock().expect("hold a's lock");
+
+    // Act
+    let blocked = a.playbook(&["code", "index"]);
+    let sibling = b.playbook(&["code", "index"]);
+
+    // Assert
+    assert_eq!(blocked.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&blocked.stderr).into_owned();
+    assert!(err.contains("another index run is in progress"), "{err}");
+    assert!(
+        sibling.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sibling.stderr)
+    );
+}
+
+#[test]
+fn a_rebuild_of_a_healthy_store_says_worktree_only() {
+    // Arrange
+    let a = Fixture::new("rebuild-scope", true);
+    a.write("a.rs", "fn a() {}\n");
+    let b = a.add_worktree("rebuild-scope-b");
+    b.write("b.rs", "fn b() {}\n");
+    a.playbook(&["code", "index"]);
+    b.playbook(&["code", "index"]);
+    let before = b.playbook(&["code", "symbol", "b", "--json"]).stdout;
+
+    // Act
+    let json = json_of(&a.playbook(&["code", "index", "--rebuild", "--json"]));
+    let text = a.playbook(&["code", "index", "--rebuild"]);
+
+    // Assert
+    assert_eq!(json["results"]["scope"], "worktree");
+    assert!(String::from_utf8_lossy(&text.stdout).contains("rebuilt: worktree only"));
+    assert_eq!(
+        b.playbook(&["code", "symbol", "b", "--json"]).stdout,
+        before
+    );
+}
+
+#[test]
+fn an_index_kept_by_an_earlier_version_is_ignored() {
+    // Arrange
+    let fx = Fixture::new("old-index", true);
     fx.write("a.rs", "fn a() {}\n");
     let probe = json_of(&fx.playbook(&["code", "index", "--json"]));
-    let new_path = PathBuf::from(probe["index"]["path"].as_str().expect("path"));
-    fs::remove_file(&new_path).expect("drop the new index");
-    let worktree_id = new_path
-        .file_stem()
-        .expect("stem")
-        .to_string_lossy()
-        .into_owned();
-    let old_dir = fx
-        .home
-        .join(".config/playbook/repos/test-owner/test-repo")
-        .join(worktree_id)
-        .join("code");
-    fs::create_dir_all(&old_dir).expect("old dir");
-    fs::write(old_dir.join("index.sqlite3"), vec![b'x'; 4096]).expect("junk");
+    let store = PathBuf::from(probe["index"]["path"].as_str().expect("path"));
+    let old = store_dir(&probe).join("old-worktree.db");
+    fs::write(&old, vec![b'x'; 4096]).expect("junk");
 
     // Act
     let out = fx.playbook(&["code", "index", "--json"]);
@@ -592,5 +705,206 @@ fn a_corrupt_old_index_does_not_stop_a_fresh_build() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(new_path.is_file());
+    assert!(store.is_file());
+    assert_eq!(fs::read(&old).expect("old file stays"), vec![b'x'; 4096]);
+}
+
+#[test]
+fn status_reports_the_same_store_size_in_every_worktree() {
+    // Arrange
+    let a = Fixture::new("db-bytes", true);
+    a.write("a.rs", "fn a() {}\n");
+    let b = a.add_worktree("db-bytes-b");
+    b.write("b.rs", "fn b() {}\n");
+    a.playbook(&["code", "index"]);
+    b.playbook(&["code", "index"]);
+
+    // Act
+    let in_a = json_of(&a.playbook(&["code", "status", "--json"]));
+    let in_b = json_of(&b.playbook(&["code", "status", "--json"]));
+
+    // Assert
+    assert_eq!(in_a["results"]["db_bytes"], in_b["results"]["db_bytes"]);
+    assert!(in_a["results"]["db_bytes"].as_u64().is_some_and(|n| n > 0));
+}
+
+#[test]
+fn an_empty_repo_indexes_zero_files_into_a_store() {
+    // Arrange
+    let fx = Fixture::new("empty-repo", true);
+
+    // Act
+    let out = fx.playbook(&["code", "index", "--json"]);
+
+    // Assert
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(json_of(&out)["results"]["indexed"], 0);
+}
+
+#[test]
+fn a_second_worktree_with_the_same_files_reuses_them() {
+    // Arrange
+    let a = Fixture::new("reuse", true);
+    let b = a.add_worktree("reuse-b");
+    for fx in [&a, &b] {
+        fx.write("a.rs", "fn a() {}\n");
+        fx.write("b.ts", "export const b = 1;\n");
+        fx.write("c.py", "def c():\n    pass\n");
+    }
+    a.playbook(&["code", "index"]);
+
+    // Act
+    let json = json_of(&b.playbook(&["code", "index", "--json"]));
+    let text = Fixture::playbook(&b, &["code", "index", "--rebuild"]);
+
+    // Assert
+    assert_eq!(json["results"]["reused"], 3);
+    assert_eq!(json["results"]["parsed"], 0);
+    assert!(String::from_utf8_lossy(&text.stdout).contains("reused: 0"));
+}
+
+impl Fixture {
+    /// Starts `playbook code index` with the debug-only seams on and stdout
+    /// piped, so the test can read the marker while the child waits.
+    fn spawn_index(&self) -> std::process::Child {
+        Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["code", "index"])
+            .current_dir(&self.repo)
+            .env_clear()
+            .env("HOME", &self.home)
+            .env("PATH", &self.bin)
+            .env("PLAYBOOK_CODE_TEST_MARKER", "1")
+            .env("PLAYBOOK_CODE_BUSY_TIMEOUT_MS", "30000")
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("playbook spawns")
+    }
+}
+
+/// A spawned `playbook` that is killed and reaped when the test ends early.
+struct Running(std::process::Child);
+
+impl Running {
+    /// Waits for the process to end, at most `limit`.
+    fn finish(&mut self, limit: std::time::Duration) -> std::process::ExitStatus {
+        let start = std::time::Instant::now();
+        loop {
+            if let Some(status) = self.0.try_wait().expect("poll") {
+                return status;
+            }
+            assert!(start.elapsed() < limit, "the index run did not end");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Waits for the first stdout line of `child`, at most `limit`.
+fn first_line(child: &mut std::process::Child, limit: std::time::Duration) -> Option<String> {
+    use std::io::BufRead;
+    let stdout = child.stdout.take().expect("piped stdout");
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut reader = std::io::BufReader::new(stdout);
+        let mut line = String::new();
+        let _ = reader.read_line(&mut line);
+        let _ = tx.send(line);
+        // Keep reading, so the child can print its summary without a broken pipe.
+        let _ = std::io::copy(&mut reader, &mut std::io::sink());
+    });
+    rx.recv_timeout(limit).ok()
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn two_worktrees_index_at_the_same_time_once_the_write_lock_frees() {
+    // Arrange
+    let a = Fixture::new("two-runs", true);
+    a.write("a.rs", "fn a() {}\n");
+    let b = a.add_worktree("two-runs-b");
+    b.write("b.rs", "fn b() {}\n");
+    let first = json_of(&a.playbook(&["code", "index", "--json"]));
+    let store = PathBuf::from(first["index"]["path"].as_str().expect("path"));
+    let completed = |worktree_files: &str| -> i64 {
+        rusqlite::Connection::open(&store)
+            .expect("probe")
+            .query_row(
+                "SELECT COALESCE(MAX(last_run_completed), 0) FROM worktrees WHERE root LIKE ?1",
+                [format!("%{worktree_files}")],
+                |r| r.get(0),
+            )
+            .expect("completed")
+    };
+    let a_root = a
+        .repo
+        .file_name()
+        .expect("name")
+        .to_string_lossy()
+        .into_owned();
+    let a_before = completed(&a_root);
+    let holder = rusqlite::Connection::open(&store).expect("holder");
+    holder.execute_batch("BEGIN IMMEDIATE").expect("hold");
+    let limit = std::time::Duration::from_secs(10);
+
+    // Act
+    let mut run_a = Running(a.spawn_index());
+    let mut run_b = Running(b.spawn_index());
+    let marker_a = first_line(&mut run_a.0, limit);
+    let marker_b = first_line(&mut run_b.0, limit);
+
+    // Assert
+    assert_eq!(marker_a.as_deref(), Some("marker: ready\n"));
+    assert_eq!(marker_b.as_deref(), Some("marker: ready\n"));
+    assert!(run_a.0.try_wait().expect("poll").is_none(), "a waits");
+    assert!(run_b.0.try_wait().expect("poll").is_none(), "b waits");
+
+    // Act
+    holder.execute_batch("COMMIT").expect("commit");
+
+    // Assert
+    assert!(run_a.finish(limit).success());
+    assert!(run_b.finish(limit).success());
+    let check = rusqlite::Connection::open(&store).expect("check");
+    let rows: i64 = check
+        .query_row("SELECT COUNT(*) FROM worktrees", [], |r| r.get(0))
+        .expect("rows");
+    let integrity: String = check
+        .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+        .expect("integrity");
+    let broken = check
+        .prepare("PRAGMA foreign_key_check")
+        .expect("fk")
+        .query_map([], |r| r.get::<_, String>(0))
+        .expect("rows")
+        .count();
+    assert_eq!((rows, integrity.as_str(), broken), (2, "ok", 0));
+    assert!(completed(&a_root) > a_before, "a recorded its second run");
+}
+
+/// CI runs this in a debug build, where the marker must show. A release run of
+/// the test (`cargo test --release`) checks the other half: no marker. The
+/// source checks in `db.rs` and `cli.rs` pin the gate in both profiles.
+#[test]
+fn the_debug_only_marker_follows_the_build_profile() {
+    // Arrange
+    let fx = Fixture::new("seams", true);
+    fx.write("a.rs", "fn a() {}\n");
+
+    // Act
+    let out = fx.spawn_index().wait_with_output().expect("output");
+
+    // Assert
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(stdout.contains("marker: ready"), cfg!(debug_assertions));
 }

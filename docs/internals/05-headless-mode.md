@@ -94,7 +94,7 @@ These commands read the mode first and take the recommended answer instead of as
 - `/playbook:plan`: answers the convergent phase (Work Units and Segments) on its own. Plain auto stops at the design approval. Only `--auto-design` approves a design.
 - `/playbook:implement` and `/playbook:fix`: pick the recommended delivery options and run to a pull request.
 - `/playbook:commit-and-push` and `/playbook:create-pull-request`: run end to end.
-- `/playbook:review` takes its own recommendation and passes `--auto` on to `/playbook:quick-review` or `/playbook:deep-review`. Those reviews still ask what to post unless the caller passes `--self` or `--no-post`.
+- `/playbook:review` reviews this PR only when the PR sits in a stack, takes its own recommendation for that scope, and passes `--auto` on to `/playbook:quick-review` or `/playbook:deep-review`. Those reviews still ask what to post unless the caller passes `--self` or `--no-post`.
 - `/playbook:learn-project`: runs as `--stage`, so candidates go to the staging area and nothing reaches the live memory store.
 - `/playbook:repo-audit`, `/playbook:doctor`, and `/playbook:session-start`: behave the same in either mode.
 
@@ -120,7 +120,7 @@ In ask mode, these commands still ask a person:
 | `implement` | delivery questions unless flags preset them |
 | `plan` | the divergent phase |
 | `adr`, `setup`, `address-pr-comments` | still ask a person |
-| `review` | quick or deep, unless `--quick` or `--deep` is passed |
+| `review` | the scope when the PR is in a stack (unless `--this-pr` or `--whole-stack` is passed), then quick or deep (unless `--quick` or `--deep` is passed) |
 | `quick-review` | how to submit |
 | `deep-review` | which findings to post |
 | `learn-project` | if the Jira or Confluence target is ambiguous |

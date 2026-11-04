@@ -2040,12 +2040,13 @@ fn real_main() {
             }
             ReviewCommand::Suggest {
                 pr,
+                scope,
                 base,
                 dir,
                 json,
             } => {
                 enter_dir("review suggest", dir.as_deref());
-                match review::suggest::run(pr.as_deref(), base.as_deref()) {
+                match review::suggest::run(pr.as_deref(), base.as_deref(), scope) {
                     Ok(sug) if json => println!(
                         "{}",
                         serde_json::to_string_pretty(&sug).unwrap_or_else(|_| "{}".to_string())
