@@ -5,6 +5,8 @@
 //! draws, `worker` keeps it fresh in the background, `app` is the state and
 //! keys, `view` draws a frame, and `run` is the terminal loop around them.
 
+#[cfg(test)]
+mod a11y;
 pub mod app;
 pub mod budget;
 pub mod burnup;

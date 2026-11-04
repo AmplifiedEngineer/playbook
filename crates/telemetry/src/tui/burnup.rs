@@ -326,7 +326,7 @@ impl Dot {
     fn ink(self, pal: &Palette) -> Ink {
         match self {
             Dot::Green => pal.live,
-            Dot::Yellow => pal.series[4],
+            Dot::Yellow => pal.caution,
             Dot::Red | Dot::Limit => pal.error,
             Dot::Half | Dot::Near => pal.inactive,
             Dot::Projection => pal.hi,
@@ -529,4 +529,54 @@ pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette, dots: b
         pal,
         dots,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::a11y::{confusable, contrast, rgb_of, NON_TEXT_CONTRAST};
+    use crate::tui::theme::{ColorDepth, Theme};
+
+    #[test]
+    fn the_ramp_colors_meet_the_non_text_contrast_on_the_ground() {
+        // Arrange
+        let pal = Theme::Standard.palette(ColorDepth::True);
+        let bg = rgb_of(pal.bg);
+
+        // Act
+        let ratios: Vec<(Dot, f64)> = [Dot::Green, Dot::Yellow, Dot::Red]
+            .into_iter()
+            .map(|dot| (dot, contrast(rgb_of(dot.ink(&pal)), bg)))
+            .collect();
+
+        // Assert
+        for (i, (_, ratio)) in ratios.iter().enumerate() {
+            assert!(*ratio >= NON_TEXT_CONTRAST, "stop {i} is {ratio:.2}");
+        }
+    }
+
+    #[test]
+    fn the_ramp_stops_stay_apart_under_each_color_vision_type() {
+        // Arrange
+        let pal = Theme::Standard.palette(ColorDepth::True);
+        let stops: Vec<_> = [Dot::Green, Dot::Yellow, Dot::Red]
+            .into_iter()
+            .map(|dot| rgb_of(dot.ink(&pal)))
+            .collect();
+
+        // Act
+        let pair = confusable(&stops);
+
+        // Assert
+        assert_eq!(pair, None);
+    }
+
+    #[test]
+    fn the_ramp_runs_green_then_yellow_then_red_by_percent() {
+        assert!(Dot::ramp(0.0) == Dot::Green);
+        assert!(Dot::ramp(RAMP_YELLOW - 0.1) == Dot::Green);
+        assert!(Dot::ramp(RAMP_YELLOW) == Dot::Yellow);
+        assert!(Dot::ramp(NEAR - 0.1) == Dot::Yellow);
+        assert!(Dot::ramp(NEAR) == Dot::Red);
+    }
 }

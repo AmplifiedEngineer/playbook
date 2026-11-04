@@ -338,6 +338,8 @@ The Burn-up panel is on the Charts tab. It plots the spend of the period so far 
 - A window in percent is drawn from the readings saved in `rate_limits.jsonl`, or as a straight line from the start of the window to the figure Claude Code reported when none were saved.
 - With no limit known the panel says so and charts the spend alone.
 
+The used area is drawn as Braille dots, four times as fine as a whole cell in height. It is green below 60 percent of the limit, yellow from 60 and red from 80, and from 80 percent every dot of a cell is set, so the danger zone reads denser without color. Set `PBTOP_DOTS=0` if your font draws Braille badly; the chart then keeps the solid glyphs, as it does in the mono theme and when symbols are off.
+
 Nothing here is set by hand: the limit and the used figure come from what Claude Code reports. The math is in `crates/telemetry/src/burnup.rs` and the drawing in `crates/telemetry/src/tui/burnup.rs`.
 
 ### The reading history

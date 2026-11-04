@@ -1293,19 +1293,31 @@ fn the_dot_chart_draws_braille_and_keeps_the_point_glyphs_whole() {
 #[test]
 fn the_used_area_is_denser_in_the_danger_zone_than_below_it() {
     // Arrange
-    let (text, _) = draw_burnup_dots("exceeded", Theme::Standard, 100, 30, true);
+    let pal = Theme::Standard.palette(ColorDepth::True);
+    let (b, limits) = burn_case("exceeded");
+    crate::tz::set(crate::tz::Zone::Utc);
 
     // Act
-    let densities: Vec<u32> = text
-        .lines()
-        .flat_map(|l| l.chars())
-        .filter(|c| ('\u{2800}'..='\u{28ff}').contains(c))
-        .map(|c| (c as u32 - 0x2800).count_ones())
-        .collect();
+    let (_, buf) = draw_with(100, 30, |f| {
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal, true);
+    });
+    let dots_in = |ink| -> Vec<u32> {
+        buf.content()
+            .iter()
+            .filter(|c| c.fg == pal.color(ink))
+            .filter_map(|c| c.symbol().chars().next())
+            .filter(|ch| ('\u{2800}'..='\u{28ff}').contains(ch))
+            .map(|ch| (ch as u32 - 0x2800).count_ones())
+            .collect()
+    };
+    let (green, red) = (dots_in(pal.live), dots_in(pal.error));
 
     // Assert
-    assert!(densities.contains(&8), "no full cell\n{text}");
-    assert!(densities.contains(&4), "no checker cell\n{text}");
+    assert!(
+        !green.is_empty() && green.iter().all(|n| *n <= 4),
+        "{green:?}"
+    );
+    assert!(red.contains(&8), "no full red cell: {red:?}");
 }
 
 #[test]
@@ -1331,7 +1343,7 @@ fn the_dot_chart_colors_the_used_area_green_yellow_then_red_by_height() {
         .collect();
 
     // Assert
-    for ink in [pal.live, pal.series[4], pal.error, pal.hi] {
+    for ink in [pal.live, pal.caution, pal.error, pal.hi] {
         assert!(colors.contains(&pal.color(ink)), "{ink:?} not drawn");
     }
 }
