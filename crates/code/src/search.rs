@@ -242,8 +242,8 @@ fn fts_rows(
 ) -> Result<(Vec<Row>, usize), String> {
     let (extra, extra_params) = filters(opts);
     let base = format!(
-        "FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
-         JOIN files f ON f.id = c.file_id
+        "FROM chunks_fts JOIN main.chunks c ON c.id = chunks_fts.rowid
+         JOIN files f ON f.id = c.content
          WHERE chunks_fts MATCH ?{extra}"
     );
     let mut params: Vec<String> = vec![query.to_string()];

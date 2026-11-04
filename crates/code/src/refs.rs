@@ -85,8 +85,8 @@ fn candidate_files(conn: &Connection, name: &str, limit: usize) -> Result<Vec<St
     let mut stmt = conn
         .prepare(
             "SELECT DISTINCT f.path FROM chunks_fts
-             JOIN chunks c ON c.id = chunks_fts.rowid
-             JOIN files f ON f.id = c.file_id
+             JOIN main.chunks c ON c.id = chunks_fts.rowid
+             JOIN files f ON f.id = c.content
              WHERE chunks_fts MATCH ?1 AND f.lang IS NOT NULL
              ORDER BY f.path LIMIT ?2",
         )

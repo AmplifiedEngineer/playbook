@@ -53,11 +53,25 @@ pub fn symbol_hits(
                         WHEN s.name = ?1 THEN 2
                         WHEN lower(s.name) = lower(?1) THEN 3
                         WHEN substr(lower(s.name), 1, length(?1)) = lower(?1) THEN 4 END AS tier
-            FROM symbols s JOIN files f ON f.id = s.file_id
+            FROM (SELECT id FROM main.symbols WHERE qualified_name = ?1
+                  UNION SELECT id FROM main.symbols WHERE lower(name) LIKE ?2 ESCAPE '\\') h
+            CROSS JOIN main.symbols s ON s.id = h.id
+            CROSS JOIN files f ON f.id = s.content
             WHERE 1 = 1{extra}{kind}
          ) WHERE tier IS NOT NULL"
     );
-    let mut params: Vec<String> = vec![query.to_string()];
+    // Tiers 2 to 4 all name a prefix of the symbol's name. The prefilter reads
+    // two indexes and scopes only its rows, where the scoped `symbols` view
+    // would probe the file list for every symbol of the store.
+    let prefix = format!(
+        "{}%",
+        query
+            .to_ascii_lowercase()
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_")
+    );
+    let mut params: Vec<String> = vec![query.to_string(), prefix];
     params.extend(extra_params);
     params.extend(opts.kind.clone());
 
@@ -511,6 +525,31 @@ mod tests {
         // Assert
         assert!(first >= 1);
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn a_prefix_query_with_a_wildcard_character_matches_only_its_own_prefix() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("ranked-wildcards");
+        f.write(
+            "a.rs",
+            "fn run_lock_path() {}\nfn runXlock() {}\nfn Run_Lock() {}\nfn other() {}\n",
+        );
+        f.run();
+
+        // Act
+        let (hits, total) =
+            symbol_hits(&f.conn(), &f.root, &SearchOptions::new("run_lock"), 10).expect("hits");
+
+        // Assert
+        let mut names: Vec<&str> = hits
+            .iter()
+            .filter_map(|h| h.symbol.as_ref().map(|s| s.name.as_str()))
+            .collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["Run_Lock", "run_lock_path"]);
+        assert_eq!(total, 2);
     }
 
     #[test]

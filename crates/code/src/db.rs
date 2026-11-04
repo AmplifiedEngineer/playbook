@@ -683,8 +683,9 @@ pub fn create_scope_views(
         "CREATE TEMP VIEW IF NOT EXISTS files AS
          SELECT m.content AS id, m.path AS path, m.lang AS lang, m.sha256 AS sha256,
                 m.size AS size, m.mtime_ns AS mtime_ns, m.status AS status, m.error AS error,
-                m.content AS content, c.parser AS parser
-         FROM main.manifest m LEFT JOIN main.content c ON c.id = m.content
+                m.content AS content,
+                (SELECT c.parser FROM main.content c WHERE c.id = m.content) AS parser
+         FROM main.manifest m
          WHERE m.worktree = {wt};"
     );
     if kind == ScopeKind::Reader {
