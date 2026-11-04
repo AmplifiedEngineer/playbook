@@ -242,8 +242,8 @@ fn fts_rows(
 ) -> Result<(Vec<Row>, usize), String> {
     let (extra, extra_params) = filters(opts);
     let base = format!(
-        "FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
-         JOIN files f ON f.id = c.file_id
+        "FROM chunks_fts JOIN main.chunks c ON c.id = chunks_fts.rowid
+         JOIN files f ON f.id = c.content
          WHERE chunks_fts MATCH ?{extra}"
     );
     let mut params: Vec<String> = vec![query.to_string()];
@@ -254,14 +254,14 @@ fn fts_rows(
             rusqlite::params_from_iter(params.iter()),
             |r| r.get(0),
         )
-        .map_err(|e| format!("search failed: {e}"))?;
+        .map_err(|e| super::db::map_sql_error("search failed", &e))?;
     let sql = format!(
         "SELECT f.path, f.sha256, c.start_line, c.end_line {base}
          ORDER BY bm25(chunks_fts), f.path, c.start_line LIMIT {fetch}"
     );
     let mut stmt = conn
         .prepare(&sql)
-        .map_err(|e| format!("search failed: {e}"))?;
+        .map_err(|e| super::db::map_sql_error("search failed", &e))?;
     let rows = stmt
         .query_map(rusqlite::params_from_iter(params.iter()), |r| {
             Ok(Row {
@@ -271,10 +271,10 @@ fn fts_rows(
                 end_line: usize::try_from(r.get::<_, i64>(3)?).unwrap_or(1),
             })
         })
-        .map_err(|e| format!("search failed: {e}"))?;
+        .map_err(|e| super::db::map_sql_error("search failed", &e))?;
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("search failed: {e}"))?;
+        .map_err(|e| super::db::map_sql_error("search failed", &e))?;
     Ok((rows, usize::try_from(total).unwrap_or(0)))
 }
 
@@ -371,14 +371,14 @@ pub(super) fn literal_scan(
     );
     let mut stmt = conn
         .prepare(&sql)
-        .map_err(|e| format!("search failed: {e}"))?;
+        .map_err(|e| super::db::map_sql_error("search failed", &e))?;
     let files: Vec<(String, String)> = stmt
         .query_map(rusqlite::params_from_iter(extra_params.iter()), |r| {
             Ok((r.get(0)?, r.get(1)?))
         })
-        .map_err(|e| format!("search failed: {e}"))?
+        .map_err(|e| super::db::map_sql_error("search failed", &e))?
         .collect::<Result<_, _>>()
-        .map_err(|e| format!("search failed: {e}"))?;
+        .map_err(|e| super::db::map_sql_error("search failed", &e))?;
     let mut scanned = 0usize;
     for (path, sha) in files {
         if scanned >= opts.scan_cap {
@@ -683,5 +683,63 @@ mod tests {
             Some("\"retry\" \"AND\" \"OR\"".to_string())
         );
         assert_eq!(fts_query("++ --"), None);
+    }
+
+    #[test]
+    fn a_damaged_text_index_names_rebuild() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("search-damaged");
+        f.write("a.rs", "fn needle() {}\n");
+        f.run();
+        let conn = f.conn();
+        crate::testkit::damage_pages(&f);
+
+        // Act
+        let got = text_search(&conn, &f.root, &SearchOptions::new("needle"));
+
+        // Assert
+        let Err(message) = got else {
+            panic!("the query must fail")
+        };
+        assert!(message.contains("--rebuild"), "{message}");
+    }
+
+    /// This worktree lists the same bytes as `shared.rs` and `again.rs`, and
+    /// another worktree lists them as `sibling.rs` next to a file only it has.
+    fn two_worktrees_sharing(tag: &str) -> (Fx, crate::db::Store) {
+        let f = fx(tag);
+        f.write("shared.rs", "fn widget() { widget(); }\n");
+        f.write("again.rs", "fn widget() { widget(); }\n");
+        f.run();
+        let other = crate::walker::test_repo::init(&format!("{tag}-b"));
+        crate::walker::test_repo::write(&other, "sibling.rs", b"fn widget() { widget(); }\n");
+        crate::walker::test_repo::write(&other, "only_there.rs", b"fn widgetonly() {}\n");
+        crate::index::run(
+            &other,
+            &f.index,
+            "other",
+            false,
+            &crate::index::Options::default(),
+        )
+        .expect("second worktree");
+        let conn = f.conn();
+        (f, conn)
+    }
+
+    #[test]
+    fn a_text_search_lists_each_path_of_this_worktree_and_none_of_a_sibling() {
+        let _g = pinned();
+        // Arrange
+        let (f, conn) = two_worktrees_sharing("sr-scope");
+
+        // Act
+        let got = text_search(&conn, &f.root, &SearchOptions::new("widget")).expect("search");
+
+        // Assert
+        let mut found = paths(&got);
+        found.sort_unstable();
+        assert_eq!(found, vec!["again.rs", "shared.rs"]);
+        assert_eq!(got.omitted, 0);
     }
 }

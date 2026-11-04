@@ -36,6 +36,7 @@ pub mod usage_warm;
 pub mod worktree_create;
 pub mod worktree_remove;
 pub mod worktree_setup;
+pub mod worktree_target;
 
 /// `git rev-parse --show-toplevel`, trimmed. Empty outside a repo or on any
 /// failure. Never panics.

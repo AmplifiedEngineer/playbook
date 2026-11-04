@@ -491,8 +491,9 @@ fn node_id(rel: &str, scope: Scope, project: Option<&str>) -> String {
 
 // --- Graph shape and rebuild ------------------------------------------------
 
-// `version` and `pinned` (below) have no reader yet; both are written for a
-// future consumer described in ADR-0011.
+// `version` has no reader yet; it is written for a future schema check
+// described in ADR-0011. `pinned` is read by `render_ranked` in
+// `json/memorycontext.rs`.
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
 struct Graph {
@@ -1075,16 +1076,39 @@ fn walk_markdown_files_into(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()
 fn write_graph_store(mem_dir: &Path, graph: &Graph) -> Result<(), RebuildError> {
     let db = store_db(mem_dir)?;
     let (nodes, edges) = rows_of(graph);
-    let mut result = playbook_data::memory::write_graph(&db, &nodes, &edges);
+    let write = || {
+        playbook_data::memory::write_graph_with_bodies(&db, &nodes, &edges, |file| {
+            fact_body_for_index(mem_dir, file)
+        })
+    };
+    let mut result = write();
     if result
         .as_ref()
         .err()
         .is_some_and(|e| playbook_data::memory::is_corrupt(e))
         && playbook_data::migrate::set_aside(&db).is_ok()
     {
-        result = playbook_data::memory::write_graph(&db, &nodes, &edges);
+        result = write();
     }
     result.map_err(|e| RebuildError(format!("write memory.db: {e}")))
+}
+
+/// Longest fact body the search index holds, so one huge file cannot bloat it.
+const MAX_INDEXED_BODY_BYTES: usize = 64 * 1024;
+
+/// The body of the fact in `file` (relative to `mem_dir`) for the search
+/// index: the text after its frontmatter, cut at a character boundary.
+fn fact_body_for_index(mem_dir: &Path, file: &str) -> Option<String> {
+    if file.is_empty() {
+        return None;
+    }
+    let text = fs::read_to_string(mem_dir.join(file)).ok()?;
+    let body = crate::hooks::memory_anchors::strip_frontmatter(&text);
+    let end = (0..=MAX_INDEXED_BODY_BYTES.min(body.len()))
+        .rev()
+        .find(|i| body.is_char_boundary(*i))
+        .unwrap_or(0);
+    Some(body[..end].to_string())
 }
 
 /// The rows of `memory.db` that hold `graph`.
@@ -1216,8 +1240,10 @@ pub fn import_json(mem_dir: &Path, json: &str) -> Result<(), RebuildError> {
     let graph: Graph =
         serde_json::from_str(json).map_err(|e| RebuildError(format!("parse graph: {e}")))?;
     let (nodes, edges) = rows_of(&graph);
-    playbook_data::memory::write_graph(&store_db(mem_dir)?, &nodes, &edges)
-        .map_err(|e| RebuildError(format!("write memory.db: {e}")))
+    playbook_data::memory::write_graph_with_bodies(&store_db(mem_dir)?, &nodes, &edges, |file| {
+        fact_body_for_index(mem_dir, file)
+    })
+    .map_err(|e| RebuildError(format!("write memory.db: {e}")))
 }
 
 /// The graph stored in `memory.db`, as the JSON document `memory.graph.json`

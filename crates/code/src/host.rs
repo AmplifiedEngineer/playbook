@@ -17,7 +17,7 @@ pub fn tool_version() -> &'static str {
 }
 
 /// The state folder for the current worktree, where earlier versions kept the
-/// index cache (`code/index.sqlite3`). Fails with an actionable message
+/// index cache (`code/index.sqlite3`) and where the fallback index lives. Fails with an actionable message
 /// when the repo has no way to name itself.
 pub fn state_dir() -> Result<PathBuf, String> {
     playbook_common::paths::repo_scoped_dir(playbook_common::paths::RepoScope::Worktree).ok_or_else(
@@ -29,22 +29,23 @@ pub fn state_dir() -> Result<PathBuf, String> {
     )
 }
 
-/// The code index of the current worktree inside the data folder, after
-/// moving the one earlier versions kept under the worktree state folder. A
-/// failed move is not an error: the index is a cache and is rebuilt. A repo
-/// whose name has no safe data folder path keeps its index at the old path.
+/// The file name of the index at the state folder fallback path.
+pub const FALLBACK_FILE: &str = "index.sqlite3";
+
+/// The repo's shared store inside the data folder. A repo whose name has no
+/// safe data folder path (`scoped` is `None`) keeps one index per worktree at
+/// the state folder path `old`.
+pub fn choose_index_path(scoped: Option<PathBuf>, old: PathBuf) -> PathBuf {
+    scoped.unwrap_or(old)
+}
+
+/// The code index the current worktree writes to: the repo's shared store, or
+/// the state folder fallback. An index file kept by an earlier version stays
+/// where it is.
 pub fn index_db() -> Result<PathBuf, String> {
-    let old = state_dir()?.join("code").join("index.sqlite3");
-    let Some(new) = playbook_data::scoped_db("code") else {
-        return Ok(old);
-    };
-    let step = playbook_data::migrate::Move {
-        old,
-        new: new.clone(),
-        policy: playbook_data::migrate::Policy::Cache,
-    };
-    let _ = playbook_data::migrate::migrate_with_notice(&step, "code index");
-    Ok(new)
+    let old = state_dir()?.join("code").join(FALLBACK_FILE);
+    let scoped = playbook_data::code_store(super::db::SCHEMA_VERSION);
+    Ok(choose_index_path(scoped, old))
 }
 
 /// A stable identity for the current worktree.
@@ -66,4 +67,34 @@ pub fn make_file_private(path: &Path) -> Result<(), String> {
 /// The command line a user runs for `args`, for error messages.
 pub fn command(args: &str) -> String {
     format!("{PROGRAM} code {args}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_scoped_path_wins_over_the_state_folder_path() {
+        // Arrange
+        let scoped = PathBuf::from("/data/code/o/r/store-v4.sqlite3");
+        let old = PathBuf::from("/state/code/index.sqlite3");
+
+        // Act
+        let chosen = choose_index_path(Some(scoped.clone()), old);
+
+        // Assert
+        assert_eq!(chosen, scoped);
+    }
+
+    #[test]
+    fn without_a_scoped_path_the_state_folder_path_is_used() {
+        // Arrange
+        let old = PathBuf::from("/state/code/index.sqlite3");
+
+        // Act
+        let chosen = choose_index_path(None, old.clone());
+
+        // Assert
+        assert_eq!(chosen, old);
+    }
 }

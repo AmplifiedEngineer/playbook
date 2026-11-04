@@ -4,7 +4,9 @@
 //! The thin command line layer: argument shapes, and rendering of the results
 //! the library functions in `code` return.
 
+use super::cleanup::Cleanup;
 use super::host;
+use super::index::Scope;
 use super::output::{Envelope, IndexState};
 use super::search::SearchOptions;
 use super::status;
@@ -18,14 +20,15 @@ pub enum CodeCommand {
     /// Build or refresh the code index for this repo
     ///
     /// Hashes every file git lists, and reads only the ones that changed.
-    /// Only one run at a time is allowed.
+    /// Worktrees of one repo share one store, so content that is already
+    /// stored is not parsed again. Each worktree runs once at a time.
     ///
     /// Example: `playbook code index --json`
     Index {
         /// Print one JSON document
         #[arg(long)]
         json: bool,
-        /// Delete the cache first and index everything again
+        /// Index everything again; a damaged store is replaced for every worktree
         #[arg(long)]
         rebuild: bool,
     },
@@ -667,8 +670,26 @@ fn render_status(env: &Env, json: bool) -> Result<String, String> {
     }
 }
 
+/// The options of a `code index` run. In debug builds, when
+/// `PLAYBOOK_CODE_TEST_MARKER` is set, the run prints `marker: ready` the
+/// first time it is about to write, so a binary test can order two runs.
+fn index_options() -> super::index::Options {
+    let mut opts = super::index::Options::default();
+    if cfg!(debug_assertions) && std::env::var_os("PLAYBOOK_CODE_TEST_MARKER").is_some() {
+        let once = std::sync::Once::new();
+        opts.before_write = Some(Box::new(move || {
+            once.call_once(|| {
+                use std::io::Write;
+                println!("marker: ready");
+                let _ = std::io::stdout().flush();
+            });
+        }));
+    }
+    opts
+}
+
 fn render_index(env: &Env, json: bool, rebuild: bool) -> Result<String, String> {
-    let outcome = super::index(&env.cwd, rebuild)?;
+    let outcome = super::index_with(&env.cwd, rebuild, &index_options())?;
     let report = &outcome.report;
     let mut warnings = Vec::new();
     if report.failed > 0 {
@@ -690,6 +711,9 @@ fn render_index(env: &Env, json: bool, rebuild: bool) -> Result<String, String> 
                 "removed": report.removed,
                 "skipped": report.skipped,
                 "failed": report.failed,
+                "reused": report.reused,
+                "cleanup": report.cleanup.as_str(),
+                "scope": report.scope.as_str(),
             }),
         );
         envelope.warnings = warnings;
@@ -698,14 +722,24 @@ fn render_index(env: &Env, json: bool, rebuild: bool) -> Result<String, String> 
     for warning in &warnings {
         eprintln!("code: {warning}");
     }
+    let cleanup = match report.cleanup {
+        Cleanup::Skipped => "cleanup: skipped\n",
+        Cleanup::Done => "",
+    };
+    let rebuilt = match (report.scope, rebuild) {
+        (Scope::Store, _) => "rebuilt: store\n",
+        (Scope::Worktree, true) => "rebuilt: worktree only\n",
+        (Scope::Worktree, false) => "",
+    };
     Ok(format!(
-        "indexed {} files: {} changed, {} unchanged, {} removed, {} skipped, {} failed\n",
+        "indexed {} files: {} changed, {} unchanged, {} removed, {} skipped, {} failed\nreused: {}\n{cleanup}{rebuilt}",
         report.indexed,
         report.changed,
         report.unchanged,
         report.removed,
         report.skipped,
-        report.failed
+        report.failed,
+        report.reused
     ))
 }
 
@@ -726,5 +760,24 @@ mod tests {
         assert_eq!(normalize_prefix("././lib"), "lib");
         assert_eq!(normalize_prefix("lib\\pay"), "lib/pay");
         assert_eq!(normalize_prefix("lib/"), "lib/");
+    }
+
+    #[test]
+    fn the_test_marker_env_seam_is_read_only_in_debug_builds() {
+        // Arrange
+        let production = include_str!("cli.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production part");
+
+        // Act
+        let gated = production.contains(
+            "cfg!(debug_assertions) && std::env::var_os(\"PLAYBOOK_CODE_TEST_MARKER\").is_some()",
+        );
+        let reads = production.matches("PLAYBOOK_CODE_TEST_MARKER\")").count();
+
+        // Assert
+        assert!(gated);
+        assert_eq!(reads, 1);
     }
 }

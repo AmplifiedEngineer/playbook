@@ -30,13 +30,13 @@ struct Cli {
     /// Print the text summary and exit (every recorded session unless `--range` is given)
     #[arg(long, conflicts_with_all = ["json"])]
     summary: bool,
-    /// Date range (days in the chosen time zone): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
+    /// Date range, counted in days of the chosen time zone. One of today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
     #[arg(long, value_name = "RANGE")]
     range: Option<String>,
-    /// Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+    /// Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
     #[arg(long, global = true, conflicts_with = "local")]
     utc: bool,
-    /// Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+    /// Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
     #[arg(long, global = true, conflicts_with = "utc")]
     local: bool,
 }

@@ -116,7 +116,7 @@ struct Cand {
 }
 
 fn sql_err(e: rusqlite::Error) -> String {
-    format!("context failed: {e}")
+    super::db::map_sql_error("context failed", &e)
 }
 
 fn to_usize(n: i64) -> usize {
@@ -133,14 +133,21 @@ fn is_test_symbol(path: &str, qualified: &str, name: &str) -> bool {
         || name.starts_with("test_")
 }
 
-/// Symbols whose name holds `term`, with a tier from how well the name fits.
-fn symbol_cands(conn: &Connection, term: &str) -> Result<Vec<Cand>, String> {
+/// Symbols whose name holds `term`, with a tier from how well the name fits,
+/// and how many symbols of the worktree hold it. The scan reads the name index
+/// and scopes only the matches through `files` (`CROSS JOIN` keeps that
+/// order), so it skips the per-symbol file-list probe of the scoped view. The
+/// count comes from the same pass, as a window over the matches before the
+/// limit.
+fn symbol_cands(conn: &Connection, term: &str) -> Result<(Vec<Cand>, i64), String> {
     let pattern = format!("%{}%", term.replace('\\', "\\\\").replace('_', "\\_"));
     let mut stmt = conn
         .prepare(
-            "SELECT f.path, f.sha256, s.name, s.qualified_name, s.start_line, s.end_line
-             FROM symbols s JOIN files f ON f.id = s.file_id
-             WHERE lower(s.name) LIKE ?1 ESCAPE '\\'
+            "SELECT f.path, f.sha256, s.name, s.qualified_name, s.start_line, s.end_line,
+                    COUNT(*) OVER ()
+             FROM (SELECT id FROM main.symbols WHERE lower(name) LIKE ?1 ESCAPE '\\') h
+             CROSS JOIN main.symbols s ON s.id = h.id
+             CROSS JOIN files f ON f.id = s.content
              ORDER BY (lower(s.name) = ?3) DESC, length(s.name), f.path, s.start_line, s.id
              LIMIT ?2",
         )
@@ -154,12 +161,15 @@ fn symbol_cands(conn: &Connection, term: &str) -> Result<Vec<Cand>, String> {
                 r.get::<_, String>(3)?,
                 to_usize(r.get(4)?),
                 to_usize(r.get(5)?),
+                r.get::<_, i64>(6)?,
             ))
         })
         .map_err(sql_err)?;
     let mut out = Vec::new();
+    let mut df = 0;
     for row in rows {
-        let (path, sha, name, qualified, start, end) = row.map_err(sql_err)?;
+        let (path, sha, name, qualified, start, end, matches) = row.map_err(sql_err)?;
+        df = matches;
         if is_test_symbol(&path, &qualified, &name) {
             continue;
         }
@@ -181,7 +191,7 @@ fn symbol_cands(conn: &Connection, term: &str) -> Result<Vec<Cand>, String> {
             tier,
         });
     }
-    Ok(out)
+    Ok((out, df))
 }
 
 /// The smallest symbol in `path` that holds `line`, as a range.
@@ -320,23 +330,22 @@ fn import_cands(
 }
 
 /// How much each term tells apart: rare names weigh more than common ones.
-fn term_weights(conn: &Connection, words: &[String]) -> Result<Vec<f64>, String> {
+/// `dfs` holds, per term, how many symbols of the worktree name it. The total
+/// counts the worktree's symbols through `files`, a walk over the
+/// `symbols_content` index. Two paths with the same bytes count twice, as
+/// they did when each path had its own rows.
+fn term_weights(conn: &Connection, dfs: &[i64]) -> Result<Vec<f64>, String> {
     let total: i64 = conn
-        .query_row("SELECT COUNT(*) FROM symbols", [], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM files f JOIN main.symbols t ON t.content = f.id",
+            [],
+            |r| r.get(0),
+        )
         .map_err(sql_err)?;
-    let mut out = Vec::new();
-    for word in words {
-        let pattern = format!("%{}%", word.replace('\\', "\\\\").replace('_', "\\_"));
-        let df: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM symbols WHERE lower(name) LIKE ?1 ESCAPE '\\'",
-                [pattern],
-                |r| r.get(0),
-            )
-            .map_err(sql_err)?;
-        out.push((2.0 + total as f64 / (1.0 + df as f64)).ln());
-    }
-    Ok(out)
+    Ok(dfs
+        .iter()
+        .map(|df| (2.0 + total as f64 / (1.0 + *df as f64)).ln())
+        .collect())
 }
 
 /// A documentation file: a prose extension or a `docs` or `doc` directory.
@@ -425,13 +434,16 @@ pub fn build(
         return Ok(result);
     }
     let mut cands: Vec<Cand> = Vec::new();
+    let mut dfs: Vec<i64> = Vec::new();
     for word in &words {
-        cands.extend(symbol_cands(conn, word)?);
+        let (found, df) = symbol_cands(conn, word)?;
+        cands.extend(found);
+        dfs.push(df);
     }
     let text = text_cands(conn, root, &words, "text", 20)?;
     cands.extend(text.into_iter().filter(|c| !is_test_path(&c.path)));
     let merged = merge(cands);
-    let weights = term_weights(conn, &words)?;
+    let weights = term_weights(conn, &dfs)?;
     let mut cache: HashMap<String, Option<Loaded>> = HashMap::new();
     let scores: Vec<f64> = merged
         .iter()
@@ -1000,7 +1012,7 @@ mod tests {
         f.run();
 
         // Act
-        let got = symbol_cands(&f.conn(), "prompt").expect("cands");
+        let (got, _) = symbol_cands(&f.conn(), "prompt").expect("cands");
 
         // Assert
         assert!(got.iter().any(|c| c.reason == "symbol run_prompt"));
@@ -1180,5 +1192,84 @@ mod tests {
         // Assert
         assert!(text.len() <= 120, "{}", text.len());
         assert!(text.is_empty() || text.ends_with('\n'));
+    }
+
+    #[test]
+    fn term_weights_count_a_declaration_once_per_path() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("cx-df-per-path");
+        f.write("a.rs", "fn widget() {}\n");
+        f.write("b.rs", "fn widget() {}\n");
+        f.write("c.rs", "fn other() {}\n");
+        f.run();
+        let conn = f.conn();
+
+        // Act
+        let (_, df) = symbol_cands(&conn, "widget").expect("cands");
+        let weights = term_weights(&conn, &[df]).expect("weights");
+
+        // Assert: three symbols in total, two of them named widget.
+        let expected = (2.0 + 3.0 / (1.0 + 2.0_f64)).ln();
+        assert!((weights[0] - expected).abs() < 1e-9, "{weights:?}");
+    }
+
+    #[test]
+    fn term_weights_ignore_the_symbols_of_a_sibling_worktree() {
+        let _g = pinned();
+        // Arrange
+        let alone = fx("cx-weights-alone");
+        let shared = fx("cx-weights-shared");
+        for f in [&alone, &shared] {
+            f.write("a.rs", "fn widget() {}\n");
+            f.write("b.rs", "fn widget() {}\nfn other() {}\n");
+            f.run();
+        }
+        let sibling = crate::walker::test_repo::init("cx-weights-sibling");
+        for i in 0..50 {
+            crate::walker::test_repo::write(
+                &sibling,
+                &format!("w{i}.rs"),
+                format!("fn widget() {{}}\nfn only{i}() {{}}\n").as_bytes(),
+            );
+        }
+        crate::index::run(
+            &sibling,
+            &shared.index,
+            "sibling",
+            false,
+            &crate::index::Options::default(),
+        )
+        .expect("sibling");
+
+        // Act
+        let weigh = |f: &Fx| {
+            let conn = f.conn();
+            let (_, df) = symbol_cands(&conn, "widget").expect("cands");
+            term_weights(&conn, &[df]).expect("weights")
+        };
+
+        // Assert
+        assert_eq!(weigh(&shared), weigh(&alone));
+    }
+
+    #[test]
+    fn a_damaged_symbol_table_names_rebuild() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("context-damaged");
+        f.write("a.rs", "fn needle() {}\n");
+        f.run();
+        let conn = f.conn();
+        crate::testkit::damage_pages(&f);
+
+        // Act
+        let got = build(&conn, &f.root, &ContextOptions::new("needle"));
+
+        // Assert
+        let Err(message) = got else {
+            panic!("the query must fail")
+        };
+        assert!(message.contains("--rebuild"), "{message}");
     }
 }

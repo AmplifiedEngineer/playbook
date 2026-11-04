@@ -1,0 +1,316 @@
+{
+  "corpus_facts": 2000,
+  "corpus_hash": "6b9323693b2afd0b",
+  "top": {
+    "q001": [
+      "ferry-invoice-00625",
+      "ferry-millimetres-00803",
+      "ferry-timetable-cache-expiry"
+    ],
+    "q002": [
+      "waiting-lifts-00452",
+      "register-wait-01441",
+      "bunkering-lifts-00828"
+    ],
+    "q003": [
+      "lamp-alarm-01744",
+      "contract-rotation-01664",
+      "lamps-buoy-00736"
+    ],
+    "q004": [
+      "centimetres-sheet-00204",
+      "centimetres-torn-00462",
+      "choosing-centimetres-00317"
+    ],
+    "q005": [
+      "buoy-telemetry-retention",
+      "fires-store-01241",
+      "readings-drones-00905"
+    ],
+    "q006": [
+      "dockworker-shift-rotation",
+      "percent-swaps-01541",
+      "tidal-crews-00313"
+    ],
+    "q007": [
+      "boats-rejected-00639",
+      "customs-manifest-validation",
+      "inspection-rejected-00979"
+    ],
+    "q008": [
+      "pilot-boarding-protocol",
+      "boots-wind-00670",
+      "wind-inbound-01551"
+    ],
+    "q009": [
+      "added-berth-00367",
+      "berth-allocation-solver",
+      "berth-maintenance-00859"
+    ],
+    "q010": [
+      "fuel-bunkering-permit-window",
+      "activation-expire-01232",
+      "always-permits-00346"
+    ],
+    "q011": [
+      "radar-sweep-noise-filter",
+      "call-ghost-00629",
+      "echoes-renewal-01888"
+    ],
+    "q012": [
+      "tug-fleet-dispatch-rules",
+      "dispatch-depth-00856",
+      "dispatch-seafarer-01424"
+    ],
+    "q013": [
+      "quay-wall-inspection-cycle",
+      "wall-register-00090",
+      "cleaning-divers-00735"
+    ],
+    "q014": [
+      "refrigerated-container-alarms",
+      "alarms-week-00506",
+      "alarms-within-00793"
+    ],
+    "q015": [
+      "gate-truck-appointment-slots",
+      "behind-slotting-00996",
+      "base-truck-00795"
+    ],
+    "q016": [
+      "vessel-eta-prediction-model",
+      "deciding-timetable-01008",
+      "list-predicted-00932"
+    ],
+    "q017": [
+      "ballast-water-reporting",
+      "closes-missing-00077",
+      "cracks-format-01199"
+    ],
+    "q018": [
+      "lock-gate-hydraulic-sequence",
+      "transit-lock-00754",
+      "adds-gatehouse-01384"
+    ],
+    "q019": [
+      "bollard-close-01527",
+      "bollard-items-01104",
+      "bollard-minute-01480"
+    ],
+    "q020": [
+      "dredging-survey-schedule",
+      "bunkering-sonar-01475",
+      "lookup-sonar-01168"
+    ],
+    "q021": [
+      "ship-agent-invoice-export",
+      "agents-clutter-01435",
+      "movers-agents-00039"
+    ],
+    "q022": [
+      "start-ordered-01273",
+      "borrowing-foghorn-00147",
+      "certificate-start-00672"
+    ],
+    "q023": [
+      "harbour-master-radio-channels",
+      "radio-callsign-glossary",
+      "yearly-radio-00425"
+    ],
+    "q024": [
+      "closes-missing-00077",
+      "oil-spill-response-checklist",
+      "repairs-storm-00065"
+    ],
+    "q025": [
+      "estimate-passengers-00186",
+      "outside-covered-00098",
+      "salt-walk-01001"
+    ],
+    "q026": [
+      "cycle-weekly-00399",
+      "near-glossary-01112",
+      "near-supplier-01447"
+    ],
+    "q027": [
+      "alert-thresholds-00571",
+      "cables-hydraulic-00982",
+      "placed-anchors-01264"
+    ],
+    "q028": [
+      "port-fee-tariff-lookup",
+      "port-format-00135",
+      "stored-ships-00720"
+    ],
+    "q029": [
+      "rail-siding-shunting-plan",
+      "admin-shift-00766",
+      "choosing-destination-01025"
+    ],
+    "q030": [
+      "cargo-scanner-image-retention",
+      "jackets-long-00022",
+      "alert-long-00482"
+    ],
+    "q031": [
+      "thirty-minute-00502",
+      "backup-visitor-00584",
+      "power-parking-00176"
+    ],
+    "q032": [
+      "patrols-lifts-01443",
+      "appear-nesting-01671",
+      "birds-booms-00985"
+    ],
+    "q033": [
+      "bollard-minute-01480",
+      "check-motion-01376",
+      "crib-lamp-00174"
+    ],
+    "q034": [
+      "officer-eight-00681",
+      "activation-expire-01232",
+      "ahead-hour-00244"
+    ],
+    "q035": [
+      "ferry-rotation-00059",
+      "revoked-weights-01647",
+      "rotation-ninety-00858"
+    ],
+    "q036": [
+      "crew-change-visa-checks",
+      "asks-crew-01063",
+      "beside-card-00746"
+    ],
+    "q037": [
+      "harbour-patrol-boat-fuel",
+      "inspection-pontoon-01450",
+      "pontoon-damages-01261"
+    ],
+    "q038": [
+      "water-taxi-fare-zones",
+      "anchorage-zone-boundaries",
+      "ballast-water-reporting"
+    ],
+    "q039": [
+      "sea-level-alert-thresholds",
+      "alerts-freight-00199",
+      "flood-every-01123"
+    ],
+    "q040": [
+      "engineering-spares-reorder-point",
+      "bunkering-lead-00661",
+      "lead-split-01546"
+    ],
+    "q041": [
+      "plugs-seven-00032",
+      "tidal-gate-maintenance-window",
+      "adds-gatehouse-01384"
+    ],
+    "q042": [
+      "hundred-sticking-01795",
+      "lock-expected-01142",
+      "arrival-stored-00775"
+    ],
+    "q043": [
+      "adds-gatehouse-01384",
+      "test-response-00800",
+      "check-tested-01467"
+    ],
+    "q044": [
+      "ties-birds-01305",
+      "wait-crew-01265",
+      "wait-torn-00422"
+    ],
+    "q045": [
+      "shop-callsigns-01268",
+      "fleet-splicing-01469",
+      "call-ghost-00629"
+    ],
+    "q046": [
+      "beside-card-00746",
+      "beside-valves-01741",
+      "boarding-kept-01765"
+    ],
+    "q047": [
+      "close-stops-00662",
+      "accepts-stops-01090",
+      "bollard-close-01527"
+    ],
+    "q048": [
+      "behind-stored-00901",
+      "fuel-bunkering-permit-window",
+      "parking-fuel-01455"
+    ],
+    "q049": [
+      "checked-about-00078",
+      "burned-stations-01634",
+      "check-channels-01531"
+    ],
+    "q050": [
+      "salt-damage-01794",
+      "boards-outer-01922",
+      "board-confined-00281"
+    ],
+    "q051": [
+      "otter-ties-01686",
+      "checklist-otter-00682",
+      "food-otter-01386"
+    ],
+    "q052": [
+      "space-years-00411",
+      "confined-shunting-00755",
+      "course-level-00730"
+    ],
+    "q053": [
+      "assigned-pass-01534",
+      "bollard-items-01104",
+      "calendar-items-01037"
+    ],
+    "q054": [
+      "files-nearest-00093",
+      "picking-nearest-01413",
+      "pilot-quay-00226"
+    ],
+    "q055": [
+      "evening-month-00031",
+      "times-signal-00371",
+      "warehouse-stops-01204"
+    ],
+    "q056": [
+      "account-seconds-01344",
+      "cables-june-00280",
+      "canteen-opening-hours"
+    ],
+    "q057": [
+      "peels-port-00732",
+      "raised-jackets-00230",
+      "strip-coast-01238"
+    ],
+    "q058": [
+      "engineer-print-00617",
+      "quay-label-01908",
+      "account-seconds-01344"
+    ],
+    "q059": [
+      "month-second-00655",
+      "berth-months-01342",
+      "calibration-visitors-01113"
+    ],
+    "q060": [
+      "nightly-photographs-00265",
+      "bunkering-lead-00661",
+      "cannot-complaints-01485"
+    ],
+    "q061": [
+      "flag-etiquette-notes",
+      "flag-name-00569",
+      "flag-pontoon-01474"
+    ],
+    "q062": [
+      "spare-key-register",
+      "beam-spare-00149",
+      "came-spare-00035"
+    ]
+  }
+}

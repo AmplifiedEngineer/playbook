@@ -13,12 +13,22 @@ use std::collections::HashMap;
 use std::path::Path;
 
 fn sql_err(e: rusqlite::Error) -> String {
-    format!("search failed: {e}")
+    super::db::map_sql_error("search failed", &e)
 }
 
 fn to_usize(n: i64) -> usize {
     usize::try_from(n).unwrap_or(0)
 }
+
+/// The ids of the symbols a query can match: the exact qualified name, or a
+/// name that starts with the query. The prefix part is a range on the
+/// `lower(name)` index and the LIKE only filters inside that range, because a
+/// LIKE alone scans the whole index. `?1` is the query, `?2` its lowercase
+/// form and `?3` the escaped LIKE pattern.
+const PREFILTER: &str = "SELECT id FROM main.symbols WHERE qualified_name = ?1
+     UNION SELECT id FROM main.symbols
+           WHERE lower(name) >= ?2 AND lower(name) < ?2 || char(1114111)
+             AND lower(name) LIKE ?3 ESCAPE '\\'";
 
 /// Whether `path` on disk still hashes to `sha`. Cached per path.
 fn is_current(cache: &mut HashMap<String, bool>, root: &Path, path: &str, sha: &str) -> bool {
@@ -53,11 +63,24 @@ pub fn symbol_hits(
                         WHEN s.name = ?1 THEN 2
                         WHEN lower(s.name) = lower(?1) THEN 3
                         WHEN substr(lower(s.name), 1, length(?1)) = lower(?1) THEN 4 END AS tier
-            FROM symbols s JOIN files f ON f.id = s.file_id
+            FROM ({PREFILTER}) h
+            CROSS JOIN main.symbols s ON s.id = h.id
+            CROSS JOIN files f ON f.id = s.content
             WHERE 1 = 1{extra}{kind}
          ) WHERE tier IS NOT NULL"
     );
-    let mut params: Vec<String> = vec![query.to_string()];
+    // Tiers 2 to 4 all name a prefix of the symbol's name. The prefilter reads
+    // two indexes and scopes only its rows, where the scoped `symbols` view
+    // would probe the file list for every symbol of the store.
+    let lowered = query.to_ascii_lowercase();
+    let like = format!(
+        "{}%",
+        lowered
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_")
+    );
+    let mut params: Vec<String> = vec![query.to_string(), lowered, like];
     params.extend(extra_params);
     params.extend(opts.kind.clone());
 
@@ -511,5 +534,120 @@ mod tests {
         // Assert
         assert!(first >= 1);
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn a_prefix_query_with_a_wildcard_character_matches_only_its_own_prefix() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("ranked-wildcards");
+        f.write(
+            "a.rs",
+            "fn run_lock_path() {}\nfn runXlock() {}\nfn Run_Lock() {}\nfn other() {}\n",
+        );
+        f.run();
+
+        // Act
+        let (hits, total) =
+            symbol_hits(&f.conn(), &f.root, &SearchOptions::new("run_lock"), 10).expect("hits");
+
+        // Assert
+        let mut names: Vec<&str> = hits
+            .iter()
+            .filter_map(|h| h.symbol.as_ref().map(|s| s.name.as_str()))
+            .collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["Run_Lock", "run_lock_path"]);
+        assert_eq!(total, 2);
+    }
+
+    #[test]
+    fn a_damaged_symbol_table_names_rebuild() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("ranked-damaged");
+        f.write("a.rs", "fn needle() {}\n");
+        f.run();
+        let conn = f.conn();
+        crate::testkit::damage_pages(&f);
+
+        // Act
+        let got = ranked_search(&conn, &f.root, &SearchOptions::new("needle"));
+
+        // Assert
+        let Err(message) = got else {
+            panic!("the query must fail")
+        };
+        assert!(message.contains("--rebuild"), "{message}");
+    }
+
+    #[test]
+    fn the_prefix_prefilter_searches_the_name_index_instead_of_scanning_it() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("rk-plan");
+        f.write("a.rs", "fn widget() {}\n");
+        f.run();
+        let conn = f.conn();
+
+        // Act
+        let mut stmt = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {PREFILTER}"))
+            .expect("prepare");
+        let plan: Vec<String> = stmt
+            .query_map(["widget", "widget", "widget%"], |r| r.get::<_, String>(3))
+            .expect("plan")
+            .map(|r| r.expect("row"))
+            .collect();
+
+        // Assert
+        assert!(
+            plan.iter().any(|p| p.contains("symbols_name_lower")),
+            "{plan:?}"
+        );
+        assert!(
+            plan.iter().all(|p| !p.starts_with("SCAN main.symbols")),
+            "{plan:?}"
+        );
+    }
+
+    /// The fixture of the scoping tests: `shared.rs` and `again.rs` hold the
+    /// same bytes in this worktree, and another worktree lists the same bytes
+    /// as `sibling.rs` next to a symbol only it has.
+    fn two_worktrees_sharing(tag: &str) -> (Fx, crate::db::Store) {
+        let f = fx(tag);
+        f.write("shared.rs", "fn widget() {}\n");
+        f.write("again.rs", "fn widget() {}\n");
+        f.run();
+        let other = crate::walker::test_repo::init(&format!("{tag}-b"));
+        crate::walker::test_repo::write(&other, "sibling.rs", b"fn widget() {}\n");
+        crate::walker::test_repo::write(&other, "only_there.rs", b"fn widgetry() {}\n");
+        crate::index::run(
+            &other,
+            &f.index,
+            "other",
+            false,
+            &crate::index::Options::default(),
+        )
+        .expect("second worktree");
+        let conn = f.conn();
+        (f, conn)
+    }
+
+    #[test]
+    fn a_symbol_search_lists_each_path_of_this_worktree_once_and_none_of_a_sibling() {
+        let _g = pinned();
+        // Arrange
+        let (f, conn) = two_worktrees_sharing("rk-scope");
+        let opts = SearchOptions::new("widget");
+
+        // Act
+        let got = ranked_search(&conn, &f.root, &opts).expect("search");
+
+        // Assert
+        let mut paths: Vec<&str> = got.hits.iter().map(|h| h.path.as_str()).collect();
+        paths.sort_unstable();
+        assert_eq!(paths, vec!["again.rs", "shared.rs"]);
+        assert_eq!(got.omitted, 0);
     }
 }

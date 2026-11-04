@@ -31,6 +31,8 @@ When `package-lock.json` hashes match between the base repo and the worktree, `n
 
 ## The daily sweep
 
+Every removal in the sweep goes through the gc guard and takes the gc run lock, so a sweep and `playbook gc` never run at once. See [cleanup and tombstones](17-gc-and-tombstones.md). Review worktrees follow one rule in the sweep and in `worktree review setup`: unlocked after 60 seconds, locked after a dead owner pid and 24 hours.
+
 `maybe_sweep_worktrees` (`crates/cli/src/hooks/session_init.rs`) also runs the sweep on every Claude Code `SessionStart`, at most once per 24 hours per repo (a row under `worktree-sweep/<repo slug>` in the [state store](08-state-store.md)). So a repo is swept when you create a worktree and again the first time a session opens each day. Both triggers call the same function. The overlap is deliberate.
 
 A repo nobody opens is swept by neither trigger. That is a known limit: fixing it needs an OS scheduler, which nothing here uses.
@@ -49,6 +51,7 @@ Settings: `worktreeCleanup.enabled`, `worktreeCleanup.staleAfterDays` and `workt
 - The base is the payload's `base_commit`, then the cached `origin/HEAD`, then local `HEAD`.
 - With no `base_commit`, the hook first refreshes `origin/HEAD`, like Claude Code. It fetches the default branch unless `FETCH_HEAD` or the `playbook-origin-fetch` stamp in the git directory is under 24 hours old. The fetch waits at most 5 seconds, never prompts for credentials, and keeps the cached ref on failure.
 - A newly created worktree (not a reused one) gets the files that match a pattern in the main checkout's `.worktreeinclude` and are ignored by git, so local files such as `.env` follow it. Tracked files are never copied, existing files are never overwritten, symlinks are skipped, and a path that leaves the repo is ignored.
+- On macOS, a newly created worktree also gets a copy-on-write clone of the main checkout's `target` folder when that folder exists and git ignores it. The clone shares disk blocks with the original until either side writes, so a new worktree reuses the compiled dependencies and spends little extra disk. On another platform, on a filesystem without clone support (anything but APFS), or when the copy fails, the worktree starts without a `target` and the hook still succeeds. Removing the worktree deletes its `target` with it; the main checkout's is never touched.
 - Stdout carries only the absolute path. All git output goes to stderr.
 - The path follows the launcher convention: `classify` reports `CcLauncher` and the sweep cleans it once its work has landed.
 

@@ -152,6 +152,32 @@ playbook setup
 
 An upgrade installs the newer file the same way. The package owns no file under `/etc` or your home folder, so an upgrade or a removal leaves your config alone, and `playbook migrate` runs on first use. The package manager owns `/usr/bin/playbook`, so update with it. Do not run `playbook update` on a package install, because it would replace a file the package manager owns. Each release installs, reinstalls and removes the packages in Debian, Ubuntu and Fedora containers before and after it is published.
 
+### Debian, Ubuntu and Fedora repository
+
+The release workflow can publish a signed apt and dnf repository, so the package manager upgrades `playbook` for you ([ADR 0052](../adr/0052-signed-apt-and-dnf-repository.md)). It is live only after the maintainer has finished the one time setup in the [release channels guide](../internals/06-release-channels.md#apt-and-dnf-repository). Until then, install the downloaded package as above.
+
+```bash
+# Debian, Ubuntu
+sudo install -d -m 0755 /etc/apt/keyrings
+sudo curl -fsSL https://pragmatic-engineer.github.io/playbook/playbook.gpg -o /etc/apt/keyrings/playbook.gpg
+echo "deb [signed-by=/etc/apt/keyrings/playbook.gpg] https://pragmatic-engineer.github.io/playbook/apt stable main" | sudo tee /etc/apt/sources.list.d/playbook.list
+sudo apt update && sudo apt install playbook
+
+# Fedora, RHEL
+sudo tee /etc/yum.repos.d/playbook.repo <<'REPO'
+[playbook]
+name=playbook
+baseurl=https://pragmatic-engineer.github.io/playbook/rpm/$basearch
+enabled=1
+repo_gpgcheck=1
+gpgcheck=0
+gpgkey=https://pragmatic-engineer.github.io/playbook/playbook.asc
+REPO
+sudo dnf install playbook
+```
+
+The index is signed, and each package matches the attested release asset. The packages themselves are not signed one by one, so `gpgcheck` is 0 and `repo_gpgcheck` is 1. Compare the key fingerprint with the one in the release notes before you trust it. If the key is ever rotated, download `playbook.gpg` again and replace the file in `/etc/apt/keyrings`. `SHA256SUMS` stays unsigned.
+
 ### Windows with scoop (experimental)
 
 ```powershell

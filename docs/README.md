@@ -64,6 +64,7 @@ How the machine works, and why it is shaped this way.
 - [The memory system](internals/13-memory-system.md): the global, org, and project fact store, typed edges, and how it feeds the commands.
 - [Why the pieces are shaped this way](internals/14-why-the-pieces-are-shaped-this-way.md): why commands, skills, agents and hooks are separate, why each model and effort level was chosen, and where to change them.
 - [Codex skills](internals/15-codex-skills.md): where `playbook skills sync` puts the playbook skills for Codex, how names, ownership and rendering work, and what Codex lacks.
+- [Cleanup, tombstones and gc](internals/17-gc-and-tombstones.md): what `playbook gc` removes, how a tombstone is kept and restored, the stores and the build output table.
 - [PR-Agent and the review pipeline](internals/16-pr-agent-and-the-review-pipeline.md): the decision to try PR-Agent's ideas in the playbook review pipeline first, and which ones.
 
 ## Decisions
@@ -124,3 +125,4 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0050](adr/0050-limits-from-claude-data-not-the-login-token.md) | Derive usage limits from Claude Code's own data, not the login token | Accepted | 2026-10-20 |
 | [0051](adr/0051-bundle-anydoc-as-pbdoc-helper.md) | Bundle the anydoc converter as the pbdoc helper | Accepted | 2026-10-21 |
 | [0055](adr/0055-watch-mode-for-github-events.md) | A polling watch mode for GitHub events, with rules, autonomy levels and a durable queue | Proposed | 2026-10-25 |
+| [0059](adr/0059-tombstone-format.md) | Tombstone format for on disk state | Accepted | 2026-11-05 |

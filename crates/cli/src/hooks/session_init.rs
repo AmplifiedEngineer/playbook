@@ -104,6 +104,7 @@ pub fn run(payload: &Payload) {
     let headless = crate::common::headless::is_headless();
     if !headless {
         maybe_sweep_worktrees(&home, &repo_root);
+        maybe_gc(Path::new(&home));
     }
 
     let (mut system_message, mut extra_context) = check_config_drift(payload, &dir, &home);
@@ -381,7 +382,7 @@ fn append_memory_context(extra_context: &mut String, repo_root: &str) {
 /// `source: "clear"` and `"compact"`: this is called unconditionally regardless
 /// of `.source`.
 /// The shared `crate::handoff` module keys, loads, and archives them: up to
-/// three fresh ones are injected and moved to `handoff/used/`, stale and
+/// three fresh ones are injected and tombstoned by gc, stale and
 /// over-cap ones are removed. Returns how many were injected. Never panics.
 fn append_handoff_slice(extra_context: &mut String, source: &str, session_id: &str) -> usize {
     let slug = crate::handoff::current_slug();
@@ -390,7 +391,7 @@ fn append_handoff_slice(extra_context: &mut String, source: &str, session_id: &s
     }
     let taken = crate::handoff::take_in(&crate::handoff::root(), &slug, SystemTime::now());
     // Leave the memory block its share of the cap. The handoff files are
-    // archived under `handoff/used/` once taken, so a cut loses nothing.
+    // tombstoned by gc once taken, so a cut loses nothing.
     let budget = handoff_room(extra_context).max(MIN_HANDOFF_CHARS) / taken.contents.len().max(1);
     for (i, contents) in taken.contents.iter().enumerate() {
         let contents = &fit_handoff(contents, budget);
@@ -480,7 +481,7 @@ const MIN_HANDOFF_CHARS: usize = 3000;
 const BLOCK_SEPARATOR_CHARS: usize = 2;
 
 const HANDOFF_CUT_NOTE: &str =
-    "\n[handoff cut to fit the hook output cap; the full text is under the handoff used directory]";
+    "\n[handoff cut to fit the hook output cap; the full text is in the gc tombstone folder; run `playbook handoff show`]";
 
 /// `text`, or its leading `budget` characters plus a note when longer.
 fn fit_handoff(text: &str, budget: usize) -> String {
@@ -669,11 +670,33 @@ fn maybe_sweep_worktrees(home: &str, repo_root: &str) {
     // partway through still rate-limits the next run, rather than retrying
     // the same destructive pass on every SessionStart until one finishes.
     let _ = crate::state::set(&root, &marker, &now_epoch.to_string());
-    if let Err(err) =
-        crate::worktree::sweep(Path::new(repo_root), home, repo_slug_opt, false, now_epoch)
-    {
-        eprintln!("worktree-sweep: {err}");
+    let clock = crate::gc::default_clock();
+    match crate::gc::worktrees::sweep_locked(
+        home,
+        &*clock,
+        (Path::new(repo_root), repo_slug_opt),
+        false,
+    ) {
+        Ok(crate::gc::worktrees::SweepRun::Busy) => {
+            // Nothing was swept, so give the stamp back and let the next
+            // SessionStart try again instead of waiting a full interval.
+            let before = marker_mtime_epoch.unwrap_or(0);
+            let _ = crate::state::set(&root, &marker, &before.to_string());
+        }
+        Ok(crate::gc::worktrees::SweepRun::Swept(_)) => {}
+        Err(err) => eprintln!("worktree-sweep: {err}"),
     }
+}
+
+/// Runs a slice of the daily gc sweep unless `gc.enabled` is off. A value of
+/// the wrong type reads as off, so a hand-edited config never starts a sweep.
+fn maybe_gc(home: &Path) {
+    let enabled = crate::config::resolve_valid("gc.enabled", home, None)
+        .ok()
+        .and_then(|(value, _, _)| value.as_bool())
+        .unwrap_or(false);
+    let clock = crate::gc::default_clock();
+    crate::gc::sweep::maybe_gc(enabled, &crate::gc::registry(home), &*clock);
 }
 
 /// `git rev-parse --show-toplevel`, trimmed. Empty outside a repo or on any
