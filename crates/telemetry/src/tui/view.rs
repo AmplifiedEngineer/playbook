@@ -112,19 +112,9 @@ pub struct Placed {
 /// A tab can be all about the budget, so this is lower than the classic one.
 const TAB_BUDGET_MIN_ROWS: u16 = 24;
 
-/// Splits `body` for `n` panels: one or two panels stack, three and four make
-/// two rows, five and six make three rows of two (the last row of five is
-/// one wide panel). Six panels land exactly where the classic screen puts them.
-fn grid(body: Rect, n: usize) -> Vec<Rect> {
-    let rows: Vec<(usize, u16)> = match n {
-        0 => return Vec::new(),
-        1 => vec![(1, 1)],
-        2 => vec![(1, 1), (1, 1)],
-        3 => vec![(2, 1), (1, 1)],
-        4 => vec![(2, 1), (2, 1)],
-        5 => vec![(2, 40), (2, 26), (1, 34)],
-        _ => vec![(2, 40), (2, 26), (2, 34)],
-    };
+/// Splits `body` into bands, each a `(columns, weight)` pair: one wide panel
+/// or two side by side.
+fn tile(body: Rect, rows: &[(usize, u16)]) -> Vec<Rect> {
     let bands = Layout::vertical(rows.iter().map(|(_, w)| Constraint::Fill(*w))).split(body);
     let mut out = Vec::new();
     for ((cols, _), band) in rows.iter().zip(bands.iter()) {
@@ -140,10 +130,50 @@ fn grid(body: Rect, n: usize) -> Vec<Rect> {
     out
 }
 
+/// Splits `body` for `n` panels: one or two panels stack, three and four make
+/// two rows, five and six make three rows of two (the last row of five is
+/// one wide panel). Six panels land exactly where the classic screen puts them.
+/// Beyond six, rows of two share the height equally, the last one wide if odd.
+fn grid(body: Rect, n: usize) -> Vec<Rect> {
+    let rows: Vec<(usize, u16)> = match n {
+        0 => return Vec::new(),
+        1 => vec![(1, 1)],
+        2 => vec![(1, 1), (1, 1)],
+        3 => vec![(2, 1), (1, 1)],
+        4 => vec![(2, 1), (2, 1)],
+        5 => vec![(2, 40), (2, 26), (1, 34)],
+        6 => vec![(2, 40), (2, 26), (2, 34)],
+        _ => (0..n.div_ceil(2))
+            .map(|i| (if i * 2 + 1 < n { 2 } else { 1 }, 1))
+            .collect(),
+    };
+    tile(body, &rows)
+}
+
+/// The least body height per row for an arranged tab to be drawn as arranged.
+const MIN_ROW_HEIGHT: u16 = 5;
+
+/// The panel count of each row once the budget strip, which has no cell in the
+/// body, is taken out. A row that held only the strip disappears.
+fn body_rows(ids: &[PanelId], rows: &[u8]) -> Vec<usize> {
+    let mut ids = ids.iter();
+    rows.iter()
+        .map(|n| {
+            ids.by_ref()
+                .take(usize::from(*n))
+                .filter(|id| **id != PanelId::Budget)
+                .count()
+        })
+        .filter(|n| *n > 0)
+        .collect()
+}
+
 /// Places the header, the optional tab bar, the budget strip, the panels of
 /// a tab and the footer on `area`. A layout with one tab keeps the classic
-/// screen: no tab bar, and the budget strip from 36 rows as before.
-pub fn place(area: Rect, ids: &[PanelId], tabbed: bool) -> Placed {
+/// screen: no tab bar, and the budget strip from 36 rows as before. `rows` is
+/// the size of each row of an arranged tab; `None`, or a body too short for
+/// the rows, gives the automatic grid.
+pub fn place(area: Rect, ids: &[PanelId], rows: Option<&[u8]>, tabbed: bool) -> Placed {
     let wants_budget = ids.contains(&PanelId::Budget);
     // A tab with few other panels can afford the strip on a short screen.
     let few = ids.iter().filter(|id| **id != PanelId::Budget).count() <= 3;
@@ -170,7 +200,14 @@ pub fn place(area: Rect, ids: &[PanelId], tabbed: bool) -> Placed {
         .copied()
         .filter(|id| *id != PanelId::Budget)
         .collect();
-    let panels = shown.iter().copied().zip(grid(body, shown.len())).collect();
+    let arranged = rows
+        .map(|r| body_rows(ids, r))
+        .filter(|r| !r.is_empty() && body.height >= MIN_ROW_HEIGHT * r.len() as u16);
+    let rects = match arranged {
+        Some(r) => tile(body, &r.iter().map(|n| (*n, 1)).collect::<Vec<_>>()),
+        None => grid(body, shown.len()),
+    };
+    let panels = shown.iter().copied().zip(rects).collect();
     Placed {
         header,
         tabbar,
@@ -181,8 +218,14 @@ pub fn place(area: Rect, ids: &[PanelId], tabbed: bool) -> Placed {
 }
 
 /// The place of one panel of a tab on `area`, `None` when the tab lacks it.
-pub fn panel_rect(area: Rect, ids: &[PanelId], tabbed: bool, id: PanelId) -> Option<Rect> {
-    place(area, ids, tabbed)
+pub fn panel_rect(
+    area: Rect,
+    ids: &[PanelId],
+    rows: Option<&[u8]>,
+    tabbed: bool,
+    id: PanelId,
+) -> Option<Rect> {
+    place(area, ids, rows, tabbed)
         .panels
         .into_iter()
         .find(|(p, _)| *p == id)
@@ -214,7 +257,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         return;
     }
     let tabbed = app.layout.tabs.len() > 1;
-    let p = place(area, app.tab_ids(), tabbed);
+    let p = place(area, app.tab_ids(), app.tab_rows(), tabbed);
     render_header(frame, p.header, app, &pal);
     if tabbed {
         render_tabbar(frame, p.tabbar, app, &pal);
@@ -1394,9 +1437,9 @@ mod tests {
             let old = layout(area);
 
             let classic = Layout::classic().tabs[0].panels.clone();
-            let placed = place(area, &classic, false);
+            let placed = place(area, &classic, None, false);
 
-            let rect = |id| panel_rect(area, &classic, false, id).unwrap();
+            let rect = |id| panel_rect(area, &classic, None, false, id).unwrap();
             assert_eq!(rect(PanelId::Spend), old.spend, "{w}x{h}");
             assert_eq!(rect(PanelId::Tokens), old.tokens, "{w}x{h}");
             assert_eq!(rect(PanelId::Models), old.models, "{w}x{h}");
@@ -1412,7 +1455,7 @@ mod tests {
     fn a_tab_with_two_panels_stacks_them_and_fills_the_body() {
         let area = Rect::new(0, 0, 100, 30);
 
-        let placed = place(area, &[PanelId::Spend, PanelId::Tokens], true);
+        let placed = place(area, &[PanelId::Spend, PanelId::Tokens], None, true);
 
         let (_, top) = placed.panels[0];
         let (_, bottom) = placed.panels[1];
@@ -1420,6 +1463,86 @@ mod tests {
         assert_eq!(top.bottom(), bottom.y);
         assert_eq!(bottom.bottom(), placed.footer.y);
         assert_eq!(placed.tabbar.height, 1);
+    }
+
+    const NINE: [PanelId; 9] = crate::tui::layout::ALL;
+
+    fn assert_tiles_body(area: Rect, ids: &[PanelId], rows: Option<&[u8]>) -> Placed {
+        let placed = place(area, ids, rows, true);
+        let body_cells: u32 = placed
+            .panels
+            .iter()
+            .map(|(_, r)| u32::from(r.width) * u32::from(r.height))
+            .sum();
+        let body_height = placed.footer.y - placed.budget.bottom();
+        assert_eq!(body_cells, u32::from(body_height) * u32::from(area.width));
+        for (i, (_, a)) in placed.panels.iter().enumerate() {
+            for (_, b) in &placed.panels[i + 1..] {
+                assert!(!a.intersects(*b), "{a:?} overlaps {b:?}");
+            }
+        }
+        placed
+    }
+
+    #[test]
+    fn explicit_rows_tile_the_body_with_a_wide_panel_under_a_pair() {
+        // Arrange
+        let area = Rect::new(0, 0, 100, 30);
+        let ids = [PanelId::Spend, PanelId::Tokens, PanelId::Models];
+
+        // Act
+        let placed = assert_tiles_body(area, &ids, Some(&[2, 1]));
+
+        // Assert
+        let rect = |i: usize| placed.panels[i].1;
+        assert_eq!(rect(0).y, rect(1).y);
+        assert_eq!(rect(0).width + rect(1).width, 100);
+        assert_eq!(rect(2).width, 100);
+        assert_eq!(rect(2).y, rect(0).bottom());
+    }
+
+    #[test]
+    fn explicit_rows_give_way_to_the_auto_grid_on_a_short_body() {
+        // Arrange
+        let area = Rect::new(0, 0, 100, 14);
+        let ids = [PanelId::Spend, PanelId::Tokens, PanelId::Models];
+
+        // Act
+        let rows = place(area, &ids, Some(&[2, 1]), true);
+        let auto = place(area, &ids, None, true);
+
+        // Assert
+        assert_eq!(rows.panels, auto.panels);
+    }
+
+    #[test]
+    fn a_budget_strip_in_a_row_leaves_the_rest_of_the_row_wide() {
+        // Arrange
+        let area = Rect::new(0, 0, 100, 40);
+        let ids = [PanelId::Budget, PanelId::Spend, PanelId::Tokens];
+
+        // Act
+        let placed = assert_tiles_body(area, &ids, Some(&[2, 1]));
+
+        // Assert
+        assert_eq!(placed.panels[0].1.width, 100);
+        assert_eq!(placed.panels[1].1.width, 100);
+    }
+
+    #[test]
+    fn seven_to_nine_panels_all_get_a_place_and_one_to_six_keep_theirs() {
+        // Arrange
+        let area = Rect::new(0, 0, 120, 40);
+        let panels = NINE.iter().copied().filter(|p| *p != PanelId::Budget);
+
+        for n in 7..=8 {
+            // Act
+            let ids: Vec<PanelId> = panels.clone().take(n).collect();
+            let placed = assert_tiles_body(area, &ids, None);
+
+            // Assert
+            assert_eq!(placed.panels.len(), n, "{n} panels");
+        }
     }
 
     #[test]
@@ -1562,7 +1685,7 @@ mod tests {
         for n in 1..=6 {
             let ids: Vec<PanelId> = ALL.iter().copied().take(n).collect();
 
-            let placed = place(area, &ids, true);
+            let placed = place(area, &ids, None, true);
 
             assert_eq!(placed.panels.len(), n, "{n} panels");
             for (i, (_, a)) in placed.panels.iter().enumerate() {
