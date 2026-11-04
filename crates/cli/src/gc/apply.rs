@@ -16,7 +16,7 @@ use super::lock::{with_run_lock, NoHook, RunOutcome};
 use super::tombstone::{
     anomalies, move_locked, reconcile, Env, Findings, MoveOutcome, MoveRequest,
 };
-use super::{registry, Action, Clock};
+use super::{Action, Clock, Registry};
 
 /// A run expires at most this many tombstones, so one run stays short.
 pub const EXPIRE_CAP: usize = 500;
@@ -280,8 +280,8 @@ pub fn restore(env: &Env, id: &str) -> Result<String, String> {
 
 /// The text `playbook gc` adds under the report: anything a reconcile would
 /// fix or that needs a person to look at it. Empty when all is well.
-pub fn render_anomalies(root: &Path, clock: &dyn Clock) -> String {
-    let found = anomalies(&registry(root), clock.now());
+pub fn render_anomalies(registry: &Registry, clock: &dyn Clock) -> String {
+    let found = anomalies(registry, clock.now());
     let mut text = String::new();
     for (title, lines) in [
         ("Needs attention:", &found.attention),
@@ -298,14 +298,13 @@ pub fn render_anomalies(root: &Path, clock: &dyn Clock) -> String {
 }
 
 /// `playbook gc --yes`: the text to print and the exit code.
-pub fn apply_command(root: &Path, clock: &dyn Clock) -> (String, i32) {
-    let registry = registry(root);
-    let fs = RealFs::new(&registry);
+pub fn apply_command(registry: &Registry, clock: &dyn Clock) -> (String, i32) {
+    let fs = RealFs::new(registry);
     let ran = with_run_lock(registry.gc_dir(), Duration::ZERO, clock, &NoHook, |guard| {
         run_apply(
             &Env {
                 guard,
-                registry: &registry,
+                registry,
                 fs: &fs,
             },
             0,
@@ -333,13 +332,12 @@ pub fn apply_command(root: &Path, clock: &dyn Clock) -> (String, i32) {
 }
 
 /// `playbook gc --restore <id>`: the text to print and the exit code.
-pub fn restore_command(root: &Path, clock: &dyn Clock, id: &str) -> (String, i32) {
-    let registry = registry(root);
-    let fs = RealFs::new(&registry);
+pub fn restore_command(registry: &Registry, clock: &dyn Clock, id: &str) -> (String, i32) {
+    let fs = RealFs::new(registry);
     let ran = with_run_lock(registry.gc_dir(), RESTORE_WAIT, clock, &NoHook, |guard| {
         let env = Env {
             guard,
-            registry: &registry,
+            registry,
             fs: &fs,
         };
         reconcile(&env);
@@ -658,10 +656,9 @@ mod tests {
     fn restore_reports_busy() {
         let fx = fx("apply-restore-busy");
         let real_now = crate::common::time::now_secs();
-        let root = fx.gc.parent().unwrap().to_path_buf();
 
         let (text, code) = fx.run(real_now, |_| {
-            restore_command(&root, &FixedClock(real_now), "any")
+            restore_command(&fx.registry, &FixedClock(real_now), "any")
         });
 
         assert_eq!(code, 1);
@@ -705,9 +702,8 @@ mod tests {
     fn dry_run_text_lists_anomalies() {
         let fx = fx("apply-render");
         plant_state(&fx, "lost", State::Done, NOW - 10);
-        let root = fx.gc.parent().unwrap().to_path_buf();
 
-        let text = render_anomalies(&root, &FixedClock(NOW));
+        let text = render_anomalies(&fx.registry, &FixedClock(NOW));
 
         assert!(text.contains("Would be repaired"), "{text}");
     }

@@ -431,20 +431,23 @@ fn real_main() {
                 );
                 std::process::exit(2);
             }
-            let root = playbook::common::paths::playbook_root();
+            let home = playbook::common::home_dir();
             let clock = playbook::gc::default_clock();
+            let registry = playbook::gc::registry(&home);
             if yes || restore.is_some() {
                 let (text, code) = match restore {
-                    Some(id) => playbook::gc::apply::restore_command(&root, &*clock, &id),
-                    None => playbook::gc::apply::apply_command(&root, &*clock),
+                    Some(id) => playbook::gc::apply::restore_command(&registry, &*clock, &id),
+                    None => playbook::gc::apply::apply_command(&registry, &*clock),
                 };
                 print!("{text}");
                 std::process::exit(code);
             }
-            let registry = playbook::gc::registry(&root);
             let report = playbook::gc::report::report(&registry, clock.now());
             print!("{}", playbook::gc::report::render(&report));
-            print!("{}", playbook::gc::apply::render_anomalies(&root, &*clock));
+            print!(
+                "{}",
+                playbook::gc::apply::render_anomalies(&registry, &*clock)
+            );
         }
         Command::Statusline => std::process::exit(statusline::run()),
         Command::Version => print!("{}", Cli::command().render_version()),
