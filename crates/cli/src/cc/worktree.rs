@@ -335,7 +335,7 @@ const FETCH_CACHE_MARKER_PREFIX: &str = ".git-fetch-";
 /// depends on `gh` being installed and authenticated or touches this
 /// machine's real markers.
 ///
-/// RETIRED as the active cleanup path: [`crate::worktree::sweep`] is what
+/// RETIRED as the active cleanup path: [`crate::gc::worktrees::sweep_locked`] is what
 /// production now calls. Nothing in this binary calls this function; kept
 /// only for the tests exercising [`cleanup_stale_with`] directly.
 pub fn cleanup_stale(repo_root: &Path, target: &Path, now_epoch: i64) -> usize {
@@ -1647,7 +1647,7 @@ pub fn housekeep(
     // Every caller in this binary hands this a marker freshly touched this
     // instant (`worktree_run.rs`'s `run_housekeep`), so this call always
     // reads as not-yet-due and no-ops: it is not the active stale-worktree
-    // path any more, `crate::worktree::sweep` is, called separately by that
+    // path any more, `crate::gc::worktrees::sweep_locked` is, called separately by that
     // same caller.
     cleanup_stale_with(
         target.repo_root,

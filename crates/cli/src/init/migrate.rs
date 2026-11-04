@@ -80,6 +80,9 @@ pub const RM_GUARD_NOTICE_MIGRATION: &str = "rm-guard-simplified";
 /// The `Owned` removal of the per-worktree code index files (ADR 0056). The
 /// shared store replaces them.
 pub const CODE_INDEX_FILES_MIGRATION: &str = "code-index-per-worktree-files";
+/// The `Owned` move of loaded handoffs from the old `used` folder into the gc
+/// tombstone folder.
+pub const HANDOFF_USED_MIGRATION: &str = "handoff-used-to-tombstone";
 /// The step name of that notice, which the heal line shows in full.
 pub const RM_GUARD_NOTICE_STEP: &str = "rm guard";
 /// What the notice says (docs/guides/07-rm-guard.md).
@@ -423,6 +426,13 @@ pub fn registry() -> Vec<Migration> {
             kind: Kind::Auto,
             scope: Scope::Owned,
             run: code_index_per_worktree_files,
+        },
+        Migration {
+            id: HANDOFF_USED_MIGRATION,
+            since: "next",
+            kind: Kind::Idempotent,
+            scope: Scope::Owned,
+            run: crate::init::handoff_used::run,
         },
     ]
 }

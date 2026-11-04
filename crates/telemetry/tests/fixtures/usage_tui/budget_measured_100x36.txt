@@ -5,8 +5,8 @@
 │messages           4   vs          3          +1   +33.3%                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─┤Budget├─────────────────────────────────────────────────────────────────────┤UTC  all projects├─╮
-│5 hour window [measured]  ■■■■■····· 50%/100%  will exceed ~09-03 03:46 UTC  left 50%             │
-│weekly window [measured]  ■■■······· 30%/100%  under  left 70%  allow 0.7%/h 17.5%/d              │
+│5 hour window [measured]  ■■■■■····· 50%/100%  ! will exceed ~09-03 03:46 UTC  left 50%           │
+│weekly window [measured]  ■■■······· 30%/100%  + under  left 70%  allow 0.7%/h 17.5%/d            │
 │this week spend [local history]  $3.05 so far  avg $0.04/h $0.99/day  last week $0.08/h $2.02/day │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─┤¹Spend per day, USD├─┤v view: total├──────────╮╭─┤²Tokens per day├──────────────────────────────╮

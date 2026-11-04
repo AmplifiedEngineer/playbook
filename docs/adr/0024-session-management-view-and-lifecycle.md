@@ -1,8 +1,8 @@
 # ADR-0024: A Session Management View With a Derived Record and a Suggest-First Lifecycle
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date created:** 2026-10-11
-- **Date modified:** 2026-10-11
+- **Date modified:** 2026-11-04
 
 ## Context
 
@@ -55,7 +55,7 @@ A **session record** is computed on read. It is not a new store.
 | `cwd`, `worktree` | The first transcript line that carries `cwd` (found by session id under the agent's session directory), then `git worktree list --porcelain` from that directory. The `classify` convention is reported (launcher, agent, review, other). |
 | `context_size` | Input plus cache read plus cache write tokens of the newest event of the session, which is the prompt size of the latest request. |
 | `linked_issue` | A number in the branch name (`536-foo`, `feat/536-foo`, `issue-536`), shown as inferred. |
-| `linked_pr`, `pr_state` | `gh pr list --head <branch> --state all` with the existing timeout helpers, cached for the life of one refresh. `None` when `gh` is missing or offline. |
+| `linked_pr`, `pr_state` | `gh pr list --head <branch> --state all` with the existing timeout helpers, cached for the life of one refresh. An open PR wins over any other. A merged PR counts only when it targeted the default branch and its head is the local branch tip. `None` when `gh` is missing or offline. |
 | `task` | A short hash of the first user prompt, never the text. It tells two sessions on one branch apart and detects a resume. |
 | `pane` (optional) | `TMUX_PANE` recorded by a hook (stage 3), matched to `tmux list-panes -a`. |
 
@@ -77,7 +77,7 @@ Waiting and working are timing guesses in stage 1 (a message in the last 2 minut
 
 | Signal | Meaning | Confidence | What it may trigger |
 | --- | --- | --- | --- |
-| PR for the branch is merged | The work landed | High | Suggest close. Safe cleanup via the existing sweep. |
+| PR for the branch is merged into the default branch, at the branch tip | The work landed | High | Suggest close. Safe cleanup via the existing sweep. |
 | PR closed unmerged | The work was dropped | Medium (may be re opened) | Suggest close and handoff. No cleanup. |
 | Branch merged into the default branch locally (`merged_branches`) | The work landed without a PR | Medium | Suggest close. |
 | Linked issue closed | The ask is done | Medium (can be a different PR) | Suggest only. |
@@ -91,20 +91,20 @@ Linking uses the branch first. A session whose branch is the default branch (`ma
 `sessions.autoClose` has three levels, off by default.
 
 - `off`: the view and `sessions list` only. Nothing is suggested or run.
-- `propose`: the view and a one line hint at `SessionStart` show what could be closed and why. Nothing runs. This is the default when the feature ships.
+- `propose`: the view and a one line hint at `SessionStart` show what could be closed and why. Nothing runs.
 - `auto`: only the actions in the "automatic" column, only when every guard holds.
 
 | Action | `propose` | `auto` |
 | --- | --- | --- |
 | Show "close this tab" or "archive" suggestion | yes | yes |
 | Save a handoff for the session | suggest | no. The agent writes a handoff, a hook cannot. It stays a suggestion. |
-| Remove the worktree and delete the branch | suggest | yes, only through the existing `worktree::remove` and `sweep` rules: landed, clean, not locked, not in use. |
+| Remove the worktree | suggest | yes, only through the existing `worktree::remove` and `sweep` rules: landed, clean, not locked by a live process, not in use. Deleting the branch is a later stage. |
 | Mark the record closed | suggest | yes |
 | Stop the process or close a tmux pane | never | never without a confirmation in the view |
-| Anything on a tree with uncommitted or untracked changes, or unpushed commits | never | never. The session goes to a needs attention list. |
+| Anything on a tree with uncommitted or untracked changes | never | never. The session goes to a needs attention list. |
 | Anything on a session with activity in the last 15 minutes | never | never |
 
-No code path may call `git reset`, `git checkout --`, `git clean`, `git worktree remove --force` or `git branch -D`. Cleanup is the existing `worktree::remove`, which does not use `--force`, and the existing `worktree-sweep.log` records what it took.
+No lifecycle code path may call `git reset`, `git checkout --`, `git clean` or `git branch -D`. Cleanup is the existing `worktree::remove` and `sweep`, and the existing `worktree-sweep.log` records what it took. Those do call `git worktree remove --force`, so the safety rests on the checks that run first: landed, not in use, clean (untracked files count) and not locked by a live process. The `--force` only lets git drop a tree that has passed those checks, ignored files included. A new lifecycle path must go through the same checks and never add its own forced removal. The existing sweep does not look at unpushed commits on a stale branch, so the `auto` level must add that check before it calls the sweep.
 
 Where it runs: a read in the view and in `sessions list` (always), and the existing daily `SessionStart` sweep (`maybe_sweep_worktrees`) for the `auto` cleanup of worktrees. No new daemon and no OS scheduler. A repo nobody opens is not swept, the same known limit as today. Watch mode (#534) can call the same function later.
 
@@ -136,7 +136,7 @@ The view columns: repo, branch, worktree (short path), issue or PR (`#536`, `PR 
 
 | Key | Default | Values | Stage |
 | --- | --- | --- | --- |
-| `sessions.autoClose` | `propose` | `off`, `propose`, `auto` | 4 (hint), 5 (`auto`) |
+| `sessions.autoClose` | `off` | `off`, `propose`, `auto` | 4 (hint), 5 (`auto`) |
 | `sessions.staleAfterDays` | `3` | whole number, 1 or more | 1 |
 | `sessions.recentDays` | `7` | whole number, 1 or more | 1 |
 | `sessions.closeRemoves` | `worktree` | `none`, `worktree`, `worktree,branch` | 5 |
@@ -150,7 +150,7 @@ The view columns: repo, branch, worktree (short path), issue or PR (`#536`, `PR 
 | 2 | Sessions management view in the usage TUI (separate module). Needs attention group. Suggestions shown, never run. | None. |
 | 3 | A `Notification` and `UserPromptSubmit` hook writing a small per session file (pane id, last notification type). States `waiting` and exact `working`. tmux read mapping. | New hook entry, new small file. |
 | 4 | `sessions sweep --dry-run` and the `propose` hint at `SessionStart`. | A one line message. |
-| 5 | `auto` for the safest action first: closed or merged PR plus clean worktree, through the existing sweep. Then branch delete, then record close. | Removes worktrees, as the sweep already does. |
+| 5 | `auto` for the safest action first: merged PR plus clean worktree, through the existing sweep. Then branch delete, then record close. | Removes worktrees, as the sweep already does. |
 
 **The first slice is small and safe:** stage 1 only. It reads the usage store, a transcript head, `git worktree list` and `gh pr list`. It writes nothing, adds no hook and no dependency, and every part it uses is tested code. Stage 2 follows as its own change.
 
@@ -180,14 +180,16 @@ The record is agent neutral. `agent` comes from the store and Codex rows already
 
 | Risk | Mitigation |
 | --- | --- |
-| A session wrongly called done and its worktree removed | Cleanup is only the existing `worktree::remove` guards (landed, clean, unlocked), only at `auto`, off by default. A merged PR plus clean tree is the first and only automatic case. |
-| Uncommitted work lost | No forced git command anywhere. A dirty tree moves the session to needs attention. |
+| A session wrongly called done and its worktree removed | Cleanup is only the existing `worktree::remove` guards (landed, not in use, clean and not locked by a live process), only at `auto`, off by default. A merged PR plus clean tree is the first and only automatic case. |
+| Uncommitted work lost | No new forced git command. The existing removal runs only after the clean, landed, not in use and unlocked checks. A dirty tree moves the session to needs attention. |
 | `gh` missing, offline or rate limited | `unknown` link, no action. |
 | Hook payload changes between Claude Code releases | Fields are read as optional and a missing field degrades the row. Stage 3 is verified against the installed version in its PR. |
 | Transcript layout changes | The cwd lookup falls back to the repo name from the store. |
 | Slow read with many sessions | Bounded by `sessions.recentDays` and a per refresh cache. |
 
 ## Follow up issues (not created)
+
+As accepted, the `sessions.autoClose` levels built are `off` and `propose`. The `auto` level (stage 5) is not built.
 
 1. Stage 1: `playbook sessions` core and read only list (the first slice).
 2. Stage 2: Sessions management view in the usage TUI, with the needs attention group.

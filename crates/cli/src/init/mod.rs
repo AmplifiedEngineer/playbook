@@ -34,6 +34,7 @@ pub mod choices;
 pub mod collector_service;
 pub mod completion;
 pub mod dead_hooks;
+pub mod handoff_used;
 pub mod memory_migrate;
 pub mod merge;
 pub mod migrate;

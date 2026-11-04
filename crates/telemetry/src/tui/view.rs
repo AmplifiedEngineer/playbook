@@ -11,7 +11,7 @@ use super::burnup;
 use super::data::Data;
 use super::fmt::{compact, fit, money, signed_compact, signed_count, signed_money, signed_percent};
 use super::keys::{self, HelpLine};
-use super::layout::PanelId;
+use super::layout::{auto_rows, PanelId};
 use super::notice::{self, Notice};
 use super::panels;
 use super::projection;
@@ -112,19 +112,9 @@ pub struct Placed {
 /// A tab can be all about the budget, so this is lower than the classic one.
 const TAB_BUDGET_MIN_ROWS: u16 = 24;
 
-/// Splits `body` for `n` panels: one or two panels stack, three and four make
-/// two rows, five and six make three rows of two (the last row of five is
-/// one wide panel). Six panels land exactly where the classic screen puts them.
-fn grid(body: Rect, n: usize) -> Vec<Rect> {
-    let rows: Vec<(usize, u16)> = match n {
-        0 => return Vec::new(),
-        1 => vec![(1, 1)],
-        2 => vec![(1, 1), (1, 1)],
-        3 => vec![(2, 1), (1, 1)],
-        4 => vec![(2, 1), (2, 1)],
-        5 => vec![(2, 40), (2, 26), (1, 34)],
-        _ => vec![(2, 40), (2, 26), (2, 34)],
-    };
+/// Splits `body` into bands, each a `(columns, weight)` pair: one wide panel
+/// or two side by side.
+fn tile(body: Rect, rows: &[(usize, u16)]) -> Vec<Rect> {
     let bands = Layout::vertical(rows.iter().map(|(_, w)| Constraint::Fill(*w))).split(body);
     let mut out = Vec::new();
     for ((cols, _), band) in rows.iter().zip(bands.iter()) {
@@ -140,10 +130,52 @@ fn grid(body: Rect, n: usize) -> Vec<Rect> {
     out
 }
 
+/// Splits `body` for `n` panels: one or two panels stack, three and four make
+/// two rows, five and six make three rows of two (the last row of five is
+/// one wide panel). Six panels land exactly where the classic screen puts them.
+/// Beyond six, rows of two share the height equally, the last one wide if odd.
+fn grid(body: Rect, n: usize) -> Vec<Rect> {
+    if n == 0 {
+        return Vec::new();
+    }
+    // The panel count of each row is `auto_rows`, which the editor shares; only
+    // five and six panels weigh their row heights.
+    let heights: &[u16] = match n {
+        5 | 6 => &[40, 26, 34],
+        _ => &[],
+    };
+    let rows: Vec<(usize, u16)> = auto_rows(n)
+        .iter()
+        .enumerate()
+        .map(|(i, cols)| (usize::from(*cols), heights.get(i).copied().unwrap_or(1)))
+        .collect();
+    tile(body, &rows)
+}
+
+/// The least body height per row for an arranged tab to be drawn as arranged.
+const MIN_ROW_HEIGHT: u16 = 5;
+
+/// The panel count of each row once the budget strip, which has no cell in the
+/// body, is taken out. A row that held only the strip disappears.
+fn body_rows(ids: &[PanelId], rows: &[u8]) -> Vec<usize> {
+    let mut ids = ids.iter();
+    rows.iter()
+        .map(|n| {
+            ids.by_ref()
+                .take(usize::from(*n))
+                .filter(|id| **id != PanelId::Budget)
+                .count()
+        })
+        .filter(|n| *n > 0)
+        .collect()
+}
+
 /// Places the header, the optional tab bar, the budget strip, the panels of
 /// a tab and the footer on `area`. A layout with one tab keeps the classic
-/// screen: no tab bar, and the budget strip from 36 rows as before.
-pub fn place(area: Rect, ids: &[PanelId], tabbed: bool) -> Placed {
+/// screen: no tab bar, and the budget strip from 36 rows as before. `rows` is
+/// the size of each row of an arranged tab; `None`, or a body too short for
+/// the rows, gives the automatic grid.
+pub fn place(area: Rect, ids: &[PanelId], rows: Option<&[u8]>, tabbed: bool) -> Placed {
     let wants_budget = ids.contains(&PanelId::Budget);
     // A tab with few other panels can afford the strip on a short screen.
     let few = ids.iter().filter(|id| **id != PanelId::Budget).count() <= 3;
@@ -170,7 +202,16 @@ pub fn place(area: Rect, ids: &[PanelId], tabbed: bool) -> Placed {
         .copied()
         .filter(|id| *id != PanelId::Budget)
         .collect();
-    let panels = shown.iter().copied().zip(grid(body, shown.len())).collect();
+    let arranged = rows.map(|r| body_rows(ids, r)).filter(|r| {
+        !r.is_empty()
+            && r.iter().sum::<usize>() == shown.len()
+            && body.height >= MIN_ROW_HEIGHT * r.len() as u16
+    });
+    let rects = match arranged {
+        Some(r) => tile(body, &r.iter().map(|n| (*n, 1)).collect::<Vec<_>>()),
+        None => grid(body, shown.len()),
+    };
+    let panels = shown.iter().copied().zip(rects).collect();
     Placed {
         header,
         tabbar,
@@ -181,8 +222,14 @@ pub fn place(area: Rect, ids: &[PanelId], tabbed: bool) -> Placed {
 }
 
 /// The place of one panel of a tab on `area`, `None` when the tab lacks it.
-pub fn panel_rect(area: Rect, ids: &[PanelId], tabbed: bool, id: PanelId) -> Option<Rect> {
-    place(area, ids, tabbed)
+pub fn panel_rect(
+    area: Rect,
+    ids: &[PanelId],
+    rows: Option<&[u8]>,
+    tabbed: bool,
+    id: PanelId,
+) -> Option<Rect> {
+    place(area, ids, rows, tabbed)
         .panels
         .into_iter()
         .find(|(p, _)| *p == id)
@@ -214,28 +261,39 @@ pub fn render(frame: &mut Frame, app: &App) {
         return;
     }
     let tabbed = app.layout.tabs.len() > 1;
-    let p = place(area, app.tab_ids(), tabbed);
+    let p = place(area, app.tab_ids(), app.tab_rows(), tabbed);
     render_header(frame, p.header, app, &pal);
     if tabbed {
         render_tabbar(frame, p.tabbar, app, &pal);
     }
     let top = p.tabbar.bottom();
     let body = Rect::new(0, top, area.width, p.footer.y.saturating_sub(top));
+    let dots = burnup::braille_ok(app.icon, pal.mono, app.dots_off);
     match (&app.data, notice::body(app)) {
         (Some(data), None) => {
             if p.budget.height > 0 {
-                budget::render(frame, p.budget, data, &pal);
+                budget::render(frame, p.budget, data, &pal, app.icon);
             }
             for (id, rect) in &p.panels {
                 match id {
-                    PanelId::Spend => panels::spend(frame, *rect, app, data, &pal),
+                    PanelId::Spend
+                    | PanelId::SpendTotal
+                    | PanelId::SpendModel
+                    | PanelId::SpendDaily => panels::spend(frame, *rect, app, data, &pal, *id),
                     PanelId::Tokens => panels::tokens(frame, *rect, app, data, &pal),
                     PanelId::Models => panels::models(frame, *rect, app, data, &pal),
-                    PanelId::Breakdown => panels::projects(frame, *rect, app, data, &pal),
+                    PanelId::Breakdown
+                    | PanelId::BreakdownProjects
+                    | PanelId::BreakdownAgents
+                    | PanelId::BreakdownSkills
+                    | PanelId::BreakdownTools
+                    | PanelId::BreakdownHealth => {
+                        panels::projects(frame, *rect, app, data, &pal, *id)
+                    }
                     PanelId::Live => panels::live(frame, *rect, app, data, &pal),
                     PanelId::Sessions => panels::sessions(frame, *rect, app, data, &pal),
                     PanelId::Projection => projection::render(frame, *rect, data, &pal),
-                    PanelId::Burnup => burnup::render(frame, *rect, data, &pal),
+                    PanelId::Burnup => burnup::render(frame, *rect, data, &pal, dots),
                     PanelId::Budget => {}
                 }
             }
@@ -243,7 +301,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         (data, Some(n)) => {
             if let Some(data) = data {
                 if p.budget.height > 0 {
-                    budget::render(frame, p.budget, data, &pal);
+                    budget::render(frame, p.budget, data, &pal, app.icon);
                 }
             }
             render_notice(frame, body, &n, &pal);
@@ -264,90 +322,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         render_help(frame, area, scroll, &pal);
     }
     if let Some(editor) = &app.editor {
-        render_editor(frame, area, editor, &pal);
+        super::editor_view::render(frame, area, editor, &pal, app.icon);
     }
-}
-
-/// The layout editor window, centered over the panels.
-fn render_editor(frame: &mut Frame, area: Rect, ed: &super::editor::Editor, pal: &Palette) {
-    let width = area.width.saturating_sub(2).min(78);
-    // Tab line, rename line, one line per panel, a message line, two key lines and the border.
-    let wanted = super::layout::ALL.len() as u16 + 7;
-    let height = wanted.min(area.height.saturating_sub(2));
-    let rect = Rect::new(
-        area.x + (area.width - width) / 2,
-        area.y + (area.height - height) / 2,
-        width,
-        height,
-    );
-    let accent = Style::default()
-        .fg(pal.color(pal.hi))
-        .add_modifier(Modifier::BOLD);
-    let plain = Style::default().fg(pal.color(pal.fg));
-    let mut lines: Vec<Line> = Vec::new();
-    let mut tabs = vec![Span::raw(" ")];
-    let full: usize = ed
-        .layout
-        .tabs
-        .iter()
-        .map(|t| t.name.chars().count() + 2)
-        .sum();
-    let names = full < usize::from(width).saturating_sub(4);
-    for (i, tab) in ed.layout.tabs.iter().enumerate() {
-        let shown = if names || i == ed.tab {
-            format!(" {} ", tab.name)
-        } else {
-            format!(" {} ", i + 1)
-        };
-        tabs.push(if i == ed.tab {
-            Span::styled(shown, accent.add_modifier(Modifier::UNDERLINED))
-        } else {
-            Span::styled(shown, plain)
-        });
-    }
-    lines.push(Line::from(tabs));
-    lines.push(match &ed.rename {
-        Some(name) => Line::styled(
-            format!(" New name: {name}_   enter apply   esc cancel"),
-            accent,
-        ),
-        None => Line::raw(""),
-    });
-    for (i, id) in super::layout::ALL.iter().enumerate() {
-        let mark = match ed.position(*id) {
-            Some(at) => format!("[{}]", at + 1),
-            None => "[ ]".to_string(),
-        };
-        let pointer = if i == ed.row { ">" } else { " " };
-        let text = format!(" {pointer} {mark} {:<10} {}", id.word(), id.describe());
-        lines.push(if i == ed.row {
-            Line::styled(text, accent)
-        } else {
-            Line::styled(text, plain)
-        });
-    }
-    lines.push(match &ed.message {
-        Some(m) => Line::styled(format!(" {m}"), Style::default().fg(pal.color(pal.error))),
-        None => Line::raw(""),
-    });
-    lines.push(Line::styled(
-        " Left/Right tab   j/k line   space add or remove   J/K move panel",
-        plain,
-    ));
-    lines.push(Line::styled(
-        " < > move tab   n new   x delete   r rename   w save   R reset   esc cancel",
-        plain,
-    ));
-    let edge = Style::default().fg(pal.color(pal.hi));
-    let block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(edge)
-        .title(Line::styled(
-            "\u{2524} Layout: tabs and panels \u{251c}",
-            edge,
-        ));
-    frame.render_widget(ratatui::widgets::Clear, rect);
-    frame.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
 /// Height of the help window on a screen `rows` tall: all its lines, or what
@@ -420,13 +396,22 @@ fn render_tabbar(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
         .enumerate()
         .map(|(i, t)| format!(" F{} {} ", i + 1, t.name).chars().count())
         .sum();
-    // When the names do not fit, only the selected tab keeps its name.
+    // When the names do not fit, only the selected tab keeps its name, cut to
+    // the width the numbered tabs leave over.
     let names = full <= usize::from(area.width);
+    let numbered: usize = (0..app.layout.tabs.len())
+        .filter(|&i| i != app.tab)
+        .map(|i| format!(" F{} ", i + 1).chars().count())
+        .sum();
     let mut spans = Vec::new();
     for (i, tab) in app.layout.tabs.iter().enumerate() {
         let style = if i == app.tab { chosen } else { plain };
-        let text = if names || i == app.tab {
+        let text = if names {
             format!(" F{} {} ", i + 1, tab.name)
+        } else if i == app.tab {
+            let room = usize::from(area.width).saturating_sub(numbered);
+            let whole = format!(" F{} {} ", i + 1, tab.name);
+            whole.chars().take(room).collect()
         } else {
             format!(" F{} ", i + 1)
         };
@@ -1394,9 +1379,9 @@ mod tests {
             let old = layout(area);
 
             let classic = Layout::classic().tabs[0].panels.clone();
-            let placed = place(area, &classic, false);
+            let placed = place(area, &classic, None, false);
 
-            let rect = |id| panel_rect(area, &classic, false, id).unwrap();
+            let rect = |id| panel_rect(area, &classic, None, false, id).unwrap();
             assert_eq!(rect(PanelId::Spend), old.spend, "{w}x{h}");
             assert_eq!(rect(PanelId::Tokens), old.tokens, "{w}x{h}");
             assert_eq!(rect(PanelId::Models), old.models, "{w}x{h}");
@@ -1412,7 +1397,7 @@ mod tests {
     fn a_tab_with_two_panels_stacks_them_and_fills_the_body() {
         let area = Rect::new(0, 0, 100, 30);
 
-        let placed = place(area, &[PanelId::Spend, PanelId::Tokens], true);
+        let placed = place(area, &[PanelId::Spend, PanelId::Tokens], None, true);
 
         let (_, top) = placed.panels[0];
         let (_, bottom) = placed.panels[1];
@@ -1420,6 +1405,151 @@ mod tests {
         assert_eq!(top.bottom(), bottom.y);
         assert_eq!(bottom.bottom(), placed.footer.y);
         assert_eq!(placed.tabbar.height, 1);
+    }
+
+    #[test]
+    fn the_editor_knows_the_rows_of_the_automatic_grid() {
+        for n in 1..=9 {
+            // Arrange
+            let area = Rect::new(0, 0, 100, 60);
+
+            // Act
+            let rects = grid(area, n);
+            let mut by_row: Vec<u8> = Vec::new();
+            let mut last_y = None;
+            for r in &rects {
+                if last_y == Some(r.y) {
+                    *by_row.last_mut().unwrap() += 1;
+                } else {
+                    by_row.push(1);
+                    last_y = Some(r.y);
+                }
+            }
+
+            // Assert
+            assert_eq!(by_row, auto_rows(n), "{n} panels");
+        }
+    }
+
+    /// The nine panels that existed before the pinned view words.
+    const NINE: [PanelId; 9] = [
+        PanelId::Spend,
+        PanelId::Tokens,
+        PanelId::Models,
+        PanelId::Breakdown,
+        PanelId::Live,
+        PanelId::Sessions,
+        PanelId::Budget,
+        PanelId::Projection,
+        PanelId::Burnup,
+    ];
+
+    fn assert_tiles_body(area: Rect, ids: &[PanelId], rows: Option<&[u8]>) -> Placed {
+        let placed = place(area, ids, rows, true);
+        let body_cells: u32 = placed
+            .panels
+            .iter()
+            .map(|(_, r)| u32::from(r.width) * u32::from(r.height))
+            .sum();
+        let body_height = placed.footer.y - placed.budget.bottom();
+        assert_eq!(body_cells, u32::from(body_height) * u32::from(area.width));
+        for (i, (_, a)) in placed.panels.iter().enumerate() {
+            for (_, b) in &placed.panels[i + 1..] {
+                assert!(!a.intersects(*b), "{a:?} overlaps {b:?}");
+            }
+        }
+        placed
+    }
+
+    #[test]
+    fn explicit_rows_tile_the_body_with_a_wide_panel_over_a_pair() {
+        // Arrange: the auto grid for 3 panels puts the pair on top instead.
+        let area = Rect::new(0, 0, 100, 30);
+        let ids = [PanelId::Spend, PanelId::Tokens, PanelId::Models];
+
+        // Act
+        let placed = assert_tiles_body(area, &ids, Some(&[1, 2]));
+
+        // Assert
+        let rect = |i: usize| placed.panels[i].1;
+        assert_eq!(rect(0).width, 100);
+        assert_eq!(rect(1).y, rect(0).bottom());
+        assert_eq!(rect(1).y, rect(2).y);
+        assert_eq!(rect(1).width + rect(2).width, 100);
+        assert_ne!(placed.panels, place(area, &ids, None, true).panels);
+    }
+
+    #[test]
+    fn explicit_rows_that_do_not_add_up_to_the_panels_use_the_auto_grid() {
+        let area = Rect::new(0, 0, 100, 30);
+        let ids = [PanelId::Spend, PanelId::Tokens, PanelId::Models];
+
+        let short = place(area, &ids, Some(&[1, 1]), true);
+        let auto = place(area, &ids, None, true);
+
+        assert_eq!(short.panels, auto.panels);
+    }
+
+    #[test]
+    fn explicit_rows_give_way_to_the_auto_grid_on_a_short_body() {
+        // Arrange
+        let area = Rect::new(0, 0, 100, 14);
+        let ids = [PanelId::Spend, PanelId::Tokens, PanelId::Models];
+
+        // Act
+        let rows = place(area, &ids, Some(&[1, 1, 1]), true);
+        let auto = place(area, &ids, None, true);
+        let tall = place(Rect::new(0, 0, 100, 40), &ids, Some(&[1, 1, 1]), true);
+
+        // Assert
+        assert_eq!(rows.panels, auto.panels);
+        assert!(tall.panels.iter().all(|(_, r)| r.width == 100));
+    }
+
+    #[test]
+    fn a_budget_strip_in_a_row_leaves_the_rest_of_the_row_wide() {
+        // Arrange
+        let area = Rect::new(0, 0, 100, 40);
+        let ids = [PanelId::Budget, PanelId::Spend, PanelId::Tokens];
+
+        // Act
+        let placed = assert_tiles_body(area, &ids, Some(&[2, 1]));
+
+        // Assert
+        assert_eq!(placed.panels[0].1.width, 100);
+        assert_eq!(placed.panels[1].1.width, 100);
+    }
+
+    #[test]
+    fn seven_and_eight_panels_all_get_a_place() {
+        // Arrange
+        let area = Rect::new(0, 0, 120, 40);
+        let panels = NINE.iter().copied().filter(|p| *p != PanelId::Budget);
+
+        for n in 7..=8 {
+            // Act
+            let ids: Vec<PanelId> = panels.clone().take(n).collect();
+            let placed = assert_tiles_body(area, &ids, None);
+
+            // Assert
+            assert_eq!(placed.panels.len(), n, "{n} panels");
+        }
+    }
+
+    #[test]
+    fn an_editor_refusal_starts_with_an_alert_mark() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.key(press(KeyCode::Char('e')));
+
+        // Act
+        for _ in 0..13 {
+            app.key(press(KeyCode::Char('n')));
+        }
+        let text = screen(&app, 100, 30);
+
+        // Assert
+        assert!(text.contains("! At most 12 tabs"), "{text}");
     }
 
     #[test]
@@ -1456,6 +1586,54 @@ mod tests {
         assert_eq!(second, 1);
         assert_eq!(wrapped, 2);
         assert_eq!(app.tab, 1);
+    }
+
+    #[test]
+    fn f10_to_f12_select_the_last_tabs_and_a_missing_tab_changes_nothing() {
+        let mut app = tabbed_app();
+        app.layout = Layout::parse(&twelve_tabs()).unwrap();
+
+        app.key(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
+        let twelfth = app.tab;
+        app.key(KeyEvent::new(KeyCode::F(10), KeyModifiers::NONE));
+        let tenth = app.tab;
+        app.layout = Layout::parse("A=spend;B=tokens;C=live;D=models;E=sessions").unwrap();
+        app.key(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
+
+        assert_eq!((twelfth, tenth, app.tab), (11, 9, 9));
+    }
+
+    #[test]
+    fn a_long_selected_tab_name_is_cut_so_every_tab_number_stays_visible() {
+        let mut app = tabbed_app();
+        let text = (1..=12)
+            .map(|i| format!("{}{i:02}=spend", "N".repeat(14)))
+            .collect::<Vec<_>>()
+            .join(";");
+        app.layout = Layout::parse(&text).unwrap();
+        app.go_tab(5);
+
+        // The other eleven tabs need 8 * 4 + 3 * 5 = 47 columns, so 60 leaves
+        // 13 for the selected tab, which is shorter than its 21 column label.
+        // The 80 column minimum never reaches this cut, so draw the bar alone.
+        let pal = app.theme.palette(app.depth);
+        let mut terminal = Terminal::new(TestBackend::new(60, 1)).unwrap();
+        terminal
+            .draw(|f| render_tabbar(f, f.area(), &app, &pal))
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let bar: String = (0..60).map(|x| buffer[(x, 0)].symbol()).collect();
+
+        assert!(bar.contains(" F12"), "{bar}");
+        assert!(bar.contains(" F6 NNNNNNNNN"), "{bar}");
+        assert!(!bar.contains("NNNNNNNNNNNNNN06"), "{bar}");
+    }
+
+    fn twelve_tabs() -> String {
+        (1..=12)
+            .map(|i| format!("T{i}=spend"))
+            .collect::<Vec<_>>()
+            .join(";")
     }
 
     #[test]
@@ -1535,13 +1713,13 @@ mod tests {
     }
 
     #[test]
-    fn from_a_hidden_focus_the_bracket_key_lands_on_the_second_panel() {
+    fn from_a_hidden_focus_the_bracket_key_lands_on_the_second_slot() {
         let mut app = tabbed_app();
         app.focus = crate::tui::sort::Panel::Sessions;
 
         app.key(press(KeyCode::Char(']')));
 
-        assert_eq!(app.focus, crate::tui::sort::Panel::Tokens);
+        assert_eq!(app.focus_slot(), Some(PanelId::SpendModel));
     }
 
     #[test]
@@ -1562,7 +1740,7 @@ mod tests {
         for n in 1..=6 {
             let ids: Vec<PanelId> = ALL.iter().copied().take(n).collect();
 
-            let placed = place(area, &ids, true);
+            let placed = place(area, &ids, None, true);
 
             assert_eq!(placed.panels.len(), n, "{n} panels");
             for (i, (_, a)) in placed.panels.iter().enumerate() {
@@ -1606,27 +1784,32 @@ mod tests {
     }
 
     #[test]
-    fn e_opens_the_layout_editor_and_escape_closes_it_without_changes() {
+    fn e_opens_the_layout_editor_and_escape_closes_it_with_the_layout_as_it_was() {
+        // Arrange
         let mut app = tabbed_app();
 
+        // Act
         app.key(press(KeyCode::Char('e')));
         let open = app.editor.is_some();
-        app.key(press(KeyCode::Char('x')));
-        app.key(press(KeyCode::Esc));
+        let effect = app.key(press(KeyCode::Esc));
 
+        // Assert
         assert!(open);
         assert!(app.editor.is_none());
+        assert_eq!(effect, crate::tui::app::Effect::None);
         assert_eq!(app.layout, Layout::default());
     }
 
     #[test]
-    fn saving_in_the_editor_applies_the_layout_and_asks_to_store_it() {
+    fn a_change_in_the_editor_shows_behind_it_at_once_and_asks_to_store_it() {
+        // Arrange
         let mut app = tabbed_app();
         app.key(press(KeyCode::Char('e')));
-        app.key(press(KeyCode::Char('x')));
 
-        let effect = app.key(press(KeyCode::Char('w')));
+        // Act
+        let effect = app.key(press(KeyCode::Char('x')));
 
+        // Assert
         assert_eq!(
             effect,
             crate::tui::app::Effect::SaveLayout(
@@ -1635,32 +1818,295 @@ mod tests {
         );
         assert_eq!(app.layout.tabs.len(), 2);
         assert_eq!(app.tab, 0);
+        assert!(app.editor.is_some());
+    }
+
+    #[test]
+    fn escape_after_a_change_keeps_it_and_stores_nothing_more() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.key(press(KeyCode::Char('e')));
+        app.key(press(KeyCode::Char('x')));
+
+        // Act
+        let effect = app.key(press(KeyCode::Esc));
+
+        // Assert
+        assert!(app.editor.is_none());
+        assert_eq!(effect, crate::tui::app::Effect::None);
+        assert_eq!(app.layout.tabs.len(), 2);
+    }
+
+    #[test]
+    fn a_layout_the_text_form_cannot_hold_is_refused_with_a_message() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.key(press(KeyCode::Char('e')));
+        if let Some(editor) = app.editor.as_mut() {
+            editor.layout.tabs.clear();
+        }
+
+        // Act
+        let effect = app.key(press(KeyCode::Char('l')));
+
+        // Assert
+        assert_eq!(effect, crate::tui::app::Effect::None);
+        assert_eq!(app.layout, Layout::default());
+        assert!(app.editor.is_some_and(|e| e.message.is_some()));
+    }
+
+    #[test]
+    fn a_key_that_changes_nothing_in_the_editor_stores_nothing() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.key(press(KeyCode::Char('e')));
+
+        // Act
+        let moved = app.key(press(KeyCode::Char('l')));
+        let refused = app.key(press(KeyCode::Char('L')));
+
+        // Assert
+        assert_eq!(moved, crate::tui::app::Effect::None);
+        assert_eq!(refused, crate::tui::app::Effect::None);
+    }
+
+    #[test]
+    fn the_old_save_keys_do_nothing_in_the_editor() {
+        for key in ['w', 's'] {
+            // Arrange
+            let mut app = tabbed_app();
+            app.key(press(KeyCode::Char('e')));
+
+            // Act
+            let effect = app.key(press(KeyCode::Char(key)));
+
+            // Assert
+            assert_eq!(effect, crate::tui::app::Effect::None, "{key}");
+            assert!(app.editor.is_some(), "{key}");
+        }
+    }
+
+    fn customised_app() -> App {
+        let mut app = app_with(&[event("opus", "alpha", 1.0)]);
+        app.layout = Layout::parse("One=spend;Two=tokens").unwrap();
+        app.go_tab(1);
+        app.range = Range::All;
+        app.filter = "alpha".into();
+        app.spend_view = crate::tui::app::SpendView::Daily;
+        app.projects_view = crate::tui::app::ProjectsView::Agents;
+        app.sorts[0] = crate::tui::sort::Sort {
+            col: 2,
+            desc: false,
+        };
+        app.selected[2] = 3;
+        app
+    }
+
+    #[test]
+    fn r_asks_before_resetting_and_n_changes_nothing() {
+        // Arrange
+        let mut app = customised_app();
+        app.key(press(KeyCode::Char('e')));
+
+        // Act
+        let asked = app.key(press(KeyCode::Char('R')));
+        let prompt = screen(&app, 100, 30);
+        let answer = app.key(press(KeyCode::Char('n')));
+
+        // Assert
+        assert_eq!(asked, crate::tui::app::Effect::None);
+        assert!(prompt.contains("Reset layout and view settings to the defaults? [y/N]"));
+        assert_eq!(answer, crate::tui::app::Effect::None);
+        assert!(app.editor.is_some());
+        assert_eq!(app.filter, "alpha");
+    }
+
+    #[test]
+    fn y_asks_the_loop_to_clear_the_store_and_changes_nothing_in_memory_yet() {
+        // Arrange
+        let mut app = customised_app();
+        app.key(press(KeyCode::Char('e')));
+        app.key(press(KeyCode::Char('R')));
+
+        // Act
+        let effect = app.key(press(KeyCode::Char('y')));
+
+        // Assert
+        assert_eq!(effect, crate::tui::app::Effect::ResetPrefs);
+        assert_eq!(app.filter, "alpha");
+        assert_eq!(app.layout.tabs.len(), 2);
+    }
+
+    #[test]
+    fn a_cleared_store_puts_layout_tab_range_views_sorts_and_filter_back() {
+        // Arrange
+        let mut app = customised_app();
+        app.key(press(KeyCode::Char('e')));
+
+        // Act
+        let effect = app.reset_done(Ok(()));
+
+        // Assert
+        assert_eq!(effect, crate::tui::app::Effect::Requery);
+        assert_eq!(app.layout, Layout::default());
+        assert_eq!(app.tab, 0);
+        assert_eq!(app.range, Range::ThisWeek(app.week_start));
+        assert!(app.filter.is_empty());
+        assert_eq!(app.spend_view, crate::tui::app::SpendView::default());
+        assert_eq!(app.projects_view, crate::tui::app::ProjectsView::default());
+        assert_eq!(
+            app.sorts,
+            crate::tui::sort::PANELS.map(crate::tui::sort::Panel::default_sort)
+        );
+        assert_eq!(app.selected, [0; 6]);
         assert!(app.editor.is_none());
     }
 
     #[test]
-    fn reset_in_the_editor_restores_the_default_tabs_and_clears_the_store() {
-        let mut app = app_with(&[event("opus", "alpha", 1.0)]);
-        app.layout = Layout::parse("One=spend").unwrap();
+    fn a_failed_clear_changes_nothing_and_says_so_in_the_footer() {
+        // Arrange
+        let mut app = customised_app();
         app.key(press(KeyCode::Char('e')));
 
-        let effect = app.key(press(KeyCode::Char('R')));
+        // Act
+        let effect = app.reset_done(Err("database is locked, nothing changed".into()));
 
-        assert_eq!(effect, crate::tui::app::Effect::SaveLayout(String::new()));
-        assert_eq!(app.layout, Layout::default());
+        // Assert
+        assert_eq!(effect, crate::tui::app::Effect::None);
+        assert_eq!(app.layout.tabs.len(), 2);
+        assert_eq!(app.tab, 1);
+        assert_eq!(app.filter, "alpha");
+        assert!(app.editor.is_some());
+        let footer = screen(&app, 140, 30);
+        assert!(
+            footer.contains("Reset failed: database is locked, nothing changed"),
+            "{footer}"
+        );
     }
 
     #[test]
-    fn the_editor_window_lists_the_panels_and_the_keys() {
+    fn a_reset_asks_for_a_requery_when_only_the_filter_or_only_the_range_changed() {
+        for (range, filter) in [
+            (Range::ThisWeek(crate::query::WeekStart::Monday), "alpha"),
+            (Range::All, ""),
+        ] {
+            // Arrange
+            let mut app = tabbed_app();
+            app.week_start = crate::query::WeekStart::Monday;
+            app.range = range;
+            app.filter = filter.into();
+
+            // Act
+            let effect = app.reset_done(Ok(()));
+
+            // Assert
+            assert_eq!(
+                effect,
+                crate::tui::app::Effect::Requery,
+                "{range:?} {filter}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_reset_needs_no_requery_when_the_query_is_already_the_default() {
+        // Arrange
         let mut app = tabbed_app();
+        app.range = Range::ThisWeek(app.week_start);
+        app.go_tab(2);
         app.key(press(KeyCode::Char('e')));
 
+        // Act
+        let effect = app.reset_done(Ok(()));
+
+        // Assert
+        assert_eq!(effect, crate::tui::app::Effect::None);
+        assert_eq!(app.tab, 0);
+        assert!(app.editor.is_none());
+    }
+
+    #[test]
+    fn the_editor_window_draws_the_tab_as_rows_and_marks_the_cursor_cell() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.layout = Layout::parse("Charts=spend,tokens|burnup").unwrap();
+        app.go_tab(0);
+        app.key(press(KeyCode::Char('e')));
+
+        // Act
         let text = screen(&app, 100, 30);
 
+        // Assert
+        let rows: Vec<&str> = text.lines().collect();
+        let first = rows
+            .iter()
+            .position(|l| l.contains("[> spend"))
+            .unwrap_or(0);
+        assert!(rows[first].contains("[  tokens"), "{text}");
+        assert!(rows[first + 1].contains("[  burnup"), "{text}");
+        assert_eq!(rows[first + 1].matches("[  burnup").count(), 1, "{text}");
         assert!(text.contains("Layout: tabs and panels"), "{text}");
-        assert!(text.contains("[1] spend"), "{text}");
-        assert!(text.contains("[ ] live"), "{text}");
-        assert!(text.contains("w save"), "{text}");
+        assert!(text.contains("spend: cost per day"), "{text}");
+        assert!(
+            text.contains("changes are saved as you make them"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_picker_lists_the_panels_the_tab_lacks_and_marks_the_chosen_one() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.layout = Layout::parse("Charts=spend,tokens").unwrap();
+        app.go_tab(0);
+        app.key(press(KeyCode::Char('e')));
+
+        // Act
+        app.key(press(KeyCode::Char('a')));
+        let text = screen(&app, 100, 30);
+
+        // Assert
+        assert!(text.contains("Add after spend"), "{text}");
+        assert!(text.contains("> models"), "{text}");
+        assert!(text.contains("live"), "{text}");
+        assert!(!text.contains("  tokens "), "{text}");
+    }
+
+    #[test]
+    fn the_picker_names_the_panel_the_new_one_lands_after_in_an_arranged_tab() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.layout = Layout::parse("Charts=spend,tokens|models").unwrap();
+        app.go_tab(0);
+        app.key(press(KeyCode::Char('e')));
+
+        // Act
+        app.key(press(KeyCode::Char('a')));
+        let text = screen(&app, 100, 30);
+
+        // Assert
+        assert!(text.contains("Add after tokens"), "{text}");
+        assert!(!text.contains("Add after spend"), "{text}");
+    }
+
+    #[test]
+    fn the_picker_scrolls_to_keep_the_chosen_line_in_view() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.layout = Layout::parse("Charts=spend,tokens").unwrap();
+        app.go_tab(0);
+        app.key(press(KeyCode::Char('e')));
+        app.key(press(KeyCode::Char('a')));
+
+        // Act
+        for _ in 0..10 {
+            app.key(press(KeyCode::Char('j')));
+        }
+        let text = screen(&app, 100, 30);
+
+        // Assert
+        assert!(text.contains("> breakdown.projects"), "{text}");
+        assert!(!text.contains("  models "), "{text}");
     }
 
     #[test]
@@ -1687,18 +2133,6 @@ mod tests {
 
         assert!(prompt.contains("New name:"), "{prompt}");
         assert!(refusal.contains("A tab needs a name"), "{refusal}");
-    }
-
-    #[test]
-    fn reset_from_another_tab_goes_back_to_the_first_tab_and_closes_the_editor() {
-        let mut app = tabbed_app();
-        app.go_tab(2);
-        app.key(press(KeyCode::Char('e')));
-
-        app.key(press(KeyCode::Char('R')));
-
-        assert_eq!(app.tab, 0);
-        assert!(app.editor.is_none());
     }
 
     #[test]

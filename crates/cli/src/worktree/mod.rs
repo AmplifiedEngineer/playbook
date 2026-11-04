@@ -6,7 +6,7 @@
 //! review worktrees), then decides whether an already-classified worktree is
 //! safe to reap.
 
-mod pr_state;
+pub(crate) mod pr_state;
 pub mod review;
 
 use crate::common::git;
@@ -219,8 +219,8 @@ pub fn review_worktree_landed(
     // the lock to also be older than a real TTL, not just the short
     // never-locked grace window, keeps an active review (which can run for
     // minutes, e.g. a full check-suite run) from being reaped the instant a
-    // sweep happens to run. `REVIEW_LOCK_TTL_SECS` matches
-    // `review::setup`'s own `REVIEW_WT_TTL_SECONDS` default.
+    // sweep happens to run. Review setup and the daily sweep both use
+    // `REVIEW_LOCK_TTL_SECS`.
     let stale_enough = lock_age_secs >= REVIEW_LOCK_TTL_SECS;
     match lock_owner_pid {
         Some(pid) => !pid_is_alive(pid) && stale_enough,
@@ -228,11 +228,10 @@ pub fn review_worktree_landed(
     }
 }
 
-/// Matches `review::setup`'s own `REVIEW_WT_TTL_SECONDS` default (24
-/// hours): the floor a locked review worktree's lock age must clear before
+/// 24 hours, the one limit for review setup and the daily sweep: the floor a locked review worktree's lock age must clear before
 /// [`review_worktree_landed`] treats it as safe to reap, since a dead lock
 /// pid is not itself a safe signal for this convention.
-const REVIEW_LOCK_TTL_SECS: i64 = 86_400;
+pub const REVIEW_LOCK_TTL_SECS: i64 = 86_400;
 
 /// Whether `pid` still refers to a running process, checked via `kill -0`
 /// rather than a signal-handling crate dependency (none already in this
@@ -439,7 +438,7 @@ const CONFLICT_MARKER_FILE: &str = ".playbook-conflict-stop";
 /// A worktree just added but not yet locked needs a moment before `git
 /// worktree lock` runs, matching the gap between `review::setup`'s own
 /// `add` and `lock` calls.
-const NEVER_LOCKED_GRACE_SECS: i64 = 60;
+pub const NEVER_LOCKED_GRACE_SECS: i64 = 60;
 
 /// Unix seconds the conflict-STOP marker inside `worktree_path` was written
 /// at, or `None` when the marker is absent or its second line does not parse
@@ -497,6 +496,8 @@ fn worktree_created_epoch(worktree_path: &Path) -> Option<i64> {
 struct LockState {
     is_locked: bool,
     owner_pid: Option<u32>,
+    /// The `ts=<epoch>` the lock reason carries, when it has a readable one.
+    ts: Option<i64>,
 }
 
 fn lock_state(entry: &WorktreeEntry) -> LockState {
@@ -504,12 +505,28 @@ fn lock_state(entry: &WorktreeEntry) -> LockState {
         Some(reason) => LockState {
             is_locked: true,
             owner_pid: parse_lock_pid(reason),
+            ts: lock_ts(reason),
         },
         None => LockState {
             is_locked: false,
             owner_pid: None,
+            ts: None,
         },
     }
+}
+
+/// The `ts=<epoch>` value inside a lock reason, if any.
+fn lock_ts(reason: &str) -> Option<i64> {
+    let rest = &reason[reason.find("ts=")? + 3..];
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
+/// How old a review worktree is: from the lock's `ts=` when it has a readable
+/// one, else from when the worktree was created. Zero when neither is known,
+/// which keeps it.
+pub fn review_age_secs(lock_ts: Option<i64>, created: Option<i64>, now_epoch: i64) -> i64 {
+    lock_ts.or(created).map_or(0, |started| now_epoch - started)
 }
 
 /// A worktree younger than this is never treated as landed, whatever git says:
@@ -607,9 +624,8 @@ fn is_landed(
             None => false,
         },
         Convention::Review => {
-            let worktree_age_secs = worktree_created_epoch(&entry.path)
-                .map(|epoch| now_epoch - epoch)
-                .unwrap_or(0);
+            let worktree_age_secs =
+                review_age_secs(lock.ts, worktree_created_epoch(&entry.path), now_epoch);
             review_worktree_landed(
                 lock.is_locked,
                 lock.owner_pid,
@@ -655,7 +671,11 @@ fn wu_landed(
 /// caller has already confirmed the lock is held by a dead process: a live
 /// lock is never overridden, only a stale one left behind by a process that
 /// no longer exists.
-fn remove_worktree(repo_root: &Path, path: &Path, force_twice: bool) -> Result<(), String> {
+pub(crate) fn remove_worktree(
+    repo_root: &Path,
+    path: &Path,
+    force_twice: bool,
+) -> Result<(), String> {
     let path_str = path.to_string_lossy().into_owned();
     let mut args: Vec<&str> = vec!["worktree", "remove", "--force"];
     if force_twice {
@@ -699,8 +719,8 @@ fn decide_and_report(
     entry: &WorktreeEntry,
     landed: bool,
     lock: &LockState,
-    repo_root: &Path,
     dry_run: bool,
+    remove: Remover,
 ) -> String {
     let path = entry.path.display();
     if !landed {
@@ -726,7 +746,7 @@ fn decide_and_report(
     if dry_run {
         return format!("worktree {path}: would remove (dry run)");
     }
-    match remove_worktree(repo_root, &entry.path, force_twice) {
+    match remove(&entry.path, force_twice) {
         Ok(()) => format!("worktree {path}: removed"),
         Err(err) => format!("worktree {path}: failed to remove: {err}"),
     }
@@ -830,7 +850,9 @@ fn decide_target(
         pr_lookup: None,
     };
     let landed = is_landed(&entry, convention, &lock, &policy, &repo, now_epoch, 0);
-    let report = decide_and_report(&entry, landed, &lock, repo_root, dry_run);
+    let report = decide_and_report(&entry, landed, &lock, dry_run, &|path, force_twice| {
+        remove_worktree(repo_root, path, force_twice)
+    });
     Ok((Some(entry), report))
 }
 
@@ -858,25 +880,41 @@ fn log_removal(home: &Path, now_epoch: i64, line: &str) {
 /// check landed (conflict marker first for `Wu`), check lock, decide, act.
 /// A named branch counts as landed when its pull request is merged (read with
 /// `gh`), which catches squash merges that git history cannot see.
-pub fn sweep(
+///
+/// This only reports. The gc worktree store is the one caller that removes, so
+/// every removal goes through its guard.
+pub fn sweep_dry_run(
     repo_root: &Path,
     home: &Path,
     repo_slug: Option<&str>,
-    dry_run: bool,
     now_epoch: i64,
 ) -> Result<Vec<String>, String> {
     sweep_with(
         repo_root,
         home,
         repo_slug,
-        dry_run,
+        true,
         now_epoch,
         Some(&pr_state::gh_pr_state),
     )
 }
 
-/// [`sweep`] with the pull request lookup injected; `None` judges by local
-/// git history alone.
+/// What a sweep may do beyond judging.
+#[derive(Clone, Copy)]
+pub struct SweepOpts<'a> {
+    pub dry_run: bool,
+    pub now_epoch: i64,
+    /// Judge only the worktrees below this folder.
+    pub only_under: Option<&'a Path>,
+}
+
+/// Removes one worktree: the path and whether the lock needs a doubled
+/// `--force`.
+pub type Remover<'a> = &'a dyn Fn(&Path, bool) -> Result<(), String>;
+
+/// [`sweep_dry_run`] with the pull request lookup injected and removal done
+/// by `git worktree remove` directly; `None` judges by local git history
+/// alone. For tests; production removal goes through [`sweep_removing`].
 pub fn sweep_with(
     repo_root: &Path,
     home: &Path,
@@ -885,6 +923,31 @@ pub fn sweep_with(
     now_epoch: i64,
     pr_lookup: Option<PrLookup<'_>>,
 ) -> Result<Vec<String>, String> {
+    sweep_removing(
+        (repo_root, home, repo_slug),
+        SweepOpts {
+            dry_run,
+            now_epoch,
+            only_under: None,
+        },
+        pr_lookup,
+        &|path, force_twice| remove_worktree(repo_root, path, force_twice),
+    )
+}
+
+/// The sweep proper: every removal goes through `remove`, which the caller
+/// supplies so it can refuse or log.
+pub fn sweep_removing(
+    (repo_root, home, repo_slug): (&Path, &Path, Option<&str>),
+    opts: SweepOpts<'_>,
+    pr_lookup: Option<PrLookup<'_>>,
+    remove: Remover<'_>,
+) -> Result<Vec<String>, String> {
+    let SweepOpts {
+        dry_run,
+        now_epoch,
+        only_under,
+    } = opts;
     let policy = resolve_policy(home, repo_slug).map_err(|err| err.to_string())?;
     if !policy.enabled {
         return Ok(vec![
@@ -905,6 +968,7 @@ pub fn sweep_with(
         .into_iter()
         .skip(1)
         .filter(|entry| caller_worktree.as_deref() != entry.path.canonicalize().ok().as_deref())
+        .filter(|entry| only_under.is_none_or(|base| entry.path.starts_with(base)))
         .filter_map(|entry| {
             let convention = classify(&entry.path, home);
             (convention != Convention::Unmanaged).then_some((entry, convention))
@@ -945,7 +1009,7 @@ pub fn sweep_with(
     );
     let mut report = Vec::new();
     for ((entry, _), (lock, landed)) in candidates.iter().zip(judged) {
-        let line = decide_and_report(entry, landed, &lock, repo_root, dry_run);
+        let line = decide_and_report(entry, landed, &lock, dry_run, remove);
         if !dry_run && (line.ends_with(": removed") || line.contains(": failed to remove")) {
             log_removal(home, now_epoch, &line);
         }

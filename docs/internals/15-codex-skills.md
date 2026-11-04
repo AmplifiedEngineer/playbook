@@ -47,7 +47,7 @@ Each replacement writes to a temporary folder, records the change as pending, sw
 
 ## What does not work in Codex
 
-Codex has subagents and no `AskUserQuestion` tool. Playbook does not render its agent files for Codex. A command step that dispatches a playbook agent or asks a question through a tool does not run as written. The preamble tells the agent to do that step itself, to ask Codex to spawn a subagent, or to ask in chat. See the [Codex support matrix](../reference/codex-support.md).
+Codex has subagents and no `AskUserQuestion` tool. Playbook does not render its agent files for Codex. A command step that dispatches a playbook agent or asks a question through a tool does not run as written. The preamble tells the agent to do that step itself or to ask in chat. See the [Codex support matrix](../reference/codex-support.md).
 
 ## Open question
 
