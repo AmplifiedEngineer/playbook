@@ -167,7 +167,10 @@ fn picker_lines(ed: &Editor, at: usize, accent: Style, plain: Style) -> Vec<Line
         .layout
         .tabs
         .get(ed.tab)
-        .and_then(|t| t.panels.get(ed.slot))
+        .and_then(|t| {
+            t.panels
+                .get(arrange::insert_point(t, ed.slot).checked_sub(1)?)
+        })
         .map_or("", |p| p.word());
     let mut lines = vec![Line::styled(
         format!(" Add after {after}   enter add   esc back   j/k choose"),

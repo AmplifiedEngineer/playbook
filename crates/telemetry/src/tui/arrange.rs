@@ -150,14 +150,26 @@ pub fn toggle_width(tab: &mut Tab, slot: usize) -> Result<usize, String> {
     Ok(slot)
 }
 
+/// The index `insert_after` puts a new panel at: right after the cursor slot
+/// in an automatic tab, after the whole cursor row in an arranged one.
+pub fn insert_point(tab: &Tab, slot: usize) -> usize {
+    match &tab.rows {
+        None => (slot + 1).min(tab.panels.len()),
+        Some(rows) => {
+            let (row, _) = locate(rows, slot);
+            row_start(rows, row) + usize::from(rows[row])
+        }
+    }
+}
+
 /// Adds `panel` after the cursor slot: on its own full width row in an
 /// arranged tab, in reading order in an automatic one.
 pub fn insert_after(tab: &mut Tab, slot: usize, panel: PanelId) -> Result<usize, String> {
     if tab.panels.contains(&panel) {
         return Err(format!("{} is already on the tab", panel.word()));
     }
+    let at = insert_point(tab, slot);
     let Some(mut rows) = tab.rows.clone() else {
-        let at = (slot + 1).min(tab.panels.len());
         tab.panels.insert(at, panel);
         return Ok(at);
     };
@@ -167,7 +179,6 @@ pub fn insert_after(tab: &mut Tab, slot: usize, panel: PanelId) -> Result<usize,
         ));
     }
     let (row, _) = locate(&rows, slot);
-    let at = row_start(&rows, row) + usize::from(rows[row]);
     rows.insert(row + 1, 1);
     tab.panels.insert(at, panel);
     tab.rows = Some(rows);
@@ -357,6 +368,22 @@ mod tests {
         assert_eq!(at, Ok(2));
         assert_eq!(words(&t), ["spend", "tokens", "live", "models"]);
         assert_eq!(t.rows, Some(vec![2, 1, 1]));
+    }
+
+    #[test]
+    fn the_insert_point_is_after_the_cursor_row_in_an_arranged_tab_and_the_cursor_in_an_automatic_one(
+    ) {
+        // Arrange
+        let arranged = tab("A=spend,tokens|models");
+        let automatic = tab("A=spend,tokens");
+
+        // Act
+        let after_row = insert_point(&arranged, 0);
+        let after_slot = insert_point(&automatic, 0);
+
+        // Assert
+        assert_eq!(after_row, 2);
+        assert_eq!(after_slot, 1);
     }
 
     #[test]

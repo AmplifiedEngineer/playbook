@@ -2015,6 +2015,43 @@ mod tests {
     }
 
     #[test]
+    fn the_picker_names_the_panel_the_new_one_lands_after_in_an_arranged_tab() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.layout = Layout::parse("Charts=spend,tokens|models").unwrap();
+        app.go_tab(0);
+        app.key(press(KeyCode::Char('e')));
+
+        // Act
+        app.key(press(KeyCode::Char('a')));
+        let text = screen(&app, 100, 30);
+
+        // Assert
+        assert!(text.contains("Add after tokens"), "{text}");
+        assert!(!text.contains("Add after spend"), "{text}");
+    }
+
+    #[test]
+    fn the_picker_scrolls_to_keep_the_chosen_line_in_view() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.layout = Layout::parse("Charts=spend,tokens").unwrap();
+        app.go_tab(0);
+        app.key(press(KeyCode::Char('e')));
+        app.key(press(KeyCode::Char('a')));
+
+        // Act
+        for _ in 0..10 {
+            app.key(press(KeyCode::Char('j')));
+        }
+        let text = screen(&app, 100, 30);
+
+        // Assert
+        assert!(text.contains("> breakdown.projects"), "{text}");
+        assert!(!text.contains("  models "), "{text}");
+    }
+
+    #[test]
     fn ctrl_c_quits_from_the_editor() {
         let mut app = tabbed_app();
         app.key(press(KeyCode::Char('e')));
