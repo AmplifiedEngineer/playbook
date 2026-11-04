@@ -13,7 +13,7 @@ use std::time::Duration;
 use super::guard::RealFs;
 use super::index::{self, Record, State};
 use super::lock::{with_run_lock, NoHook, RunOutcome};
-use super::logs::{append_confirmed, rotate, RealLogFs, Rotation};
+use super::logs::{append_confirmed, rotate, staging_of, RealLogFs, Rotation};
 use super::tombstone::{
     anomalies, move_locked, reconcile, Env, Findings, MoveOutcome, MoveRequest,
 };
@@ -70,6 +70,18 @@ fn run_stores(
                 return None;
             }
             if store.action == Action::Rotate {
+                let staged = staging_of(&item.path);
+                if fs::symlink_metadata(&staged).is_ok() {
+                    // A copy left by a run that stopped midway.
+                    if let Err(err) = env.fs.remove(env.guard, &staged) {
+                        out.failures.push(format!(
+                            "{}: could not clear {}: {err}",
+                            item.path.display(),
+                            staged.display()
+                        ));
+                        continue;
+                    }
+                }
                 match rotate(&item.path, &RealLogFs, append_confirmed(&item.path)) {
                     Ok(Rotation::Rotated) => out.rotated += 1,
                     Ok(_) => {}
@@ -698,6 +710,38 @@ mod tests {
             (1, 1, fx.registry.stores().len())
         );
         assert!(out.failures.is_empty(), "{:?}", out.failures);
+    }
+
+    #[test]
+    fn a_run_clears_a_leftover_staging_file_and_rotates_the_log() {
+        let mut fx = fx("apply-rotate-leftover");
+        let store = Store {
+            name: "logs",
+            roots: vec![fx.root.clone()],
+            scan: crate::gc::logs::scan,
+            action: Action::Rotate,
+            retention_key: None,
+            limits: Limits {
+                idle_days: 1,
+                max_bytes: 0,
+                retain_days: 7,
+            },
+        };
+        fx.registry = Registry::new(fx.gc.clone()).with_store(store);
+        let log = fx.file("collector.log", "some log text");
+        let stale = staging_of(&log);
+        fs::write(&stale, "half a copy").unwrap();
+
+        let out = fx.run(NOW + 40 * 86_400, |env| run_apply(env, 0, None));
+
+        assert!(out.failures.is_empty(), "{:?}", out.failures);
+        assert_eq!(out.rotated, 1);
+        assert_eq!(fs::metadata(&log).unwrap().len(), 0);
+        assert!(!stale.exists());
+        assert_eq!(
+            fs::read_to_string(log.with_file_name("collector.log.1")).unwrap(),
+            "some log text"
+        );
     }
 
     #[test]
