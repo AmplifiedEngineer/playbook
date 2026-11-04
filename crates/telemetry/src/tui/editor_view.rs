@@ -53,6 +53,10 @@ pub fn render(frame: &mut Frame, area: Rect, ed: &Editor, pal: &Palette) {
         Style::default().fg(pal.color(pal.graph_text)),
     ));
     lines.push(match &ed.message {
+        _ if ed.confirm_reset => Line::styled(
+            " Reset layout and view settings to the defaults? [y/N]",
+            accent,
+        ),
         Some(m) => Line::styled(format!(" {m}"), Style::default().fg(pal.color(pal.error))),
         None => Line::raw(""),
     });

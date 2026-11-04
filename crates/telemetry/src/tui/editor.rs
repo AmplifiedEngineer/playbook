@@ -20,8 +20,9 @@ pub enum Outcome {
     Stay,
     /// Close the editor; every change was already applied.
     Close,
-    /// Go back to the default layout and clear the stored one.
-    Reset,
+    /// The user confirmed putting the layout and the screen setup back to
+    /// the defaults.
+    ResetAll,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +38,8 @@ pub struct Editor {
     undo: Vec<Layout>,
     /// The new name while a tab is being renamed.
     pub rename: Option<String>,
+    /// True while the reset waits for a `y`.
+    pub confirm_reset: bool,
     /// The last thing the user should know, such as why a key did nothing.
     pub message: Option<String>,
 }
@@ -50,6 +53,7 @@ impl Editor {
             slot: 0,
             undo: Vec::new(),
             rename: None,
+            confirm_reset: false,
             message: None,
         }
     }
@@ -60,7 +64,11 @@ impl Editor {
 
     /// Runs one key and remembers the layout before it when the key changed it.
     pub fn key(&mut self, code: KeyCode) -> Outcome {
-        if self.rename.is_none() && self.picker.is_none() && code == KeyCode::Char('u') {
+        if self.rename.is_none()
+            && self.picker.is_none()
+            && !self.confirm_reset
+            && code == KeyCode::Char('u')
+        {
             self.message = None;
             self.undo();
             return Outcome::Stay;
@@ -93,6 +101,14 @@ impl Editor {
             self.rename_key(code);
             return Outcome::Stay;
         }
+        if self.confirm_reset {
+            self.confirm_reset = false;
+            return if code == KeyCode::Char('y') {
+                Outcome::ResetAll
+            } else {
+                Outcome::Stay
+            };
+        }
         if self.picker.is_some() {
             self.picker_key(code);
             return Outcome::Stay;
@@ -120,7 +136,7 @@ impl Editor {
             KeyCode::Char('r') => {
                 self.rename = self.layout.tabs.get(self.tab).map(|t| t.name.clone());
             }
-            KeyCode::Char('R') => return Outcome::Reset,
+            KeyCode::Char('R') => self.confirm_reset = true,
             _ => {}
         }
         Outcome::Stay
@@ -609,10 +625,39 @@ mod tests {
     }
 
     #[test]
-    fn capital_r_asks_for_the_default_layout() {
-        let mut e = editor();
+    fn capital_r_asks_first_and_only_y_confirms_the_reset() {
+        for (answer, expected) in [
+            ('y', Outcome::ResetAll),
+            ('n', Outcome::Stay),
+            ('Y', Outcome::Stay),
+            ('x', Outcome::Stay),
+        ] {
+            // Arrange
+            let mut e = editor();
+            let asked = e.key(KeyCode::Char('R'));
 
-        assert_eq!(e.key(KeyCode::Char('R')), Outcome::Reset);
+            // Act
+            let outcome = e.key(KeyCode::Char(answer));
+
+            // Assert
+            assert_eq!(asked, Outcome::Stay);
+            assert_eq!(outcome, expected, "{answer}");
+            assert!(!e.confirm_reset, "{answer}");
+        }
+    }
+
+    #[test]
+    fn escape_answers_the_reset_question_with_no_and_does_not_close_the_editor() {
+        // Arrange
+        let mut e = editor();
+        e.key(KeyCode::Char('R'));
+
+        // Act
+        let outcome = e.key(KeyCode::Esc);
+
+        // Assert
+        assert_eq!(outcome, Outcome::Stay);
+        assert!(!e.confirm_reset);
     }
 
     #[test]

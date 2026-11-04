@@ -147,6 +147,26 @@ pub fn save_layout(home: &Path, text: &str) -> Result<bool, String> {
     crate::config::save_app(home, "usage.ui.layout", &Value::from(text))
 }
 
+/// Puts the layout and the screen setup back to the defaults by storing the
+/// empty value, which already means the default. The layout goes first. Only
+/// these two keys are written. `Ok(false)` means there is no config store.
+pub fn reset(home: &Path) -> Result<bool, String> {
+    reset_with(
+        || save_layout(home, ""),
+        || crate::config::save_app(home, KEY, &Value::from("")),
+    )
+}
+
+fn reset_with(
+    clear_layout: impl FnOnce() -> Result<bool, String>,
+    clear_state: impl FnOnce() -> Result<bool, String>,
+) -> Result<bool, String> {
+    let layout = clear_layout()?;
+    let state =
+        clear_state().map_err(|e| format!("{e}; the layout setting was already cleared"))?;
+    Ok(layout && state)
+}
+
 /// `text` as one single-quoted shell word.
 fn shell_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
@@ -193,6 +213,11 @@ pub struct Autosave {
 }
 
 impl Autosave {
+    /// Drops the pending text, for when the layout is reset to the default.
+    pub fn discard(&mut self) {
+        self.dirty = None;
+    }
+
     /// Remembers `text` as the layout to store, replacing an older one.
     pub fn push(&mut self, text: String) {
         self.dirty = Some(text);
@@ -482,6 +507,81 @@ mod tests {
             load_layout(&home).0,
             super::super::layout::Layout::default()
         );
+    }
+
+    #[test]
+    fn a_reset_empties_the_layout_and_the_state_and_leaves_the_theme() {
+        // Arrange
+        let home = store("ui-reset-both");
+        save_layout(&home, "Money=budget").unwrap();
+        save(&home, &UiState::parse(r#"{"range":"30d"}"#));
+        crate::config::save_app(&home, "usage.theme", &Value::from("dark")).unwrap();
+
+        // Act
+        let wrote = reset(&home);
+
+        // Assert
+        assert_eq!(wrote, Ok(true));
+        assert_eq!(load(&home), UiState::default());
+        assert_eq!(
+            load_layout(&home).0,
+            super::super::layout::Layout::default()
+        );
+        assert_eq!(
+            crate::config::resolve(&home, "usage.theme").and_then(|v| v.as_str().map(String::from)),
+            Some("dark".to_string())
+        );
+    }
+
+    #[test]
+    fn a_failed_layout_write_stops_the_reset_before_the_state_is_touched() {
+        // Arrange
+        let mut state_calls = 0;
+
+        // Act
+        let result = reset_with(
+            || Err("locked".to_string()),
+            || {
+                state_calls += 1;
+                Ok(true)
+            },
+        );
+
+        // Assert
+        assert_eq!(result, Err("locked".to_string()));
+        assert_eq!(state_calls, 0);
+    }
+
+    #[test]
+    fn a_failed_state_write_names_the_layout_that_was_already_cleared() {
+        // Arrange
+        let layout = || Ok(true);
+
+        // Act
+        let result = reset_with(layout, || Err("locked".to_string()));
+
+        // Assert
+        let why = result.unwrap_err();
+        assert!(why.contains("locked") && why.contains("layout setting was already cleared"));
+    }
+
+    #[test]
+    fn a_reset_without_a_store_says_so() {
+        assert_eq!(reset_with(|| Ok(false), || Ok(false)), Ok(false));
+    }
+
+    #[test]
+    fn a_reset_drops_the_pending_layout_text() {
+        // Arrange
+        let mut auto = Autosave::default();
+        auto.push("Old=spend".into());
+
+        // Act
+        auto.discard();
+        let flushed = auto.flush(Instant::now(), true, |_| Err("unused".into()));
+
+        // Assert
+        assert_eq!(flushed, Flushed::Idle);
     }
 
     #[test]

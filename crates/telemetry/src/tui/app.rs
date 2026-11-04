@@ -178,6 +178,8 @@ pub enum Effect {
     Sessions,
     /// Store the layout text (empty means back to the default).
     SaveLayout(String),
+    /// Clear the stored layout and screen setup, then call `reset_done`.
+    ResetPrefs,
 }
 
 /// What `v` says on a panel pinned to one view.
@@ -642,11 +644,7 @@ impl App {
                 self.editor = None;
                 Effect::None
             }
-            super::editor::Outcome::Reset => {
-                self.editor = None;
-                self.use_layout(super::layout::Layout::default(), 0);
-                Effect::SaveLayout(String::new())
-            }
+            super::editor::Outcome::ResetAll => Effect::ResetPrefs,
             super::editor::Outcome::Stay if edited == self.layout => Effect::None,
             super::editor::Outcome::Stay => self.apply_edit(edited, tab),
         }
@@ -664,6 +662,32 @@ impl App {
         }
         self.use_layout(edited, tab);
         Effect::SaveLayout(text)
+    }
+
+    /// Finishes a reset once the stored layout and setup were cleared. On
+    /// success the layout, tab, range, views, sorts and filter go back to the
+    /// defaults and the editor closes. On a failure nothing changes here.
+    pub fn reset_done(&mut self, cleared: Result<bool, String>) -> Effect {
+        if let Err(why) = cleared {
+            self.note = Some(format!("Reset failed: {why}, nothing changed"));
+            return Effect::None;
+        }
+        let range = Range::ThisWeek(self.week_start);
+        let query_changed = self.range != range || !self.filter.is_empty();
+        self.editor = None;
+        self.range = range;
+        self.filter.clear();
+        self.spend_view = SpendView::default();
+        self.projects_view = ProjectsView::default();
+        self.sorts = PANELS.map(Panel::default_sort);
+        self.selected = [0; 6];
+        self.cursor = None;
+        self.use_layout(super::layout::Layout::default(), 0);
+        if query_changed {
+            Effect::Requery
+        } else {
+            Effect::None
+        }
     }
 
     /// Switches to `layout`, showing tab `tab` of it.

@@ -1776,16 +1776,119 @@ mod tests {
         }
     }
 
-    #[test]
-    fn reset_in_the_editor_restores_the_default_tabs_and_clears_the_store() {
+    fn customised_app() -> App {
         let mut app = app_with(&[event("opus", "alpha", 1.0)]);
-        app.layout = Layout::parse("One=spend").unwrap();
+        app.layout = Layout::parse("One=spend;Two=tokens").unwrap();
+        app.go_tab(1);
+        app.range = Range::All;
+        app.filter = "alpha".into();
+        app.spend_view = crate::tui::app::SpendView::Daily;
+        app.projects_view = crate::tui::app::ProjectsView::Agents;
+        app.sorts[0] = crate::tui::sort::Sort {
+            col: 2,
+            desc: false,
+        };
+        app.selected[2] = 3;
+        app
+    }
+
+    #[test]
+    fn r_asks_before_resetting_and_n_changes_nothing() {
+        // Arrange
+        let mut app = customised_app();
         app.key(press(KeyCode::Char('e')));
 
-        let effect = app.key(press(KeyCode::Char('R')));
+        // Act
+        let asked = app.key(press(KeyCode::Char('R')));
+        let prompt = screen(&app, 100, 30);
+        let answer = app.key(press(KeyCode::Char('n')));
 
-        assert_eq!(effect, crate::tui::app::Effect::SaveLayout(String::new()));
+        // Assert
+        assert_eq!(asked, crate::tui::app::Effect::None);
+        assert!(prompt.contains("Reset layout and view settings to the defaults? [y/N]"));
+        assert_eq!(answer, crate::tui::app::Effect::None);
+        assert!(app.editor.is_some());
+        assert_eq!(app.filter, "alpha");
+    }
+
+    #[test]
+    fn y_asks_the_loop_to_clear_the_store_and_changes_nothing_in_memory_yet() {
+        // Arrange
+        let mut app = customised_app();
+        app.key(press(KeyCode::Char('e')));
+        app.key(press(KeyCode::Char('R')));
+
+        // Act
+        let effect = app.key(press(KeyCode::Char('y')));
+
+        // Assert
+        assert_eq!(effect, crate::tui::app::Effect::ResetPrefs);
+        assert_eq!(app.filter, "alpha");
+        assert_eq!(app.layout.tabs.len(), 2);
+    }
+
+    #[test]
+    fn a_cleared_store_puts_layout_tab_range_views_sorts_and_filter_back() {
+        // Arrange
+        let mut app = customised_app();
+        app.key(press(KeyCode::Char('e')));
+
+        // Act
+        let effect = app.reset_done(Ok(true));
+
+        // Assert
+        assert_eq!(effect, crate::tui::app::Effect::Requery);
         assert_eq!(app.layout, Layout::default());
+        assert_eq!(app.tab, 0);
+        assert_eq!(app.range, Range::ThisWeek(app.week_start));
+        assert!(app.filter.is_empty());
+        assert_eq!(app.spend_view, crate::tui::app::SpendView::default());
+        assert_eq!(app.projects_view, crate::tui::app::ProjectsView::default());
+        assert_eq!(
+            app.sorts,
+            crate::tui::sort::PANELS.map(crate::tui::sort::Panel::default_sort)
+        );
+        assert_eq!(app.selected, [0; 6]);
+        assert!(app.editor.is_none());
+    }
+
+    #[test]
+    fn a_failed_clear_changes_nothing_and_says_so_in_the_footer() {
+        // Arrange
+        let mut app = customised_app();
+        app.key(press(KeyCode::Char('e')));
+
+        // Act
+        let effect = app.reset_done(Err("database is locked".into()));
+
+        // Assert
+        assert_eq!(effect, crate::tui::app::Effect::None);
+        assert_eq!(app.layout.tabs.len(), 2);
+        assert_eq!(app.tab, 1);
+        assert_eq!(app.filter, "alpha");
+        assert!(app.editor.is_some());
+        let footer = screen(&app, 140, 30);
+        assert!(
+            footer.contains("Reset failed: database is locked, nothing changed"),
+            "{footer}"
+        );
+    }
+
+    #[test]
+    fn a_reset_with_no_store_still_resets_the_run_and_needs_no_requery_when_the_query_is_default() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.range = Range::ThisWeek(app.week_start);
+        app.go_tab(2);
+        app.key(press(KeyCode::Char('e')));
+
+        // Act
+        let effect = app.reset_done(Ok(false));
+
+        // Assert
+        assert_eq!(effect, crate::tui::app::Effect::None);
+        assert_eq!(app.tab, 0);
+        assert!(app.editor.is_none());
     }
 
     #[test]
@@ -1859,18 +1962,6 @@ mod tests {
 
         assert!(prompt.contains("New name:"), "{prompt}");
         assert!(refusal.contains("A tab needs a name"), "{refusal}");
-    }
-
-    #[test]
-    fn reset_from_another_tab_goes_back_to_the_first_tab_and_closes_the_editor() {
-        let mut app = tabbed_app();
-        app.go_tab(2);
-        app.key(press(KeyCode::Char('e')));
-
-        app.key(press(KeyCode::Char('R')));
-
-        assert_eq!(app.tab, 0);
-        assert!(app.editor.is_none());
     }
 
     #[test]

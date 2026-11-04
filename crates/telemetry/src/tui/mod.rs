@@ -100,9 +100,9 @@ fn event_loop(
     range: Option<Range>,
 ) -> std::io::Result<()> {
     let home = crate::host::home_dir();
-    let saved = ui_state::load(&home);
+    let mut saved = ui_state::load(&home);
     let week = super::entry::configured_week_start();
-    let flag = range;
+    let mut flag = range;
     let range = start_range(flag, &saved, week);
     let mut app = App::new(range);
     let (layout, layout_warning) = ui_state::load_layout(&home);
@@ -161,6 +161,21 @@ fn event_loop(
                     Effect::Requery => worker.ask(app.range, &app.filter),
                     Effect::Sessions => sessions.open(),
                     Effect::SaveLayout(text) => autosave.push(text),
+                    Effect::ResetPrefs => {
+                        autosave.discard();
+                        let cleared = ui_state::reset(&home);
+                        let cleared_ok = cleared.is_ok();
+                        if let Effect::Requery = app.reset_done(cleared) {
+                            worker.ask(app.range, &app.filter);
+                        }
+                        if cleared_ok {
+                            // The defaults are not written back, and a `--range`
+                            // flag cannot bring the old range back.
+                            flag = None;
+                            saved = ui_state::UiState::default();
+                            last_saved = state_to_save(&app, flag, &saved);
+                        }
+                    }
                     Effect::None => {}
                 },
                 _ => {}
