@@ -134,12 +134,14 @@ fn is_test_symbol(path: &str, qualified: &str, name: &str) -> bool {
 }
 
 /// Symbols whose name holds `term`, with a tier from how well the name fits.
+/// The scan reads the `symbols` table and scopes only the matches through
+/// `files`, so it skips the per-symbol file-list probe of the scoped view.
 fn symbol_cands(conn: &Connection, term: &str) -> Result<Vec<Cand>, String> {
     let pattern = format!("%{}%", term.replace('\\', "\\\\").replace('_', "\\_"));
     let mut stmt = conn
         .prepare(
             "SELECT f.path, f.sha256, s.name, s.qualified_name, s.start_line, s.end_line
-             FROM symbols s JOIN files f ON f.id = s.file_id
+             FROM main.symbols s JOIN files f ON f.id = s.content
              WHERE lower(s.name) LIKE ?1 ESCAPE '\\'
              ORDER BY (lower(s.name) = ?3) DESC, length(s.name), f.path, s.start_line, s.id
              LIMIT ?2",
@@ -321,14 +323,14 @@ fn import_cands(
 
 /// How much each term tells apart: rare names weigh more than common ones.
 /// One pass over the worktree's symbols counts them all and each term's
-/// matches, because a scan through the scoped views costs more than a plain
-/// table scan. Two paths with the same bytes count twice, as they did when
-/// each path had its own rows.
+/// matches. It joins the worktree's files to the `symbols` table, because the
+/// scoped `symbols` view probes the file list once per symbol. Two paths with
+/// the same bytes count twice, as they did when each path had its own rows.
 fn term_weights(conn: &Connection, words: &[String]) -> Result<Vec<f64>, String> {
     let sums: String = (1..=words.len())
         .map(|i| format!(", COALESCE(SUM(lower(s.name) LIKE ?{i} ESCAPE '\\'), 0)"))
         .collect();
-    let sql = format!("SELECT COUNT(*){sums} FROM symbols s JOIN files f ON f.id = s.file_id");
+    let sql = format!("SELECT COUNT(*){sums} FROM files f JOIN main.symbols s ON s.content = f.id");
     let patterns: Vec<String> = words
         .iter()
         .map(|w| format!("%{}%", w.replace('\\', "\\\\").replace('_', "\\_")))
