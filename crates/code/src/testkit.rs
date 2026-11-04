@@ -3,7 +3,7 @@
 
 //! Shared helpers for unit tests that need a scratch repo and an index.
 
-use super::db::{self, OpenMode};
+use super::db;
 use super::index::{self, Options, Report};
 use super::walker::test_repo::{git_in, init, write};
 use rusqlite::Connection;
@@ -27,14 +27,20 @@ pub(crate) fn pinned() -> MutexGuard<'static, ()> {
 pub(crate) struct Fx {
     pub root: PathBuf,
     pub index: PathBuf,
+    /// The worktree key every run and query of this fixture uses.
+    pub worktree: String,
 }
 
 pub(crate) fn fx(tag: &str) -> Fx {
     let root = init(tag);
     let index = playbook_common::test_support::scratch_dir(&format!("{tag}-idx"))
         .join("code")
-        .join("index.sqlite3");
-    Fx { root, index }
+        .join("store-v4.sqlite3");
+    Fx {
+        root,
+        index,
+        worktree: "fixture-worktree".to_string(),
+    }
 }
 
 impl Fx {
@@ -51,11 +57,11 @@ impl Fx {
     }
 
     pub(crate) fn run_with(&self, opts: &Options) -> Report {
-        index::run(&self.root, &self.index, false, opts).expect("index run")
+        index::run(&self.root, &self.index, &self.worktree, false, opts).expect("index run")
     }
 
-    pub(crate) fn conn(&self) -> Connection {
-        db::open_index(&self.index, OpenMode::Query).expect("query open")
+    pub(crate) fn conn(&self) -> db::Store {
+        db::open_query(&self.index, &self.worktree).expect("query open")
     }
 
     pub(crate) fn set_mtime(&self, rel: &str, secs: u64) {
@@ -66,4 +72,39 @@ impl Fx {
         file.set_modified(UNIX_EPOCH + Duration::from_secs(secs))
             .expect("set mtime");
     }
+}
+
+/// Overwrites every page of the store except page 1 and the worktrees table
+/// with garbage, after the store is checkpointed. A connection opened before
+/// the call still resolves its worktree and then fails on the next page it
+/// reads.
+pub(crate) fn damage_pages(f: &Fx) {
+    let (page_size, pages, keep): (i64, i64, i64) = {
+        let conn = Connection::open(&f.index).expect("raw open");
+        conn.pragma_update(None, "wal_checkpoint", "TRUNCATE").ok();
+        let size = conn
+            .query_row("PRAGMA page_size", [], |r| r.get(0))
+            .expect("page size");
+        let count = conn
+            .query_row("PRAGMA page_count", [], |r| r.get(0))
+            .expect("page count");
+        let keep = conn
+            .query_row(
+                "SELECT rootpage FROM sqlite_schema WHERE name = 'worktrees'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("worktrees page");
+        (size, count, keep)
+    };
+    let mut bytes = std::fs::read(&f.index).expect("read store");
+    let size = usize::try_from(page_size).expect("page size");
+    for page in 2..=pages {
+        if page == keep {
+            continue;
+        }
+        let start = usize::try_from(page - 1).expect("page") * size;
+        bytes[start..start + size].fill(0x5A);
+    }
+    std::fs::write(&f.index, bytes).expect("write store");
 }

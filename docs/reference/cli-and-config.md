@@ -275,12 +275,12 @@ Example: `playbook code context "add retry support to payment processing"`
 
 Build or refresh the code index for this repo
 
-Hashes every file git lists, and reads only the ones that changed. Only one run at a time is allowed.
+Hashes every file git lists, and reads only the ones that changed. Worktrees of one repo share one store, so content that is already stored is not parsed again. Each worktree runs once at a time.
 
 Example: `playbook code index --json`
 
 - `--json`: Print one JSON document
-- `--rebuild`: Delete the cache first and index everything again
+- `--rebuild`: Index everything again; a damaged store is replaced for every worktree
 
 ### `playbook code outline`
 

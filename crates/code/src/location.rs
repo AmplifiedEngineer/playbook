@@ -50,8 +50,9 @@ fn git_toplevel(cwd: &Path) -> Option<PathBuf> {
         .filter(|top| top.join(".git").exists())
 }
 
-/// `<data dir>/code/<owner>/<repo>/<worktree-id>.db` for the current repo.
-/// Moves an index kept at the old worktree state path on first use.
+/// `<data dir>/code/<owner>/<repo>/store-v<N>.sqlite3`, the one store every
+/// worktree of the current repo indexes into. A repo with no safe data folder
+/// path keeps one index in its worktree state folder.
 pub fn index_path() -> Result<PathBuf, String> {
     host::index_db()
 }
