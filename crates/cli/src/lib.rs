@@ -1249,7 +1249,7 @@ pub enum SettingsCommand {
     /// Takes the hooks and status line from the live file and keeps the
     /// permissions of the current seed. Prints the new seed.
     ///
-    /// Example: `playbook settings gen ~/.claude/settings.json seed/settings.shared.json`
+    /// Example: `playbook settings gen ~/.claude/settings.json seed/shared-settings.json`
     Gen {
         /// Live settings.json to start from
         src: PathBuf,
@@ -1260,7 +1260,7 @@ pub enum SettingsCommand {
     ///
     /// Exits 0 when valid and 1 with a message when not.
     ///
-    /// Example: `playbook settings check seed/settings.shared.json .`
+    /// Example: `playbook settings check seed/shared-settings.json .`
     Check {
         /// Shared settings template to check
         template: PathBuf,

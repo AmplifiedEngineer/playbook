@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date created:** 2026-10-22
-- **Date modified:** 2026-10-22
+- **Date modified:** 2026-11-04
 - **Relates to:** [ADR 0007](0007-rust-binary-for-hooks-and-launcher-quality.md), which listed Windows as a deliberate scope addition with its own go or no-go.
 
 ## Context
@@ -44,6 +44,16 @@ Not supported, and documented as such:
 Full parity (a PowerShell shim, backslash parsing, `update` on Windows) needs its own plan and its own ADR. This ADR does not promise it.
 
 Distribution: scoop, from a bucket in its own repository, labelled experimental. winget is not started. The maintainer judged it premature: it has a human moderator, an unresolved signing question and a classic token requirement. Revisit it after scoop has shipped one real release.
+
+### Amendment, 2026-11-04: winget starts
+
+The maintainer delegated the winget questions and took the recommended answer for each:
+
+- Build the `winget` release job now (S4 of the plan for #1149), without waiting for a real scoop release. It warns and passes while its secret is missing, so an unconfigured channel never blocks a release.
+- Tool: `wingetcreate update`, run on a `windows-latest` job, with the token passed by environment variable and never on the command line.
+- Identifier: `PragmaticEngineer.Playbook`.
+- Signing: "no unsigned artifacts" means checksum plus build attestation for the `.exe`. No Authenticode certificate is bought. If winget validation rejects the unsigned file, the job stays off and this record is revisited.
+- Account: a dedicated bot account holds the fork and a classic `public_repo` token in environment `winget`, limited to `main`. The maintainer creates both, and submits and lands the first manifest by hand before the job can open an update.
 
 ## Alternatives considered
 

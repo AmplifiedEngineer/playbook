@@ -1384,7 +1384,7 @@ Check the shared settings template is valid
 
 Exits 0 when valid and 1 with a message when not.
 
-Example: `playbook settings check seed/settings.shared.json .`
+Example: `playbook settings check seed/shared-settings.json .`
 
 - `<TEMPLATE>`: Shared settings template to check
 - `<REPO_ROOT>`: Repo root that every hook command must resolve inside
@@ -1395,7 +1395,7 @@ Create the shared settings template from a live settings.json
 
 Takes the hooks and status line from the live file and keeps the permissions of the current seed. Prints the new seed.
 
-Example: `playbook settings gen ~/.claude/settings.json seed/settings.shared.json`
+Example: `playbook settings gen ~/.claude/settings.json seed/shared-settings.json`
 
 - `<SRC>`: Live settings.json to start from
 - `<SEED>`: Current seed, whose permissions block is kept
