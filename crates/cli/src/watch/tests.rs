@@ -46,6 +46,12 @@ impl GithubWrite for Spy {
     fn add_comment(&self, _: &str, _: u64, _: &str) -> Result<(), String> {
         Ok(())
     }
+    fn merge_check(&self, _: &str, _: u64) -> Result<crate::watch::engine::MergeCheck, String> {
+        Err("no merge in this test".to_string())
+    }
+    fn merge(&self, _: &str, _: u64, _: &str) -> Result<(), String> {
+        Ok(())
+    }
     fn diff(&self, _: &str, _: u64) -> Result<String, String> {
         Ok(String::new())
     }

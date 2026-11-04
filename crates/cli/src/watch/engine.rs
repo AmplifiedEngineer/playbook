@@ -61,6 +61,17 @@ pub enum BranchUpdate {
     Conflict,
 }
 
+/// What a pull request shows about whether it may be merged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeCheck {
+    /// GitHub reports it mergeable with checks and branch rules satisfied.
+    pub green: bool,
+    pub head: String,
+    pub author: String,
+    /// Whose latest review is an approval: login and association.
+    pub approvers: Vec<(String, String)>,
+}
+
 /// The GitHub calls the actions make.
 pub trait GithubWrite {
     fn issue(&self, repo: &str, number: u64) -> Result<IssueView, String>;
@@ -71,6 +82,9 @@ pub trait GithubWrite {
     /// Merges the base branch into the pull request's branch, without a force
     /// push. Does nothing when the branch is not behind.
     fn update_branch(&self, repo: &str, number: u64) -> Result<BranchUpdate, String>;
+    fn merge_check(&self, repo: &str, number: u64) -> Result<MergeCheck, String>;
+    /// Merges the pull request if its head is still `head`.
+    fn merge(&self, repo: &str, number: u64, head: &str) -> Result<(), String>;
     /// The unified diff of a pull request, read through the API.
     fn diff(&self, repo: &str, number: u64) -> Result<String, String>;
     /// Whether a review of the pull request holds `marker`, pending or not.
@@ -196,6 +210,8 @@ pub struct Engine<'a, W, C> {
     pub allowed: &'a [String],
     /// The defaults from `fix.maxFiles` and `fix.maxLines`.
     pub fix: DiffCaps,
+    /// `autoMerge.enabled`.
+    pub auto_merge: bool,
     /// The caps from `watch.limits.*`.
     pub caps: GlobalCaps,
     /// The login of the authenticated user.
@@ -492,6 +508,7 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
             }
             Do::AddressComment => return self.address(id, row, rule),
             Do::ReviewPr => return self.review(row, rule, &view),
+            Do::MergeWhenGreen => return self.merge_when_green(row),
             Do::UpdateBranch => match self.write.update_branch(&row.repo, row.object)? {
                 BranchUpdate::Updated => {}
                 BranchUpdate::UpToDate => return Ok(Step::AlreadyDone),
@@ -631,6 +648,9 @@ mod tests {
         up_to_date: std::cell::Cell<bool>,
         conflict: bool,
         diff: String,
+        /// The merge check, when a test sets one.
+        check: Option<MergeCheck>,
+        merges: RefCell<Vec<(u64, String)>>,
         reviews: RefCell<Vec<(u64, String)>>,
         /// The pull request thread, when a test sets one.
         thread: Option<Vec<Post>>,
@@ -657,6 +677,13 @@ mod tests {
                 .iter()
                 .any(|(_, b)| b.contains(marker));
             Ok(posted || self.markers.iter().any(|m| m == marker))
+        }
+        fn merge_check(&self, _: &str, _: u64) -> Result<MergeCheck, String> {
+            Ok(self.check.clone().unwrap_or_else(ready))
+        }
+        fn merge(&self, _: &str, number: u64, head: &str) -> Result<(), String> {
+            self.merges.borrow_mut().push((number, head.to_string()));
+            Ok(())
         }
         fn diff(&self, _: &str, _: u64) -> Result<String, String> {
             Ok(self.diff.clone())
@@ -790,6 +817,16 @@ mod tests {
         }
     }
 
+    /// A pull request by `me` that is green and approved by a maintainer.
+    fn ready() -> MergeCheck {
+        MergeCheck {
+            green: true,
+            head: "abc123".into(),
+            author: "me".into(),
+            approvers: vec![("maint".into(), "MEMBER".into())],
+        }
+    }
+
     fn post(author: &str, association: &str, body: &str) -> Post {
         Post {
             author: author.into(),
@@ -858,6 +895,7 @@ mod tests {
             model,
             code: &f.code,
             allowed: &[],
+            auto_merge: true,
             fix: DiffCaps {
                 files: 3,
                 lines: 500,
@@ -2172,6 +2210,163 @@ mod tests {
         let rows = [
             r#"{"on":"issue.opened","do":"review_pr","limits":{"usd_per_day":1}}"#,
             r#"{"on":"pr.opened","do":"review_pr"}"#,
+        ];
+        for text in rows {
+            assert!(Stored::parse(text).is_err(), "{text}");
+        }
+    }
+
+    const MERGE: &str = r#"{"on":"pr.commented","where":{"comment_prefix":"/playbook merge"},"do":"merge_when_green","autonomy":"auto"}"#;
+
+    fn merge_event() -> Event {
+        Event {
+            kind: crate::watch::rule::On::PrCommented,
+            ..comment("owner", "OWNER", "/playbook merge now")
+        }
+    }
+
+    fn merge_item(f: &mut Fixture, spy: &Spy, rules: &[NamedRule]) -> i64 {
+        ingest_at(f, spy, &[merge_event()], rules, Autonomy::Propose)[0]
+    }
+
+    #[test]
+    fn merge_when_green_merges_once_at_the_checked_head_and_a_repeat_adds_none() {
+        // Arrange
+        let mut f = fixture("watch-merge-repeat");
+        let spy = Spy::default();
+        let rules = rules(MERGE);
+        let id = merge_item(&mut f, &spy, &rules);
+
+        // Act: approve, then the pull request is closed by the merge and the
+        // item is approved again.
+        let first = engine(&mut f, &spy).approve(id, &rules, true).unwrap();
+        f.store
+            .transaction(|tx| tx.set_state(id, "proposed", None))
+            .unwrap();
+        let after = Spy {
+            closed: true,
+            ..Spy::default()
+        };
+        let second = engine(&mut f, &after).approve(id, &rules, true).unwrap();
+
+        // Assert
+        assert_eq!(first, ApproveOutcome::Done);
+        assert_eq!(second, ApproveOutcome::Skipped("closed"));
+        assert_eq!(spy.merges.borrow().as_slice(), &[(4, "abc123".to_string())]);
+        assert!(after.merges.borrow().is_empty());
+    }
+
+    #[test]
+    fn merge_when_green_skips_when_the_object_changed() {
+        let mut f = fixture("watch-merge-closed");
+        let spy = Spy {
+            closed: true,
+            ..Spy::default()
+        };
+        let rules = rules(MERGE);
+        let id = merge_item(&mut f, &spy, &rules);
+
+        let out = engine(&mut f, &spy).approve(id, &rules, true).unwrap();
+
+        assert_eq!(out, ApproveOutcome::Skipped("closed"));
+        assert!(spy.merges.borrow().is_empty());
+    }
+
+    #[test]
+    fn merge_when_green_never_exceeds_its_highest_level() {
+        // Arrange: the rule asks for auto under an auto ceiling.
+        let mut f = fixture("watch-merge-level");
+        let spy = Spy::default();
+        let rules = rules(MERGE);
+
+        // Act
+        let id = ingest_at(&mut f, &spy, &[merge_event()], &rules, Autonomy::Auto)[0];
+        engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+
+        // Assert
+        assert_eq!(state(&f, id).0, "proposed");
+        assert!(spy.merges.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_pull_request_that_is_not_ready_stays_a_proposal_with_the_reason() {
+        // (the check, the reason)
+        let with = |change: fn(&mut MergeCheck)| {
+            let mut check = ready();
+            change(&mut check);
+            check
+        };
+        let rows = [
+            (with(|c| c.green = false), "not_green"),
+            (with(|c| c.author = "stranger".into()), "author_not_allowed"),
+            (with(|c| c.approvers.clear()), "no_approval"),
+            (
+                with(|c| c.approvers = vec![("me".into(), "OWNER".into())]),
+                "no_approval",
+            ),
+            (
+                with(|c| c.approvers = vec![("rando".into(), "NONE".into())]),
+                "no_approval",
+            ),
+        ];
+        for (n, (check, reason)) in rows.into_iter().enumerate() {
+            let mut f = fixture(&format!("watch-merge-not-ready-{n}"));
+            let spy = Spy {
+                check: Some(check),
+                ..Spy::default()
+            };
+            let rules = rules(MERGE);
+            let id = merge_item(&mut f, &spy, &rules);
+
+            let out = engine(&mut f, &spy).approve(id, &rules, true).unwrap();
+
+            assert_eq!(out, ApproveOutcome::Demoted(reason));
+            assert_eq!(state(&f, id), ("proposed".into(), Some(reason.into())));
+            assert!(spy.merges.borrow().is_empty(), "{reason}");
+        }
+    }
+
+    #[test]
+    fn a_pull_request_by_an_allowed_author_is_merged() {
+        let mut f = fixture("watch-merge-allowed");
+        let spy = Spy {
+            check: Some(MergeCheck {
+                author: "dev".into(),
+                ..ready()
+            }),
+            ..Spy::default()
+        };
+        let rules = rules(MERGE);
+        let id = merge_item(&mut f, &spy, &rules);
+        let allowed = ["dev".to_string()];
+
+        let mut e = engine(&mut f, &spy);
+        e.allowed = &allowed;
+        let out = e.approve(id, &rules, true).unwrap();
+
+        assert_eq!(out, ApproveOutcome::Done);
+    }
+
+    #[test]
+    fn merging_stays_off_until_auto_merge_is_enabled() {
+        let mut f = fixture("watch-merge-off");
+        let spy = Spy::default();
+        let rules = rules(MERGE);
+        let id = merge_item(&mut f, &spy, &rules);
+
+        let mut e = engine(&mut f, &spy);
+        e.auto_merge = false;
+        let out = e.approve(id, &rules, true).unwrap();
+
+        assert_eq!(out, ApproveOutcome::Demoted("auto_merge_off"));
+        assert!(spy.merges.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_merge_rule_needs_a_prefix_on_a_pull_request_comment() {
+        let rows = [
+            r#"{"on":"pr.commented","do":"merge_when_green"}"#,
+            r#"{"on":"issue.commented","where":{"comment_prefix":"/x"},"do":"merge_when_green"}"#,
         ];
         for text in rows {
             assert!(Stored::parse(text).is_err(), "{text}");

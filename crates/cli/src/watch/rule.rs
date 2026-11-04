@@ -52,16 +52,20 @@ pub enum Do {
     /// A model reads the diff and the result is saved as a pending review for
     /// you to submit. Never runs on its own.
     ReviewPr,
+    /// Merges a pull request that is green and has a human approval, when
+    /// `autoMerge.enabled` is on. Never runs on its own.
+    MergeWhenGreen,
 }
 
 impl Do {
-    pub const ALL: [Do; 6] = [
+    pub const ALL: [Do; 7] = [
         Do::Label,
         Do::Comment,
         Do::TriageIssue,
         Do::AddressComment,
         Do::UpdateBranch,
         Do::ReviewPr,
+        Do::MergeWhenGreen,
     ];
 
     /// The name the rule file and the audit log use.
@@ -73,6 +77,7 @@ impl Do {
             Self::AddressComment => "address_comment",
             Self::UpdateBranch => "update_branch",
             Self::ReviewPr => "review_pr",
+            Self::MergeWhenGreen => "merge_when_green",
         }
     }
 
@@ -80,7 +85,7 @@ impl Do {
     /// Code written by a model has no ladder to climb in this release.
     pub fn highest(self) -> Autonomy {
         match self {
-            Self::AddressComment | Self::ReviewPr => Autonomy::Propose,
+            Self::AddressComment | Self::ReviewPr | Self::MergeWhenGreen => Autonomy::Propose,
             _ => Autonomy::Auto,
         }
     }
@@ -227,6 +232,14 @@ impl Stored {
             {
                 return Err(RuleError(
                     "the update_branch and review_pr actions need on set to pr.opened or pr.commented"
+                        .to_string(),
+                ));
+            }
+            Do::MergeWhenGreen
+                if rule.on != On::PrCommented || rule.filter.comment_prefix.is_none() =>
+            {
+                return Err(RuleError(
+                    "the merge_when_green action needs on set to pr.commented and a where.comment_prefix"
                         .to_string(),
                 ));
             }

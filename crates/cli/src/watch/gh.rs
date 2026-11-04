@@ -10,7 +10,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use super::engine::{BranchUpdate, GithubWrite, IssueView, Post, HIDDEN_MARKER};
+use super::engine::{BranchUpdate, GithubWrite, IssueView, MergeCheck, Post, HIDDEN_MARKER};
 use super::journal::RecoverOps;
 use super::store::WorkRow;
 use crate::common::proc::run_with_timeout;
@@ -79,6 +79,36 @@ pub fn parse_posts(text: &str) -> Result<Vec<Post>, String> {
             })
         })
         .collect()
+}
+
+#[derive(Deserialize)]
+struct RawReview {
+    user: Option<String>,
+    #[serde(default)]
+    association: String,
+    state: String,
+}
+
+/// The reviewers whose latest review is an approval, from one JSON object per
+/// line in the order GitHub lists them. A later comment does not undo an
+/// approval, but a dismissal or a change request does.
+fn approvers(text: &str) -> Result<Vec<(String, String)>, String> {
+    let mut latest: Vec<(String, String, String)> = Vec::new();
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        let review: RawReview =
+            serde_json::from_str(line).map_err(|e| format!("a review is not valid: {e}"))?;
+        let Some(user) = review.user else { continue };
+        if review.state == "COMMENTED" {
+            continue;
+        }
+        latest.retain(|(login, _, _)| login != &user);
+        latest.push((user, review.association, review.state));
+    }
+    Ok(latest
+        .into_iter()
+        .filter(|(_, _, state)| state == "APPROVED")
+        .map(|(login, association, _)| (login, association))
+        .collect())
 }
 
 /// Reads `<mergeable_state> <head sha>`.
@@ -167,6 +197,34 @@ impl GithubWrite for GhWrite {
             args.extend(["-f", field]);
         }
         self.gh(&args).map(|_| ())
+    }
+
+    fn merge_check(&self, repo: &str, number: u64) -> Result<MergeCheck, String> {
+        let path = format!("repos/{repo}/pulls/{number}");
+        let jq = r#".mergeable_state + " " + .head.sha + " " + .user.login"#;
+        let pull = self.gh(&["api", &path, "--jq", jq])?;
+        let mut fields = pull.split_whitespace();
+        let (Some(state), Some(head), Some(author)) = (fields.next(), fields.next(), fields.next())
+        else {
+            return Err("the pull request state is not valid".to_string());
+        };
+        let reviews = format!("{path}/reviews");
+        let jq = r#".[] | {user: .user.login, association: .author_association, state: .state}"#;
+        let approvers = approvers(&self.gh(&["api", "--paginate", &reviews, "--jq", jq])?)?;
+        Ok(MergeCheck {
+            green: state == "clean",
+            head: head.to_string(),
+            author: author.to_string(),
+            approvers,
+        })
+    }
+
+    fn merge(&self, repo: &str, number: u64, head: &str) -> Result<(), String> {
+        // `sha` makes GitHub refuse the merge when a push landed after the check.
+        let path = format!("repos/{repo}/pulls/{number}/merge");
+        let sha = format!("sha={head}");
+        self.gh(&["api", "--method", "PUT", &path, "-f", &sha])
+            .map(|_| ())
     }
 
     fn diff(&self, repo: &str, number: u64) -> Result<String, String> {
@@ -296,6 +354,25 @@ mod tests {
         assert_eq!(posts[0].association, "MEMBER");
         assert_eq!((posts[1].author.as_str(), posts[1].body.as_str()), ("", ""));
         assert!(parse_posts("not json").is_err());
+    }
+
+    #[test]
+    fn only_the_latest_non_comment_review_of_each_user_counts() {
+        // Arrange: ann approves then asks for changes, bob approves, cy only comments.
+        let text = [
+            r#"{"user":"ann","association":"MEMBER","state":"APPROVED"}"#,
+            r#"{"user":"bob","association":"OWNER","state":"APPROVED"}"#,
+            r#"{"user":"ann","association":"MEMBER","state":"CHANGES_REQUESTED"}"#,
+            r#"{"user":"cy","association":"NONE","state":"COMMENTED"}"#,
+            r#"{"user":null,"association":"NONE","state":"APPROVED"}"#,
+        ]
+        .join("\n");
+
+        // Act / Assert
+        assert_eq!(
+            approvers(&text).unwrap(),
+            vec![("bob".to_string(), "OWNER".to_string())]
+        );
     }
 
     #[test]
