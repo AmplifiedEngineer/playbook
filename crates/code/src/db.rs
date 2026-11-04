@@ -395,7 +395,7 @@ fn open_index_with(
             })
         }
         Err(DbError::NeedsRebuild(first)) if mode == OpenMode::Index => {
-            recover(path, &first, lock, delete, hooks)
+            recover(path, &first, lock, delete, false, hooks)
         }
         Err(e) => Err(e),
     }
@@ -404,12 +404,14 @@ fn open_index_with(
 /// Deletes and recreates a damaged store, holding the exclusive store lock
 /// only for that step. A sibling that holds the shared lock stops it, and
 /// nothing is deleted. Opening the store again under the lock covers a sibling
-/// that repaired it first.
+/// that repaired it first, unless `force` is set: a store that opens but fails
+/// an integrity check is deleted anyway.
 fn recover(
     path: &Path,
     first: &str,
     lock: StoreLock,
     delete: &dyn Fn(&Path) -> Result<(), String>,
+    force: bool,
     hooks: &DbHooks,
 ) -> Result<Store, DbError> {
     if !lock.try_exclusive(path, hooks)? {
@@ -420,7 +422,7 @@ fn recover(
             host::command("index --rebuild")
         )));
     }
-    let recreated = recreate(path, first, delete, hooks);
+    let recreated = recreate(path, first, delete, force, hooks);
     let _ = lock.0.unlock();
     if let Some(recovered) = hooks.after_recovery {
         recovered();
@@ -439,12 +441,15 @@ fn recreate(
     path: &Path,
     first: &str,
     delete: &dyn Fn(&Path) -> Result<(), String>,
+    force: bool,
     hooks: &DbHooks,
 ) -> Result<(Connection, bool), DbError> {
-    match try_open(path, OpenMode::Index, hooks) {
-        Ok(conn) => return Ok((conn, false)),
-        Err(DbError::NeedsRebuild(_)) => {}
-        Err(e) => return Err(e),
+    if !force {
+        match try_open(path, OpenMode::Index, hooks) {
+            Ok(conn) => return Ok((conn, false)),
+            Err(DbError::NeedsRebuild(_)) => {}
+            Err(e) => return Err(e),
+        }
     }
     delete(path)
         .map_err(|e| DbError::Failed(format!("{e}; run `{}`", host::command("index --rebuild"))))?;
@@ -471,6 +476,7 @@ pub fn rebuild_store(path: &Path) -> Result<Store, DbError> {
         "failed an integrity check",
         lock,
         &delete_index_files,
+        true,
         &hooks,
     )
 }
@@ -634,16 +640,26 @@ pub fn open_maintenance(path: &Path) -> Result<Store, DbError> {
 }
 
 /// Whether the store passes SQLite's quick check and the FTS5 integrity check.
-pub fn is_healthy(conn: &Connection) -> bool {
+/// Only a corruption error or a failed check counts as damage. Any other error,
+/// a busy store held by a sibling for one, is returned so a healthy store is
+/// never rebuilt because of it.
+pub fn is_healthy(conn: &Connection) -> Result<bool, String> {
     let quick: rusqlite::Result<String> =
         conn.query_row("PRAGMA quick_check(1)", [], |row| row.get(0));
-    quick.is_ok_and(|result| result == "ok")
-        && conn
-            .execute(
-                "INSERT INTO chunks_fts(chunks_fts) VALUES ('integrity-check')",
-                [],
-            )
-            .is_ok()
+    match quick {
+        Ok(result) if result == "ok" => {}
+        Ok(_) => return Ok(false),
+        Err(e) if is_corrupt(&e) => return Ok(false),
+        Err(e) => return Err(format!("failed to check the index: {e}")),
+    }
+    match conn.execute(
+        "INSERT INTO chunks_fts(chunks_fts) VALUES ('integrity-check')",
+        [],
+    ) {
+        Ok(_) => Ok(true),
+        Err(e) if is_corrupt(&e) => Ok(false),
+        Err(e) => Err(format!("failed to check the index: {e}")),
+    }
 }
 
 /// Which connection the scoped views are for.
@@ -1327,6 +1343,25 @@ mod tests {
     }
 
     #[test]
+    fn a_second_schema_creation_finds_the_version_set_and_writes_nothing() {
+        // Arrange
+        let dir = scratch_dir("code-db-schema-twice");
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("store-v4.sqlite3");
+        let mut conn = Connection::open(&path).expect("raw db");
+
+        // Act
+        let first = create_schema(&mut conn, &path, &DbHooks::default()).expect("first");
+        let second = create_schema(&mut conn, &path, &DbHooks::default()).expect("second");
+
+        // Assert
+        assert!(first);
+        assert!(!second);
+        assert_eq!(pragma(&conn, "user_version"), SCHEMA_VERSION);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn an_open_store_holds_the_shared_lock_in_both_modes() {
         // Arrange
         let dir = scratch_dir("code-db-shared");
@@ -1346,7 +1381,7 @@ mod tests {
             let store = open_index_with(&path, mode, &delete_index_files, &hooks);
 
             // Assert
-            assert!(store.is_ok() || mode == OpenMode::Query);
+            assert!(store.is_ok(), "{mode:?}");
             assert!(!exclusive_while_open.get(), "{mode:?}");
         }
         let _ = std::fs::remove_dir_all(dir);
@@ -1510,7 +1545,7 @@ mod tests {
         let store = open_index(&path, OpenMode::Index).expect("open");
 
         // Act
-        let healthy = is_healthy(&store);
+        let healthy = is_healthy(&store).expect("check");
 
         // Assert
         assert!(healthy);

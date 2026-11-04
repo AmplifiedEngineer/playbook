@@ -977,7 +977,7 @@ pub fn run(
         Scope::Worktree
     };
     if rebuild {
-        if db::is_healthy(&conn) {
+        if db::is_healthy(&conn)? {
             forget_worktree(&mut conn, worktree)?;
         } else {
             drop(conn);
@@ -2919,5 +2919,44 @@ impl P { fn go(&self) {} }
         assert_eq!(symbol_names(&f.conn(), "a.rs"), vec!["a"]);
         let conn = db::open_query(&f.index, "other").expect("b");
         assert_eq!(symbol_names(&conn, "a.rs"), vec!["a"]);
+    }
+
+    #[test]
+    fn a_rebuild_replaces_a_store_that_opens_but_fails_its_integrity_check() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-rebuild-integrity");
+        write(&f.root, "a.rs", b"fn a() {}\n");
+        let other = crate::walker::test_repo::init("idx-rebuild-integrity-b");
+        write(&other, "b.rs", b"fn b() {}\n");
+        f.run();
+        run(&other, &f.index, "other", false, &Options::default()).expect("second worktree");
+        {
+            let raw = rusqlite::Connection::open(&f.index).expect("raw");
+            let hit = raw
+                .execute(
+                    "UPDATE chunks_fts_data SET block = zeroblob(8) WHERE id > 10",
+                    [],
+                )
+                .expect("damage the fts pages");
+            assert!(hit > 0);
+        }
+        let writer = db::open_index(&f.index, OpenMode::Index).expect("still opens");
+        assert!(!db::is_healthy(&writer).expect("check"));
+        drop(writer);
+
+        // Act
+        let report =
+            run(&f.root, &f.index, &f.worktree, true, &Options::default()).expect("rebuild");
+
+        // Assert
+        assert_eq!(report.scope, Scope::Store);
+        assert_eq!(paths(&f.conn()), vec!["a.rs"]);
+        assert_eq!(
+            db::open_query(&f.index, "other").err(),
+            Some(db::DbError::Missing)
+        );
+        let again = db::open_index(&f.index, OpenMode::Index).expect("open");
+        assert!(db::is_healthy(&again).expect("check"));
     }
 }
