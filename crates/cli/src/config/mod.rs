@@ -466,6 +466,19 @@ mod tests {
     }
 
     #[test]
+    fn a_gc_number_is_range_checked_on_write() {
+        let low = write::validate_key_and_value("gc.graceDays", &json!(0));
+        let high = write::validate_key_and_value("gc.graceDays", &json!(366));
+        let text = write::validate_key_and_value("gc.graceDays", &json!(1.5));
+        let ok = write::validate_key_and_value("gc.graceDays", &json!(30));
+
+        assert!(matches!(low, Err(ConfigError::OutOfRange { .. })));
+        assert!(matches!(high, Err(ConfigError::OutOfRange { .. })));
+        assert!(matches!(text, Err(ConfigError::OutOfRange { .. })));
+        assert!(ok.is_ok());
+    }
+
+    #[test]
     fn resolve_valid_drops_an_out_of_range_gc_value_and_a_pressure_above_idle() {
         let home = scratch_home("gc-range");
         let root = crate::common::paths::playbook_root_from(&home);
