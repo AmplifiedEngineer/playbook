@@ -14,6 +14,8 @@ pub const ALARM_MARK: &str = "! ";
 
 /// Segments with a lower number are kept longer on a narrow terminal.
 pub const PRIORITY_SEVEN_DAY: u8 = 0;
+/// Below the monthly spend segment, whose place is 1.
+pub const PRIORITY_FIVE_HOUR: u8 = 2;
 
 /// One thing line 4 says.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,15 +39,19 @@ pub fn build(input: &str, now: i64) -> Vec<Segment> {
     snapshot
         .limits(now)
         .iter()
-        .filter(|limit| limit.period == LimitPeriod::SevenDay)
         .filter_map(|limit| {
+            let priority = match limit.period {
+                LimitPeriod::SevenDay => PRIORITY_SEVEN_DAY,
+                LimitPeriod::FiveHour => PRIORITY_FIVE_HOUR,
+                _ => return None,
+            };
             let headroom = limit.headroom(now)?;
             let brief = brief(limit, &headroom, now)?;
             let mark = if brief.alarm { ALARM_MARK } else { "" };
             Some(Segment {
                 text: format!("{mark}{}", brief.text),
                 short: None,
-                priority: PRIORITY_SEVEN_DAY,
+                priority,
                 alarm: brief.alarm,
             })
         })

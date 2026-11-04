@@ -865,17 +865,13 @@ const BUDGET_NOW: i64 = 1_000_000;
 const DAY_SECS: i64 = 86_400;
 const SEVEN_DAYS_SECS: i64 = 7 * DAY_SECS;
 
-/// The colour-stripped lines for a 7 day window at `used` percent that has run
-/// for `elapsed` seconds of its seven days, at a fixed clock.
-fn seven_day_lines(used: f64, elapsed: i64, columns: Option<&str>) -> Vec<String> {
+const FIVE_HOURS_SECS: i64 = 5 * 3600;
+
+/// The colour-stripped lines for the given `rate_limits` members at a fixed
+/// clock.
+fn budget_lines(members: &str, columns: Option<&str>) -> Vec<String> {
     let s = Scratch::new();
-    let resets_at = BUDGET_NOW + SEVEN_DAYS_SECS - elapsed;
-    let body = payload(
-        &s.0,
-        &format!(
-            r#""rate_limits":{{"seven_day":{{"used_percentage":{used},"resets_at":{resets_at}}}}}"#
-        ),
-    );
+    let body = payload(&s.0, &format!(r#""rate_limits":{{{members}}}"#));
     let home = s.0.to_str().unwrap();
     let mut pairs = vec![
         ("HOME", home),
@@ -891,6 +887,37 @@ fn seven_day_lines(used: f64, elapsed: i64, columns: Option<&str>) -> Vec<String
         .lines()
         .map(str::to_string)
         .collect()
+}
+
+/// A window member that is `used` percent spent after `elapsed` seconds of a
+/// window that is `length` seconds long.
+fn window(key: &str, used: f64, elapsed: i64, length: i64) -> String {
+    let resets_at = BUDGET_NOW + length - elapsed;
+    format!(r#""{key}":{{"used_percentage":{used},"resets_at":{resets_at}}}"#)
+}
+
+/// The colour-stripped lines for a 7 day window at `used` percent that has run
+/// for `elapsed` seconds of its seven days, at a fixed clock.
+fn seven_day_lines(used: f64, elapsed: i64, columns: Option<&str>) -> Vec<String> {
+    budget_lines(
+        &window("seven_day", used, elapsed, SEVEN_DAYS_SECS),
+        columns,
+    )
+}
+
+/// The same for a 5 hour window.
+fn five_hour_lines(used: f64, elapsed: i64) -> Vec<String> {
+    budget_lines(&window("five_hour", used, elapsed, FIVE_HOURS_SECS), None)
+}
+
+/// Both windows alarming: 7d cap in 2d3h and 5h cap in 1h20m.
+fn both_alarm_lines(columns: Option<&str>) -> Vec<String> {
+    let members = format!(
+        "{},{}",
+        window("seven_day", 60.0, 275_400, SEVEN_DAYS_SECS),
+        window("five_hour", 60.0, 2 * 3600, FIVE_HOURS_SECS),
+    );
+    budget_lines(&members, columns)
 }
 
 #[test]
@@ -963,4 +990,40 @@ fn the_budget_line_is_red_and_never_relies_on_colour_alone() {
         out.ends_with(&format!("{RED}! 7d CAP HIT{RESET}\n")),
         "{out:?}"
     );
+}
+
+#[test]
+fn a_reached_five_hour_cap_adds_a_fourth_line() {
+    let lines = five_hour_lines(100.0, 3600);
+    assert_eq!(lines.last().unwrap(), "! 5h CAP HIT", "{lines:?}");
+}
+
+#[test]
+fn a_five_hour_pace_past_the_cap_names_the_time_left() {
+    // 60 percent after 2 hours is 30 percent an hour, so 40 left lasts 1h20m.
+    let lines = five_hour_lines(60.0, 2 * 3600);
+    assert_eq!(lines.last().unwrap(), "! 5h cap in 1h20m", "{lines:?}");
+}
+
+#[test]
+fn a_five_hour_window_under_an_hour_in_adds_no_line() {
+    let lines = five_hour_lines(60.0, 1800);
+    assert!(lines.iter().all(|l| !l.starts_with('!')), "{lines:?}");
+}
+
+#[test]
+fn both_alarms_share_line_four_with_the_seven_day_first() {
+    let lines = both_alarm_lines(None);
+    assert_eq!(
+        lines.last().unwrap(),
+        "! 7d cap in 2d3h | ! 5h cap in 1h20m",
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn the_five_hour_alarm_is_dropped_whole_when_the_line_is_too_narrow() {
+    // The joined line needs 36 columns; the 5h alarm has no short form.
+    let lines = both_alarm_lines(Some("33"));
+    assert_eq!(lines.last().unwrap(), "! 7d cap in 2d3h", "{lines:?}");
 }
