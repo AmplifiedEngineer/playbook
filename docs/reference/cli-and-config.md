@@ -86,7 +86,15 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `update.mode` | `notify` | `notify`, `auto`, `off` |
 | `update.checkIntervalHours` | `24` | a number, see the config keys page for the range |
 | `update.plugin` | `auto` | `auto`, `ask`, `off` |
+| `watch.enabled` | `false` | `true`, `false` |
+| `watch.repos` | `[]` | see the config keys page |
+| `watch.autonomy` | `propose` | `off`, `propose`, `auto` |
+| `watch.pollSeconds` | `60` | a number, see the config keys page for the range |
+| `watch.maxCatchupHours` | `72` | a number, see the config keys page for the range |
+| `watch.allowedAuthors` | `[]` | see the config keys page |
+| `watch.tokenEnv` | empty | see the config keys page |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
+| `watch.rule.<id>` | empty | one rule as JSON text |
 
 ## Commands
 

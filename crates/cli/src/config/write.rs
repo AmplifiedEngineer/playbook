@@ -91,6 +91,14 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
     if matches!(default, Value::Number(_)) {
         validate_number(key, value)?;
     }
+    if let (true, Value::String(text)) = (keys::is_watch_rule_key(key), value) {
+        if !text.is_empty() {
+            crate::watch::rule::Stored::parse(text).map_err(|e| ConfigError::InvalidRule {
+                key: key.to_string(),
+                reason: e.to_string(),
+            })?;
+        }
+    }
     if key == "pr.ticketPatterns" {
         let ok = value.as_array().is_some_and(|items| {
             items.iter().all(|i| {
@@ -244,6 +252,14 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
         "usage.refreshSeconds" => (
             whole.is_some_and(|n| (1..=3600).contains(&n)),
             "a whole number between 1 and 3600",
+        ),
+        "watch.pollSeconds" => (
+            whole.is_some_and(|n| (1..=86_400).contains(&n)),
+            "a whole number between 1 and 86400",
+        ),
+        "watch.maxCatchupHours" => (
+            whole.is_some_and(|n| (1..=720).contains(&n)),
+            "a whole number between 1 and 720",
         ),
         "sessions.staleAfterDays" | "sessions.recentDays" => {
             (whole.is_some_and(|n| n >= 1), "a positive integer")

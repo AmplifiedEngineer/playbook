@@ -87,6 +87,8 @@ pub enum ConfigError {
     DirectoryUnwritable(PathBuf),
     /// `key` is a per-user setting, so only the global tier holds it.
     GlobalOnly(String),
+    /// A `watch.rule.<id>` value that is not a valid rule. `reason` says why.
+    InvalidRule { key: String, reason: String },
 }
 
 impl std::fmt::Display for ConfigError {
@@ -99,7 +101,7 @@ impl std::fmt::Display for ConfigError {
             ),
             ConfigError::UnknownKey(key) => write!(
                 f,
-                "unknown config key: {key}, valid keys are: {}, and effort.<agents|commands|skills>.<name>",
+                "unknown config key: {key}, valid keys are: {}, effort.<agents|commands|skills>.<name>, and watch.rule.<id>",
                 keys::KNOWN_KEYS.join(", ")
             ),
             ConfigError::WrongType { key, expected } => {
@@ -118,6 +120,9 @@ impl std::fmt::Display for ConfigError {
                 f,
                 "{key} is a per-user setting; set it with --global"
             ),
+            ConfigError::InvalidRule { key, reason } => {
+                write!(f, "config key {key} does not accept this rule: {reason}")
+            }
             ConfigError::InvalidNumber { key, value } => write!(
                 f,
                 "config key {key} does not accept '{value}', must be a non-negative integer"
@@ -447,6 +452,84 @@ mod tests {
         // Assert
         assert_eq!(result.unwrap(), (Value::Number(14.into()), Source::Repo));
 
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_watch_rule_round_trips_through_write_and_resolve() {
+        // Arrange
+        let home = scratch_home("watch-rule-round-trip");
+        let rule = r#"{"on":"issue.opened","do":"label","with":{"labels":["triage"]}}"#;
+        write::set(
+            Tier::Global,
+            "watch.rule.label-new-issues",
+            &Value::String(rule.to_string()),
+            &home,
+            None,
+        )
+        .expect("a valid rule should be stored");
+
+        // Act
+        let result = resolve("watch.rule.label-new-issues", &home, None);
+
+        // Assert
+        assert_eq!(
+            result.unwrap(),
+            (Value::String(rule.to_string()), Source::Global)
+        );
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn an_invalid_watch_rule_stores_nothing() {
+        // Arrange
+        let home = scratch_home("watch-rule-invalid");
+        let bad = r#"{"on":"issue.opened","do":"label","run":"x"}"#;
+
+        // Act
+        let result = write::set(
+            Tier::Global,
+            "watch.rule.bad",
+            &Value::String(bad.to_string()),
+            &home,
+            None,
+        );
+
+        // Assert
+        assert!(matches!(result, Err(ConfigError::InvalidRule { .. })));
+        let (value, source) = resolve("watch.rule.bad", &home, None).unwrap();
+        assert_eq!(
+            (value, source),
+            (Value::String(String::new()), Source::Default)
+        );
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_watch_rule_key_with_an_uppercase_id_is_unknown() {
+        let home = scratch_home("watch-rule-uppercase");
+        let result = write::set(
+            Tier::Global,
+            "watch.rule.Triage",
+            &Value::String(String::new()),
+            &home,
+            None,
+        );
+        assert!(matches!(result, Err(ConfigError::UnknownKey(_))));
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn the_watch_kill_switch_is_a_global_only_setting() {
+        let home = scratch_home("watch-enabled-global");
+        let result = write::set(
+            Tier::Repo,
+            "watch.enabled",
+            &Value::Bool(true),
+            &home,
+            Some("owner/repo"),
+        );
+        assert!(matches!(result, Err(ConfigError::GlobalOnly(_))));
         let _ = fs::remove_dir_all(&home);
     }
 
