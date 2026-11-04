@@ -1289,7 +1289,7 @@ Example: `playbook segment branch --type feat --plan-slug my-plan --n 2 --title 
 - `--title <TITLE>`: Segment title, kebab-cased and truncated into the branch name
 - `--default-branch <DEFAULT_BRANCH>`: Default branch of the repo
 - `--dir <DIR>`: Repo directory to run in. Defaults to the current directory
-- `--topology <TOPOLOGY>`: One of stacked, independent or single (one of `stacked`, `independent`, `single`)
+- `--topology <TOPOLOGY>`: How the Segment relates to the previous one (one of `stacked`, `independent`, `single`)
 - `--prev-branch <PREV_BRANCH>`: Previous Segment's branch, for a stacked Segment past the first
 - `--land`: Branch off the fetched origin default branch, at the land boundary
 

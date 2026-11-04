@@ -2763,7 +2763,7 @@ pub enum SegmentCommand {
     Branch {
         #[command(flatten)]
         naming: SegmentNaming,
-        /// One of stacked, independent or single
+        /// How the Segment relates to the previous one
         #[arg(long, value_enum)]
         topology: SegmentTopology,
         /// Previous Segment's branch, for a stacked Segment past the first
