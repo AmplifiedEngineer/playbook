@@ -4,6 +4,7 @@
 //! The thin command line layer: argument shapes, and rendering of the results
 //! the library functions in `code` return.
 
+use super::cleanup::Cleanup;
 use super::host;
 use super::index::Scope;
 use super::output::{Envelope, IndexState};
@@ -692,6 +693,7 @@ fn render_index(env: &Env, json: bool, rebuild: bool) -> Result<String, String> 
                 "skipped": report.skipped,
                 "failed": report.failed,
                 "reused": report.reused,
+                "cleanup": report.cleanup.as_str(),
                 "scope": report.scope.as_str(),
             }),
         );
@@ -701,13 +703,17 @@ fn render_index(env: &Env, json: bool, rebuild: bool) -> Result<String, String> 
     for warning in &warnings {
         eprintln!("code: {warning}");
     }
+    let cleanup = match report.cleanup {
+        Cleanup::Skipped => "cleanup: skipped\n",
+        Cleanup::Done => "",
+    };
     let rebuilt = match (report.scope, rebuild) {
         (Scope::Store, _) => "rebuilt: store\n",
         (Scope::Worktree, true) => "rebuilt: worktree only\n",
         (Scope::Worktree, false) => "",
     };
     Ok(format!(
-        "indexed {} files: {} changed, {} unchanged, {} removed, {} skipped, {} failed\nreused: {}\n{rebuilt}",
+        "indexed {} files: {} changed, {} unchanged, {} removed, {} skipped, {} failed\nreused: {}\n{cleanup}{rebuilt}",
         report.indexed,
         report.changed,
         report.unchanged,

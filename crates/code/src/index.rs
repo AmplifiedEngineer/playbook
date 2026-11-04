@@ -7,6 +7,7 @@
 //! file inside a transaction per batch. A file is the atomic unit: an error in
 //! one file rolls back only that file.
 
+use super::cleanup::{self, Cleanup};
 use super::db::{self, OpenMode, ScopeKind, TxHooks};
 use super::host;
 use super::lang::{self, Lang};
@@ -32,8 +33,13 @@ pub struct Options {
     /// The parser key stored with each content row. A manifest row whose
     /// content has another key counts as changed.
     pub parser: String,
+    /// The clock of the run in milliseconds since the epoch, for tests. The
+    /// run reads the system clock when it is `None`.
+    pub now_ms: Option<i64>,
     #[cfg(test)]
     pub hooks: Hooks,
+    #[cfg(test)]
+    pub cleanup_hooks: cleanup::Hooks,
 }
 
 impl Default for Options {
@@ -44,8 +50,11 @@ impl Default for Options {
             max_threads: MAX_WORKERS,
             chunk_lines: 60,
             parser: lang::parser_key(),
+            now_ms: None,
             #[cfg(test)]
             hooks: Hooks::default(),
+            #[cfg(test)]
+            cleanup_hooks: cleanup::Hooks::default(),
         }
     }
 }
@@ -82,7 +91,26 @@ static NO_TX_HOOKS: TxHooks = TxHooks {
     fail_commit: None,
 };
 
+#[cfg(not(test))]
+static NO_CLEANUP_HOOKS: cleanup::Hooks = cleanup::Hooks {
+    fail_cleanup: false,
+    after_cleanup_chunk: None,
+    before_vacuum: None,
+    delete_file: None,
+};
+
 impl Options {
+    fn now(&self) -> i64 {
+        self.now_ms.unwrap_or_else(now_ms)
+    }
+
+    fn cleanup_hooks(&self) -> &cleanup::Hooks {
+        #[cfg(test)]
+        return &self.cleanup_hooks;
+        #[cfg(not(test))]
+        &NO_CLEANUP_HOOKS
+    }
+
     fn tx_hooks(&self) -> &TxHooks {
         #[cfg(test)]
         return &self.hooks.tx;
@@ -147,6 +175,8 @@ pub struct Report {
     pub failed: usize,
     /// Files that took stored content with the same key and were not parsed.
     pub reused: usize,
+    /// Whether the cleanup at the end of the run finished.
+    pub cleanup: Cleanup,
 }
 
 struct Chunk {
@@ -942,7 +972,7 @@ pub fn run(
             scope = Scope::Store;
         }
     }
-    let started = now_ms();
+    let started = opts.now();
     let wt = register_worktree(&mut conn, root, worktree, started)?;
     db::create_scope_views(&conn, wt, ScopeKind::Writer).map_err(|e| e.to_string())?;
 
@@ -1086,12 +1116,18 @@ pub fn run(
         )
         .map_err(|e| e.to_string())
         .map(|n| usize::try_from(n).unwrap_or(0))?;
-    let completed = now_ms().max(started);
+    let completed = opts.now().max(started);
     conn.execute(
         "UPDATE worktrees SET last_run_completed = ?2 WHERE id = ?1",
         params![wt, completed],
     )
     .map_err(|e| e.to_string())?;
+    let env = cleanup::Env {
+        now_ms: completed,
+        tx: opts.tx_hooks(),
+        hooks: opts.cleanup_hooks(),
+    };
+    report.cleanup = cleanup::collect_garbage(&mut conn, index, &env);
     Ok(report)
 }
 

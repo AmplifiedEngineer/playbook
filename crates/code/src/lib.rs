@@ -8,6 +8,7 @@
 //! in `cli` calls them and only renders. This module reaches the host program
 //! only through `host`.
 
+pub mod cleanup;
 pub mod cli;
 pub mod context;
 pub mod db;
