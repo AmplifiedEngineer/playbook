@@ -664,35 +664,58 @@ mod tests {
         }
     }
 
+    /// How many times the work of copying the file one write may cost. A
+    /// write measures about 2 to 3 copies on a quiet or a loaded machine, so
+    /// a write that grows faster than the file passes 8 copies.
+    const FULL_WRITE_BUDGET: u32 = 8;
+    /// How many times the copy and the two writes are timed.
+    const ROUNDS: usize = 15;
+
     #[test]
-    fn a_full_history_adds_at_most_5_ms_to_a_statusline_reading() {
-        use std::time::{Duration, Instant};
+    fn a_full_history_costs_a_write_no_more_than_a_few_copies_of_the_file() {
+        use std::time::Instant;
         let one = |t: i64| reading_line(t, 1.0, 2.0);
         let n = MAX_BYTES as usize / one(NOW - 100_000).len();
         let body: String = (0..n as i64).map(|i| one(NOW - 100_000 + i)).collect();
-        let best = |with_history: bool| {
-            (0..7)
-                .map(|i| {
-                    let d = dir(&format!("timing-{with_history}-{i}"));
-                    if with_history {
-                        fs::write(history_path(&d), &body).unwrap();
-                    } else {
-                        // a folder in the file's place: the history step does nothing
-                        fs::create_dir(history_path(&d)).unwrap();
-                    }
-                    let start = Instant::now();
-                    record(&d, Some(55.0), None, NOW);
-                    start.elapsed()
-                })
-                .min()
-                .unwrap()
+        // The work a trim cannot avoid: read the whole file, split it into
+        // lines and write it out again. It is measured next to each timed
+        // write, so a loaded machine slows both and the ratio holds.
+        let copy = || {
+            let d = dir("timing-copy");
+            fs::write(history_path(&d), &body).unwrap();
+            let start = Instant::now();
+            let text = fs::read_to_string(history_path(&d)).unwrap();
+            let lines = text.lines().count();
+            fs::write(d.join("copy"), &text).unwrap();
+            std::hint::black_box(lines);
+            start.elapsed()
+        };
+        let write = |with_history: bool| {
+            let d = dir(&format!("timing-{with_history}"));
+            if with_history {
+                fs::write(history_path(&d), &body).unwrap();
+            } else {
+                // a folder in the file's place: the history step does nothing
+                fs::create_dir(history_path(&d)).unwrap();
+            }
+            let start = Instant::now();
+            record(&d, Some(55.0), None, NOW);
+            start.elapsed()
         };
 
-        let (with, without) = (best(true), best(false));
+        // Each round times the copy and the two writes back to back, and the
+        // write passes in a round where it stayed within its budget. A pause
+        // from other work lands in a few rounds, so a write that costs more
+        // than the budget in every round is a slow write, not a busy machine.
+        let rounds: Vec<_> = (0..ROUNDS)
+            .map(|_| (copy(), write(false), write(true)))
+            .collect();
 
         assert!(
-            with <= without + Duration::from_millis(5),
-            "with {with:?}, without {without:?}"
+            rounds
+                .iter()
+                .any(|&(copy, without, with)| with <= without + copy * FULL_WRITE_BUDGET),
+            "no round kept the write within {FULL_WRITE_BUDGET} copies: {rounds:?}"
         );
     }
 
