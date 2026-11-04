@@ -769,8 +769,11 @@ mod tests {
     const DAY: i64 = 86_400;
     const GIB: u64 = 1024 * 1024 * 1024;
 
+    /// One clock reading for the whole test run, so a file aged against it and
+    /// a plan judged against it cannot straddle a second tick.
     fn now() -> i64 {
-        crate::common::time::now_secs()
+        static NOW: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+        *NOW.get_or_init(crate::common::time::now_secs)
     }
 
     fn limits() -> Limits {

@@ -798,6 +798,7 @@ mod tests {
                 idle_days: 1,
                 max_bytes: 0,
                 retain_days: 7,
+                ..Limits::default()
             },
         };
         fx.registry = Registry::new(fx.gc.clone()).with_store(store);
