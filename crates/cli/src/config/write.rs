@@ -223,6 +223,16 @@ const DOCS_DISPLAY_CHARS_MAX: i64 = 120_000;
 /// numeric key 0 or more.
 fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
     let whole = value.as_i64();
+    if let Some(entry) = keys::gc_number(key) {
+        if whole.is_some_and(|n| (entry.min..=entry.max).contains(&n)) {
+            return Ok(());
+        }
+        return Err(ConfigError::OutOfRange {
+            key: key.to_string(),
+            value: value.to_string(),
+            constraint: GC_RANGE_HINT,
+        });
+    }
     let (valid, constraint) = match key {
         "auto.budgetUsd" | "auto.agentBudgetUsd" => (
             value.as_f64().is_some_and(|n| n.is_finite() && n >= 0.01),
@@ -265,13 +275,6 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
         | "review.suggest.packageSpan"
         | "review.suggest.untestedLines"
         | "update.checkIntervalHours" => (whole.is_some_and(|n| n >= 1), "a positive integer"),
-        gc_key if keys::gc_number(gc_key).is_some() => {
-            let entry = keys::gc_number(gc_key).expect("checked by the guard");
-            (
-                whole.is_some_and(|n| (entry.min..=entry.max).contains(&n)),
-                GC_RANGE_HINT,
-            )
-        }
         "docs.maxBytes" => (
             whole.is_some_and(|n| (1..=DOCS_MAX_BYTES_CEILING).contains(&n)),
             "a whole number from 1 to 104857600 (the 100 MiB ceiling)",
