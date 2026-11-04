@@ -446,6 +446,7 @@ pub fn run(cmd: Option<&WatchCommand>) -> Result<String, String> {
                 )
             })?
     };
+    claude::note_token_env(&settings.token_env);
     let write = gh::GhWrite::new(token.clone());
     let clock = SystemClock;
     let me = match cmd {

@@ -68,8 +68,12 @@ pub struct MergeCheck {
     pub green: bool,
     pub head: String,
     pub author: String,
-    /// Whose latest review is an approval: login and association.
+    /// Whose latest review is an approval of this head: login and association.
     pub approvers: Vec<(String, String)>,
+    /// Someone's latest review asks for changes.
+    pub changes_requested: bool,
+    /// A reviewer or a team is still asked to review.
+    pub review_requested: bool,
 }
 
 /// The GitHub calls the actions make.
@@ -305,19 +309,26 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
             reason: None,
             ..row
         };
-        self.run(id, &row, rules)
+        self.run(id, &row, rules, Autonomy::Auto)
     }
 
     /// Runs every approved item of `repo` that is due, with that repo's rules.
-    /// The lock holder calls this on each cycle.
-    pub fn run_approved(&mut self, repo: &str, rules: &[NamedRule]) -> Result<usize, EngineError> {
+    /// The lock holder calls this on each cycle. An item queued to run on its
+    /// own only runs while its rule is still at `auto` under `ceiling`, so
+    /// lowering the ceiling stops items already waiting for a retry.
+    pub fn run_approved(
+        &mut self,
+        repo: &str,
+        rules: &[NamedRule],
+        ceiling: Autonomy,
+    ) -> Result<usize, EngineError> {
         let mut ran = 0;
         for id in self.store.ids_due("approved", self.clock.now())? {
             if self.paused()? {
                 break;
             }
             if let Some(row) = self.store.work(id)?.filter(|r| r.repo == repo) {
-                self.run(id, &row, rules)?;
+                self.run(id, &row, rules, ceiling)?;
                 ran += 1;
             }
         }
@@ -397,11 +408,17 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
         id: i64,
         row: &WorkRow,
         rules: &[NamedRule],
+        ceiling: Autonomy,
     ) -> Result<ApproveOutcome, EngineError> {
         let Some((_, rule)) = rules.iter().find(|(name, _)| name == &row.rule) else {
             return self.finish(id, row, ApproveOutcome::Skipped("rule_missing"), 0.0);
         };
         if row.reason.as_deref() == Some(AUTO) {
+            if level(rule, ceiling) != Autonomy::Auto {
+                self.set(id, "proposed", Some("ceiling"))?;
+                self.record(&row.rule, &row.key, "ceiling");
+                return Ok(ApproveOutcome::Demoted("ceiling"));
+            }
             if let Some((reason, detail)) = self.demotion(row, rule)? {
                 self.set(id, "proposed", Some(reason))?;
                 self.record(&row.rule, &row.key, &format!("{reason}:{detail}"));
@@ -824,6 +841,8 @@ mod tests {
             head: "abc123".into(),
             author: "me".into(),
             approvers: vec![("maint".into(), "MEMBER".into())],
+            changes_requested: false,
+            review_requested: false,
         }
     }
 
@@ -973,7 +992,7 @@ mod tests {
         assert!(spy.calls.borrow().is_empty());
 
         let ran = engine(&mut f, &spy)
-            .run_approved("o/r", &rules(LABEL))
+            .run_approved("o/r", &rules(LABEL), Autonomy::Auto)
             .unwrap();
         assert_eq!(ran, 1);
         assert_eq!(spy.calls.borrow().len(), 1);
@@ -1050,9 +1069,13 @@ mod tests {
 
         // Act
         ingest_at(&mut f, &spy, &events, &rules, Autonomy::Auto);
-        engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+        engine(&mut f, &spy)
+            .run_approved("o/r", &rules, Autonomy::Auto)
+            .unwrap();
         ingest_at(&mut f, &spy, &events, &rules, Autonomy::Auto);
-        engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+        engine(&mut f, &spy)
+            .run_approved("o/r", &rules, Autonomy::Auto)
+            .unwrap();
 
         // Assert
         assert_eq!(spy.calls.borrow().len(), 1);
@@ -1072,10 +1095,29 @@ mod tests {
         )[0];
         assert_eq!(state(&f, id).0, "proposed");
         engine(&mut f, &spy)
-            .run_approved("o/r", &rules(AUTO_LABEL))
+            .run_approved("o/r", &rules(AUTO_LABEL), Autonomy::Auto)
             .unwrap();
         assert!(spy.calls.borrow().is_empty());
         assert_eq!(actions_today(&f), 0);
+    }
+
+    #[test]
+    fn lowering_the_ceiling_stops_an_auto_item_that_was_already_queued() {
+        // Arrange: queued at auto, then the ceiling drops to propose.
+        let mut f = fixture("watch-engine-ceiling-drop");
+        let spy = Spy::default();
+        let rules = rules(AUTO_LABEL);
+        let id = ingest_at(&mut f, &spy, &[issue(7, "a")], &rules, Autonomy::Auto)[0];
+        assert_eq!(state(&f, id).0, "approved");
+
+        // Act
+        engine(&mut f, &spy)
+            .run_approved("o/r", &rules, Autonomy::Propose)
+            .unwrap();
+
+        // Assert
+        assert_eq!(state(&f, id), ("proposed".into(), Some("ceiling".into())));
+        assert!(spy.calls.borrow().is_empty());
     }
 
     #[test]
@@ -1097,7 +1139,9 @@ mod tests {
             &rules,
             Autonomy::Auto,
         );
-        engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+        engine(&mut f, &spy)
+            .run_approved("o/r", &rules, Autonomy::Auto)
+            .unwrap();
 
         // Assert
         assert_eq!(state(&f, ids[0]).0, "done");
@@ -1113,7 +1157,7 @@ mod tests {
         let ids = ingest_at(&mut f, &spy, &[issue(7, "a")], &rules, Autonomy::Auto);
         let mut e = engine(&mut f, &spy);
         e.caps.actions_per_day = 0;
-        e.run_approved("o/r", &rules).unwrap();
+        e.run_approved("o/r", &rules, Autonomy::Auto).unwrap();
         assert_eq!(state(&f, ids[0]), ("proposed".into(), Some("limit".into())));
 
         // A person's approval is not held to the automatic caps.
@@ -1142,7 +1186,9 @@ mod tests {
         let ids = ingest_at(&mut f, &spy, &[issue(7, "a")], &rules, Autonomy::Auto);
 
         // Act
-        engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+        engine(&mut f, &spy)
+            .run_approved("o/r", &rules, Autonomy::Auto)
+            .unwrap();
 
         // Assert
         let posted = spy.comments.borrow().clone();
@@ -1164,7 +1210,9 @@ mod tests {
         };
         let rules = rules(COMMENT);
         ingest_at(&mut f, &spy, &[issue(7, "a")], &rules, Autonomy::Auto);
-        engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+        engine(&mut f, &spy)
+            .run_approved("o/r", &rules, Autonomy::Auto)
+            .unwrap();
         assert!(spy.comments.borrow().is_empty());
     }
 
@@ -1180,7 +1228,9 @@ mod tests {
         let id = ingest_at(&mut f, &spy, &[issue(7, "a")], &rules, Autonomy::Auto)[0];
 
         // Act
-        let out = engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+        let out = engine(&mut f, &spy)
+            .run_approved("o/r", &rules, Autonomy::Auto)
+            .unwrap();
 
         // Assert: back to approved, one try counted, due 30 seconds on.
         assert_eq!(out, 1);
@@ -1190,9 +1240,19 @@ mod tests {
             ("approved", 1, 1_030)
         );
         // Not due yet, so a second cycle leaves it alone.
-        assert_eq!(engine(&mut f, &spy).run_approved("o/r", &rules).unwrap(), 0);
+        assert_eq!(
+            engine(&mut f, &spy)
+                .run_approved("o/r", &rules, Autonomy::Auto)
+                .unwrap(),
+            0
+        );
         f.clock.advance(30);
-        assert_eq!(engine(&mut f, &spy).run_approved("o/r", &rules).unwrap(), 1);
+        assert_eq!(
+            engine(&mut f, &spy)
+                .run_approved("o/r", &rules, Autonomy::Auto)
+                .unwrap(),
+            1
+        );
     }
 
     #[test]
@@ -1206,7 +1266,9 @@ mod tests {
         let id = ingest_at(&mut f, &spy, &[issue(7, "a")], &rules, Autonomy::Auto)[0];
         for _ in 0..5 {
             f.clock.advance(4_000);
-            engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+            engine(&mut f, &spy)
+                .run_approved("o/r", &rules, Autonomy::Auto)
+                .unwrap();
         }
         assert_eq!(state(&f, id), ("dead".into(), Some("HTTP 502".into())));
     }
@@ -1223,7 +1285,9 @@ mod tests {
         let id = ingest_at(&mut f, &spy, &[issue(7, "a")], &rules, Autonomy::Auto)[0];
         for _ in 0..5 {
             f.clock.advance(4_000);
-            engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+            engine(&mut f, &spy)
+                .run_approved("o/r", &rules, Autonomy::Auto)
+                .unwrap();
         }
 
         // Act
@@ -1239,7 +1303,9 @@ mod tests {
         engine(&mut f, &ok)
             .redecide("o/r", &rules, Autonomy::Auto)
             .unwrap();
-        engine(&mut f, &ok).run_approved("o/r", &rules).unwrap();
+        engine(&mut f, &ok)
+            .run_approved("o/r", &rules, Autonomy::Auto)
+            .unwrap();
         assert_eq!(state(&f, id).0, "done");
         assert!(engine(&mut f, &ok).retry(id).is_err());
     }
@@ -1254,9 +1320,13 @@ mod tests {
         engine(&mut f, &spy).set_paused(true).unwrap();
 
         // Act
-        let paused_run = engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+        let paused_run = engine(&mut f, &spy)
+            .run_approved("o/r", &rules, Autonomy::Auto)
+            .unwrap();
         engine(&mut f, &spy).set_paused(false).unwrap();
-        let resumed_run = engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+        let resumed_run = engine(&mut f, &spy)
+            .run_approved("o/r", &rules, Autonomy::Auto)
+            .unwrap();
 
         // Assert
         assert_eq!((paused_run, resumed_run), (0, 1));
@@ -1294,7 +1364,9 @@ mod tests {
         );
 
         // Act
-        let ran = engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+        let ran = engine(&mut f, &spy)
+            .run_approved("o/r", &rules, Autonomy::Auto)
+            .unwrap();
 
         // Assert
         assert_eq!(ran, 1);
@@ -1344,7 +1416,7 @@ mod tests {
 
         // Act
         engine_with(&mut f, &spy, &model)
-            .run_approved("o/r", &rules)
+            .run_approved("o/r", &rules, Autonomy::Auto)
             .unwrap();
 
         // Assert
@@ -1380,7 +1452,7 @@ mod tests {
             let ids = ingest_at(&mut f, &spy, &[issue(7, "a")], &rules, Autonomy::Auto);
             let model = Scripted(RefCell::new(replies));
             engine_with(&mut f, &spy, &model)
-                .run_approved("o/r", &rules)
+                .run_approved("o/r", &rules, Autonomy::Auto)
                 .unwrap();
             assert_eq!(state(&f, ids[0]), ("proposed".into(), Some(reason.into())));
             assert!(spy.calls.borrow().is_empty());
@@ -1505,11 +1577,11 @@ mod tests {
         // Act
         ingest_at(&mut f, &spy, &events, &rules, Autonomy::Auto);
         engine_with(&mut f, &spy, &agreeing("bug"))
-            .run_approved("o/r", &rules)
+            .run_approved("o/r", &rules, Autonomy::Auto)
             .unwrap();
         ingest_at(&mut f, &spy, &events, &rules, Autonomy::Auto);
         engine_with(&mut f, &spy, &agreeing("bug"))
-            .run_approved("o/r", &rules)
+            .run_approved("o/r", &rules, Autonomy::Auto)
             .unwrap();
 
         // Assert
@@ -1530,7 +1602,7 @@ mod tests {
 
         // Act
         engine_with(&mut f, &spy, &agreeing("bug"))
-            .run_approved("o/r", &rules)
+            .run_approved("o/r", &rules, Autonomy::Auto)
             .unwrap();
 
         // Assert
@@ -1548,7 +1620,7 @@ mod tests {
 
         // Act
         engine_with(&mut f, &spy, &agreeing("bug"))
-            .run_approved("o/r", &rules)
+            .run_approved("o/r", &rules, Autonomy::Auto)
             .unwrap();
 
         // Assert: the ladder holds it back, and the model was never asked.
@@ -1563,7 +1635,7 @@ mod tests {
         let spy = Spy::default();
         let ids = ingest_at(&mut g, &spy, &[issue(7, "a")], &rules, Autonomy::Propose);
         engine_with(&mut g, &spy, &agreeing("bug"))
-            .run_approved("o/r", &rules)
+            .run_approved("o/r", &rules, Autonomy::Auto)
             .unwrap();
         assert_eq!(state(&g, ids[0]).0, "proposed");
         assert!(spy.calls.borrow().is_empty());
@@ -1661,7 +1733,9 @@ mod tests {
 
         // Act
         let id = address_item(&mut f, &spy, &rules);
-        engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+        engine(&mut f, &spy)
+            .run_approved("o/r", &rules, Autonomy::Auto)
+            .unwrap();
 
         // Assert: it waits for a person, and nothing ran.
         assert_eq!(state(&f, id).0, "proposed");
@@ -1754,7 +1828,10 @@ mod tests {
             .any(|a| a == "--bare" || a.contains("bypass")));
         assert!(call.env.contains(&("PLAYBOOK_HEADLESS".into(), "1".into())));
         assert!(call.env.contains(&("PLAYBOOK_MODE".into(), "auto".into())));
-        assert_eq!(call.cwd.as_deref(), Some("/work/playbook-watch-r-4"));
+        assert!(call
+            .cwd
+            .as_deref()
+            .is_some_and(|d| d.starts_with("/work/playbook-watch-r-4-")));
         assert!(call.stdin.contains(sentinel));
         assert!(!call.argv.iter().any(|a| a.contains(sentinel)));
         assert_eq!(call.stdin.matches("</untrusted_data>").count(), 1);
@@ -1992,7 +2069,9 @@ mod tests {
         let id = ingest_at(&mut f, &spy, &[pull(7)], &rules, Autonomy::Auto)[0];
 
         // Act
-        engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+        engine(&mut f, &spy)
+            .run_approved("o/r", &rules, Autonomy::Auto)
+            .unwrap();
 
         // Assert
         assert_eq!(state(&f, id), ("proposed".into(), Some("ladder".into())));
@@ -2003,7 +2082,9 @@ mod tests {
         earn_the_ladder(&mut g, "update_branch");
         let spy = Spy::default();
         let id = ingest_at(&mut g, &spy, &[pull(7)], &rules, Autonomy::Propose)[0];
-        engine(&mut g, &spy).run_approved("o/r", &rules).unwrap();
+        engine(&mut g, &spy)
+            .run_approved("o/r", &rules, Autonomy::Auto)
+            .unwrap();
         assert_eq!(state(&g, id).0, "proposed");
 
         // With the ceiling and the track record, it runs.
@@ -2011,7 +2092,9 @@ mod tests {
         earn_the_ladder(&mut h, "update_branch");
         let spy = Spy::default();
         ingest_at(&mut h, &spy, &[pull(7)], &rules, Autonomy::Auto);
-        engine(&mut h, &spy).run_approved("o/r", &rules).unwrap();
+        engine(&mut h, &spy)
+            .run_approved("o/r", &rules, Autonomy::Auto)
+            .unwrap();
         assert_eq!(spy.updates.borrow().as_slice(), &[7]);
     }
 
@@ -2129,7 +2212,7 @@ mod tests {
         // Act
         let id = ingest_at(&mut f, &spy, &[pull(7)], &rules, Autonomy::Auto)[0];
         engine_with(&mut f, &spy, &model)
-            .run_approved("o/r", &rules)
+            .run_approved("o/r", &rules, Autonomy::Auto)
             .unwrap();
 
         // Assert: it waits for a person, and the model was not asked.
@@ -2281,7 +2364,9 @@ mod tests {
 
         // Act
         let id = ingest_at(&mut f, &spy, &[merge_event()], &rules, Autonomy::Auto)[0];
-        engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+        engine(&mut f, &spy)
+            .run_approved("o/r", &rules, Autonomy::Auto)
+            .unwrap();
 
         // Assert
         assert_eq!(state(&f, id).0, "proposed");
@@ -2298,6 +2383,8 @@ mod tests {
         };
         let rows = [
             (with(|c| c.green = false), "not_green"),
+            (with(|c| c.changes_requested = true), "changes_requested"),
+            (with(|c| c.review_requested = true), "review_requested"),
             (with(|c| c.author = "stranger".into()), "author_not_allowed"),
             (with(|c| c.approvers.clear()), "no_approval"),
             (

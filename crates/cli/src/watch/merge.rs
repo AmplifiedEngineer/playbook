@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The `merge_when_green` action: merges a pull request once it is green, has
-//! a human approval and comes from an author you allowed, and only when
+//! a human approval of the current head, no open change request or review
+//! request, and comes from an author you allowed, and only when
 //! `autoMerge.enabled` is on. Merging is on the list of things that are unsafe
 //! unattended, so the action stays at `propose`.
 
@@ -36,6 +37,12 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
         }
         if !check.green {
             return Some("not_green");
+        }
+        if check.changes_requested {
+            return Some("changes_requested");
+        }
+        if check.review_requested {
+            return Some("review_requested");
         }
         let human_approval = check.approvers.iter().any(|(login, association)| {
             login != &check.author

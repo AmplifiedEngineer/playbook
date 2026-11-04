@@ -82,6 +82,7 @@ mod os {
         pub fn spawn(&self, call: &Call) -> io::Result<OsChild> {
             let mut command = Command::new(&self.program);
             command.args(&call.argv).envs(call.env.iter().cloned());
+            crate::watch::claude::scrub_tokens(&mut command);
             if let Some(dir) = &call.cwd {
                 command.current_dir(dir);
             }

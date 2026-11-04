@@ -6,6 +6,7 @@
 //! on stdin, never into an argument, so it is not visible in the process list.
 
 use std::process::Command;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -29,6 +30,32 @@ pub struct Call {
     pub stdin: String,
     /// The directory the program runs in, or the current one.
     pub cwd: Option<String>,
+}
+
+/// Variables that can hold a GitHub token. A model child must not see them:
+/// it reads text from strangers and can write files that get pushed.
+const TOKEN_VARS: [&str; 4] = [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+];
+
+static EXTRA_TOKEN_VAR: OnceLock<String> = OnceLock::new();
+
+/// Records the configured `watch.tokenEnv` name so children lose it too.
+pub fn note_token_env(name: &str) {
+    let _ = EXTRA_TOKEN_VAR.set(name.to_string());
+}
+
+/// Removes every token variable from a child's environment.
+pub fn scrub_tokens(command: &mut Command) {
+    for name in TOKEN_VARS {
+        command.env_remove(name);
+    }
+    if let Some(name) = EXTRA_TOKEN_VAR.get() {
+        command.env_remove(name);
+    }
 }
 
 fn args(list: &[&str]) -> Vec<String> {
@@ -79,7 +106,9 @@ const EDIT_TOOLS: &str = "Read,Edit,Write,Glob,Grep";
 /// The call that lets the model edit files in `dir`, held to `budget_usd` and
 /// `max_turns`. It runs in auto mode so the playbook guards stay on. It keeps
 /// its session: the spend guard reads the transcript, and without one it
-/// denies every write as "cost unreadable".
+/// denies every write as "cost unreadable". Only the user settings load, so a
+/// hook or allow rule committed in the checked out branch never runs, and the
+/// tool set is fixed with `--tools`.
 pub fn tool_call(budget_usd: f64, max_turns: u32, dir: &str, system: &str, text: &str) -> Call {
     let mut argv = args(&["-p", "--output-format", "json", "--max-budget-usd"]);
     argv.push(budget_usd.to_string());
@@ -88,8 +117,13 @@ pub fn tool_call(budget_usd: f64, max_turns: u32, dir: &str, system: &str, text:
     argv.extend(args(&[
         "--permission-mode",
         "acceptEdits",
+        "--tools",
+        EDIT_TOOLS,
         "--allowedTools",
         EDIT_TOOLS,
+        "--setting-sources",
+        "user",
+        "--strict-mcp-config",
         "--system-prompt",
     ]));
     argv.push(system.to_string());
@@ -199,6 +233,7 @@ impl ModelRunner for ClaudeCli {
     fn run(&self, call: &Call) -> Result<String, String> {
         let mut command = Command::new("claude");
         command.args(&call.argv).envs(call.env.iter().cloned());
+        scrub_tokens(&mut command);
         if let Some(dir) = &call.cwd {
             command.current_dir(dir);
         }
@@ -339,6 +374,39 @@ mod tests {
             Some("Read,Edit,Write,Glob,Grep")
         );
         assert_eq!(call.cwd.as_deref(), Some("/w"));
+        // The tool set is fixed and no project setting or MCP server loads.
+        assert_eq!(
+            pair(&call.argv, "--tools").as_deref(),
+            Some("Read,Edit,Write,Glob,Grep")
+        );
+        assert_eq!(
+            pair(&call.argv, "--setting-sources").as_deref(),
+            Some("user")
+        );
+        assert!(call.argv.iter().any(|a| a == "--strict-mcp-config"));
+    }
+
+    #[test]
+    fn a_model_child_loses_every_token_variable() {
+        // Arrange
+        let mut command = Command::new("env");
+        command
+            .env("GH_TOKEN", "x")
+            .env("GITHUB_TOKEN", "x")
+            .env("GH_ENTERPRISE_TOKEN", "x")
+            .env("GITHUB_ENTERPRISE_TOKEN", "x");
+
+        // Act
+        scrub_tokens(&mut command);
+
+        // Assert: each name is marked as removed, not set.
+        let envs: Vec<_> = command.get_envs().collect();
+        for name in TOKEN_VARS {
+            assert!(
+                envs.iter().any(|(k, v)| *k == name && v.is_none()),
+                "{name}"
+            );
+        }
     }
 
     #[test]

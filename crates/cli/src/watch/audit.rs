@@ -51,10 +51,15 @@ impl AuditLog {
         if size > 0 && size + line.len() as u64 > self.max_bytes {
             self.rotate()?;
         }
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.live())?;
+        let mut options = OpenOptions::new();
+        options.create(true).append(true);
+        // Outcomes can carry raw git errors, so the file is owner-only.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(self.live())?;
         file.write_all(line.as_bytes())
     }
 
@@ -113,6 +118,20 @@ fn clean(value: &Value) -> Value {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_live_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = dir("watch-audit-mode");
+        let log = AuditLog::new(&d);
+        log.append(&json!({"a": 1})).unwrap();
+        let mode = fs::metadata(d.join("audit.jsonl"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
 
     fn dir(tag: &str) -> PathBuf {
         crate::common::test_support::scratch_dir(tag)

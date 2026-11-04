@@ -54,7 +54,9 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
         let Some(budget) = self.remaining_usd(row, rule)? else {
             return Ok(Step::Demote("limit"));
         };
-        let branch = format!("playbook/watch/{}-{}", row.rule, row.object);
+        // The item id keeps one run apart from an earlier push on the same pull request,
+        // so recovery cannot mistake an old branch for this run's push.
+        let branch = format!("playbook/watch/{}-{}-{id}", row.rule, row.object);
         let dir = self.code.worktree_path(&branch);
         let site = Site {
             branch: &branch,
@@ -121,9 +123,18 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
         self.code
             .checkout(&row.repo, row.object, site.branch, site.dir)?;
         let call = tool_call(budget, MAX_TURNS, site.dir, SYSTEM, &prompt(thread));
-        let raw = match self.code.run_tool(&call)? {
-            ToolEnd::Killed => return Ok(Step::Stopped),
-            ToolEnd::Output(raw) => raw,
+        // A call that failed or was stopped may still have spent money, so its
+        // worst case is charged before the item goes back for another try.
+        let raw = match self.code.run_tool(&call) {
+            Err(why) => {
+                self.spend(row, budget)?;
+                return Err(why);
+            }
+            Ok(ToolEnd::Killed) => {
+                self.spend(row, budget)?;
+                return Ok(Step::Stopped);
+            }
+            Ok(ToolEnd::Output(raw)) => raw,
         };
         let reply = match parse_reply(&raw) {
             Ok(reply) => reply,

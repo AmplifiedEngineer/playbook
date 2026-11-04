@@ -125,7 +125,7 @@ pub fn cycle<W: GithubWrite + RecoverOps, C: Clock, H: Http>(
             .redecide(repo, &rules, level)
             .map_err(|e| e.to_string())?;
         let ran = engine
-            .run_approved(repo, &rules)
+            .run_approved(repo, &rules, level)
             .map_err(|e| e.to_string())?;
         if ran > 0 {
             report
