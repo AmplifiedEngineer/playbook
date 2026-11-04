@@ -205,7 +205,7 @@ pub fn build_context(cwd: &Path, opts: &context::ContextOptions) -> Result<Conte
 }
 
 #[cfg(test)]
-mod forget_tests {
+mod tests {
     use super::*;
     use crate::index::{self, Options};
     use crate::testkit::{fx, pinned};
