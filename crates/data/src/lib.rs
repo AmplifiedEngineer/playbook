@@ -204,6 +204,44 @@ mod tests {
     }
 
     #[test]
+    fn the_shared_code_store_and_its_locks_are_not_orphans() {
+        // Arrange
+        let d = std::env::temp_dir().join(format!("pbdata-store-{}", std::process::id()));
+        touch(&scoped_db_in(&d, "code", "o", "r", "dead"));
+        touch(&code_store_in(&d, "o", "r", 4));
+        touch(&d.join("code/o/r/store-v4.lock"));
+        touch(&d.join("code/o/r/live.lock"));
+
+        // Act
+        let got = orphan_dbs(&d, "o/r", &["live".to_string()]);
+
+        // Assert
+        let names: Vec<_> = got
+            .iter()
+            .map(|(_, p)| p.file_name().expect("name").to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["dead.db"]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_code_database_of_a_removed_worktree_is_deleted() {
+        // Arrange
+        let d = std::env::temp_dir().join(format!("pbdata-code-rm-{}", std::process::id()));
+        let code = scoped_db_in(&d, "code", "o", "r", "wt-gone");
+        touch(&code);
+
+        // Act
+        let removed = remove_worktree_dbs(&d, "o/r", "wt-gone");
+
+        // Assert
+        assert!(WORKTREE_KINDS.contains(&"code"));
+        assert_eq!(removed, 1);
+        assert!(!code.exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
     fn dot_segments_are_not_safe_path_parts() {
         for bad in ["", ".", "..", "a/b", "a\\b"] {
             assert!(!safe_segment(bad), "{bad:?}");
