@@ -664,35 +664,53 @@ mod tests {
         }
     }
 
+    /// How many times the work of copying the file one write may cost.
+    const FULL_WRITE_BUDGET: u32 = 4;
+
     #[test]
-    fn a_full_history_adds_at_most_5_ms_to_a_statusline_reading() {
+    fn a_full_history_costs_a_write_no_more_than_a_few_copies_of_the_file() {
         use std::time::{Duration, Instant};
         let one = |t: i64| reading_line(t, 1.0, 2.0);
         let n = MAX_BYTES as usize / one(NOW - 100_000).len();
         let body: String = (0..n as i64).map(|i| one(NOW - 100_000 + i)).collect();
-        let best = |with_history: bool| {
-            (0..7)
-                .map(|i| {
-                    let d = dir(&format!("timing-{with_history}-{i}"));
-                    if with_history {
-                        fs::write(history_path(&d), &body).unwrap();
-                    } else {
-                        // a folder in the file's place: the history step does nothing
-                        fs::create_dir(history_path(&d)).unwrap();
-                    }
-                    let start = Instant::now();
-                    record(&d, Some(55.0), None, NOW);
-                    start.elapsed()
-                })
-                .min()
-                .unwrap()
+        // The work a trim cannot avoid: read the whole file, look at every
+        // line and write it out again. It is measured next to each timed
+        // write, so a loaded machine slows both and the ratio holds.
+        let copy = || {
+            let d = dir("timing-copy");
+            fs::write(history_path(&d), &body).unwrap();
+            let start = Instant::now();
+            let text = fs::read_to_string(history_path(&d)).unwrap();
+            let lines = text.lines().filter_map(parse_line).count();
+            fs::write(d.join("copy"), &text).unwrap();
+            std::hint::black_box(lines);
+            start.elapsed()
+        };
+        let write = |with_history: bool| {
+            let d = dir(&format!("timing-{with_history}"));
+            if with_history {
+                fs::write(history_path(&d), &body).unwrap();
+            } else {
+                // a folder in the file's place: the history step does nothing
+                fs::create_dir(history_path(&d)).unwrap();
+            }
+            let start = Instant::now();
+            record(&d, Some(55.0), None, NOW);
+            start.elapsed()
         };
 
-        let (with, without) = (best(true), best(false));
+        let rounds: Vec<_> = (0..7)
+            .map(|_| (copy(), write(false), write(true)))
+            .collect();
 
+        // The best round of each: an interruption lands in a single round.
+        let min = |f: fn(&(Duration, Duration, Duration)) -> Duration| {
+            rounds.iter().map(f).min().unwrap()
+        };
+        let (copy, without, with) = (min(|r| r.0), min(|r| r.1), min(|r| r.2));
         assert!(
-            with <= without + Duration::from_millis(5),
-            "with {with:?}, without {without:?}"
+            with <= without + copy * FULL_WRITE_BUDGET,
+            "with {with:?}, without {without:?}, one copy {copy:?}"
         );
     }
 
