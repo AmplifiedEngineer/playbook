@@ -150,6 +150,7 @@ fn index_prints_the_envelope_and_a_second_run_is_all_unchanged() {
     assert_eq!(first["results"]["indexed"], 3);
     assert_eq!(first["results"]["changed"], 3);
     assert_eq!(first["results"]["reused"], 0);
+    assert_eq!(first["results"]["cleanup"], "done");
     let second = json_of(&second);
     assert_eq!(second["results"]["unchanged"], 3);
     assert_eq!(second["results"]["changed"], 0);

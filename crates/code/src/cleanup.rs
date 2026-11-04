@@ -100,21 +100,40 @@ pub fn collect_garbage(conn: &mut Connection, store: &Path, env: &Env) -> Cleanu
 
 fn clean(conn: &mut Connection, store: &Path, env: &Env) -> rusqlite::Result<()> {
     for (id, key) in dead_worktrees(conn, env.now_ms)? {
+        // A held run lock means that worktree is indexing right now, so its
+        // row stays whatever its root says.
+        let lock = store.parent().map(|dir| dir.join(format!("{key}.lock")));
+        let held = match &lock {
+            Some(path) => match exclusive_lock(path) {
+                Some(guard) => Some(guard),
+                None => continue,
+            },
+            None => None,
+        };
         drop_worktree(conn, id, env)?;
+        drop(held);
         // A lock file that cannot be deleted stays for the next run to retry
         // and does not stop the cleanup.
-        if let Some(dir) = store.parent() {
-            let _ = env.delete(&dir.join(format!("{key}.lock")));
+        if let Some(path) = &lock {
+            let _ = env.delete(path);
         }
     }
     drop_unreferenced_content(conn, env)?;
     if let Some(before) = &env.hooks.before_vacuum {
         before();
     }
-    conn.execute_batch(&format!(
-        "PRAGMA incremental_vacuum({VACUUM_PAGES}); PRAGMA wal_checkpoint(PASSIVE);"
-    ))?;
+    incremental_vacuum(conn)?;
+    conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE)")?;
     delete_stale_stores(store, env);
+    Ok(())
+}
+
+/// Returns up to [`VACUUM_PAGES`] free pages to the file. The pragma frees one
+/// page per step, so every row it returns is stepped through.
+fn incremental_vacuum(conn: &Connection) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare(&format!("PRAGMA incremental_vacuum({VACUUM_PAGES})"))?;
+    let mut rows = stmt.query([])?;
+    while rows.next()?.is_some() {}
     Ok(())
 }
 
@@ -122,7 +141,9 @@ fn clean(conn: &mut Connection, store: &Path, env: &Env) -> rusqlite::Result<()>
 /// the grace. A root that cannot be checked keeps its row.
 fn dead_worktrees(conn: &Connection, now_ms: i64) -> rusqlite::Result<Vec<(i64, String)>> {
     let mut stmt = conn.prepare(
-        "SELECT id, key, root, MAX(COALESCE(last_run_completed, 0), created_at) FROM worktrees",
+        "SELECT id, key, root,
+                MAX(COALESCE(last_run_completed, 0), COALESCE(last_run_started, 0), created_at)
+         FROM worktrees",
     )?;
     let rows = stmt.query_map([], |r| {
         Ok((
@@ -369,6 +390,14 @@ mod tests {
             0
         );
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM chunks"), 1);
+        let hits = |term: &str| {
+            count(
+                &conn,
+                &format!("SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH '{term}'"),
+            )
+        };
+        assert_eq!(hits("only_a"), 0);
+        assert_eq!(hits("shared"), 1);
     }
 
     #[test]
@@ -713,5 +742,173 @@ mod tests {
         let during = *during.lock().expect("during");
         assert!(during > 0);
         assert!(count(&raw(&f), "PRAGMA freelist_count") < during);
+    }
+
+    #[test]
+    fn the_vacuum_returns_every_page_it_is_allowed_to() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("gc-vacuum-many");
+        f.write("a.rs", "fn a() {}\n");
+        f.run();
+        {
+            let conn = raw(&f);
+            conn.execute_batch("CREATE TABLE junk(x BLOB)")
+                .expect("junk");
+            for _ in 0..200 {
+                conn.execute("INSERT INTO junk VALUES (zeroblob(4096))", [])
+                    .expect("row");
+            }
+            conn.execute_batch("DROP TABLE junk").expect("drop");
+        }
+        let before = count(&raw(&f), "PRAGMA freelist_count");
+        assert!(before > 100, "{before}");
+
+        // Act
+        clean(&f);
+
+        // Assert
+        assert!(count(&raw(&f), "PRAGMA freelist_count") < before - 100);
+    }
+
+    #[test]
+    fn a_dead_worktree_whose_run_lock_is_held_keeps_its_row() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("gc-dead-running");
+        f.write("a.rs", "fn a() {}\n");
+        f.run();
+        add_worktree_row(&f, "busy", "/no/such/root", 0, Some(1));
+        let lock = f.index.with_file_name("busy.lock");
+        let held = std::fs::File::options()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock)
+            .expect("lock");
+        held.try_lock().expect("take");
+
+        // Act
+        clean(&f);
+
+        // Assert
+        assert!(has_worktree(&f, "busy"));
+        assert!(lock.exists());
+        held.unlock().expect("release");
+
+        // Act
+        clean(&f);
+
+        // Assert
+        assert!(!has_worktree(&f, "busy"));
+        assert!(!lock.exists());
+    }
+
+    #[test]
+    fn a_worktree_that_started_a_run_recently_is_not_dead() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("gc-dead-started");
+        f.write("a.rs", "fn a() {}\n");
+        f.run();
+        add_worktree_row(
+            &f,
+            "started",
+            "/no/such/root",
+            NOW - 100 * DEAD_ROOT_GRACE_MS,
+            Some(NOW - 100 * DEAD_ROOT_GRACE_MS),
+        );
+        raw(&f)
+            .execute(
+                "UPDATE worktrees SET last_run_started = ?1 WHERE key = 'started'",
+                [NOW - 1000],
+            )
+            .expect("started");
+
+        // Act
+        clean(&f);
+
+        // Assert
+        assert!(has_worktree(&f, "started"));
+    }
+
+    #[test]
+    fn the_content_of_a_dead_worktree_goes_in_the_same_cleanup() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("gc-dead-content");
+        f.write("a.rs", "fn a() {}\n");
+        f.run();
+        add_worktree_row(&f, "dead", "/no/such/root", 0, Some(1));
+        {
+            let conn = raw(&f);
+            conn.execute(
+                "INSERT INTO content(sha256, grammar, parser, partial) VALUES (?1, 'text', 'p', 0)",
+                [format!("{:0>64}", "dead")],
+            )
+            .expect("content");
+            let content = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO manifest(worktree, path, content, sha256, size, mtime_ns, status)
+                 SELECT id, 'only_dead.rs', ?1, '', 0, 0, 'ok' FROM worktrees WHERE key = 'dead'",
+                [content],
+            )
+            .expect("manifest");
+        }
+        let before = count(&raw(&f), "SELECT COUNT(*) FROM content");
+
+        // Act
+        clean(&f);
+
+        // Assert
+        assert_eq!(count(&raw(&f), "SELECT COUNT(*) FROM content"), before - 1);
+    }
+
+    #[test]
+    fn an_old_store_with_no_sidecars_is_deleted_with_its_lock() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("gc-stale-bare");
+        f.write("a.rs", "fn a() {}\n");
+        f.run();
+        let files = old_store(&f, 3, STALE_STORE_GRACE_MS + 1000);
+        std::fs::remove_file(&files[1]).expect("wal");
+        std::fs::remove_file(&files[2]).expect("shm");
+
+        // Act
+        clean(&f);
+
+        // Assert
+        assert!(!files[0].exists());
+        assert!(!files[3].exists());
+    }
+
+    #[test]
+    fn a_run_passes_its_clock_to_the_cleanup() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("gc-run-clock");
+        f.write("a.rs", "fn a() {}\n");
+        f.run();
+        add_worktree_row(
+            &f,
+            "dead",
+            "/no/such/root",
+            NOW - 100 * DEAD_ROOT_GRACE_MS,
+            None,
+        );
+        let lock = f.index.with_file_name("dead.lock");
+        std::fs::write(&lock, b"").expect("lock");
+        let opts = Options {
+            now_ms: Some(NOW),
+            ..Options::default()
+        };
+
+        // Act
+        index::run(&f.root, &f.index, &f.worktree, false, &opts).expect("run");
+
+        // Assert
+        assert!(!has_worktree(&f, "dead"));
+        assert!(!lock.exists());
     }
 }
