@@ -22,6 +22,21 @@ pub const SCHEMA_VERSION: i64 = 4;
 
 const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
 
+/// The busy timeout of a connection. Debug builds read
+/// `PLAYBOOK_CODE_BUSY_TIMEOUT_MS` so a binary test can hold a write
+/// transaction for longer than the default; a release build ignores it.
+fn busy_timeout() -> Duration {
+    if cfg!(debug_assertions) {
+        if let Some(ms) = std::env::var("PLAYBOOK_CODE_BUSY_TIMEOUT_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+        {
+            return Duration::from_millis(ms);
+        }
+    }
+    BUSY_TIMEOUT
+}
+
 /// How often a query asks for the shared store lock while a rebuild holds the
 /// exclusive one, and the wait between asks.
 const LOCK_POLL_TRIES: u32 = 5;
@@ -515,7 +530,7 @@ fn try_open(path: &Path, mode: OpenMode, hooks: &DbHooks) -> Result<Connection, 
         return Err(DbError::Missing);
     }
     let mut conn = Connection::open(path).map_err(|e| step(path, "open the database", &e))?;
-    conn.busy_timeout(BUSY_TIMEOUT)
+    conn.busy_timeout(busy_timeout())
         .map_err(|e| step(path, "set busy_timeout", &e))?;
     // Read the version before any pragma that writes the header, so a query on
     // an empty or foreign file leaves its bytes alone.

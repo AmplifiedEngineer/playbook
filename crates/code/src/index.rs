@@ -36,6 +36,10 @@ pub struct Options {
     /// The clock of the run in milliseconds since the epoch, for tests. The
     /// run reads the system clock when it is `None`.
     pub now_ms: Option<i64>,
+    /// Called once the store is open and before each write transaction. The
+    /// `code index` command sets it in debug builds, for the two-runs binary
+    /// test.
+    pub before_write: Option<Box<dyn Fn() + Send + Sync>>,
     #[cfg(test)]
     pub hooks: Hooks,
     #[cfg(test)]
@@ -51,6 +55,7 @@ impl Default for Options {
             chunk_lines: 60,
             parser: lang::parser_key(),
             now_ms: None,
+            before_write: None,
             #[cfg(test)]
             hooks: Hooks::default(),
             #[cfg(test)]
@@ -100,6 +105,12 @@ static NO_CLEANUP_HOOKS: cleanup::Hooks = cleanup::Hooks {
 };
 
 impl Options {
+    fn before_write(&self) {
+        if let Some(hook) = &self.before_write {
+            hook();
+        }
+    }
+
     fn now(&self) -> i64 {
         self.now_ms.unwrap_or_else(now_ms)
     }
@@ -728,6 +739,7 @@ fn write_batch(
     replace: bool,
     report: &mut Report,
 ) -> Result<Vec<String>, String> {
+    opts.before_write();
     for attempt in 0..=BATCH_RETRIES {
         let mut staged = Report::default();
         match write_batch_once(conn, batch, opts, wt, replace, &mut staged) {
@@ -958,6 +970,7 @@ pub fn run(
 ) -> Result<Report, String> {
     let _lock = acquire_lock(index, worktree)?;
     let mut conn = db::open_index(index, OpenMode::Index).map_err(|e| e.to_string())?;
+    opts.before_write();
     let mut scope = if conn.recovered() {
         Scope::Store
     } else {

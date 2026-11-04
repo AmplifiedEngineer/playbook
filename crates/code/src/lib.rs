@@ -38,15 +38,18 @@ pub struct IndexOutcome {
 
 /// Builds or refreshes the index for the repository containing `cwd`.
 pub fn index(cwd: &Path, rebuild: bool) -> Result<IndexOutcome, String> {
+    index_with(cwd, rebuild, &index::Options::default())
+}
+
+/// [`index`] with the run's options passed in.
+pub fn index_with(
+    cwd: &Path,
+    rebuild: bool,
+    opts: &index::Options,
+) -> Result<IndexOutcome, String> {
     let root = location::repo_root(cwd)?;
     let index_path = location::index_path()?;
-    let report = index::run(
-        &root,
-        &index_path,
-        &host::worktree_id(),
-        rebuild,
-        &index::Options::default(),
-    )?;
+    let report = index::run(&root, &index_path, &host::worktree_id(), rebuild, opts)?;
     Ok(IndexOutcome { index_path, report })
 }
 

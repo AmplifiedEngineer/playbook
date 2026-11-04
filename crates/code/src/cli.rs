@@ -669,8 +669,26 @@ fn render_status(env: &Env, json: bool) -> Result<String, String> {
     }
 }
 
+/// The options of a `code index` run. In debug builds, when
+/// `PLAYBOOK_CODE_TEST_MARKER` is set, the run prints `marker: ready` the
+/// first time it is about to write, so a binary test can order two runs.
+fn index_options() -> super::index::Options {
+    let mut opts = super::index::Options::default();
+    if cfg!(debug_assertions) && std::env::var_os("PLAYBOOK_CODE_TEST_MARKER").is_some() {
+        let once = std::sync::Once::new();
+        opts.before_write = Some(Box::new(move || {
+            once.call_once(|| {
+                use std::io::Write;
+                println!("marker: ready");
+                let _ = std::io::stdout().flush();
+            });
+        }));
+    }
+    opts
+}
+
 fn render_index(env: &Env, json: bool, rebuild: bool) -> Result<String, String> {
-    let outcome = super::index(&env.cwd, rebuild)?;
+    let outcome = super::index_with(&env.cwd, rebuild, &index_options())?;
     let report = &outcome.report;
     let mut warnings = Vec::new();
     if report.failed > 0 {

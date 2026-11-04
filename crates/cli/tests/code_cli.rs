@@ -765,3 +765,100 @@ fn a_second_worktree_with_the_same_files_reuses_them() {
     assert_eq!(json["results"]["parsed"], 0);
     assert!(String::from_utf8_lossy(&text.stdout).contains("reused: 0"));
 }
+
+impl Fixture {
+    /// Starts `playbook code index` with the debug-only seams on and stdout
+    /// piped, so the test can read the marker while the child waits.
+    fn spawn_index(&self) -> std::process::Child {
+        Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["code", "index"])
+            .current_dir(&self.repo)
+            .env_clear()
+            .env("HOME", &self.home)
+            .env("PATH", &self.bin)
+            .env("PLAYBOOK_CODE_TEST_MARKER", "1")
+            .env("PLAYBOOK_CODE_BUSY_TIMEOUT_MS", "30000")
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("playbook spawns")
+    }
+}
+
+/// Waits for the first stdout line of `child`, at most `limit`.
+fn first_line(child: &mut std::process::Child, limit: std::time::Duration) -> Option<String> {
+    use std::io::BufRead;
+    let stdout = child.stdout.take().expect("piped stdout");
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut reader = std::io::BufReader::new(stdout);
+        let mut line = String::new();
+        let _ = reader.read_line(&mut line);
+        let _ = tx.send(line);
+        // Keep reading, so the child can print its summary without a broken pipe.
+        let _ = std::io::copy(&mut reader, &mut std::io::sink());
+    });
+    rx.recv_timeout(limit).ok()
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn two_worktrees_index_at_the_same_time_once_the_write_lock_frees() {
+    // Arrange
+    let a = Fixture::new("two-runs", true);
+    a.write("a.rs", "fn a() {}\n");
+    let b = a.add_worktree("two-runs-b");
+    b.write("b.rs", "fn b() {}\n");
+    let first = json_of(&a.playbook(&["code", "index", "--json"]));
+    let store = PathBuf::from(first["index"]["path"].as_str().expect("path"));
+    let holder = rusqlite::Connection::open(&store).expect("holder");
+    holder.execute_batch("BEGIN IMMEDIATE").expect("hold");
+    let limit = std::time::Duration::from_secs(10);
+
+    // Act
+    let mut run_a = a.spawn_index();
+    let mut run_b = b.spawn_index();
+    let marker_a = first_line(&mut run_a, limit);
+    let marker_b = first_line(&mut run_b, limit);
+
+    // Assert
+    assert_eq!(marker_a.as_deref(), Some("marker: ready\n"));
+    assert_eq!(marker_b.as_deref(), Some("marker: ready\n"));
+    assert!(run_a.try_wait().expect("poll").is_none(), "a waits");
+    assert!(run_b.try_wait().expect("poll").is_none(), "b waits");
+
+    // Act
+    holder.execute_batch("COMMIT").expect("commit");
+
+    // Assert
+    assert!(run_a.wait().expect("a ends").success());
+    assert!(run_b.wait().expect("b ends").success());
+    let check = rusqlite::Connection::open(&store).expect("check");
+    let rows: i64 = check
+        .query_row("SELECT COUNT(*) FROM worktrees", [], |r| r.get(0))
+        .expect("rows");
+    let integrity: String = check
+        .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+        .expect("integrity");
+    let broken = check
+        .prepare("PRAGMA foreign_key_check")
+        .expect("fk")
+        .query_map([], |r| r.get::<_, String>(0))
+        .expect("rows")
+        .count();
+    assert_eq!((rows, integrity.as_str(), broken), (2, "ok", 0));
+}
+
+#[test]
+fn the_debug_only_seams_do_nothing_in_a_release_build() {
+    // Arrange
+    let fx = Fixture::new("seams", true);
+    fx.write("a.rs", "fn a() {}\n");
+
+    // Act
+    let out = fx.spawn_index().wait_with_output().expect("output");
+
+    // Assert
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(stdout.contains("marker: ready"), cfg!(debug_assertions));
+}
