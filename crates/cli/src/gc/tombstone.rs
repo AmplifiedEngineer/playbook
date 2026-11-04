@@ -65,6 +65,9 @@ pub enum MoveOutcome {
     Busy,
     /// The move was not allowed or could not be recorded; the source is intact.
     Refused(String),
+    /// The tombstone folder cannot be created, so nothing can be moved into it;
+    /// the source is intact.
+    Unavailable(String),
     Failed(String),
 }
 
@@ -236,7 +239,9 @@ fn prepare(env: &Env, req: &MoveRequest, mode: Option<Mode>) -> Result<Record, M
     }
     let now = env.now();
     let date_dir = env.registry.tombstones_dir().join(date_folder(now));
-    fs::create_dir_all(&date_dir).map_err(|e| refused("cannot create the tombstone folder", e))?;
+    fs::create_dir_all(&date_dir).map_err(|e| {
+        MoveOutcome::Unavailable(format!("cannot create the tombstone folder: {e}"))
+    })?;
     let (id, dest) = fresh_id(&date_dir, first, now);
     let fingerprint = measure(present.iter().copied());
     let mode = mode.unwrap_or(if present.iter().all(|p| same_filesystem(p, &date_dir)) {
