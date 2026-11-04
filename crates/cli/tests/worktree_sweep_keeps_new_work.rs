@@ -5,6 +5,7 @@
 //! branch sits at a commit that is already an ancestor of the default branch,
 //! so it read as "merged" before any work existed.
 
+use playbook::worktree::PrState;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -365,5 +366,67 @@ fn many_worktrees_are_judged_side_by_side_but_reported_in_list_order() {
             assert!(line.contains("not landed"), "line {i}: {line}");
         }
     }
+    cleanup(&f);
+}
+
+/// Sweeps `f` with a fake pull request lookup, so no test needs `gh`.
+fn sweep_with_pr(f: &Fixture, branch: &str, state: Option<PrState>) -> String {
+    let lines = playbook::worktree::sweep_with(
+        &f.repo,
+        &f.home,
+        None,
+        false,
+        playbook::common::time::now_secs(),
+        Some(&move |root: &Path, name: &str| {
+            if root == f.repo.as_path() && name == branch {
+                state
+            } else {
+                None
+            }
+        }),
+    )
+    .expect("sweep");
+    lines.join("\n")
+}
+
+#[test]
+fn a_squash_merged_branch_is_removed_once_its_pull_request_is_merged() {
+    let f = fixture("squash");
+    let wt = agent_worktree(&f, "agent-squash");
+    commit_in(&wt, "feature.txt");
+    age(&wt, 1);
+    // The squash commit is not an ancestor of the branch, so git alone keeps it.
+    let kept = sweep_with_pr(&f, "agent-squash", None);
+    assert!(wt.is_dir(), "no PR information: kept as before: {kept}");
+    let out = sweep_with_pr(&f, "agent-squash", Some(PrState::Merged));
+    assert!(!wt.exists(), "merged PR: reaped: {out}");
+    cleanup(&f);
+}
+
+#[test]
+fn an_idle_branch_with_an_open_pull_request_is_kept() {
+    let f = fixture("open-pr");
+    let wt = agent_worktree(&f, "agent-open");
+    age(&wt, 40);
+    let out = sweep_with_pr(&f, "agent-open", Some(PrState::Open));
+    assert!(wt.is_dir(), "an open PR protects an old branch: {out}");
+    let out = sweep_with_pr(&f, "agent-open", None);
+    assert!(
+        !wt.exists(),
+        "without the open PR the idle branch is reaped: {out}"
+    );
+    cleanup(&f);
+}
+
+#[test]
+fn a_merged_pull_request_does_not_remove_a_dirty_worktree() {
+    let f = fixture("merged-dirty");
+    let wt = agent_worktree(&f, "agent-merged-dirty");
+    commit_in(&wt, "feature.txt");
+    age(&wt, 1);
+    fs::write(wt.join("work.txt"), "in progress\n").unwrap();
+    let out = sweep_with_pr(&f, "agent-merged-dirty", Some(PrState::Merged));
+    assert!(wt.join("work.txt").is_file(), "{out}");
+    assert!(out.contains("uncommitted"), "{out}");
     cleanup(&f);
 }

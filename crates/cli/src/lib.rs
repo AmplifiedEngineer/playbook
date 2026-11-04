@@ -790,7 +790,7 @@ pub enum Command {
         #[command(subcommand)]
         sub: ManifestCommand,
     },
-    /// Check agent definition files
+    /// Check agent definition files and show their effort variants
     Agents {
         #[command(subcommand)]
         sub: AgentsCommand,
@@ -802,10 +802,10 @@ pub enum Command {
         #[command(subcommand)]
         sub: GateCommand,
     },
-    /// Index and search the repository's source code
+    /// Index and search the repo's source code
     ///
-    /// The index is a cache kept under the playbook state folder for this
-    /// worktree. Nothing is written inside the repository.
+    /// The index is a cache kept under the playbook state directory for this
+    /// worktree. Nothing is written inside the repo.
     Code {
         #[command(subcommand)]
         sub: CodeCommand,
@@ -1227,6 +1227,8 @@ pub enum SettingsCommand {
     ///
     /// Takes the hooks and status line from the live file and keeps the
     /// permissions of the current seed. Prints the new seed.
+    ///
+    /// Example: `playbook settings gen ~/.claude/settings.json seed/shared-settings.json`
     Gen {
         /// Live settings.json to start from
         src: PathBuf,
@@ -1236,6 +1238,8 @@ pub enum SettingsCommand {
     /// Check the shared settings template is valid
     ///
     /// Exits 0 when valid and 1 with a message when not.
+    ///
+    /// Example: `playbook settings check seed/shared-settings.json .`
     Check {
         /// Shared settings template to check
         template: PathBuf,
@@ -1338,7 +1342,7 @@ pub enum AgentsCommand {
     ///
     /// Exits 0 when all pass and 1 otherwise.
     Check {
-        /// Folder of agent definitions (default: `plugins/playbook/agents` in the repo, else `agents` at the repo root)
+        /// Directory of agent definitions. Defaults to `plugins/playbook/agents` in the repo, else `agents` at the repo root
         agents_dir: Option<PathBuf>,
     },
     /// Show the effort-tier variants a session would get
@@ -1350,12 +1354,12 @@ pub enum AgentsCommand {
     ///
     /// Example: `playbook agents variants --ceiling medium`
     Variants {
-        /// Directory holding the agent definitions, default `plugins/playbook/agents` in the repo, else `<repo root>/agents`.
+        /// Directory of agent definitions. Defaults to `plugins/playbook/agents` in the repo, else `agents` at the repo root
         agents_dir: Option<PathBuf>,
         /// Lowest effort ceiling to apply to every agent (default: none)
         #[arg(long)]
         ceiling: Option<String>,
-        /// auto, all or off (default: auto)
+        /// One of auto, all or off
         #[arg(long, default_value = "auto")]
         mode: String,
         /// Print the `--agents` JSON
@@ -1368,18 +1372,22 @@ pub enum AgentsCommand {
 #[derive(Subcommand, Debug)]
 pub enum SanitizeCommand {
     /// Clean a commit message file, such as git's `.git/COMMIT_EDITMSG`
+    ///
+    /// Example: `playbook sanitize commit-msg .git/COMMIT_EDITMSG`
     CommitMsg {
         /// File holding the message
         file: PathBuf,
-        /// Report what would be removed and exit 1 if anything would, without writing (exits 2 if FILE cannot be read)
+        /// Report what would be removed, without writing. Exits 1 if anything would be removed, and 2 if FILE cannot be read
         #[arg(long)]
         check: bool,
     },
     /// Clean a PR title or body saved to a file
+    ///
+    /// Example: `playbook sanitize pr-text /tmp/body.md`
     PrText {
         /// File holding the text
         file: PathBuf,
-        /// Report what would be removed and exit 1 if anything would, without writing (exits 2 if FILE cannot be read)
+        /// Report what would be removed, without writing. Exits 1 if anything would be removed, and 2 if FILE cannot be read
         #[arg(long)]
         check: bool,
     },
