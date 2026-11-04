@@ -1,0 +1,8 @@
+HTTP/2.0 200 OK
+Cache-Control: private, max-age=60, s-maxage=60
+Etag: W/"b9b252f2233e6b2ba3bbf39faf4eda49d9727e52bafaa59dbacc6880afb47030"
+Link: <https://api.github.com/repositories/ID/issues/comments?since=2026-10-01T00%3A00%3A00Z&sort=updated&direction=asc&per_page=2&page=2>; rel="next", <https://api.github.com/repositories/ID/issues/comments?since=2026-10-01T00%3A00%3A00Z&sort=updated&direction=asc&per_page=2&page=101>; rel="last"
+X-Ratelimit-Limit: 5000
+X-Ratelimit-Remaining: 4989
+X-Ratelimit-Reset: 1793805222
+X-Ratelimit-Resource: core
