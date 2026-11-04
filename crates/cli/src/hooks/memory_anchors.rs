@@ -490,7 +490,7 @@ fn contains_at_boundary(text: &str, token: &str) -> bool {
 }
 
 /// The searchable parts of one prompt.
-struct PromptQuery {
+pub struct PromptQuery {
     /// Words that can match a fact name or description.
     tokens: Vec<String>,
     /// Words that name a crate, for matching the crate folder of an anchor.
@@ -500,7 +500,7 @@ struct PromptQuery {
 }
 
 impl PromptQuery {
-    fn new(prompt: &str) -> Self {
+    pub fn new(prompt: &str) -> Self {
         Self {
             tokens: prompt_tokens(prompt),
             path_tokens: prompt_path_tokens(prompt),
@@ -597,12 +597,19 @@ fn anchor_crate_name(anchor: &str) -> Option<&str> {
 /// match specific enough to trust: a hyphenated name token, two distinct name
 /// tokens, an alias hit, a crate-folder hit, or a touched-file anchor. Anything
 /// else is weak.
-struct RecallMatch {
+pub struct RecallMatch {
     score: usize,
     strong: bool,
     /// Whether the crate-folder bonus is already in `score`.
     path_scored: bool,
     row: Vec<String>,
+}
+
+impl RecallMatch {
+    /// The matched fact's graph id.
+    pub fn fact_id(&self) -> &str {
+        self.row.get(1).map_or("", String::as_str)
+    }
 }
 
 /// Rows whose name or description matches a prompt token, best first: each
@@ -915,6 +922,57 @@ fn git_last_commit_epoch(path: &Path) -> Option<staleness::DateTime> {
         &path,
     ];
     crate::common::git::output(dir, &args)?.parse::<i64>().ok()
+}
+
+/// What the recall quality tests and benchmarks need from the matcher, kept out
+/// of the hook's own surface.
+#[doc(hidden)]
+pub mod recall_harness {
+    use super::{PromptQuery, RecallMatch};
+    use std::path::Path;
+
+    /// A way to pick the facts a prompt could recall, best first.
+    pub trait CandidateSource {
+        fn candidates(&self, query: &PromptQuery, limit: usize) -> Vec<RecallMatch>;
+    }
+
+    /// The shipping matcher: scores every row of a session index.
+    pub struct ScanSource {
+        index: String,
+    }
+
+    impl ScanSource {
+        /// `index` is session index text, one row per line.
+        pub fn new(index: String) -> Self {
+            Self { index }
+        }
+    }
+
+    impl CandidateSource for ScanSource {
+        fn candidates(&self, query: &PromptQuery, limit: usize) -> Vec<RecallMatch> {
+            let mut matches = super::prompt_token_matches(&self.index, query);
+            matches.truncate(limit);
+            matches
+        }
+    }
+
+    /// One session index row for an unanchored fact.
+    pub fn index_row(id: &str, name: &str, description: &str, file: &str) -> String {
+        format!("\t{id}\t{name}\t{description}\t\t{file}\t")
+    }
+
+    /// The session index text for the store at `mem_dir`, as the hook builds it.
+    pub fn index_text(mem_dir: &Path, repo: &str) -> String {
+        super::compute_index_rows(mem_dir, repo).join("\n")
+    }
+
+    /// [`index_text`] for the current user's own store and repo.
+    pub fn own_store_index_text() -> String {
+        index_text(
+            &crate::common::paths::memory_dir(),
+            &crate::common::repo_slug(),
+        )
+    }
 }
 
 /// Build the tab-separated anchor index from `memory.db` for the current
