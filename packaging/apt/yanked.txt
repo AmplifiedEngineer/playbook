@@ -1,0 +1,2 @@
+# Versions left out of the apt and dnf repository, one MAJOR.MINOR.PATCH per line.
+# Add a version in a pull request, then run the release workflow again.

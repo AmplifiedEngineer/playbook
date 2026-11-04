@@ -117,6 +117,12 @@ jobs:
         if: runner.os == 'Linux' && needs.changes.outputs.docs_only != 'true'
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
+      # The package-repo suite builds fake .deb and .rpm files and indexes
+      # them. It skips on a machine without these tools.
+      - name: Install the package repository tools
+        if: runner.os == 'Linux' && needs.changes.outputs.docs_only != 'true'
+        run: sudo apt-get update && sudo apt-get install -y apt-utils createrepo-c rpm
+
       - name: ShellCheck (.sh files)
         # Lint once, on Linux only: shellcheck is not preinstalled on macOS
         # runners and static analysis is platform-independent.
