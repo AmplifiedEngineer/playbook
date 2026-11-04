@@ -340,7 +340,7 @@ fn gh_login() -> String {
 /// the same way it always has: that reaper is the pre-`gh-366` port, kept
 /// only for the tests that still exercise it directly, and is not this
 /// binary's active stale-worktree path any more. The real cleanup now runs
-/// through [`crate::worktree::sweep`] instead, called separately below with
+/// through [`crate::gc::worktrees::sweep_locked`] instead, called separately below with
 /// its own classification-and-landed-signal logic and its own
 /// `worktreeCleanup.*` config gate, in-process rather than as a subprocess.
 fn run_housekeep(repo_root: &Path, worktree_path: &Path, branch: &str, no_push: bool) {
@@ -373,7 +373,13 @@ fn run_housekeep(repo_root: &Path, worktree_path: &Path, branch: &str, no_push: 
     // leave the new worktree unprotected and reapable the instant it looks
     // merged (a fresh branch with no divergent commits is trivially
     // "merged" into its own base).
-    let _ = crate::worktree::sweep(worktree_path, &home, repo_slug, false, now);
+    // A busy gc run means the sweep is skipped, and the next trigger covers it.
+    let _ = crate::gc::worktrees::sweep_locked(
+        &home,
+        &*crate::gc::default_clock(),
+        (worktree_path, repo_slug),
+        false,
+    );
 }
 
 /// Matches the shell's `[[ -n "${VAR:-}" && "$VAR" != "0" ]]` truthiness test

@@ -64,6 +64,8 @@ How the machine works, and why it is shaped this way.
 - [The memory system](internals/13-memory-system.md): the global, org, and project fact store, typed edges, and how it feeds the commands.
 - [Why the pieces are shaped this way](internals/14-why-the-pieces-are-shaped-this-way.md): why commands, skills, agents and hooks are separate, why each model and effort level was chosen, and where to change them.
 - [Codex skills](internals/15-codex-skills.md): where `playbook skills sync` puts the playbook skills for Codex, how names, ownership and rendering work, and what Codex lacks.
+- [Cleanup, tombstones and gc](internals/17-gc-and-tombstones.md): what `playbook gc` removes, how a tombstone is kept and restored, the stores and the build output table.
+- [PR-Agent and the review pipeline](internals/16-pr-agent-and-the-review-pipeline.md): the decision to try PR-Agent's ideas in the playbook review pipeline first, and which ones.
 
 ## Decisions
 
@@ -94,7 +96,7 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0021](adr/0021-reviewer-at-opus-medium.md) | Ship the reviewer agent at Opus medium | Accepted | 2026-10-10 |
 | [0022](adr/0022-effort-auto-tune-from-evidence.md) | Tune effort from local evidence, in three stages | Accepted | 2026-10-10 |
 | [0023](adr/0023-commands-at-medium.md) | Ship the Opus and Sonnet commands at medium | Accepted | 2026-10-11 |
-| [0024](adr/0024-session-management-view-and-lifecycle.md) | Session management view with a derived record and suggest first lifecycle | Proposed | 2026-10-11 |
+| [0024](adr/0024-session-management-view-and-lifecycle.md) | Session management view with a derived record and suggest first lifecycle | Accepted | 2026-10-11 |
 | [0025](adr/0025-self-improving-playbook.md) | A self improving playbook proposes config patches behind a staged trust ladder | Proposed, amended on 2026-10-21 | 2026-10-11 |
 | [0026](adr/0026-local-code-index-in-the-binary.md) | Ship a local code index in the binary, accepting about 5 MB of size | Accepted | 2026-10-12 |
 | [0027](adr/0027-anydoc-as-optional-local-tool.md) | Use anydoc as an optional local tool found on PATH, never vendored | Superseded by 0051 | 2026-10-12 |
@@ -123,3 +125,4 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0050](adr/0050-limits-from-claude-data-not-the-login-token.md) | Derive usage limits from Claude Code's own data, not the login token | Accepted | 2026-10-20 |
 | [0051](adr/0051-bundle-anydoc-as-pbdoc-helper.md) | Bundle the anydoc converter as the pbdoc helper | Accepted | 2026-10-21 |
 | [0055](adr/0055-watch-mode-for-github-events.md) | A polling watch mode for GitHub events, with rules, autonomy levels and a durable queue | Proposed | 2026-10-25 |
+| [0059](adr/0059-tombstone-format.md) | Tombstone format for on disk state | Accepted | 2026-11-05 |

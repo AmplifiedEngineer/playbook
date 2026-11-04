@@ -231,7 +231,7 @@ Spawn a `fact-checker` agent with the record (and blueprint, if any). It verifie
 
 **Record the gate** for `fact-check` against `/tmp/<repo>/adr-<record-slug>-source.fact-check.md` (Gate ledger above). Do this every time Phase 1 returns, including every retry (the recording rule is in the quality-gate reference).
 
-After it returns, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist any durable gotcha as a memory fact, locked append as in Stage 1; otherwise skip that step silently. **FAIL → revise and re-run under the gate loop (`playbook:delegating-subagents`, `references/gate-loop.md`: hard cap 5 rounds, stop at PASS, STUCK on no progress).** A revised record or blueprint means re-writing this phase's own snapshot, and the shared `<gate-source-path>`, before this phase re-runs.
+After it returns, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist any durable gotcha as a memory fact, locked append as in Stage 1; otherwise skip that step silently. **FAIL → revise and re-run under the gate loop (`playbook:delegating-subagents`, `references/gate-loop.md`: hard cap `gate.maxRounds` rounds, stop at PASS, STUCK on no progress).** A revised record or blueprint means re-writing this phase's own snapshot, and the shared `<gate-source-path>`, before this phase re-runs.
 
 ### Phase 2: Adversarial Review
 

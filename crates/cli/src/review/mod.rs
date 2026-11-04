@@ -184,8 +184,13 @@ pub fn prepare(kind: Kind, args: &str, _run_mode_auto: bool) -> Result<String, S
             String::new(),
         )
     } else {
-        let path = crate::worktree::review::setup_with_url(&pr_number, &head_sha, Some(&repo_url))
-            .map_err(|e| format!("worktree setup failed: {e}"))?;
+        let path = crate::worktree::review::setup_with_url(
+            &pr_number,
+            &head_sha,
+            Some(&repo_url),
+            crate::common::time::now_secs(),
+        )
+        .map_err(|e| format!("worktree setup failed: {e}"))?;
         if path.is_empty() {
             return Err("worktree setup failed: no path returned".to_string());
         }

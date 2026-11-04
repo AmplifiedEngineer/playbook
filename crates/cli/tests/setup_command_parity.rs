@@ -184,6 +184,41 @@ fn the_command_quotes_the_welcome() {
     );
 }
 
+#[test]
+fn the_only_help_lists_every_part_id() {
+    // Arrange
+    let mut cmd = Cli::command();
+    let only = cmd
+        .find_subcommand_mut("setup")
+        .expect("setup subcommand")
+        .get_arguments()
+        .find(|a| a.get_id() == "only")
+        .expect("the --only argument")
+        .get_help()
+        .expect("help on --only")
+        .to_string();
+
+    // Act
+    // Match whole ids from the comma separated list, so `path` cannot pass by
+    // sitting inside another word.
+    let listed: Vec<&str> = only
+        .split("comma separated: ")
+        .nth(1)
+        .and_then(|rest| rest.split(". ").next())
+        .expect("the --only help lists its parts")
+        .split(", ")
+        .collect();
+    // A part with no flag runs on every setup, so `--only` never names it.
+    let missing: Vec<&str> = catalog::PARTS
+        .iter()
+        .filter(|p| !p.flags.is_empty() && !listed.contains(&p.id))
+        .map(|p| p.id)
+        .collect();
+
+    // Assert
+    assert!(missing.is_empty(), "--only help lacks {missing:?}");
+}
+
 /// The start of each Step 2 rule that drops retired words.
 const RETIRED_RULE: &str = "- Drop the retired words ";
 
