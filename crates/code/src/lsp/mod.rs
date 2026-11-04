@@ -4,11 +4,13 @@
 //! The language server client and what it rests on: process handling, message
 //! framing and the byte transport.
 
+pub mod archive;
 pub mod client;
 pub mod discover;
 #[cfg(test)]
 pub(crate) mod fake;
 pub mod framing;
+pub mod manifest;
 pub mod process;
 pub mod pyenv;
 pub mod registry;

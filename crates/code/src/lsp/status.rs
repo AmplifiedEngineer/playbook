@@ -6,6 +6,7 @@
 //! workspace, so no trust is needed.
 
 use super::discover::{self, BadPath, Found, PROBE_TIMEOUT};
+use super::manifest::{self, STALE_AFTER_DAYS};
 use super::registry::{Prerequisite, ServerSpec, SERVERS};
 use crate::host::LspSettings;
 use serde_json::{json, Value};
@@ -30,6 +31,8 @@ pub struct Machine {
     pub path_dirs: Vec<PathBuf>,
     pub probe_timeout: Duration,
     pub rust_src: Box<dyn Fn() -> RustSrc>,
+    /// Today as days since 1970-01-01, to age the pinned releases.
+    pub today: i64,
 }
 
 impl Machine {
@@ -38,8 +41,16 @@ impl Machine {
             path_dirs: discover::process_path(),
             probe_timeout: PROBE_TIMEOUT,
             rust_src: Box::new(rust_src_from_rustup),
+            today: today_days(),
         }
     }
+}
+
+fn today_days() -> i64 {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    i64::try_from(secs / 86_400).unwrap_or(0)
 }
 
 /// Asks `rustup` from the temp dir, with auto install off, so a toolchain file
@@ -68,6 +79,25 @@ pub struct ServerStatus {
     pub found: Result<Option<Found>, BadPath>,
     /// Prerequisites not met, in words.
     pub missing: Vec<String>,
+    /// The release playbook would install, when it installs this server.
+    pub pin: Option<PinInfo>,
+}
+
+pub struct PinInfo {
+    pub version: &'static str,
+    pub age_days: i64,
+    /// Older than [`STALE_AFTER_DAYS`]; the only staleness signal for a pin.
+    pub stale: bool,
+}
+
+fn pin_info(spec: &ServerSpec, today: i64) -> Option<PinInfo> {
+    let release = manifest::pin_for(spec.id)?.releases.first()?;
+    let age_days = manifest::age_days(release.released, today);
+    Some(PinInfo {
+        version: release.version,
+        age_days,
+        stale: age_days > STALE_AFTER_DAYS,
+    })
 }
 
 pub fn collect(settings: &LspSettings, machine: &Machine) -> Vec<ServerStatus> {
@@ -77,6 +107,7 @@ pub fn collect(settings: &LspSettings, machine: &Machine) -> Vec<ServerStatus> {
             spec,
             found: discover::find(spec, settings, &machine.path_dirs, machine.probe_timeout),
             missing: missing_prerequisites(spec, machine),
+            pin: pin_info(spec, machine.today),
         })
         .collect()
 }
@@ -162,6 +193,18 @@ pub fn status_text(settings: &LspSettings, statuses: &[ServerStatus]) -> String 
         for need in &status.missing {
             out.push_str(&format!("  missing: {need}\n"));
         }
+        if let Some(pin) = &status.pin {
+            out.push_str(&format!(
+                "  managed pin: {}, {} days old{}\n",
+                pin.version,
+                pin.age_days,
+                if pin.stale {
+                    "; older than a year, check for a newer release"
+                } else {
+                    ""
+                }
+            ));
+        }
     }
     out
 }
@@ -196,6 +239,9 @@ fn server_json(status: &ServerStatus) -> Value {
         "license": status.spec.license,
         "missing": status.missing,
     });
+    if let Some(pin) = &status.pin {
+        doc["pin"] = json!({"version": pin.version, "age_days": pin.age_days, "stale": pin.stale});
+    }
     match &status.found {
         Ok(Some(found)) => {
             doc["found"] = json!(true);
@@ -238,6 +284,7 @@ mod tests {
             path_dirs,
             probe_timeout: Duration::from_secs(10),
             rust_src: Box::new(move || rust_src),
+            today: manifest::days_from_civil((2026, 11, 5)),
         }
     }
 
@@ -331,6 +378,26 @@ mod tests {
         assert_eq!(ra["source"], "config");
         assert_eq!(ra["version"], "rust-analyzer 9.9");
         assert_eq!(ra["path"], fake.display().to_string());
+    }
+
+    #[test]
+    fn a_pin_is_flagged_only_after_a_year() {
+        for (age, stale) in [(365, false), (366, true)] {
+            // Arrange
+            let released = manifest::pin_for("pyright").unwrap().releases[0].released;
+            let mut m = machine(vec![], RustSrc::Present);
+            m.today = manifest::days_from_civil(released) + age;
+
+            // Act
+            let statuses = collect(&LspSettings::default(), &m);
+            let text = status_text(&LspSettings::default(), &statuses);
+
+            // Assert
+            let pin = find(&statuses, "pyright").pin.as_ref().unwrap();
+            assert_eq!((pin.age_days, pin.stale), (age, stale));
+            assert_eq!(text.contains("check for a newer release"), stale, "{age}");
+            assert!(find(&statuses, "gopls").pin.is_none());
+        }
     }
 
     #[test]

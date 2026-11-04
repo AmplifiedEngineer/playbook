@@ -34,3 +34,9 @@ SOFTWARE.
 The pbdoc document converter, built from the same repository, links further
 third-party crates. Their names, versions and licences, with copyright lines, are
 listed in NOTICE-pbdoc.
+
+This product includes flate2 (https://github.com/rust-lang/flate2-rs) and tar
+(https://github.com/alexcrichton/tar-rs), Copyright their respective authors,
+each licensed under the MIT License or the Apache License, Version 2.0, at your
+option. They unpack the language server archives that `playbook code`
+downloads.
