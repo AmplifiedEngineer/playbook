@@ -14,6 +14,7 @@ use super::{Due, Item, Store};
 
 const SECS_PER_DAY: i64 = 86_400;
 const LOG_FILES: [&str; 2] = ["collector.log", "collector-service.log"];
+const STAGING_SUFFIX: &str = ".gc-rotate.tmp";
 const SERVICE_LOG: &str = "collector-service.log";
 /// Whether the service manager opens `collector-service.log` in append mode.
 /// systemd's `append:` does; launchd's behaviour is unconfirmed, so until it is
@@ -36,22 +37,12 @@ pub struct RealLogFs;
 
 impl LogFs for RealLogFs {
     fn copy(&self, from: &Path, to: &Path) -> io::Result<()> {
-        // A leftover or planted file at `to` is removed (a symlink is removed
-        // itself, not followed), and the new file must not already exist, so
-        // the copy can never write through a link.
-        match fs::remove_file(to) {
-            Ok(()) => {}
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-            Err(err) => return Err(err),
-        }
+        // `create_new` fails on any existing name, a symlink included, so the
+        // copy can never write through a link. A leftover from a crashed run
+        // is cleared by the apply run through the guard, before this call.
         let mut src = fs::File::open(from)?;
         let mut dst = fs::File::options().write(true).create_new(true).open(to)?;
-        if let Err(err) = io::copy(&mut src, &mut dst) {
-            drop(dst);
-            let _ = fs::remove_file(to);
-            return Err(err);
-        }
-        Ok(())
+        io::copy(&mut src, &mut dst).map(|_| ())
     }
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         fs::rename(from, to)
@@ -78,6 +69,12 @@ pub fn append_confirmed(log: &Path) -> bool {
     log.file_name().is_some_and(|name| name != SERVICE_LOG) || SERVICE_LOG_APPEND_CONFIRMED
 }
 
+/// The file `rotate` stages its copy in. The apply run clears a leftover one
+/// through the guard before it rotates.
+pub fn staging_of(log: &Path) -> PathBuf {
+    sibling(log, STAGING_SUFFIX)
+}
+
 fn sibling(log: &Path, suffix: &str) -> PathBuf {
     let mut name = log.as_os_str().to_owned();
     name.push(suffix);
@@ -91,7 +88,7 @@ pub fn rotate(log: &Path, fs: &dyn LogFs, append_confirmed: bool) -> io::Result<
         return Ok(Rotation::SkippedUnconfirmed);
     }
     let len_before = fs.len(log)?;
-    let staged = sibling(log, ".gc-rotate.tmp");
+    let staged = staging_of(log);
     fs.copy(log, &staged)?;
     fs.after_copy(log);
     fs.rename(&staged, &sibling(log, ".1"))?;
@@ -229,15 +226,15 @@ mod tests {
         let target = root.join("victim.txt");
         fs::write(&target, "keep me").unwrap();
         let path = log(&root, "collector.log", 10, 0);
-        std::os::unix::fs::symlink(&target, sibling(&path, ".gc-rotate.tmp")).unwrap();
+        std::os::unix::fs::symlink(&target, staging_of(&path)).unwrap();
 
         // Act
-        let result = rotate(&path, &RealLogFs, true).unwrap();
+        let result = rotate(&path, &RealLogFs, true);
 
         // Assert
-        assert_eq!(result, Rotation::Rotated);
+        assert!(result.is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), "keep me");
-        assert_eq!(fs::metadata(sibling(&path, ".1")).unwrap().len(), 10);
+        assert_eq!(fs::metadata(&path).unwrap().len(), 10);
     }
 
     #[test]
