@@ -57,10 +57,18 @@ impl<R: Copy + Ord> DotGrid<R> {
         cell.1 = cell.1.max(Some(role));
     }
 
-    /// Sets the dots on the straight line between two dots, ends included.
+    /// Sets the dots on the straight line between two dots, ends included. An
+    /// end outside the grid is moved to the nearest edge dot first, so the work
+    /// is bounded by the grid size.
     pub fn line(&mut self, from: (usize, usize), to: (usize, usize), role: R) {
-        let (mut x, mut y) = (from.0 as isize, from.1 as isize);
-        let (x1, y1) = (to.0 as isize, to.1 as isize);
+        let (Some(last_x), Some(last_y)) = (
+            self.dot_width().checked_sub(1),
+            self.dot_height().checked_sub(1),
+        ) else {
+            return;
+        };
+        let clip = |(x, y): (usize, usize)| (x.min(last_x) as isize, y.min(last_y) as isize);
+        let ((mut x, mut y), (x1, y1)) = (clip(from), clip(to));
         let (dx, dy) = ((x1 - x).abs(), -(y1 - y).abs());
         let (sx, sy) = ((x1 - x).signum(), (y1 - y).signum());
         let mut err = dx + dy;
@@ -83,7 +91,10 @@ impl<R: Copy + Ord> DotGrid<R> {
 
     /// Sets column `x` from dot row `top` down to and including `bottom`.
     pub fn fill_column(&mut self, x: usize, top: usize, bottom: usize, role: R) {
-        for y in top..=bottom {
+        if x >= self.dot_width() || self.dot_height() == 0 {
+            return;
+        }
+        for y in top..=bottom.min(self.dot_height() - 1) {
             self.set(x, y, role);
         }
     }
@@ -190,6 +201,55 @@ mod tests {
         // Assert
         assert_ne!(mask(grid.cell(0, 0).unwrap().0) & 0x01, 0, "first dot");
         assert_ne!(mask(grid.cell(1, 1).unwrap().0) & 0x80, 0, "last dot");
+    }
+
+    #[test]
+    fn a_reversed_diagonal_sets_the_same_dots_as_the_forward_one() {
+        let mut forward = DotGrid::new(2, 1);
+        let mut backward = DotGrid::new(2, 1);
+
+        forward.line((0, 0), (3, 3), 0u8);
+        backward.line((3, 3), (0, 0), 0u8);
+
+        assert_eq!(forward.cell(0, 0), backward.cell(0, 0));
+        assert_eq!(forward.cell(1, 0), backward.cell(1, 0));
+        assert_eq!(mask(forward.cell(0, 0).unwrap().0), 0x01 | 0x10);
+        assert_eq!(mask(forward.cell(1, 0).unwrap().0), 0x04 | 0x80);
+    }
+
+    #[test]
+    fn a_bottom_to_top_line_sets_both_ends() {
+        let mut grid = DotGrid::new(1, 1);
+
+        grid.line((1, 3), (0, 0), 0u8);
+
+        let m = mask(grid.cell(0, 0).unwrap().0);
+        assert_ne!(m & 0x01, 0, "top left dot");
+        assert_ne!(m & 0x80, 0, "bottom right dot");
+    }
+
+    #[test]
+    fn a_line_and_a_column_past_the_grid_stay_inside_it_and_finish() {
+        let mut grid = DotGrid::new(1, 1);
+
+        grid.line((0, 0), (usize::MAX, usize::MAX), 0u8);
+        grid.fill_column(0, 0, usize::MAX, 1);
+        grid.fill_column(5, 0, 3, 2);
+        DotGrid::<u8>::new(0, 0).line((0, 0), (usize::MAX, 1), 0);
+
+        let (glyph, role) = grid.cell(0, 0).unwrap();
+        assert_eq!(role, 1);
+        assert_eq!(mask(glyph) & 0x47, 0x47, "left column filled");
+        assert_ne!(mask(glyph) & 0x80, 0, "line reached the corner dot");
+    }
+
+    #[test]
+    fn a_column_with_top_below_bottom_sets_nothing() {
+        let mut grid = DotGrid::new(1, 1);
+
+        grid.fill_column(0, 3, 1, 0u8);
+
+        assert_eq!(grid.cell(0, 0), None);
     }
 
     #[test]
