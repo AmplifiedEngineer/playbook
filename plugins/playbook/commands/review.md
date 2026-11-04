@@ -51,7 +51,7 @@ A depth from `--quick`, `--deep`, `--all` or `--preset` is the user's choice: ru
 
 Only for a PR target. A local branch with no PR skips this step.
 
-Intent: pr-stack. If the session's tool map lists it, use that command with the arguments as one quoted string: `"<PR> --json"`. Otherwise do this: detect the stack by hand as `skills/grounding-review/references/stack-review.md` section 1 describes. If both fail, or the JSON has `in_stack: false`, say nothing about stacks and go on to Step 2: the scope is `not a stack`.
+Intent: pr-stack. If the session's tool map lists it, use that command with the arguments as one quoted string: `"<PR> --json"`. Otherwise do this: detect the stack by hand as `skills/grounding-review/references/stack-review.md` section 1 describes. If both fail, or the JSON has `in_stack: false`, say nothing about stacks. The scope is `not a stack`. Go on as Step 1 says: to Step 5 with a depth flag, else to Step 2.
 
 If the given PR's `role` is `context` or `skip`, say so in one line and stop: there is nothing to review on it.
 
