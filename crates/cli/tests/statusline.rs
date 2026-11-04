@@ -1029,3 +1029,190 @@ fn the_five_hour_alarm_is_dropped_whole_when_the_line_is_too_narrow() {
     let lines = both_alarm_lines(Some("35"));
     assert_eq!(lines.last().unwrap(), "! 7d cap in 2d3h", "{lines:?}");
 }
+
+// ---- line 4: the Enterprise monthly spend limit ----------------------------
+
+/// The Enterprise usage cache shape: no windows, a 1500.00 USD limit, 986.40
+/// used, fetched at `FETCHED`.
+const ENTERPRISE_CACHE: &str =
+    include_str!("../../telemetry/tests/fixtures/spend/enterprise-usage-based.json");
+/// `fetchedAtMs` of the fixture in seconds: 2026-09-03 UTC.
+const FETCHED: i64 = 1_788_400_000;
+const HOUR_SECS: i64 = 3600;
+/// The 10d14h age of the owner's stale cache.
+const STALE_AGE: i64 = 10 * DAY_SECS + 14 * HOUR_SECS;
+/// The longest `.claude.json` that is read: 512 KiB.
+const MAX_CONFIG_BYTES: usize = 512 * 1024;
+
+/// Colour-stripped output lines for a payload at `now`, with `cache` as the
+/// Claude config file and `budget` as `usage.budget.monthlyUsd` when given.
+fn monthly_lines(
+    cache: Option<&str>,
+    budget: Option<u32>,
+    members: &str,
+    now: i64,
+    columns: Option<&str>,
+) -> Vec<String> {
+    let s = Scratch::new();
+    if let Some(cache) = cache {
+        std::fs::write(s.0.join(".claude.json"), cache).unwrap();
+    }
+    if let Some(usd) = budget {
+        let dir = s.0.join(".config/playbook");
+        std::fs::create_dir_all(&dir).unwrap();
+        let body = format!(r#"{{"usage":{{"budget":{{"monthlyUsd":{usd}}}}}}}"#);
+        std::fs::write(dir.join("config.json"), body).unwrap();
+    }
+    let body = payload(&s.0, members);
+    let out = render(&body, &env_with_columns(&s.0, columns), now);
+    strip_ansi(&text(&out))
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+fn enterprise(budget: Option<u32>, age: i64) -> Vec<String> {
+    monthly_lines(Some(ENTERPRISE_CACHE), budget, "", FETCHED + age, None)
+}
+
+#[test]
+fn a_fresh_enterprise_cache_on_pace_to_pass_the_limit_alarms_with_the_time_left() {
+    let lines = enterprise(None, HOUR_SECS);
+    assert_eq!(
+        lines.last().unwrap(),
+        "! $986/$1500 mo, cap in 1d2h",
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn a_lower_own_budget_is_the_limit_and_says_so() {
+    let lines = enterprise(Some(1000), HOUR_SECS);
+    assert_eq!(
+        lines.last().unwrap(),
+        "! $986/$1000 mo budget, cap in 42m",
+        "{lines:?}"
+    );
+    let lines = enterprise(Some(900), HOUR_SECS);
+    assert_eq!(
+        lines.last().unwrap(),
+        "! $986/$900 mo budget CAP HIT",
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn a_stale_cache_shows_its_age_and_makes_no_projection() {
+    let lines = enterprise(None, STALE_AGE);
+    assert_eq!(
+        lines.last().unwrap(),
+        "$986/$1500 mo (10d14h old)",
+        "{lines:?}"
+    );
+    let lines = enterprise(Some(1000), STALE_AGE);
+    assert_eq!(
+        lines.last().unwrap(),
+        "$986/$1000 mo budget (10d14h old)",
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn a_stale_cache_over_an_own_budget_still_says_the_cap_was_hit() {
+    // Spend only grows within a month, so a stale figure over the limit holds.
+    let lines = enterprise(Some(900), STALE_AGE);
+    assert_eq!(
+        lines.last().unwrap(),
+        "! $986/$900 mo budget CAP HIT (10d14h old)",
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn a_cache_from_an_earlier_month_adds_no_line() {
+    let lines = enterprise(None, 40 * DAY_SECS);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+}
+
+#[test]
+fn an_enterprise_seat_never_gets_a_five_hour_or_not_known_note() {
+    for age in [HOUR_SECS, STALE_AGE] {
+        let lines = enterprise(None, age).join("\n");
+        assert!(
+            !lines.contains("5h") && !lines.contains("not known"),
+            "{lines}"
+        );
+    }
+}
+
+#[test]
+fn a_missing_or_corrupt_config_file_adds_no_line() {
+    for cache in [None, Some("{not json"), Some("{}")] {
+        let lines = monthly_lines(cache, None, "", FETCHED + HOUR_SECS, None);
+        assert_eq!(lines.len(), 1, "{cache:?} {lines:?}");
+    }
+}
+
+/// The fixture padded with a string member to exactly `len` bytes.
+fn padded(len: usize) -> String {
+    let base = ENTERPRISE_CACHE.trim_end();
+    let head = &base[..base.len() - 1];
+    let fill = len - head.len() - r#","pad":"""#.len() - 1;
+    format!(r#"{head},"pad":"{}"}}"#, "x".repeat(fill))
+}
+
+#[test]
+fn a_config_file_over_the_size_cap_is_skipped_and_one_at_the_cap_is_read() {
+    let at_cap = monthly_lines(
+        Some(&padded(MAX_CONFIG_BYTES)),
+        None,
+        "",
+        FETCHED + HOUR_SECS,
+        None,
+    );
+    assert_eq!(at_cap.len(), 2, "{at_cap:?}");
+    let over = monthly_lines(
+        Some(&padded(MAX_CONFIG_BYTES + 1)),
+        None,
+        "",
+        FETCHED + HOUR_SECS,
+        None,
+    );
+    assert_eq!(over.len(), 1, "{over:?}");
+}
+
+#[test]
+fn a_gateway_figure_on_stdin_wins_over_the_cache() {
+    let now = FETCHED + HOUR_SECS;
+    let members = format!(
+        r#""rate_limits":{{"spend_limit":{{"used_percentage":82,"resets_at":{},"used_usd":410,"limit_usd":500,"period":"monthly"}}}}"#,
+        now + 10 * DAY_SECS
+    );
+    let lines = monthly_lines(Some(ENTERPRISE_CACHE), None, &members, now, None);
+    assert!(
+        lines.last().unwrap().starts_with("! $410/$500 mo"),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn the_monthly_figure_drops_its_words_before_the_seven_day_alarm_goes() {
+    let now = FETCHED + HOUR_SECS;
+    let members = format!(
+        r#""rate_limits":{{"seven_day":{{"used_percentage":60,"resets_at":{}}}}}"#,
+        now + 7 * DAY_SECS - 275_400
+    );
+    let seven = "! 7d cap in 2d3h";
+    let wide = monthly_lines(Some(ENTERPRISE_CACHE), None, &members, now, None);
+    assert_eq!(
+        wide.last().unwrap(),
+        &format!("{seven} | ! $986/$1500 mo, cap in 1d2h")
+    );
+    let narrow = monthly_lines(Some(ENTERPRISE_CACHE), None, &members, now, Some("36"));
+    assert_eq!(
+        narrow.last().unwrap(),
+        &format!("{seven} | ! $986/$1500 mo")
+    );
+    let tight = monthly_lines(Some(ENTERPRISE_CACHE), None, &members, now, Some("20"));
+    assert_eq!(tight.last().unwrap(), seven);
+}
