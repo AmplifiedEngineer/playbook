@@ -2159,12 +2159,21 @@ fn real_main() {
             let repo_root = std::env::current_dir().unwrap_or_default();
             match sub {
                 WorktreeCommand::Sweep { dry_run } => {
-                    let now_epoch = crate::common::time::now_secs();
-                    match worktree::sweep(&repo_root, &home, repo_slug, dry_run, now_epoch) {
-                        Ok(report) => {
+                    let clock = playbook::gc::default_clock();
+                    match playbook::gc::worktrees::sweep_locked(
+                        &home,
+                        &*clock,
+                        (&repo_root, repo_slug),
+                        dry_run,
+                    ) {
+                        Ok(playbook::gc::worktrees::SweepRun::Swept(report)) => {
                             for line in report {
                                 println!("{line}");
                             }
+                        }
+                        Ok(playbook::gc::worktrees::SweepRun::Busy) => {
+                            eprintln!("worktree sweep: gc is running; try again in a moment");
+                            std::process::exit(1);
                         }
                         Err(err) => {
                             eprintln!("worktree sweep: {err}");

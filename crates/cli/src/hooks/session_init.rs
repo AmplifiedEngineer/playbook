@@ -670,9 +670,13 @@ fn maybe_sweep_worktrees(home: &str, repo_root: &str) {
     // partway through still rate-limits the next run, rather than retrying
     // the same destructive pass on every SessionStart until one finishes.
     let _ = crate::state::set(&root, &marker, &now_epoch.to_string());
-    if let Err(err) =
-        crate::worktree::sweep(Path::new(repo_root), home, repo_slug_opt, false, now_epoch)
-    {
+    let clock = crate::gc::default_clock();
+    if let Err(err) = crate::gc::worktrees::sweep_locked(
+        home,
+        &*clock,
+        (Path::new(repo_root), repo_slug_opt),
+        false,
+    ) {
         eprintln!("worktree-sweep: {err}");
     }
 }
