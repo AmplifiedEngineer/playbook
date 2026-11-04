@@ -147,7 +147,7 @@ fn tag(origin: Origin, stale: bool, cache_age: Option<i64>) -> String {
         (Origin::Measured, true) => "measured, stale".to_string(),
         (Origin::Measured, _) => "measured".to_string(),
         // A manual budget is counted against the transcripts of this machine.
-        (Origin::Manual, _) => "manual, this machine only".to_string(),
+        (Origin::Manual, _) => "manual, local".to_string(),
         (Origin::Cached, _) => match cache_age {
             // Past the freshness limit the cache's used amount is dropped and
             // the bar shows this machine's estimate, which misses other
@@ -262,7 +262,10 @@ fn reported_line(v: &LimitsView, now: i64) -> Option<String> {
         .find(|l| l.period == LimitPeriod::Monthly && l.unit == Unit::Dollars)?;
     let age = (now - read_at).max(0);
     let stale = age > STALE_SECONDS;
-    if monthly.origin == Origin::Measured || (monthly.origin == Origin::Cached && !stale) {
+    // The bar of a fresh cache already shows the newest figure, whichever
+    // source the reported one came from.
+    let fresh_cache = v.cache_age.is_some_and(|a| a <= STALE_SECONDS);
+    if monthly.origin == Origin::Measured || (monthly.origin == Origin::Cached && fresh_cache) {
         return None;
     }
     Some(format!(

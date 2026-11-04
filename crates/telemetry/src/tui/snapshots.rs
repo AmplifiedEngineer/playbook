@@ -380,7 +380,7 @@ fn the_budget_panel_shows_a_manual_limit_and_says_so() {
         Range::CurrentMonth,
     );
     let text = draw(&a, 160, 50);
-    assert!(text.contains("[manual, this machine only]"));
+    assert!(text.contains("[manual, local]"));
     assert!(text.contains("[local history]"));
     check("budget_manual_160x50", &text);
 }
@@ -1202,6 +1202,24 @@ fn a_stale_reported_figure_is_shown_with_its_age_beside_this_machines_estimate()
         "{text}"
     );
     assert!(text.contains("/usage"), "{text}");
+}
+
+#[test]
+fn a_manual_bar_gets_the_reported_figure_line_without_stale_when_it_is_fresh() {
+    let mut s = with_reported(enterprise_sources(600), 120.0);
+    if let Some(c) = s.account.cache.as_mut() {
+        c.spend = None;
+    }
+    s.budgets = vec![(LimitPeriod::Monthly, 40.0)];
+    let a = with_sources(tabbed(1), &s, Range::LastDays(30));
+
+    let text = draw(&a, 140, 40);
+
+    assert!(text.contains("[manual, local]"), "{text}");
+    assert!(
+        text.contains("Claude reported $120.00 used this month, read 10m ago;"),
+        "{text}"
+    );
 }
 
 #[test]
