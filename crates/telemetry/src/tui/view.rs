@@ -200,9 +200,11 @@ pub fn place(area: Rect, ids: &[PanelId], rows: Option<&[u8]>, tabbed: bool) -> 
         .copied()
         .filter(|id| *id != PanelId::Budget)
         .collect();
-    let arranged = rows
-        .map(|r| body_rows(ids, r))
-        .filter(|r| !r.is_empty() && body.height >= MIN_ROW_HEIGHT * r.len() as u16);
+    let arranged = rows.map(|r| body_rows(ids, r)).filter(|r| {
+        !r.is_empty()
+            && r.iter().sum::<usize>() == shown.len()
+            && body.height >= MIN_ROW_HEIGHT * r.len() as u16
+    });
     let rects = match arranged {
         Some(r) => tile(body, &r.iter().map(|n| (*n, 1)).collect::<Vec<_>>()),
         None => grid(body, shown.len()),
@@ -1485,20 +1487,32 @@ mod tests {
     }
 
     #[test]
-    fn explicit_rows_tile_the_body_with_a_wide_panel_under_a_pair() {
-        // Arrange
+    fn explicit_rows_tile_the_body_with_a_wide_panel_over_a_pair() {
+        // Arrange: the auto grid for 3 panels puts the pair on top instead.
         let area = Rect::new(0, 0, 100, 30);
         let ids = [PanelId::Spend, PanelId::Tokens, PanelId::Models];
 
         // Act
-        let placed = assert_tiles_body(area, &ids, Some(&[2, 1]));
+        let placed = assert_tiles_body(area, &ids, Some(&[1, 2]));
 
         // Assert
         let rect = |i: usize| placed.panels[i].1;
-        assert_eq!(rect(0).y, rect(1).y);
-        assert_eq!(rect(0).width + rect(1).width, 100);
-        assert_eq!(rect(2).width, 100);
-        assert_eq!(rect(2).y, rect(0).bottom());
+        assert_eq!(rect(0).width, 100);
+        assert_eq!(rect(1).y, rect(0).bottom());
+        assert_eq!(rect(1).y, rect(2).y);
+        assert_eq!(rect(1).width + rect(2).width, 100);
+        assert_ne!(placed.panels, place(area, &ids, None, true).panels);
+    }
+
+    #[test]
+    fn explicit_rows_that_do_not_add_up_to_the_panels_use_the_auto_grid() {
+        let area = Rect::new(0, 0, 100, 30);
+        let ids = [PanelId::Spend, PanelId::Tokens, PanelId::Models];
+
+        let short = place(area, &ids, Some(&[1, 1]), true);
+        let auto = place(area, &ids, None, true);
+
+        assert_eq!(short.panels, auto.panels);
     }
 
     #[test]
@@ -1508,11 +1522,13 @@ mod tests {
         let ids = [PanelId::Spend, PanelId::Tokens, PanelId::Models];
 
         // Act
-        let rows = place(area, &ids, Some(&[2, 1]), true);
+        let rows = place(area, &ids, Some(&[1, 1, 1]), true);
         let auto = place(area, &ids, None, true);
+        let tall = place(Rect::new(0, 0, 100, 40), &ids, Some(&[1, 1, 1]), true);
 
         // Assert
         assert_eq!(rows.panels, auto.panels);
+        assert!(tall.panels.iter().all(|(_, r)| r.width == 100));
     }
 
     #[test]
@@ -1530,7 +1546,7 @@ mod tests {
     }
 
     #[test]
-    fn seven_to_nine_panels_all_get_a_place_and_one_to_six_keep_theirs() {
+    fn seven_and_eight_panels_all_get_a_place() {
         // Arrange
         let area = Rect::new(0, 0, 120, 40);
         let panels = NINE.iter().copied().filter(|p| *p != PanelId::Budget);
