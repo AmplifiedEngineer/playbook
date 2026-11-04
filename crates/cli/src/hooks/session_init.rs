@@ -382,7 +382,7 @@ fn append_memory_context(extra_context: &mut String, repo_root: &str) {
 /// `source: "clear"` and `"compact"`: this is called unconditionally regardless
 /// of `.source`.
 /// The shared `crate::handoff` module keys, loads, and archives them: up to
-/// three fresh ones are injected and moved to `handoff/used/`, stale and
+/// three fresh ones are injected and tombstoned by gc, stale and
 /// over-cap ones are removed. Returns how many were injected. Never panics.
 fn append_handoff_slice(extra_context: &mut String, source: &str, session_id: &str) -> usize {
     let slug = crate::handoff::current_slug();
@@ -391,7 +391,7 @@ fn append_handoff_slice(extra_context: &mut String, source: &str, session_id: &s
     }
     let taken = crate::handoff::take_in(&crate::handoff::root(), &slug, SystemTime::now());
     // Leave the memory block its share of the cap. The handoff files are
-    // archived under `handoff/used/` once taken, so a cut loses nothing.
+    // tombstoned by gc once taken, so a cut loses nothing.
     let budget = handoff_room(extra_context).max(MIN_HANDOFF_CHARS) / taken.contents.len().max(1);
     for (i, contents) in taken.contents.iter().enumerate() {
         let contents = &fit_handoff(contents, budget);
@@ -481,7 +481,7 @@ const MIN_HANDOFF_CHARS: usize = 3000;
 const BLOCK_SEPARATOR_CHARS: usize = 2;
 
 const HANDOFF_CUT_NOTE: &str =
-    "\n[handoff cut to fit the hook output cap; the full text is under the handoff used directory]";
+    "\n[handoff cut to fit the hook output cap; the full text is in the gc tombstone folder; run `playbook handoff show`]";
 
 /// `text`, or its leading `budget` characters plus a note when longer.
 fn fit_handoff(text: &str, budget: usize) -> String {

@@ -112,7 +112,9 @@ fn run_stores(
             match move_locked(env, &req, None) {
                 MoveOutcome::Moved { .. } => out.tombstoned += 1,
                 MoveOutcome::Busy => {}
-                MoveOutcome::Refused(why) | MoveOutcome::Failed(why) => {
+                MoveOutcome::Refused(why)
+                | MoveOutcome::Unavailable(why)
+                | MoveOutcome::Failed(why) => {
                     out.failures.push(format!("{}: {why}", item.path.display()))
                 }
             }

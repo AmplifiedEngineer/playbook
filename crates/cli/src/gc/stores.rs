@@ -219,6 +219,11 @@ fn store(
     }
 }
 
+/// Days a loaded handoff stays restorable, from `gc.handoffGraceDays`.
+pub fn handoff_grace_days(home: &Path) -> u32 {
+    configured_number(home, "gc.handoffGraceDays")
+}
+
 /// The stores of this unit, with their limits read from the config under
 /// `home`.
 pub fn small_stores(home: &Path) -> Vec<Store> {
