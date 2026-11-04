@@ -765,6 +765,7 @@ fn create_skips_the_clone_when_target_is_not_git_ignored() {
     assert!(!path.join("target").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn create_leaves_no_partial_target_when_the_clone_fails() {
     // Arrange: an unreadable artifact makes the copy fail midway
