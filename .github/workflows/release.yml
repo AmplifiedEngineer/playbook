@@ -2310,3 +2310,148 @@ jobs:
           }
           if (-not $ok) { Get-Content (Join-Path $env:USERPROFILE 'scoop\buckets\playbook\bucket\playbook.json'); throw "the bucket did not give playbook $env:VERSION" }
           "scoop installed playbook $env:VERSION from the bucket." | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+
+  # Opens a pull request to microsoft/winget-pkgs for the Windows .exe
+  # (ADR 0053, Windows is experimental). It checks SHA256SUMS and the .exe
+  # against their attestation, has wingetcreate write the manifest, compares
+  # the installer hash in that manifest with the attested one, and only then
+  # submits. winget moderators decide the rest, so the job ends at the pull
+  # request. It skips when the release is not the latest, when the version
+  # already has a pull request, and, with a warning, while the WINGET_PAT
+  # secret of environment `winget` is not set. The first manifest is made and
+  # landed by hand, because `update` needs an accepted package. A dry run
+  # prints the command and opens nothing. Audit mode for harden-runner, as in
+  # verify-scoop: a Windows block list written from reasoning could fail a
+  # release.
+  winget:
+    needs: [plan, verify]
+    if: >-
+      ${{ !cancelled()
+      && github.event_name == 'workflow_dispatch'
+      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      && (needs.plan.outputs.dry_run == 'true' || needs.verify.result == 'success') }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    environment: winget
+    permissions:
+      contents: read
+      attestations: read
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_REF: refs/heads/${{ github.event.repository.default_branch }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      DRY_RUN: ${{ needs.plan.outputs.dry_run }}
+      PACKAGE_ID: PragmaticEngineer.Playbook
+      # microsoft/winget-create, wingetcreate.exe at this release.
+      WINGETCREATE_VERSION: v1.12.13.0
+      WINGETCREATE_SHA256: 24042bd37915805615e6cf969ac57c6439124c3fe85823327f5f3fb24bd9ffea
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+
+      - name: Check the secret and the release
+        id: gate
+        env:
+          WINGET_PAT: ${{ secrets.WINGET_PAT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = "playbook-$env:VERSION-x86_64-pc-windows-msvc.exe"
+          $url = "https://github.com/$env:GH_REPO/releases/download/$env:TAG/$exe"
+          $title = "New version: $env:PACKAGE_ID version $env:VERSION"
+          "url=$url" >> $env:GITHUB_OUTPUT
+          "exe=$exe" >> $env:GITHUB_OUTPUT
+          "title=$title" >> $env:GITHUB_OUTPUT
+          "run=false" >> $env:GITHUB_OUTPUT
+          if ($env:DRY_RUN -eq 'true') {
+            "## winget dry run`n`nWould run ``wingetcreate update $env:PACKAGE_ID --version $env:VERSION --urls '$url|x64'``, compare the installer hash with SHA256SUMS, then submit with the title ``$title``. Nothing is opened." >> $env:GITHUB_STEP_SUMMARY
+            exit 0
+          }
+          if (-not $env:WINGET_PAT) {
+            Write-Host "::warning::WINGET_PAT is not set in environment winget, so $env:TAG is not submitted to winget."
+            "## winget skipped`n`nWINGET_PAT is not set. Set it and run ``gh workflow run release.yml -f version=$env:VERSION`` again." >> $env:GITHUB_STEP_SUMMARY
+            exit 0
+          }
+          # A backport or an older release must not open an update.
+          $latest = gh release view --json tagName --jq .tagName
+          if ($LASTEXITCODE -ne 0) { throw 'gh release view failed' }
+          if ($latest -ne $env:TAG) {
+            Write-Host "::notice::$env:TAG is not the latest release, so winget is left alone."
+            exit 0
+          }
+          # A rerun finds the pull request of an earlier run and stops.
+          $existing = gh pr list --repo microsoft/winget-pkgs --state all --search "`"$title`" in:title" --json url --jq '.[0].url'
+          if ($LASTEXITCODE -ne 0) { throw 'gh pr list failed' }
+          if ($existing) {
+            Write-Host "::notice::winget already has a pull request for ${env:VERSION}: $existing"
+            "winget pull request for ${env:VERSION}: $existing" >> $env:GITHUB_STEP_SUMMARY
+            exit 0
+          }
+          "run=true" >> $env:GITHUB_OUTPUT
+
+      - name: Check the .exe against its attestation
+        id: exe
+        if: steps.gate.outputs.run == 'true'
+        env:
+          EXE: ${{ steps.gate.outputs.exe }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'rel'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Set-Location $dir
+          gh release download $env:TAG --pattern SHA256SUMS --pattern $env:EXE
+          if ($LASTEXITCODE -ne 0) { throw 'gh release download failed' }
+          # The file decides the hash, so it is checked first, and then the
+          # asset against it.
+          foreach ($f in 'SHA256SUMS', $env:EXE) {
+            gh attestation verify $f --repo $env:GH_REPO --source-ref $env:SOURCE_REF --signer-workflow "$env:GH_REPO/.github/workflows/release.yml" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "attestation of $f did not verify" }
+          }
+          $line = @(Select-String -Path SHA256SUMS -SimpleMatch "  $env:EXE")
+          if ($line.Count -ne 1) { throw "SHA256SUMS lists $env:EXE $($line.Count) times, not once" }
+          $want = ($line[0].Line -split '\s+')[0].ToLower()
+          $got = (Get-FileHash -Algorithm SHA256 $env:EXE).Hash.ToLower()
+          if ($got -ne $want) { throw "$env:EXE hashes to $got, SHA256SUMS says $want" }
+          "sha256=$want" >> $env:GITHUB_OUTPUT
+
+      # Also in a dry run, so a wrong pinned version or hash fails before a release.
+      - name: Download wingetcreate
+        if: steps.gate.outputs.run == 'true' || env.DRY_RUN == 'true'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = Join-Path $env:RUNNER_TEMP 'wingetcreate.exe'
+          Invoke-WebRequest -UseBasicParsing -OutFile $bin "https://github.com/microsoft/winget-create/releases/download/$env:WINGETCREATE_VERSION/wingetcreate.exe"
+          $got = (Get-FileHash -Algorithm SHA256 $bin).Hash.ToLower()
+          if ($got -ne $env:WINGETCREATE_SHA256) { throw "wingetcreate hashes to $got, not $env:WINGETCREATE_SHA256" }
+
+      # wingetcreate reads the token from WINGET_CREATE_GITHUB_TOKEN. The
+      # command line never carries it, because the tool can log it.
+      - name: Write the manifest, compare the hash and submit
+        if: steps.gate.outputs.run == 'true'
+        env:
+          WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_PAT }}
+          WANT_SHA256: ${{ steps.exe.outputs.sha256 }}
+          URL: ${{ steps.gate.outputs.url }}
+          TITLE: ${{ steps.gate.outputs.title }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = Join-Path $env:RUNNER_TEMP 'wingetcreate.exe'
+          $out = Join-Path $env:RUNNER_TEMP 'manifest'
+          & $bin update $env:PACKAGE_ID --version $env:VERSION --urls "$env:URL|x64" --out $out
+          if ($LASTEXITCODE -ne 0) { throw 'wingetcreate update failed' }
+          $installer = @(Get-ChildItem -Recurse -Filter '*.installer.yaml' $out)
+          if ($installer.Count -ne 1) { throw "expected one installer manifest in $out, found $($installer.Count)" }
+          # wingetcreate hashes its own download, so it must equal the attested hash.
+          $text = Get-Content -Raw $installer[0].FullName
+          if ($text -notmatch "(?im)^\s*InstallerSha256:\s*$($env:WANT_SHA256)\s*$") { throw 'the installer hash in the manifest is not the attested hash' }
+          if ($text -notmatch "(?m)^PackageVersion:\s*$([regex]::Escape($env:VERSION))\s*$") { throw "the manifest version is not $env:VERSION" }
+          $log = & $bin submit --prtitle $env:TITLE --no-open $installer[0].DirectoryName 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "wingetcreate submit failed:`n$log" }
+          Write-Host $log
+          $pr = [regex]::Match($log, 'https://github\.com/microsoft/winget-pkgs/pull/\d+').Value
+          "## winget pull request for $env:TAG`n`n$pr" >> $env:GITHUB_STEP_SUMMARY
