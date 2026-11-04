@@ -1,11 +1,11 @@
 # ADR-0052: Signed apt and dnf Package Repository
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date created:** 2026-10-22
-- **Date modified:** 2026-10-22
+- **Date modified:** 2026-11-04
 - **Builds on:** [ADR 0039](0039-release-workflow.md), which defines the release workflow and its leaf jobs.
 
-This record is a proposal. The maintainer approved the plan for issue #1145 but has not answered decisions D1 to D9. Each decision below marks the proposed option. Accept the record as it stands, or change any decision in review before the first line of repository code lands.
+On 2026-11-04 the maintainer delegated decisions D1 to D9 and took the recommended option for each. The table below records every choice. The key, the Pages setup and the environments are still maintainer actions (D3, D9), and no repository code ships before they exist.
 
 ## Context
 
@@ -48,35 +48,35 @@ The only gain of a repository over the manual install is automatic upgrades. The
 
 ## Decision
 
-Proposed: build a signed stable only apt and dnf repository, rebuilt statelessly on every release from the last N attested assets, using `apt-ftparchive`, `createrepo_c` and `gpg` on the runner. The status quo is rejected because it leaves installs without upgrades. The bucket and vendor options are rejected as the default for cost and custody, but remain open under D1 and D2.
+Build a signed stable only apt and dnf repository, rebuilt statelessly on every release from the last N attested assets, using `apt-ftparchive`, `createrepo_c` and `gpg` on the runner. The status quo is rejected because it leaves installs without upgrades. The bucket and vendor options are rejected for cost and custody.
 
-Fixed by the plan, open to overrule in review: stable channel only; no per package signing (re-signing would change attested bytes, and apt `InRelease` plus rpm `repo_gpgcheck=1` cover every artifact); RSA 4096 with an offline primary and a signing subkey, because ed25519 on the oldest supported distros is unverified; key stored as secrets of environment `package-repo`, limited to `main`; a sign job that holds the key and a deploy job that holds Pages permissions and no key; a missing secret fails the run.
+Fixed by the plan: stable channel only; no per package signing (re-signing would change attested bytes, and apt `InRelease` plus rpm `repo_gpgcheck=1` cover every artifact); RSA 4096 with an offline primary and a signing subkey, because ed25519 on the oldest supported distros is unverified; key stored as secrets of environment `package-repo`, limited to `main`; a sign job that holds the key and a deploy job that holds Pages permissions and no key; a missing secret fails the run.
 
 ### Decisions D1 to D9
 
-The option marked **Proposed** is the plan's recommendation. Items marked **Hard to reverse** cannot be changed later without breaking installed clients or the trust users placed in a key.
+The column **Chosen** is the option accepted on 2026-11-04, the plan's recommendation in every row. Items marked **Hard to reverse** cannot be changed later without breaking installed clients or the trust users placed in a key.
 
-| # | Decision | Proposed | Alternatives and trade-offs | Reversibility |
+| # | Decision | Chosen | Alternatives and trade-offs | Reversibility |
 |---|---|---|---|---|
-| D1 | Hosting | **Proposed:** GitHub Pages from this repository. No account or credential, free at this size, under the 1 GB soft limit. | R2 or S3 with a domain: portable but needs an account and a domain. Vendor: moves custody away. | **Hard to reverse** unless D2 uses a custom domain |
-| D2 | Public URL | **Proposed:** a custom domain such as `packages.<domain>` if one exists. | `https://pragmatic-engineer.github.io/playbook/`: simplest, but it cannot move host without breaking every `sources.list` entry. | **Hard to reverse.** The URL is a long lived promise |
-| D3 | Signing key custody | **Proposed:** one named owner plus one backup. Primary on an offline hardware token or encrypted media, with a second copy. Secrets readable by those two people only. | Single owner: less coordination, a bus factor of one. Shared CI held primary: easy, but a CI leak ends the key. | **Hard to reverse.** Users trust a fingerprint |
-| D4 | Rotation and expiry | **Proposed:** subkey lifetime 3 years, warn under 90 days, fail under 30. Rotate one year before expiry in practice. | Shorter lifetime: more rotation work and client churn. Longer: larger blast radius on leak. | Reversible by rotation |
-| D5 | rpm trust model | **Proposed:** `repo_gpgcheck=1`, `gpgcheck=0`. | Sign each `.rpm` in the build job: needs a private key in a build job and changes attested bytes. | Reversible, but client `.repo` files must change |
-| D6 | Repo layout | **Proposed:** flat, `apt/dists/stable`, one suite for all distros. Packages are static and distro independent. | Per codename suites: more paths, no real gain for static binaries. | Hard to change once users pin a suite |
-| D7 | Retention | **Proposed:** the last 5 stable releases that carry packages. Older versions leave the index; files stay on the GitHub release. | Keep all: repository grows without bound. Keep 1: no downgrade path. | Reversible |
-| D8 | Yank process | **Proposed:** a PR adds the version to `packaging/apt/yanked.txt`, then the repo job is rerun on the newest version. | Manual redeploy of an older Pages deployment: faster, no review trail. | Reversible |
-| D9 | Pages and environments | **Proposed:** the maintainer enables Pages (source GitHub Actions) and creates environments `package-repo` and `github-pages`. | None. The agent that implements the code does not create environments or secrets. | Reversible, but needs maintainer rights |
+| D1 | Hosting | GitHub Pages from this repository. No account or credential, free at this size, under the 1 GB soft limit. | R2 or S3 with a domain: portable but needs an account and a domain. Vendor: moves custody away. | **Hard to reverse** unless D2 uses a custom domain |
+| D2 | Public URL | a custom domain such as `packages.<domain>` if one exists. | `https://pragmatic-engineer.github.io/playbook/`: simplest, but it cannot move host without breaking every `sources.list` entry. | **Hard to reverse.** The URL is a long lived promise |
+| D3 | Signing key custody | one named owner plus one backup. Primary on an offline hardware token or encrypted media, with a second copy. Secrets readable by those two people only. | Single owner: less coordination, a bus factor of one. Shared CI held primary: easy, but a CI leak ends the key. | **Hard to reverse.** Users trust a fingerprint |
+| D4 | Rotation and expiry | subkey lifetime 3 years, warn under 90 days, fail under 30. Rotate one year before expiry in practice. | Shorter lifetime: more rotation work and client churn. Longer: larger blast radius on leak. | Reversible by rotation |
+| D5 | rpm trust model | `repo_gpgcheck=1`, `gpgcheck=0`. | Sign each `.rpm` in the build job: needs a private key in a build job and changes attested bytes. | Reversible, but client `.repo` files must change |
+| D6 | Repo layout | flat, `apt/dists/stable`, one suite for all distros. Packages are static and distro independent. | Per codename suites: more paths, no real gain for static binaries. | Hard to change once users pin a suite |
+| D7 | Retention | the last 5 stable releases that carry packages. Older versions leave the index; files stay on the GitHub release. | Keep all: repository grows without bound. Keep 1: no downgrade path. | Reversible |
+| D8 | Yank process | a PR adds the version to `packaging/apt/yanked.txt`, then the repo job is rerun on the newest version. | Manual redeploy of an older Pages deployment: faster, no review trail. | Reversible |
+| D9 | Pages and environments | the maintainer enables Pages (source GitHub Actions) and creates environments `package-repo` and `github-pages`. | None. The agent that implements the code does not create environments or secrets. | Reversible, but needs maintainer rights |
 
 ## Consequences
 
-- If accepted as proposed, the project owns a long lived signing key and a public URL. Losing the key or changing the URL breaks installed clients.
+- The project owns a long lived signing key and a public URL. Losing the key or changing the URL breaks installed clients.
 - Users get `apt install playbook`, `dnf install playbook` and normal upgrades. Docs tell them the key fingerprint, how to rotate the key on the client, and that `SHA256SUMS` itself stays unsigned.
 - Other channels are unaffected: the new jobs are leaves and fail closed. A red run is rerun with `gh workflow run release.yml -f version=X.Y.Z`.
 - Key compromise path: revoke the subkey, publish a new key and an advisory, rotate both secrets, rebuild. Users who pinned the old key must fetch the new one.
 - A yanked version needs a PR and a rerun. A rerun alone does not remove a bad release.
 - Open and unverified until the first real run: the Pages egress hosts, whether harden-runner block mode covers container traffic, `deploy-pages` environment handling, and fixed time signing for byte identical reruns. The first repository release also ships without upgrade test coverage, since only one packaged release exists.
-- Follow up work, after the maintainer answers: S1 builder and tests, S2 sign and deploy jobs, S3 docs, as in the plan for #1145. This record adds no code and no key.
+- Follow up work: S1 builder and tests, S2 sign and deploy jobs, S3 docs, as in the plan for #1145. This record adds no code and no key. The builder takes the public URL as an input, so D2 can name a custom domain without a code change. If no custom domain exists at the first release, the github.io project URL is used and its lock in is accepted.
 
 ## Architecture Diagrams
 
@@ -89,7 +89,7 @@ flowchart LR
     A --> V[verify-packages smoke test]
 ```
 
-Proposed state:
+Target state:
 
 ```mermaid
 flowchart LR
