@@ -777,6 +777,7 @@ mod unix {
 mod tests {
     use super::*;
     use crate::util::scratch_paths as paths;
+    use crate::util::{within, UNLOCK_BOUND};
 
     fn shared_probe(p: &Paths, hold: Duration) -> std::thread::JoinHandle<()> {
         let path = lock_path(p);
@@ -800,6 +801,29 @@ mod tests {
     const SEEDED_PROBE_HOLD: Duration = Duration::from_millis(300);
     /// How far ahead a stamp from a stepped-back clock is dated.
     const FUTURE_STAMP_SECS: i64 = 100;
+
+    /// `take_stamp` once the stamp file reads as unlocked again. A child
+    /// another test spawns holds a copy of the file open for a moment, and
+    /// until it execs the file cannot be locked.
+    fn take_stamp_soon(p: &Paths, window: Duration, now: i64) -> bool {
+        within(UNLOCK_BOUND, || take_stamp(p, window, now))
+    }
+
+    /// Whether the lock reads as free once the holder let go. A probe is
+    /// polled, not tried once: a child another test spawns holds a copy of the
+    /// lock file open until it execs, and the copy keeps the lock.
+    fn lock_frees_soon(p: &Paths) -> bool {
+        within(UNLOCK_BOUND, || lock_state(p) == LockState::Free)
+    }
+
+    /// A stamp taken at `at`, written without the stamp's lock: a lock held
+    /// here could outlive this call in a child another test spawns, and then
+    /// the starter under test would find the stamp busy.
+    fn seed_stamp(p: &Paths, at: i64) {
+        let path = stamp_path(p);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, Stamp::line(at, SPAWN_WINDOW, SPAWN_REASON)).unwrap();
+    }
 
     fn seed(p: &Paths, text: &str) {
         let path = lock_path(p);
@@ -909,7 +933,7 @@ mod tests {
             })
         );
         drop(held);
-        assert_eq!(lock_state(&p), LockState::Free);
+        assert!(lock_frees_soon(&p));
     }
 
     #[test]
@@ -939,9 +963,9 @@ mod tests {
         let window = SPAWN_WINDOW;
         let secs = i64::try_from(window.as_secs()).unwrap();
 
-        assert!(take_stamp(&p, window, now));
+        assert!(take_stamp_soon(&p, window, now));
         assert!(!take_stamp(&p, window, now + secs - 1));
-        assert!(take_stamp(&p, window, now + secs));
+        assert!(take_stamp_soon(&p, window, now + secs));
         let text = std::fs::read_to_string(stamp_path(&p)).unwrap();
         assert_eq!(text, Stamp::line(now + secs, window, SPAWN_REASON));
     }
@@ -959,15 +983,15 @@ mod tests {
         .unwrap();
 
         assert_eq!(stamp_reason_at(&p, now), None);
-        assert!(take_stamp(&p, SPAWN_WINDOW, now));
+        assert!(take_stamp_soon(&p, SPAWN_WINDOW, now));
     }
 
     #[test]
     fn a_zero_window_never_holds_off() {
         let p = paths("daemon-stamp-zero");
 
-        assert!(take_stamp(&p, Duration::ZERO, 5));
-        assert!(take_stamp(&p, Duration::ZERO, 5));
+        assert!(take_stamp_soon(&p, Duration::ZERO, 5));
+        assert!(take_stamp_soon(&p, Duration::ZERO, 5));
     }
 
     #[test]
@@ -976,7 +1000,7 @@ mod tests {
         std::fs::create_dir_all(stamp_path(&p).parent().unwrap()).unwrap();
         std::fs::write(stamp_path(&p), "garbage").unwrap();
 
-        assert!(take_stamp(&p, SPAWN_WINDOW, 5));
+        assert!(take_stamp_soon(&p, SPAWN_WINDOW, 5));
     }
 
     #[test]
@@ -991,7 +1015,7 @@ mod tests {
         let later =
             crate::util::time::now_secs() + i64::try_from(PORT_BUSY_WINDOW.as_secs()).unwrap() + 1;
         assert_eq!(stamp_reason_at(&p, later), None);
-        assert!(take_stamp(&p, SPAWN_WINDOW, later));
+        assert!(take_stamp_soon(&p, SPAWN_WINDOW, later));
         assert_eq!(stamp_reason_at(&p, later), None);
     }
 
@@ -1007,6 +1031,7 @@ mod tests {
     #[cfg(unix)]
     mod starter {
         use super::super::*;
+        use super::seed_stamp;
         use crate::collector::tests::Running;
         use crate::collector::{read_state, State};
         use crate::receiver::bind;
@@ -1511,7 +1536,7 @@ mod tests {
         #[test]
         fn a_free_lock_with_a_fresh_stamp_spawns_nothing() {
             let p = paths("ensure-fresh-stamp");
-            assert!(take_stamp(&p, SPAWN_WINDOW, crate::util::time::now_secs()));
+            seed_stamp(&p, crate::util::time::now_secs());
             let fakes = Fakes::new(Process::saying(true));
 
             assert_eq!(ensure_now(&p, opts(false, false), &fakes), Ensured::Down);
@@ -1523,7 +1548,7 @@ mod tests {
             let p = paths("ensure-expired-stamp");
             let long_ago =
                 crate::util::time::now_secs() - i64::try_from(SPAWN_WINDOW.as_secs()).unwrap() - 1;
-            assert!(take_stamp(&p, SPAWN_WINDOW, long_ago));
+            seed_stamp(&p, long_ago);
             let fakes = Fakes::new(Process::saying(true));
 
             assert_eq!(ensure_now(&p, opts(false, false), &fakes), Ensured::Started);
