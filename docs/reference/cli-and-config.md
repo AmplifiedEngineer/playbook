@@ -1406,23 +1406,23 @@ Example: `playbook setup --no-hooks --system-prompt`
 - `--no-hooks`: Add no playbook hook entries, including the guards in the shared settings
 - `--statusline`: Use the playbook status line (sets statusLine.command to `playbook statusline`)
 - `--no-statusline`: Do not set or change statusLine in settings.json
-- `--security`: Also apply the security defaults (permissions rules); off unless asked or `security.defaults` is true
+- `--security`: Also apply the security defaults (permissions rules). Off unless asked or `security.defaults` is true
 - `--no-security`: Do not apply the security defaults, even when `security.defaults` is true
 - `--path`: Put the playbook binary on PATH for every shell start
 - `--no-path`: Do not edit shell files for PATH
 - `--system-prompt`: Install the playbook system prompt (an existing copy is refreshed either way)
-- `--no-system-prompt`: Do not install the system prompt, and store `systemPrompt.enabled` false so `pb cc` starts with Claude Code's own
-- `--telemetry`: Answer yes to the telemetry question: write the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry`
+- `--no-system-prompt`: Do not install the system prompt. It stores `systemPrompt.enabled` false so `pb cc` starts with Claude Code's own
+- `--telemetry`: Answer yes to the telemetry question. Writes the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry`
 - `--no-telemetry`: Do not write telemetry variables into settings.json
-- `--short-name`: Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free
+- `--short-name`: Add `pb` as a short name for `playbook`. Makes a `pb -> playbook` symlink in the install directory, only when `pb` is free
 - `--no-short-name`: Do not add the `pb` short name
 - `--completions`: Install tab completion for `playbook` and `pb` in the shell named by `$SHELL`
 - `--no-completions`: Do not install shell completion
-- `--policy-guard`: Turn the policy guard on (`hooks.policyGuard.enabled`): it denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes and settings.json edits
+- `--policy-guard`: Turn the policy guard on (`hooks.policyGuard.enabled`). It denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes and settings.json edits
 - `--no-policy-guard`: Do not turn the policy guard on; it is off by default and a stored choice is not changed
 - `--attribution`: Attribution ON: Claude Code adds its Co-Authored-By trailer, generated-by line and session link. Removes each `attribution` key in settings.json that holds exactly the off value playbook writes, and stores `attribution.enabled` true
-- `--no-attribution`: Attribution OFF, the default: Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values
-- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON
+- `--no-attribution`: Attribution OFF. Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values. Setup applies this when you choose nothing and have not chosen ON before
+- `--only <PART>`: Run only these parts and ask nothing. Parts, comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution. Everything else stays untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing
