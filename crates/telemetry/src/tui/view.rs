@@ -10,6 +10,7 @@ use super::budget;
 use super::burnup;
 use super::data::Data;
 use super::fmt::{compact, fit, money, signed_compact, signed_count, signed_money, signed_percent};
+use super::icon::{Cue, Icon};
 use super::keys::{self, HelpLine};
 use super::layout::PanelId;
 use super::notice::{self, Notice};
@@ -224,7 +225,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     match (&app.data, notice::body(app)) {
         (Some(data), None) => {
             if p.budget.height > 0 {
-                budget::render(frame, p.budget, data, &pal);
+                budget::render(frame, p.budget, data, &pal, app.icon);
             }
             for (id, rect) in &p.panels {
                 match id {
@@ -243,7 +244,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         (data, Some(n)) => {
             if let Some(data) = data {
                 if p.budget.height > 0 {
-                    budget::render(frame, p.budget, data, &pal);
+                    budget::render(frame, p.budget, data, &pal, app.icon);
                 }
             }
             render_notice(frame, body, &n, &pal);
@@ -264,12 +265,18 @@ pub fn render(frame: &mut Frame, app: &App) {
         render_help(frame, area, scroll, &pal);
     }
     if let Some(editor) = &app.editor {
-        render_editor(frame, area, editor, &pal);
+        render_editor(frame, area, editor, &pal, app.icon);
     }
 }
 
 /// The layout editor window, centered over the panels.
-fn render_editor(frame: &mut Frame, area: Rect, ed: &super::editor::Editor, pal: &Palette) {
+fn render_editor(
+    frame: &mut Frame,
+    area: Rect,
+    ed: &super::editor::Editor,
+    pal: &Palette,
+    icon: Icon,
+) {
     let width = area.width.saturating_sub(2).min(78);
     // Tab line, rename line, one line per panel, a message line, two key lines and the border.
     let wanted = super::layout::ALL.len() as u16 + 7;
@@ -327,7 +334,12 @@ fn render_editor(frame: &mut Frame, area: Rect, ed: &super::editor::Editor, pal:
         });
     }
     lines.push(match &ed.message {
-        Some(m) => Line::styled(format!(" {m}"), Style::default().fg(pal.color(pal.error))),
+        Some(m) => Line::styled(
+            format!(" {}{m}", icon.mark(Cue::Alert)),
+            Style::default()
+                .fg(pal.color(pal.error))
+                .add_modifier(Modifier::BOLD),
+        ),
         None => Line::raw(""),
     });
     lines.push(Line::styled(
@@ -1420,6 +1432,22 @@ mod tests {
         assert_eq!(top.bottom(), bottom.y);
         assert_eq!(bottom.bottom(), placed.footer.y);
         assert_eq!(placed.tabbar.height, 1);
+    }
+
+    #[test]
+    fn an_editor_refusal_starts_with_an_alert_mark() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.key(press(KeyCode::Char('e')));
+
+        // Act
+        for _ in 0..13 {
+            app.key(press(KeyCode::Char('n')));
+        }
+        let text = screen(&app, 100, 30);
+
+        // Assert
+        assert!(text.contains("! At most 9 tabs"), "{text}");
     }
 
     #[test]
