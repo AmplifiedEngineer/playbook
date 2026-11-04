@@ -44,7 +44,7 @@ struct Cursor {
     last_run_at: Option<String>,
 }
 
-/// Per-node signals: hit count and promotion state (`bump_hit`/`is_promoted`),
+/// Per-node signals: hit count and promotion state (`bump_hit`/`ranking_signals`),
 /// plus `stale`/`verified_hash`/`verified_at` (`cached_stale`/`set_staleness`).
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct NodeSignals {
@@ -162,15 +162,6 @@ pub fn advance_cursor(mem_dir: &Path) {
     modify_locked(mem_dir, |store| {
         store.cursor.last_run_at = Some(now.clone());
     });
-}
-
-/// Whether `node_id` has been promoted. A best-effort, unlocked read: a
-/// missing node, a missing file, or a file that fails to parse all mean
-/// `false`, not an error, matching this module's fail-open philosophy.
-pub fn is_promoted(mem_dir: &Path, node_id: &str) -> bool {
-    read_store(mem_dir)
-        .and_then(|store| store.nodes.get(node_id).map(|n| n.promoted))
-        .unwrap_or(false)
 }
 
 /// Per-node `(hits, promoted)` in one read-only pass, for ranking. A missing
