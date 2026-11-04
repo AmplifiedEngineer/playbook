@@ -114,6 +114,8 @@ pub struct Palette {
     pub avail: Fill,
     pub process: Fill,
     pub live: Ink,
+    /// The middle stop of a green, yellow, red ramp; `warn` is orange here.
+    pub caution: Ink,
     pub warn: Ink,
     pub error: Ink,
     /// One color per series, for what is told apart by name (a model).
@@ -189,6 +191,7 @@ impl Theme {
                 avail: Fill::Gradient(hex(0xb07d00), ORANGE, hex(0xffd27a)),
                 process: Fill::Gradient(hex(0xb07d00), ORANGE, hex(0xffd27a)),
                 live: ink(hex(0x009e73)),
+                caution: ink(hex(0xf0e442)),
                 warn: ink(ORANGE),
                 error: ink(hex(0xd55e00)),
                 series: [
@@ -225,6 +228,7 @@ impl Theme {
                 avail: Fill::Flat(Ink::Named(Color::Cyan)),
                 process: Fill::Flat(Ink::Default),
                 live: Ink::Named(Color::Green),
+                caution: Ink::Named(Color::Yellow),
                 warn: Ink::Named(Color::Yellow),
                 error: Ink::Named(Color::Red),
                 series: [
@@ -248,6 +252,7 @@ impl Theme {
                 cpu: Fill::Flat(Ink::Named(Color::Blue)),
                 cached: Fill::Flat(Ink::Named(Color::Blue)),
                 avail: Fill::Flat(Ink::Named(Color::Blue)),
+                caution: ink(Rgb(160, 100, 0)),
                 warn: ink(Rgb(160, 100, 0)),
                 series: [
                     Ink::Named(Color::Blue),
@@ -275,6 +280,7 @@ impl Theme {
                 cached: Fill::Flat(Ink::Default),
                 avail: Fill::Flat(Ink::Default),
                 live: Ink::Default,
+                caution: Ink::Default,
                 warn: Ink::Default,
                 error: Ink::Default,
                 series: [Ink::Default; SERIES],
@@ -469,93 +475,7 @@ mod tests {
     /// full severity in linear RGB, compared with CIE76 delta E in CIELAB.
     mod accessibility {
         use super::*;
-
-        const TEXT_CONTRAST: f64 = 4.5;
-        const NON_TEXT_CONTRAST: f64 = 3.0;
-        const MIN_CVD_DISTANCE: f64 = 10.0;
-
-        const PROTAN: [[f64; 3]; 3] = [
-            [0.152286, 1.052583, -0.204868],
-            [0.114503, 0.786281, 0.099216],
-            [-0.003882, -0.048116, 1.051998],
-        ];
-        const DEUTAN: [[f64; 3]; 3] = [
-            [0.367322, 0.860646, -0.227968],
-            [0.280085, 0.672501, 0.047413],
-            [-0.011820, 0.042940, 0.968881],
-        ];
-        const TRITAN: [[f64; 3]; 3] = [
-            [1.255528, -0.076749, -0.178779],
-            [-0.078411, 0.930809, 0.147602],
-            [0.004733, 0.691367, 0.303900],
-        ];
-
-        fn linear(c: u8) -> f64 {
-            let v = f64::from(c) / 255.0;
-            if v <= 0.04045 {
-                v / 12.92
-            } else {
-                ((v + 0.055) / 1.055).powf(2.4)
-            }
-        }
-
-        fn luminance(c: Rgb) -> f64 {
-            0.2126 * linear(c.0) + 0.7152 * linear(c.1) + 0.0722 * linear(c.2)
-        }
-
-        fn contrast(a: Rgb, b: Rgb) -> f64 {
-            let (la, lb) = (luminance(a), luminance(b));
-            (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
-        }
-
-        fn simulate(c: Rgb, m: &[[f64; 3]; 3]) -> [f64; 3] {
-            let v = [linear(c.0), linear(c.1), linear(c.2)];
-            m.map(|row| (row[0] * v[0] + row[1] * v[1] + row[2] * v[2]).clamp(0.0, 1.0))
-        }
-
-        fn lab(linear_rgb: [f64; 3]) -> [f64; 3] {
-            let [r, g, b] = linear_rgb;
-            let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
-            let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-            let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
-            let f = |t: f64| {
-                if t > 216.0 / 24389.0 {
-                    t.cbrt()
-                } else {
-                    (24389.0 / 27.0 * t + 16.0) / 116.0
-                }
-            };
-            let (fx, fy, fz) = (f(x), f(y), f(z));
-            [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
-        }
-
-        fn distance(a: Rgb, b: Rgb, m: &[[f64; 3]; 3]) -> f64 {
-            let (la, lb) = (lab(simulate(a, m)), lab(simulate(b, m)));
-            ((la[0] - lb[0]).powi(2) + (la[1] - lb[1]).powi(2) + (la[2] - lb[2]).powi(2)).sqrt()
-        }
-
-        /// The first pair in `colors` closer than the threshold under any of
-        /// the three simulations, if any.
-        fn confusable(colors: &[Rgb]) -> Option<(Rgb, Rgb)> {
-            for (i, a) in colors.iter().enumerate() {
-                for b in &colors[i + 1..] {
-                    if [&PROTAN, &DEUTAN, &TRITAN]
-                        .iter()
-                        .any(|m| distance(*a, *b, m) < MIN_CVD_DISTANCE)
-                    {
-                        return Some((*a, *b));
-                    }
-                }
-            }
-            None
-        }
-
-        fn rgb_of(ink: Ink) -> Rgb {
-            match ink {
-                Ink::Rgb(rgb) => rgb,
-                other => panic!("the Standard theme uses RGB only, got {other:?}"),
-            }
-        }
+        use crate::tui::a11y::{confusable, contrast, rgb_of, NON_TEXT_CONTRAST, TEXT_CONTRAST};
 
         fn standard() -> Palette {
             Theme::Standard.palette(ColorDepth::True)

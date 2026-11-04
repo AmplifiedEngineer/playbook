@@ -5,6 +5,8 @@
 //! draws, `worker` keeps it fresh in the background, `app` is the state and
 //! keys, `view` draws a frame, and `run` is the terminal loop around them.
 
+#[cfg(test)]
+mod a11y;
 pub mod app;
 pub mod arrange;
 pub mod budget;
@@ -128,6 +130,7 @@ fn event_loop(
         ],
         env("PBTOP_ICON_WIDTH").as_deref(),
     );
+    app.dots_off = env("PBTOP_DOTS").is_some_and(|v| v.trim() == "0");
     app.depth = ColorDepth::detect(
         std::env::var("COLORTERM").ok().as_deref(),
         std::env::var("TERM").ok().as_deref(),

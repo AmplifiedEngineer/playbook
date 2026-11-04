@@ -134,6 +134,8 @@ pub struct App {
     pub no_color: bool,
     /// How the header icon is drawn, or off for plain text.
     pub icon: super::icon::Icon,
+    /// `PBTOP_DOTS=0` is set: charts keep their solid glyphs instead of Braille dots.
+    pub dots_off: bool,
     /// True while the filter is being typed; keys then edit `draft`.
     pub editing: bool,
     pub draft: String,
@@ -201,6 +203,7 @@ impl App {
             depth: ColorDepth::default(),
             no_color: false,
             icon: super::icon::Icon::default(),
+            dots_off: false,
             editing: false,
             draft: String::new(),
             focus: Panel::Models,
