@@ -188,8 +188,9 @@ fn scan_leftovers(store: &Store, now: i64) -> Vec<Item> {
         .collect()
 }
 
-/// The configured number for `key`, or its default when it cannot be read.
-pub(super) fn configured_days(home: &Path, key: &'static str) -> u32 {
+/// The configured whole number for `key` (days, or MiB for the log size), or its
+/// default when it cannot be read.
+pub(super) fn configured_number(home: &Path, key: &'static str) -> u32 {
     let from_config = crate::config::resolve_valid(key, home, None)
         .ok()
         .and_then(|(value, _, _)| keys::gc_number_or_default(key, &value));
@@ -211,9 +212,9 @@ fn store(
         action: Action::Tombstone,
         retention_key: Some(idle_key),
         limits: Limits {
-            idle_days: configured_days(home, idle_key),
+            idle_days: configured_number(home, idle_key),
             max_bytes: 0,
-            retain_days: configured_days(home, "gc.graceDays"),
+            retain_days: configured_number(home, "gc.graceDays"),
         },
     }
 }
@@ -259,7 +260,7 @@ fn log_store(home: &Path) -> Store {
         home,
     );
     store.action = Action::Rotate;
-    store.limits.max_bytes = u64::from(configured_days(home, "gc.logMaxMiB")) * MIB;
+    store.limits.max_bytes = u64::from(configured_number(home, "gc.logMaxMiB")) * MIB;
     store
 }
 
@@ -506,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn production_stores_use_the_configured_days() {
+    fn production_stores_use_the_configured_number() {
         // Arrange
         let home = scratch("stores-config");
         let config = home.join(".config/playbook");
