@@ -15,6 +15,7 @@ pub mod logs;
 pub mod report;
 pub mod space;
 pub mod stores;
+pub mod sweep;
 pub mod tombstone;
 pub mod worktrees;
 

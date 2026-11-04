@@ -143,7 +143,9 @@ fn real_main() {
         Command::Hook { name } => run_hook(name),
         // Launcher subcommands land in a later Work Unit; stub for now.
         Command::Cc { sub, args } => match sub {
-            Some(CcCommand::Prune) => cc::retention::prune(&cc::logical_cwd()),
+            Some(CcCommand::Prune) => {
+                cc::retention::prune(&cc::logical_cwd(), playbook::common::time::now_secs())
+            }
             Some(CcCommand::BustCache) => cc::bust_cache::bust(),
             Some(CcCommand::List) => {
                 let cwd = cc::logical_cwd();

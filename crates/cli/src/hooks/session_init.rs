@@ -104,6 +104,7 @@ pub fn run(payload: &Payload) {
     let headless = crate::common::headless::is_headless();
     if !headless {
         maybe_sweep_worktrees(&home, &repo_root);
+        maybe_gc(Path::new(&home));
     }
 
     let (mut system_message, mut extra_context) = check_config_drift(payload, &dir, &home);
@@ -674,6 +675,17 @@ fn maybe_sweep_worktrees(home: &str, repo_root: &str) {
     {
         eprintln!("worktree-sweep: {err}");
     }
+}
+
+/// Runs a slice of the daily gc sweep unless `gc.enabled` is off. A value of
+/// the wrong type reads as off, so a hand-edited config never starts a sweep.
+fn maybe_gc(home: &Path) {
+    let enabled = crate::config::resolve_valid("gc.enabled", home, None)
+        .ok()
+        .and_then(|(value, _, _)| value.as_bool())
+        .unwrap_or(false);
+    let clock = crate::gc::default_clock();
+    crate::gc::sweep::maybe_gc(enabled, &crate::gc::registry(home), &*clock);
 }
 
 /// `git rev-parse --show-toplevel`, trimmed. Empty outside a repo or on any
