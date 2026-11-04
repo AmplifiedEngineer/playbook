@@ -10,7 +10,7 @@
 
 ADR 0004 considered "a searchable index over fact bodies" as option D, sized it XL, and rejected it because the corpus was 80 files under 200 KB: "infrastructure for a scale that does not exist". That reasoning was sound for 80 files. Three things have changed since.
 
-- **The recall hook reads names and descriptions only.** `UserPromptSubmit` recall (`crates/cli/src/hooks/memory_anchors.rs`, `prompt_token_matches`) scans a per-session TSV of fact names, descriptions and aliases. It reads a fact body only after a match, to inject it. A fact whose wording sits in its body is not found.
+- **The recall hook reads names and descriptions only.** `UserPromptSubmit` recall (`crates/cli/src/hooks/memory_anchors.rs`, `prompt_token_matches`) scans a per-session TSV of fact names and descriptions, plus aliases. It reads a fact body only after a match, to inject it. A fact whose wording sits in its body is not found.
 - **The store is larger and expected to keep growing.** The in-scope store for this repo is 286 facts today (65 global, 221 project), and 698 facts across all scopes. The maintainer expects tens of thousands.
 - **The scan is linear.** The plan `memory-search-rework` measured the current matcher at 2.4 ms p50 for 286 facts, 27.9 ms at 10k and 132 ms at 50k. Adding bodies to the scan costs 25.7 ms p50 at 286 facts, ten times today's cost, and 188 ms at 10k.
 
@@ -20,13 +20,13 @@ Recent hook changes keep their meaning under this decision: the zero-match and w
 
 ## Decision
 
-Add an FTS5 index over fact name, description and body to `memory.db`, and let the recall hook take its candidates from it.
+Add an FTS5 index over fact text (name, description and body) to `memory.db`, and let the recall hook take its candidates from it.
 
 1. **Engine.** A contentless FTS5 virtual table, `facts_fts`, with the plain `unicode61` tokenizer, in the existing `memory.db`. No new dependency and no added binary size. The memory matcher splits words on every non-alphanumeric character, so `unicode61` without `tokenchars` is the tokenizer that agrees with it.
 2. **Ranking.** `bm25()` with name over description over body, ties broken by fact id so order is the same on every filesystem.
 3. **The scorer stays.** The existing scoring, strength rule, alias bonus, crate-folder bonus, session dedup and caps keep running over the candidates the index returns. Aliases and crate-folder hits stay TSV lookups unioned into the candidate set, because alias matching runs on the whole prompt phrase and an index of filtered tokens cannot express it.
 4. **Derived data, with a fallback.** `memory.db` stays fully derived from the Markdown files. The table is created in a guarded step, never in the shared schema batch, so a build without FTS5 degrades instead of failing every rebuild. The hook falls back to the TSV scan when FTS5 is unavailable, the table is missing, the index is stale, or the database is busy. An empty result from a fresh index is final and does not trigger the scan.
-5. **Scoped writes.** Index rows are written inside the rebuild transaction and deleted by `(scope, project)`, because `memory.db` is one file shared by every repository.
+5. **Whole graph writes.** Index rows are written inside the rebuild transaction and replaced together with the whole graph. `write_graph` replaces every node, and the rebuild passes every repository, so a delete scoped by repository would leave index rows for facts the graph dropped.
 6. **Mid-session freshness.** Reading the index live means a fact saved in this session becomes recallable at once. ADR 0004's session cache did not do that. This ADR adopts the new behaviour deliberately. A prompt that takes the fallback still sees the session snapshot.
 7. **Evidence first.** A synthetic fixture and a regression harness land before any reader, so each later change shows what it did to recall.
 
@@ -46,7 +46,7 @@ Add an FTS5 index over fact name, description and body to `memory.db`, and let t
 
 - Recall can find a fact by its body, and it will surface facts that never surfaced before. That is the goal, and it changes what users see.
 - The index adds disk: about 40 MB at 50k facts in the contentless form, from the plan's measurements.
-- The rebuild gains an index write. The session-start cost of the TSV and graph at 50k facts is unmeasured, and the first Work Unit measures it. If it exceeds the query saving, the later work does not start.
+- The rebuild gains an index write. The session index (a TSV) is built once per session by the first memory hook that finds none, and later hooks read the cached file. Building it took 0.62 s at 10k facts and 5.8 s at 50k in the first Work Unit's measurement. That cost exists today and this decision adds none to it.
 - Two retrieval paths exist, so a differential test runs both over a static store until bodies join the index. After that a weaker containment test replaces it.
 - The similarity pass that builds `possible_relates_to` edges is quadratic and is the largest cost at scale. It is out of scope here and needs its own plan, and probably its own ADR against ADR 0011.
 
