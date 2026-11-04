@@ -1549,7 +1549,7 @@ mod tests {
         let text = screen(&app, 100, 30);
 
         // Assert
-        assert!(text.contains("! At most 9 tabs"), "{text}");
+        assert!(text.contains("! At most 12 tabs"), "{text}");
     }
 
     #[test]

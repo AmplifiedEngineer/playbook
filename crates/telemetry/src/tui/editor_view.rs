@@ -125,28 +125,30 @@ fn map_lines(ed: &Editor, inner: usize, accent: Style, plain: Style) -> Vec<Line
         return Vec::new();
     };
     let total = inner.saturating_sub(2);
-    let mut slot = 0;
-    arrange::rows(tab)
-        .into_iter()
-        .map(|count| {
-            let count = usize::from(count);
-            let mut spans = vec![Span::raw(" ")];
-            for col in 0..count {
-                let width = if col + 1 < count {
-                    total / count
-                } else {
-                    total - total / count * (count - 1)
-                };
-                let selected = slot == ed.slot;
-                let word = tab.panels.get(slot).map_or("", |p| p.word());
-                spans.push(Span::styled(
-                    cell(word, selected, width),
-                    if selected { accent } else { plain },
-                ));
-                slot += 1;
-            }
-            Line::from(spans)
-        })
+    let rows = arrange::grid(tab);
+    let drawn: Vec<usize> = rows.iter().flatten().copied().collect();
+    let strip = (0..tab.panels.len()).filter(|i| !drawn.contains(i));
+    let line = |slots: &[usize]| {
+        let count = slots.len();
+        let mut spans = vec![Span::raw(" ")];
+        for (col, slot) in slots.iter().enumerate() {
+            let width = if col + 1 < count {
+                total / count
+            } else {
+                total - total / count * (count - 1)
+            };
+            let selected = *slot == ed.slot;
+            let word = tab.panels.get(*slot).map_or("", |p| p.word());
+            spans.push(Span::styled(
+                cell(word, selected, width),
+                if selected { accent } else { plain },
+            ));
+        }
+        Line::from(spans)
+    };
+    rows.iter()
+        .map(|slots| line(slots))
+        .chain(strip.map(|i| line(&[i])))
         .collect()
 }
 

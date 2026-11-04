@@ -28,6 +28,16 @@ fn cells(tab: &Tab) -> (Vec<u8>, Vec<usize>) {
     (auto_rows(cells.len()), cells)
 }
 
+/// The panel indices of each row as the tab is drawn. A panel with no cell,
+/// the budget strip of an automatic tab, is in no row.
+pub fn grid(tab: &Tab) -> Vec<Vec<usize>> {
+    let (rows, cells) = cells(tab);
+    let mut next = cells.into_iter();
+    rows.iter()
+        .map(|n| next.by_ref().take(usize::from(*n)).collect())
+        .collect()
+}
+
 /// The row and the column of cell `at`.
 fn locate(rows: &[u8], at: usize) -> (usize, usize) {
     let mut start = 0;
