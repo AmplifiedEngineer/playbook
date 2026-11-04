@@ -115,6 +115,8 @@ pub struct LimitsView {
     pub stale: bool,
     /// Seconds since Claude Code cached the numbers a cached limit uses.
     pub cache_age: Option<i64>,
+    /// What Claude Code last reported as used this month, as `(read at, USD)`.
+    pub reported: Option<(i64, f64)>,
     /// Why the 5 hour and weekly windows are missing, when they are.
     pub windows_note: Option<&'static str>,
     pub period: Period,
@@ -151,6 +153,7 @@ impl Default for LimitsView {
             limits: Vec::new(),
             stale: false,
             cache_age: None,
+            reported: None,
             windows_note: None,
             period: Period::Week(WeekStart::default()),
             burn: Burn::new(0.0, 0),
@@ -206,6 +209,7 @@ impl LimitsView {
             spend_only,
             stale: sources.stale(now),
             cache_age,
+            reported: limits_source::billed_anchor(sources, now),
             windows_note,
             period,
             burn,

@@ -233,7 +233,7 @@ Notes:
 2. With no statusline reading, the cached spend limit however old.
 3. `usage.budget.monthlyUsd`, only when nothing is detected. It is not shown beside a detected limit.
 
-A cached limit over six hours old, whether it won under item 1 or item 2, is tagged `limit cached <age> ago, used is this machine only`. The cache's used amount is dropped and the bar shows this machine's estimate.
+A cached limit over six hours old, whether it won under item 1 or item 2, is tagged `limit cached <age> ago, used is this machine only`. The cache's used amount is dropped and the bar shows this machine's estimate. A line under the bar then shows the amount Claude Code last reported, with its age and the word stale. A manual budget is tagged `manual, local` for the same reason and gets the same line.
 
 Cache rules:
 

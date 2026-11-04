@@ -608,6 +608,12 @@ fn budget_lines(s: &limits_source::Sources, now: i64, raw: bool) -> Vec<String> 
             });
         }
     }
+    if figure.as_ref().is_some_and(|m| m.own_budget) {
+        out.push("  your usage.budget.monthlyUsd is lower than that limit: pbtop keeps the Claude limit and the statusline budget line uses yours".to_string());
+    }
+    if figure.is_some() {
+        out.push("  to compare with this machine's own cost for the month, run `playbook usage --summary`".to_string());
+    }
     let has_five_hour = s.snapshot.as_ref().is_some_and(|sn| sn.five_hour.is_some())
         || s.account
             .cache
