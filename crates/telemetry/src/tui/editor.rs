@@ -19,7 +19,7 @@ const UNDO_DEPTH: usize = 20;
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     Stay,
-    /// Close the editor; every change was already applied.
+    /// Close the editor; every valid change was already applied.
     Close,
     /// The user confirmed putting the layout and the screen setup back to
     /// the defaults.

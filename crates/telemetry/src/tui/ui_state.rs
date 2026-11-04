@@ -192,13 +192,15 @@ const WRITE_EVERY: Duration = Duration::from_millis(200);
 /// What a flush tells the user.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Flushed {
-    /// Nothing was due.
+    /// Nothing was written.
     Idle,
-    /// The layout was stored, or there is nothing to store.
+    /// The layout was stored, or there is no store and the user was told.
     Saved,
-    /// There is no config store: said once per run.
+    /// There is no config store: the command to run, said once while the
+    /// editor is open and again for the layout it closes with.
     Notice(String),
-    /// The write failed; the layout stays pending and the next flush retries.
+    /// A write failed. Said once for a run of failures; the layout stays
+    /// pending and a due flush retries it.
     Failed(String),
 }
 
@@ -210,6 +212,12 @@ pub struct Autosave {
     dirty: Option<String>,
     last_write: Option<Instant>,
     told_no_store: bool,
+    failing: bool,
+}
+
+/// The message for a layout that could not be written.
+fn not_saved(why: &str) -> String {
+    format!("Layout not saved: {why}")
 }
 
 impl Autosave {
@@ -223,39 +231,62 @@ impl Autosave {
         self.dirty = Some(text);
     }
 
-    /// Writes the pending text through `write` when it is due: `force`, or
-    /// 200 ms after the last write.
+    /// Writes the pending text through `write` when it is due: 200 ms after
+    /// the last write, or at once with `force`. A write that just failed is
+    /// retried only when the 200 ms are up, so a store that stays broken is
+    /// not hammered on every pass of the loop.
     pub fn flush(
         &mut self,
         now: Instant,
         force: bool,
         write: impl FnOnce(&str) -> Result<bool, String>,
     ) -> Flushed {
-        let Some(text) = self.dirty.clone() else {
+        if self.dirty.is_none() {
             return Flushed::Idle;
-        };
+        }
         let waiting = self
             .last_write
             .is_some_and(|at| now.duration_since(at) < WRITE_EVERY);
-        if waiting && !force {
+        if waiting && !(force && !self.failing) {
             return Flushed::Idle;
         }
-        self.last_write = Some(now);
-        let result = write(&text);
-        let notice = match &result {
-            Ok(false) if !self.told_no_store => save_notice(result.clone(), &text),
-            _ => None,
+        let Some(text) = self.dirty.clone() else {
+            return Flushed::Idle;
         };
-        match result {
-            Err(e) => Flushed::Failed(format!("Layout not saved: {e}")),
+        self.last_write = Some(now);
+        match write(&text) {
+            Err(e) => {
+                let first = !self.failing;
+                self.failing = true;
+                if first {
+                    Flushed::Failed(not_saved(&e))
+                } else {
+                    Flushed::Idle
+                }
+            }
             Ok(stored) => {
                 self.dirty = None;
-                if !stored {
+                self.failing = false;
+                // Without a store the user hears it once while editing, and
+                // again with the layout the editor closes with.
+                let notice = if stored || (self.told_no_store && !force) {
+                    None
+                } else {
+                    save_notice(Ok(false), &text)
+                };
+                notice.map_or(Flushed::Saved, |n| {
                     self.told_no_store = true;
-                }
-                notice.map_or(Flushed::Saved, Flushed::Notice)
+                    Flushed::Notice(n)
+                })
             }
         }
+    }
+
+    /// Writes what is still pending, once, at the end of the run. Gives the
+    /// message to show when that write fails.
+    pub fn finish(&mut self, write: impl FnOnce(&str) -> Result<bool, String>) -> Option<String> {
+        let text = self.dirty.take()?;
+        write(&text).err().map(|e| not_saved(&e))
     }
 }
 
@@ -494,6 +525,83 @@ mod tests {
             .count();
         assert_eq!(notices, 1);
         assert!(matches!(&results[0], Flushed::Notice(n) if n.contains("this run only")));
+    }
+
+    #[test]
+    fn a_forced_flush_does_not_hammer_a_store_that_keeps_failing() {
+        // Arrange
+        let start = Instant::now();
+        let mut auto = Autosave::default();
+        auto.push("a".into());
+        let mut calls = 0;
+
+        // Act
+        let first = auto.flush(start, true, |_| {
+            calls += 1;
+            Err("locked".into())
+        });
+        let second = auto.flush(after(start, 1), true, |_| {
+            calls += 1;
+            Err("locked".into())
+        });
+        let later = auto.flush(after(start, 300), true, |_| {
+            calls += 1;
+            Err("locked".into())
+        });
+
+        // Assert
+        assert_eq!(first, Flushed::Failed("Layout not saved: locked".into()));
+        assert_eq!((second, later), (Flushed::Idle, Flushed::Idle));
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn without_a_store_the_closing_flush_names_the_layout_the_editor_ends_with() {
+        // Arrange
+        let start = Instant::now();
+        let mut auto = Autosave::default();
+        auto.push("Charts=spend".into());
+        let opened = auto.flush(start, false, |_| Ok(false));
+        auto.push("Charts=spend,burnup".into());
+
+        // Act
+        let closed = auto.flush(after(start, 300), true, |_| Ok(false));
+
+        // Assert
+        assert!(matches!(opened, Flushed::Notice(n) if n.contains("'Charts=spend'")));
+        assert!(matches!(closed, Flushed::Notice(n) if n.contains("Charts=spend,burnup")));
+    }
+
+    #[test]
+    fn a_reset_without_a_store_does_not_use_up_the_notice() {
+        // Arrange
+        let start = Instant::now();
+        let mut auto = Autosave::default();
+        auto.push(String::new());
+        let reset = auto.flush(start, false, |_| Ok(false));
+        auto.push("Charts=spend".into());
+
+        // Act
+        let edit = auto.flush(after(start, 300), false, |_| Ok(false));
+
+        // Assert
+        assert_eq!(reset, Flushed::Saved);
+        assert!(matches!(edit, Flushed::Notice(_)));
+    }
+
+    #[test]
+    fn finish_writes_what_is_pending_once_and_reports_a_failure() {
+        // Arrange
+        let mut auto = Autosave::default();
+        auto.push("a".into());
+
+        // Act
+        let failed = auto.finish(|_| Err("disk full".into()));
+        let nothing_left = auto.finish(|_| Err("unused".into()));
+
+        // Assert
+        assert_eq!(failed, Some("Layout not saved: disk full".into()));
+        assert_eq!(nothing_left, None);
     }
 
     #[test]

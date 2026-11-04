@@ -1822,6 +1822,40 @@ mod tests {
     }
 
     #[test]
+    fn escape_after_a_change_keeps_it_and_stores_nothing_more() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.key(press(KeyCode::Char('e')));
+        app.key(press(KeyCode::Char('x')));
+
+        // Act
+        let effect = app.key(press(KeyCode::Esc));
+
+        // Assert
+        assert!(app.editor.is_none());
+        assert_eq!(effect, crate::tui::app::Effect::None);
+        assert_eq!(app.layout.tabs.len(), 2);
+    }
+
+    #[test]
+    fn a_layout_the_text_form_cannot_hold_is_refused_with_a_message() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.key(press(KeyCode::Char('e')));
+        if let Some(editor) = app.editor.as_mut() {
+            editor.layout.tabs.clear();
+        }
+
+        // Act
+        let effect = app.key(press(KeyCode::Char('l')));
+
+        // Assert
+        assert_eq!(effect, crate::tui::app::Effect::None);
+        assert_eq!(app.layout, Layout::default());
+        assert!(app.editor.is_some_and(|e| e.message.is_some()));
+    }
+
+    #[test]
     fn a_key_that_changes_nothing_in_the_editor_stores_nothing() {
         // Arrange
         let mut app = tabbed_app();
