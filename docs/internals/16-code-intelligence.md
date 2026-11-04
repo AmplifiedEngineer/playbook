@@ -91,3 +91,16 @@ Locations that are not `file://` paths inside the repo are dropped, counted in `
 ## Cold start
 
 Because each call starts its own server, every call pays the server's start. Expect seconds for the TypeScript server and Pyright, and longer for `rust-analyzer` on a large workspace. The timeout and the index fallback bound the cost. A background server pool is the answer if measurement shows start time dominates; it is not built.
+
+## Benchmark results
+
+`just bench-code` generates repos of 100, 5,000 and 50,000 files (Rust, TypeScript, JavaScript and Python, three uniquely named functions per file) with known answers, and compares the index against `rg` with whole-file reads (a) and `rg -C 30` (b). Bytes stand in for tokens.
+
+Measured on an Apple M1 Pro, macOS 15.8.1, release build, 30 tasks per size, 20 runs per latency. The 50,000 file size and the language server arm were not run.
+
+| Files | Symbol top 3 | Refs recall | Unflagged stale answers | Saving vs (a) | Saving vs (b) | symbol p50 | search p50 | context p50 | Cold index | Warm index | Database / source | Verdict |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 100 | 100% | 100% | 0 | -163% | -54% | 22 ms | 22 ms | 22 ms | 0.3 s | 0.02 s | 12.8x | partial |
+| 5,000 | 100% | 100% | 0 | -147% | -55% | 47 ms | 39 ms | 47 ms | 1.0 s | 0.22 s | 6.4x | kill |
+
+Correctness and speed pass. The saving does not: on this fixture every name is unique, so `rg` returns a few lines, and the index answer carries a JSON envelope and per-result fields that cost more bytes than those lines. The database is also larger than 1.5 times the source on small files. The verdict is kill, so these docs make no token-saving claim for the index commands. The synthetic fixture favours `rg`; the real repo tasks of the earlier checkpoint are the fairer test of savings, and a leaner output form is the likely fix.
