@@ -57,7 +57,6 @@ Version: $2
 Release: 1
 Summary: test
 License: Apache-2.0
-BuildArch: $3
 %description
 test
 %install
@@ -66,7 +65,7 @@ echo hi > %{buildroot}/usr/bin/playbook
 %files
 /usr/bin/playbook
 EOF
-  rpmbuild --quiet --define "_topdir $top" -bb "$top/SPECS/playbook.spec" > /dev/null 2>&1
+  rpmbuild --quiet --target "$3" --define "_topdir $top" -bb "$top/SPECS/playbook.spec" > /dev/null 2>&1
   cp "$top/RPMS/$3/playbook-$2-1.$3.rpm" "$1/playbook-$2.$3.rpm"
 }
 
@@ -87,8 +86,11 @@ run_build() {
   : > "$CASE/yanked.txt"
   [ ! -f "$CASE/yanked.in" ] || cp "$CASE/yanked.in" "$CASE/yanked.txt"
   RC=0
-  env PACKAGE_SIGNING_KEY="$KEY" PACKAGE_SIGNING_PASSPHRASE="$PASS" SOURCE_DATE_EPOCH="$(date +%s)" \
-    bash "$SCRIPT" build "${SITE:-$CASE/site}" "$CASE/assets" "$CASE/yanked.txt" > "$CASE/out" 2> "$CASE/err" || RC=$?
+  (
+    SOURCE_DATE_EPOCH="$(date +%s)"
+    export PACKAGE_SIGNING_KEY="$KEY" PACKAGE_SIGNING_PASSPHRASE="$PASS" SOURCE_DATE_EPOCH
+    bash "$SCRIPT" build "${SITE:-$CASE/site}" "$CASE/assets" "$CASE/yanked.txt" > "$CASE/out" 2> "$CASE/err"
+  ) || RC=$?
 }
 
 versions_in_packages() { grep -h '^Version:' "$CASE/site/apt/dists/stable/main/binary-amd64/Packages" | sort -V; }
@@ -188,7 +190,8 @@ cmp "$CASE/site/playbook.asc" "$CASE/site2/playbook.asc" || fail "the public key
 ok
 
 # Scenario: tampered InRelease or repomd.xml
-echo tamper >> "$CASE/site/apt/dists/stable/InRelease"
+sed 's/^Date:/Dat3:/' "$CASE/site/apt/dists/stable/InRelease" > "$CASE/InRelease.bad"
+mv "$CASE/InRelease.bad" "$CASE/site/apt/dists/stable/InRelease"
 if GNUPGHOME="$VERIFY" gpg --batch --verify "$CASE/site/apt/dists/stable/InRelease" 2> /dev/null; then fail "a tampered InRelease verified"; fi
 echo tamper >> "$CASE/site/rpm/x86_64/repodata/repomd.xml"
 if GNUPGHOME="$VERIFY" gpg --batch --verify "$CASE/site/rpm/x86_64/repodata/repomd.xml.asc" "$CASE/site/rpm/x86_64/repodata/repomd.xml" 2> /dev/null; then fail "a tampered repomd.xml verified"; fi
