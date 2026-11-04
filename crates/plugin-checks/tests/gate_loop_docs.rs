@@ -24,7 +24,8 @@ const COMMANDS: [&str; 3] = [
 fn the_rules_file_pins_the_cap_and_the_stuck_definition() {
     let rules = read(RULES);
     for needle in [
-        "hard cap is 5 rounds",
+        "hard cap is `gate.maxRounds` rounds",
+        "Intent: config-get",
         "PASS or WARN stops the phase at once",
         "**STUCK**",
         "--stuck",
@@ -37,6 +38,10 @@ fn the_rules_file_pins_the_cap_and_the_stuck_definition() {
         assert!(rules.contains(needle), "{RULES} lost: {needle}");
     }
     assert!(!rules.contains("max 3"), "the old cap must not return");
+    assert!(
+        !rules.contains("hard cap is 5"),
+        "the cap is read from gate.maxRounds, not fixed"
+    );
 }
 
 #[test]
@@ -56,7 +61,7 @@ fn each_command_points_at_the_rules_and_keeps_no_copy_of_the_old_cap() {
             assert!(!text.contains(stale), "{path} still says: {stale}");
         }
         assert!(
-            text.matches("hard cap 5 rounds").count() <= 1,
+            text.matches("hard cap `gate.maxRounds` rounds").count() <= 1,
             "{path} repeats the loop summary instead of pointing at it"
         );
     }

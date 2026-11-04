@@ -4,7 +4,7 @@
 │tokens        618.8K                    │1 to 6     Focus a panel by its number              all panels              │                                        │
 │messages          26                    │Tab        Show the next tab                        all panels              │                                        │
 ╰────────────────────────────────────────│Shift-Tab  Show the previous tab                    all panels              │────────────────────────────────────────╯
-╭─┤Budget├───────────────────────────────│F1 to F9   Show a tab by its number                 all panels              │────────────────────┤UTC  all projects├─╮
+╭─┤Budget├───────────────────────────────│F1 to F12  Show a tab by its number                 all panels              │────────────────────┤UTC  all projects├─╮
 │Limit unknown: playbook config set --glo│]          Focus the next panel of the tab          all panels              │                                        │
 │or use Claude Code on Pro or Max with th│[          Focus the previous panel of the tab      all panels              │                                        │
 │this week spend [local history]  $0.00 s│Down, j    Select the next row                      tables                  │                                        │
