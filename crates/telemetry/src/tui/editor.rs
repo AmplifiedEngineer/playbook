@@ -371,6 +371,48 @@ mod tests {
     }
 
     #[test]
+    fn u_and_q_in_the_picker_neither_undo_nor_close_the_editor() {
+        // Arrange
+        let mut e = editor();
+        e.key(KeyCode::Char('a'));
+        e.key(KeyCode::Enter);
+        e.key(KeyCode::Char('a'));
+        let panels = e.layout.tabs[0].panels.clone();
+
+        // Act
+        let undo = e.key(KeyCode::Char('u'));
+        let after_u = (e.picker, e.layout.tabs[0].panels.clone());
+        let quit = e.key(KeyCode::Char('q'));
+
+        // Assert
+        assert_eq!(undo, Outcome::Stay);
+        assert_eq!(after_u, (Some(0), panels.clone()));
+        assert_eq!(quit, Outcome::Stay);
+        assert_eq!(e.picker, None);
+        assert_eq!(e.layout.tabs[0].panels, panels);
+    }
+
+    #[test]
+    fn a_on_a_tab_that_shows_every_panel_opens_no_picker_and_says_why() {
+        // Arrange
+        let all: Vec<&str> = ALL.iter().map(|p| p.word()).collect();
+        let mut e = Editor::new(
+            &Layout::parse(&format!("All={}", all.join(","))).unwrap(),
+            0,
+        );
+
+        // Act
+        e.key(KeyCode::Char('a'));
+
+        // Assert
+        assert_eq!(e.picker, None);
+        assert_eq!(
+            e.message.as_deref(),
+            Some("Every panel is already on the tab")
+        );
+    }
+
+    #[test]
     fn the_picker_stops_at_its_first_and_last_line() {
         // Arrange
         let mut e = editor();
