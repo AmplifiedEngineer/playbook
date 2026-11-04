@@ -841,9 +841,9 @@ pub enum Command {
     },
     /// Print the path of a playbook storage directory
     ///
-    /// Prints one of this repo's storage directories, or the plugin's. First
-    /// moves any legacy directories from the old repo-local location.
-    /// `plugin-root` prints the installed playbook plugin directory instead. It
+    /// Prints one of this repo's storage directories. For those kinds it
+    /// first moves any legacy directories from the old repo-local location.
+    /// `data` and `plugin-root` skip that move. `plugin-root` prints the installed playbook plugin directory instead. It
     /// looks at `PLAYBOOK_PLUGIN_DIR`, then the `installPath` Claude Code
     /// recorded, then `CLAUDE_PLUGIN_ROOT`, then the newest plugin cache
     /// directory. When none is usable it prints one line naming each place
