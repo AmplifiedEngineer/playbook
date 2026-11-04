@@ -15,7 +15,7 @@ use std::path::PathBuf;
 /// `playbook code` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum CodeCommand {
-    /// Build or refresh the code index for this repository
+    /// Build or refresh the code index for this repo
     ///
     /// Hashes every file git lists, and reads only the ones that changed.
     /// Only one run at a time is allowed.
@@ -40,7 +40,7 @@ pub enum CodeCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Search symbols, imports and text of this repository
+    /// Search symbols, imports and text of this repo
     ///
     /// Without the text flag, results are ranked in tiers: exact qualified
     /// name, exact name, name ignoring case, name prefix, import, text, then a
@@ -76,7 +76,7 @@ pub enum CodeCommand {
     ///
     /// Example: `playbook code symbol PaymentService --kind class`
     Symbol {
-        /// The name to look up
+        /// Name to look up
         name: String,
         /// Only this kind, for example `function`, `class` or `method`
         #[arg(long)]
@@ -101,7 +101,7 @@ pub enum CodeCommand {
     ///
     /// Example: `playbook code outline lib/payment/service.ts`
     Outline {
-        /// The file to outline
+        /// File to outline
         path: String,
         /// Print one JSON document
         #[arg(long)]
@@ -114,7 +114,7 @@ pub enum CodeCommand {
     ///
     /// Example: `playbook code read lib/payment/service.ts 10:40`
     Read {
-        /// The file to read
+        /// File to read
         path: String,
         /// First and last line, 1 based and inclusive, as START:END
         #[arg(value_parser = parse_range_arg)]
@@ -132,7 +132,7 @@ pub enum CodeCommand {
     ///
     /// Example: `playbook code refs processPayment`
     Refs {
-        /// The name to look for; a dotted or scoped name uses its last part
+        /// Name to look for. A dotted or scoped name uses its last part
         target: String,
         /// Most results to show, from 1 to 200
         #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=200))]
@@ -150,7 +150,7 @@ pub enum CodeCommand {
     ///
     /// Example: `playbook code context "add retry support to payment processing"`
     Context {
-        /// The task, in words
+        /// Task, in words
         query: String,
         /// Budget in tokens for the whole text output, counted as four bytes each
         #[arg(long, default_value_t = 4000, value_parser = clap::value_parser!(u32).range(200..=65536))]
