@@ -2591,11 +2591,21 @@ mod tests {
         // Assert
         assert!(texts.len() > 100, "the walk found too little help text");
         for (place, text) in texts {
-            for banned in ["src/", "shell/", "::", ".rs", ".sh", ".py"] {
+            for banned in ["src/", "shell/", "::"] {
                 assert!(
                     !text.contains(banned),
                     "help for `{place}` leaks `{banned}`: {text}"
                 );
+            }
+            // A file extension ends the word, so `.sh` must not match `.shared`.
+            for ext in [".rs", ".sh", ".py"] {
+                let leaked = text.match_indices(ext).any(|(at, _)| {
+                    !text[at + ext.len()..]
+                        .chars()
+                        .next()
+                        .is_some_and(char::is_alphanumeric)
+                });
+                assert!(!leaked, "help for `{place}` leaks `{ext}`: {text}");
             }
             assert!(
                 !text.contains('\u{2014}') && !text.contains('\u{2013}'),
