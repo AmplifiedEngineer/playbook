@@ -31,6 +31,12 @@ pub const GATE_MAX_ROUNDS_DEFAULT: i64 = 5;
 /// The most `gate.maxRounds` may be.
 pub const GATE_MAX_ROUNDS_CEILING: i64 = 20;
 
+/// Whether `n` is a legal `gate.maxRounds`, 1 to the ceiling. Writes and reads
+/// both use it, so a hand-edited value cannot widen the cap.
+pub fn gate_max_rounds_in_range(n: i64) -> bool {
+    (1..=GATE_MAX_ROUNDS_CEILING).contains(&n)
+}
+
 /// The largest input a document converter opens, whatever `docs.maxBytes`
 /// says. The bundled `pbdoc` keeps its own copy because it must not depend on
 /// this crate; a test in `doc::converter` keeps the two equal.
