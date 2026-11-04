@@ -8,6 +8,7 @@ use super::host::{self, LspSettings};
 use super::lsp;
 use super::output::{Envelope, IndexState};
 use super::search::SearchOptions;
+use super::semantic_render;
 use super::status;
 use clap::Subcommand;
 use serde_json::json;
@@ -160,6 +161,40 @@ pub enum CodeCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Show where a symbol is defined, using a language server
+    ///
+    /// Takes `<path>:<line>:<column>`, with the column counted in characters
+    /// from 1. A language server answers when this repo is trusted to run one
+    /// and one is installed; otherwise the answer comes from the index and
+    /// says why. Output keeps to files inside the repo.
+    ///
+    /// Example: `playbook code definition src/app.ts:12:5`
+    Definition {
+        /// Position, as `<path>:<line>:<column>`
+        target: String,
+        /// Longest wait for the server, in milliseconds
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=600_000))]
+        timeout: Option<u64>,
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the type and documentation at a position, using a language server
+    ///
+    /// Takes `<path>:<line>:<column>`. Falls back to the index signature of
+    /// the name under the cursor, and says why.
+    ///
+    /// Example: `playbook code hover src/app.ts:12:5`
+    Hover {
+        /// Position, as `<path>:<line>:<column>`
+        target: String,
+        /// Longest wait for the server, in milliseconds
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=600_000))]
+        timeout: Option<u64>,
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
     /// Manage and inspect language servers
     ///
     /// Language servers answer exact questions about code. They run workspace
@@ -252,6 +287,26 @@ pub fn run(sub: CodeCommand, env: &Env) -> Result<String, String> {
             limit,
             json,
         } => render_refs(env, &target, limit as usize, json),
+        CodeCommand::Definition {
+            target,
+            timeout,
+            json,
+        } => semantic_render::definition(&semantic_render::Request {
+            env,
+            spec: &target,
+            timeout_ms: timeout,
+            json,
+        }),
+        CodeCommand::Hover {
+            target,
+            timeout,
+            json,
+        } => semantic_render::hover(&semantic_render::Request {
+            env,
+            spec: &target,
+            timeout_ms: timeout,
+            json,
+        }),
         CodeCommand::Lsp { sub } => Ok(render_lsp(sub, env)),
         CodeCommand::Symbol {
             name,

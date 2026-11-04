@@ -1304,6 +1304,7 @@ dependencies = [
  "rusqlite",
  "rustix",
  "serde_json",
+ "signal-hook",
  "tree-sitter",
  "tree-sitter-go",
  "tree-sitter-javascript",

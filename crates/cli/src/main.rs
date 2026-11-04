@@ -18,20 +18,40 @@ use playbook::{
 };
 use std::io::{IsTerminal, Read, Write};
 
+/// Whether SIGPIPE currently ends the process. `restore_sigpipe` sets it up on.
+#[cfg(unix)]
+static SIGPIPE_ENDS_PROCESS: std::sync::OnceLock<std::sync::Arc<std::sync::atomic::AtomicBool>> =
+    std::sync::OnceLock::new();
+
 /// Restore the default SIGPIPE action so `playbook ... | head` ends quietly
 /// instead of panicking on a closed pipe (Rust ignores SIGPIPE by default).
 #[cfg(unix)]
 fn restore_sigpipe() {
-    // The always-true flag makes signal-hook run the default action, which
-    // ends the process, whenever SIGPIPE arrives.
+    // While the flag is set, signal-hook runs the default action, which ends
+    // the process, whenever SIGPIPE arrives.
+    let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
     let _ = signal_hook::flag::register_conditional_default(
         signal_hook::consts::SIGPIPE,
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        std::sync::Arc::clone(&flag),
     );
+    let _ = SIGPIPE_ENDS_PROCESS.set(flag);
 }
 
 #[cfg(not(unix))]
 fn restore_sigpipe() {}
+
+/// Turns the SIGPIPE default on or off. Off, a write to a closed pipe returns
+/// an error instead of ending the process, which a language server that exits
+/// early needs.
+#[cfg(unix)]
+fn sigpipe_ends_process(on: bool) {
+    if let Some(flag) = SIGPIPE_ENDS_PROCESS.get() {
+        flag.store(on, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[cfg(not(unix))]
+fn sigpipe_ends_process(_on: bool) {}
 
 /// Run one hook: read the payload from stdin, then dispatch it.
 fn run_hook(name: playbook::HookName) {
@@ -949,7 +969,7 @@ fn real_main() {
                 }
             }
         }
-        Command::Code { sub } => match playbook::code::run(sub, &code_env()) {
+        Command::Code { sub } => match run_code(sub) {
             Ok(output) => print!("{output}"),
             Err(err) => {
                 eprintln!("code: {err}");
@@ -2903,6 +2923,15 @@ fn effort_diff_shape(base: &str) -> Result<effort::auto::Shape, String> {
     }
     let text = String::from_utf8_lossy(&out.stdout);
     effort::auto::Shape::from_numstat(&text)
+}
+
+/// Runs a `playbook code` subcommand. A language server can exit while the
+/// command still writes to it, so a closed pipe must not end the process here.
+fn run_code(sub: playbook::code::CodeCommand) -> Result<String, String> {
+    sigpipe_ends_process(false);
+    let result = playbook::code::run(sub, &code_env());
+    sigpipe_ends_process(true);
+    result
 }
 
 /// The environment for `playbook code`: the current directory and the language

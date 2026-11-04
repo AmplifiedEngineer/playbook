@@ -22,6 +22,7 @@ pub mod ranked;
 pub mod refs;
 pub mod search;
 pub mod semantic;
+pub mod semantic_render;
 pub mod source;
 pub mod status;
 #[cfg(test)]

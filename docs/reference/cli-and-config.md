@@ -239,7 +239,7 @@ Index and search the repo's source code
 
 The index is a cache kept under the playbook state directory for this worktree. Nothing is written inside the repo.
 
-Subcommands: `context`, `index`, `lsp`, `outline`, `read`, `refs`, `search`, `status`, `symbol`
+Subcommands: `context`, `definition`, `hover`, `index`, `lsp`, `outline`, `read`, `refs`, `search`, `status`, `symbol`
 
 ### `playbook code context`
 
@@ -251,6 +251,30 @@ Example: `playbook code context "add retry support to payment processing"`
 
 - `<QUERY>`: Task, in words
 - `--max-tokens <MAX_TOKENS>`: Budget in tokens for the whole text output, counted as four bytes each
+- `--json`: Print one JSON document
+
+### `playbook code definition`
+
+Show where a symbol is defined, using a language server
+
+Takes `<path>:<line>:<column>`, with the column counted in characters from 1. A language server answers when this repo is trusted to run one and one is installed; otherwise the answer comes from the index and says why. Output keeps to files inside the repo.
+
+Example: `playbook code definition src/app.ts:12:5`
+
+- `<TARGET>`: Position, as `<path>:<line>:<column>`
+- `--timeout <TIMEOUT>`: Longest wait for the server, in milliseconds
+- `--json`: Print one JSON document
+
+### `playbook code hover`
+
+Show the type and documentation at a position, using a language server
+
+Takes `<path>:<line>:<column>`. Falls back to the index signature of the name under the cursor, and says why.
+
+Example: `playbook code hover src/app.ts:12:5`
+
+- `<TARGET>`: Position, as `<path>:<line>:<column>`
+- `--timeout <TIMEOUT>`: Longest wait for the server, in milliseconds
 - `--json`: Print one JSON document
 
 ### `playbook code index`

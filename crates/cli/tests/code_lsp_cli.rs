@@ -188,3 +188,309 @@ fn status_shows_trust_and_its_tier_once_the_repo_is_trusted() {
     assert_eq!(doc["results"]["trust"]["workspace"], true);
     assert_eq!(doc["results"]["trust"]["tier"], "repo");
 }
+
+#[cfg(unix)]
+mod semantic {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{Duration, Instant};
+
+    const SERVER: &str = "typescript-language-server";
+
+    fn frame(body: &str) -> String {
+        format!("Content-Length: {}\r\n\r\n{body}", body.len())
+    }
+
+    fn initialize_reply(capabilities: &str) -> String {
+        frame(&format!(
+            r#"{{"jsonrpc":"2.0","id":1,"result":{{"capabilities":{capabilities}}}}}"#
+        ))
+    }
+
+    fn shutdown_reply() -> String {
+        frame(r#"{"jsonrpc":"2.0","id":3,"result":null}"#)
+    }
+
+    impl Fixture {
+        fn source(&self) -> PathBuf {
+            let path = self.repo.join("a.ts");
+            fs::write(&path, "export const answer = 42;\n").unwrap();
+            path
+        }
+
+        /// Installs a scripted server and points the config at it. `tail`
+        /// runs after the canned frames are written.
+        fn scripted_server(&self, frames: &str, tail: &str, pidfile: Option<&Path>) {
+            let data = self.home.join("frames.bin");
+            fs::write(&data, frames).unwrap();
+            let script = self.home.join("fake-ts-server");
+            let record =
+                pidfile.map_or(String::new(), |p| format!("echo $$ > '{}'\n", p.display()));
+            fs::write(
+                &script,
+                format!(
+                    "#!/bin/sh\ncase \"$1\" in --version) echo ts-fake 1.0; exit 0;; esac\n{record}/bin/cat '{}'\n{tail}\n",
+                    data.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+            self.config(
+                &format!("code.lsp.{SERVER}.path"),
+                script.to_str().unwrap(),
+                true,
+            );
+        }
+
+        fn config(&self, key: &str, value: &str, global: bool) {
+            let mut args = vec!["config", "set"];
+            if global {
+                args.push("--global");
+            }
+            args.extend([key, value]);
+            let out = self.playbook(&args);
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        fn trust(&self) {
+            self.config("code.lsp.trustWorkspace", "true", false);
+        }
+    }
+
+    fn lsp_of(out: &Output) -> serde_json::Value {
+        json_of(out)["lsp"].clone()
+    }
+
+    #[test]
+    fn definition_prints_the_location_a_trusted_scripted_server_returns() {
+        // Arrange
+        let fx = Fixture::new("def-ok");
+        let file = fx.source();
+        let uri = format!("file://{}", file.display());
+        let location = frame(&format!(
+            r#"{{"jsonrpc":"2.0","id":2,"result":[{{"uri":"{uri}","range":{{"start":{{"line":0,"character":13}},"end":{{"line":0,"character":19}}}}}}]}}"#
+        ));
+        let frames =
+            initialize_reply(r#"{"definitionProvider":true}"#) + &location + &shutdown_reply();
+        fx.scripted_server(&frames, "/bin/cat >/dev/null", None);
+        fx.trust();
+
+        // Act
+        let out = fx.playbook(&["code", "definition", "a.ts:1:14", "--json"]);
+
+        // Assert
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let doc = json_of(&out);
+        assert_eq!(doc["command"], "definition");
+        assert_eq!(doc["lsp"]["state"], "ok", "{doc}");
+        assert_eq!(doc["lsp"]["source"], "lsp");
+        assert_eq!(doc["results"][0]["path"], "a.ts");
+        assert_eq!(doc["results"][0]["line"], 1);
+        assert_eq!(doc["results"][0]["column"], 14);
+    }
+
+    #[test]
+    fn untrusted_prints_json_with_the_state_and_names_the_config_command_on_stderr() {
+        // Arrange
+        let fx = Fixture::new("def-untrusted");
+        fx.source();
+
+        // Act
+        let out = fx.playbook(&["code", "definition", "a.ts:1:14", "--json"]);
+        let text = fx.playbook(&["code", "definition", "a.ts:1:14"]);
+
+        // Assert
+        assert!(out.status.success());
+        let lsp = lsp_of(&out);
+        assert_eq!(lsp["state"], "untrusted");
+        assert_eq!(lsp["source"], "tree_sitter_fallback");
+        let stderr = String::from_utf8_lossy(&text.stderr);
+        assert!(
+            stderr.contains("config set code.lsp.trustWorkspace true"),
+            "{stderr}"
+        );
+    }
+
+    /// Runs one call so the lock file exists, then holds it.
+    fn hold_workspace_lock(fx: &Fixture) -> fs::File {
+        let first = fx.playbook(&["code", "definition", "a.ts:1:14", "--json"]);
+        assert!(first.status.success());
+        let lock = find_file(&fx.home, "lsp.lock").expect("the first call creates the lock file");
+        let file = fs::OpenOptions::new().write(true).open(lock).unwrap();
+        file.try_lock().unwrap();
+        file
+    }
+
+    fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
+        for entry in fs::read_dir(dir).ok()?.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(found) = find_file(&path, name) {
+                    return Some(found);
+                }
+            } else if path.file_name().is_some_and(|n| n == name) {
+                return Some(path);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn every_failure_state_falls_back_with_exit_0_json_and_its_own_lsp_state() {
+        let rows = [
+            "untrusted",
+            "busy",
+            "server_missing",
+            "capability_missing",
+            "timeout",
+            "server_crashed",
+            "error",
+        ];
+        for state in rows {
+            // Arrange
+            let fx = Fixture::new(&format!("matrix-{state}"));
+            fx.source();
+            let mut extra: Vec<&str> = Vec::new();
+            let mut _held = None;
+            if state != "untrusted" {
+                fx.trust();
+            }
+            let capable = initialize_reply(r#"{"definitionProvider":true}"#);
+            match state {
+                "busy" => _held = Some(hold_workspace_lock(&fx)),
+                "capability_missing" => {
+                    fx.scripted_server(&initialize_reply("{}"), "/bin/cat >/dev/null", None);
+                }
+                "timeout" => {
+                    fx.scripted_server(&capable, "exec /bin/sleep 300", None);
+                    extra = vec!["--timeout", "300"];
+                }
+                "server_crashed" => fx.scripted_server(&capable, "exit 0", None),
+                "error" => {
+                    let failure = frame(
+                        r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"boom"}}"#,
+                    );
+                    let frames = capable + &failure + &shutdown_reply();
+                    fx.scripted_server(&frames, "/bin/cat >/dev/null", None);
+                }
+                _ => {}
+            }
+            let mut args = vec!["code", "definition", "a.ts:1:14", "--json"];
+            args.extend(extra);
+
+            // Act
+            let out = fx.playbook(&args);
+
+            // Assert
+            assert_eq!(
+                out.status.code(),
+                Some(0),
+                "{state}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let lsp = lsp_of(&out);
+            assert_eq!(lsp["state"], state, "{state}");
+            assert_eq!(lsp["source"], "tree_sitter_fallback", "{state}");
+        }
+    }
+
+    #[test]
+    fn hover_falls_back_the_same_way_when_untrusted() {
+        // Arrange
+        let fx = Fixture::new("hover-untrusted");
+        fx.source();
+
+        // Act
+        let out = fx.playbook(&["code", "hover", "a.ts:1:14", "--json"]);
+
+        // Assert
+        assert!(out.status.success());
+        assert_eq!(json_of(&out)["command"], "hover");
+        assert_eq!(lsp_of(&out)["state"], "untrusted");
+    }
+
+    #[test]
+    fn a_position_outside_the_repo_is_an_argument_error() {
+        // Arrange
+        let fx = Fixture::new("def-outside");
+        fx.source();
+
+        // Act
+        let out = fx.playbook(&["code", "definition", "../elsewhere.ts:1:1"]);
+
+        // Assert
+        assert_eq!(out.status.code(), Some(1));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            err.contains("outside repo") || err.contains("no such file"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn sigterm_stops_the_server_and_exits_143() {
+        // Arrange
+        let fx = Fixture::new("def-sigterm");
+        fx.source();
+        let pidfile = fx.home.join("server.pid");
+        let frames = initialize_reply(r#"{"definitionProvider":true}"#);
+        fx.scripted_server(&frames, "exec /bin/sleep 300", Some(&pidfile));
+        fx.trust();
+        let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["code", "definition", "a.ts:1:14", "--json"])
+            .current_dir(&fx.repo)
+            .env_clear()
+            .env("HOME", &fx.home)
+            .env("PATH", &fx.bin)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let server_pid = wait_for_pid(&pidfile);
+
+        // Act
+        Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status()
+            .unwrap();
+        let status = child.wait().unwrap();
+
+        // Assert
+        assert_eq!(status.code(), Some(143));
+        assert!(process_gone(server_pid), "the server outlived the CLI");
+    }
+
+    fn wait_for_pid(file: &Path) -> i32 {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < deadline {
+            if let Some(pid) = fs::read_to_string(file)
+                .ok()
+                .and_then(|t| t.trim().parse().ok())
+            {
+                return pid;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("the scripted server never started");
+    }
+
+    fn process_gone(pid: i32) -> bool {
+        let pid = rustix::process::Pid::from_raw(pid).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if rustix::process::test_kill_process(pid).is_err() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        false
+    }
+}
