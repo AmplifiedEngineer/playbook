@@ -4,8 +4,9 @@
 //! Whole-screen snapshots of the view at fixed sizes, from a fixed set of
 //! events and a fixed clock. A snapshot is plain text in
 //! `tests/fixtures/usage_tui/`. After an intended layout change, regenerate
-//! them with `UPDATE_SNAPSHOTS=1 cargo test --lib usage::tui::snapshots` and
-//! review the diff.
+//! them with
+//! `UPDATE_SNAPSHOTS=1 cargo test -p playbook-telemetry --lib tui::snapshots`
+//! and review the diff.
 
 use super::app::App;
 use super::data::Data;

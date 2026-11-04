@@ -193,7 +193,7 @@ Tests run against hand-written transcripts in `crates/telemetry/tests/fixtures/u
 
 | File or test | What it checks |
 |---|---|
-| `crates/telemetry/src/tui/snapshots.rs` | Whole screens at 80x24, 100x30 and 160x50, the daily table and the stacked view at those sizes, and a week range, against the text files in `crates/telemetry/tests/fixtures/usage_tui/`. After an intended layout change, regenerate them with `UPDATE_SNAPSHOTS=1 cargo test --lib usage::tui::snapshots` and review the diff. |
+| `crates/telemetry/src/tui/snapshots.rs` | Whole screens at 80x24, 100x30 and 160x50, the daily table and the stacked view at those sizes, and a week range, against the text files in `crates/telemetry/tests/fixtures/usage_tui/`. After an intended layout change, regenerate them with `UPDATE_SNAPSHOTS=1 cargo test -p playbook-telemetry --lib tui::snapshots` and review the diff. |
 | `crates/telemetry/src/tui/parity.rs` | For every range, the view reports the same totals and model, repo and day groups as the web JSON, and again for events on both sides of every week and month edge (a week that spans a month boundary, a Sunday week start, a leap February). The comparison in the view and in `--json` agrees with dates worked out by hand: the same elapsed span in the previous period, the second before and after midnight UTC, and a Sunday week start. |
 | `crates/telemetry/src/period.rs` | The period math. |
 | Unit tests | The scale math, the chart geometry and every range's bounds. A chart draw test runs the chart at every size from nothing up to 70x22. |

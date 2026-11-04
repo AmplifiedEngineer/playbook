@@ -134,13 +134,11 @@ fn render_row(buf: &Buffer, y: u16, ground: &Ground, out: &mut String) {
     let mut x = 0;
     while x < COLS {
         let cell = &buf[(x, y)];
-        let (fg, bg) = if cell.modifier.contains(Modifier::REVERSED) {
-            (cell.bg, cell.fg)
+        let (fill, paper) = if cell.modifier.contains(Modifier::REVERSED) {
+            (hex(cell.bg, &ground.bg), hex(cell.fg, &ground.fg))
         } else {
-            (cell.fg, cell.bg)
+            (hex(cell.fg, &ground.fg), hex(cell.bg, &ground.bg))
         };
-        let fill = hex(fg, &ground.fg);
-        let paper = hex(bg, &ground.bg);
         let symbol = cell.symbol();
         let cells = symbol_cells(symbol);
         if paper != ground.bg {
@@ -211,7 +209,8 @@ fn the_month_picture_matches_the_committed_svg() {
         std::fs::write(&path, &svg).unwrap();
         return;
     }
-    let want = std::fs::read_to_string(&path).unwrap_or_default();
+    let want = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("missing {}: {e}", path.display()));
     assert_eq!(
         svg, want,
         "docs/images/pbtop-month.svg is out of date; rerun with UPDATE_SNAPSHOTS=1 if intended"
