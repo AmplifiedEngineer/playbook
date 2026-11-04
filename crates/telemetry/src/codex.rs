@@ -325,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn a_continuation_file_with_the_parent_session_id_counts_each_event_once() {
+    fn a_continuation_file_with_the_parent_session_id_keeps_every_event_id_distinct() {
         // Arrange: the shape of a real `<parent>_<child>` rollout, whose totals
         // continue from the parent's last total instead of repeating it.
         let dir = write_rollouts(
@@ -349,6 +349,36 @@ mod tests {
         ids.dedup();
         assert_eq!(events.usage.len(), 4);
         assert_eq!(ids.len(), 4, "every event has its own id");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_child_file_that_repeats_the_parent_lines_gets_the_same_event_ids() {
+        // Arrange: the child repeats the parent's two events and adds one
+        let dir = write_rollouts(
+            "codex-repeat",
+            &[
+                (
+                    "rollout-2026-10-20T10-00-00-0199aaaa-0000-7000-8000-0000000000aa.jsonl",
+                    rollout_lines("0199aaaa-0000-7000-8000-0000000000aa", &[(10, 110), (20, 220)]),
+                ),
+                (
+                    "rollout-2026-10-20T10-05-00-0199aaaa-0000-7000-8000-0000000000aa_0199bbbb-0000-7000-8000-0000000000bb.jsonl",
+                    rollout_lines(
+                        "0199aaaa-0000-7000-8000-0000000000aa",
+                        &[(10, 110), (20, 220), (40, 330)],
+                    ),
+                ),
+            ],
+        );
+        // Act
+        let events = CodexSource::new(dir.clone()).events_since(0).unwrap();
+        // Assert: the store keys on the id, so repeated lines collapse to three rows
+        let mut ids: Vec<_> = events.usage.iter().map(|e| e.event_id.clone()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(events.usage.len(), 5);
+        assert_eq!(ids.len(), 3);
         let _ = std::fs::remove_dir_all(dir);
     }
 
