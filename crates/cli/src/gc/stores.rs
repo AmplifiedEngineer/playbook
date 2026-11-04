@@ -46,7 +46,12 @@ fn walk(path: &Path) -> Option<Walked> {
         newest_mtime: mtime_secs(&top),
         capped: false,
     };
-    let mut pending = vec![path.to_path_buf()];
+    // A symlink at the top is measured as the link itself and not followed.
+    let mut pending = if top.is_dir() {
+        vec![path.to_path_buf()]
+    } else {
+        Vec::new()
+    };
     let mut seen = 0;
     while let Some(dir) = pending.pop() {
         let Ok(entries) = fs::read_dir(&dir) else {
@@ -117,6 +122,10 @@ fn scan_sessions(store: &Store, now: i64) -> Vec<Item> {
     items
 }
 
+/// Live checkouts sit under this folder name. A tracked `MOVED.txt` in one is
+/// the user's file, so the leftover scan does not look inside.
+const WORKTREES_DIR: &str = "worktrees";
+
 fn find_leftovers(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
@@ -126,9 +135,12 @@ fn find_leftovers(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
             continue;
         };
         let name = entry.file_name();
+        if kind.is_symlink() {
+            continue;
+        }
         if LEFTOVER_NAMES.iter().any(|leftover| name == *leftover) {
             found.push(entry.path());
-        } else if kind.is_dir() && depth < SCAN_MAX_DEPTH {
+        } else if kind.is_dir() && name != WORKTREES_DIR && depth < SCAN_MAX_DEPTH {
             find_leftovers(&entry.path(), depth + 1, found);
         }
     }
@@ -385,6 +397,32 @@ mod tests {
     }
 
     #[test]
+    fn leftover_scan_skips_live_checkouts_and_symlinks() {
+        // Arrange
+        let base = scratch("stores-leftovers-checkout");
+        let root = base.join("repos");
+        let checkout = root.join("acme/app/worktrees/wt1/docs");
+        fs::create_dir_all(&checkout).unwrap();
+        fs::write(checkout.join("MOVED.txt"), "tracked").unwrap();
+        backdate(&checkout.join("MOVED.txt"), 400 * DAY);
+        backdate(&checkout, 400 * DAY);
+        #[cfg(unix)]
+        {
+            let target = base.join("elsewhere.txt");
+            fs::write(&target, "x").unwrap();
+            fs::create_dir_all(root.join("acme/app/old")).unwrap();
+            std::os::unix::fs::symlink(&target, root.join("acme/app/old/MOVED.txt")).unwrap();
+        }
+        let store = test_store(&root, scan_leftovers, 90);
+
+        // Act
+        let items = store.items(NOW);
+
+        // Assert
+        assert!(items.is_empty(), "{items:?}");
+    }
+
+    #[test]
     fn leftovers_stay_while_the_old_files_they_guard_remain() {
         // Arrange
         let base = scratch("stores-leftovers-guard");
@@ -436,8 +474,7 @@ mod tests {
 
         // Assert
         assert!(session_items.is_empty());
-        assert_eq!(leftover_items.len(), 1);
-        assert!(due_paths(&leftover_items).is_empty());
+        assert!(leftover_items.is_empty());
         assert!(outside.join("keep").exists());
     }
 
