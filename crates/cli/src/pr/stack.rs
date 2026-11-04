@@ -130,7 +130,7 @@ impl Default for Limits {
 }
 
 impl Stack {
-    fn open(&self) -> impl Iterator<Item = &StackPr> {
+    pub(crate) fn open(&self) -> impl Iterator<Item = &StackPr> {
         self.prs.iter().filter(|p| p.state == State::Open)
     }
 

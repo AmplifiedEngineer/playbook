@@ -565,16 +565,25 @@ fn login(run: Gh) -> Option<String> {
 }
 
 fn pr_facts(run: Gh, number: &str) -> Result<Facts, String> {
-    let (files, labels, author) = pr_part(run, number)?;
-    let me = login(run);
-    Ok(Facts {
+    let (part, me) = std::thread::scope(|s| {
+        let me = s.spawn(|| login(run));
+        let part = pr_part(run, number);
+        (part, me.join().unwrap_or(None))
+    });
+    Ok(facts_of(part?, me.as_deref()))
+}
+
+/// The facts of one PR part for the caller `me`, when the login is known.
+fn facts_of((files, labels, author): PrPart, me: Option<&str>) -> Facts {
+    Facts {
         files,
         labels,
         own: me.map(|m| m == author),
-    })
+    }
 }
 
-/// Which change `review suggest` measures.
+/// Which change `review suggest` measures. The `--scope` flag that picks it
+/// arrives in the next change of this stack.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, clap::ValueEnum)]
 #[serde(rename_all = "kebab-case")]
 #[value(rename_all = "kebab-case")]
@@ -602,7 +611,8 @@ pub enum StackFacts {
     /// The merged facts of every open PR in the stack.
     Scored(Facts, StackScope),
     /// More open PRs than `review.stackMaxPrs`: nothing was fetched, and the
-    /// signals hold the sums `gh` already reported for the stack.
+    /// signals hold only the line and file sums `gh` already reported for the
+    /// stack. They are sizes, not a classification, so they never go to `decide`.
     OverBudget(StackScope, Signals),
 }
 
@@ -613,16 +623,21 @@ pub enum StackFacts {
 /// toward deep, the safe side.
 pub fn merge_facts(parts: Vec<Facts>) -> Facts {
     let mut files: Vec<File> = Vec::new();
+    let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut labels: Vec<String> = Vec::new();
     for part in &parts {
         for f in &part.files {
-            match files.iter_mut().find(|m| m.path == f.path) {
-                Some(m) => {
+            match index.get(&f.path) {
+                Some(&at) => {
+                    let m = &mut files[at];
                     m.added += f.added;
                     m.removed += f.removed;
                     m.renamed &= f.renamed;
                 }
-                None => files.push(f.clone()),
+                None => {
+                    index.insert(f.path.clone(), files.len());
+                    files.push(f.clone());
+                }
             }
         }
         for l in &part.labels {
@@ -650,8 +665,11 @@ pub fn stack_facts(run: Gh, number: &str, max_prs: u64) -> Result<StackFacts, St
         .parse()
         .map_err(|_| format!("`{number}` is not a PR number"))?;
     let stack = detect(run, Some(n))?;
-    if stack.prs.len() < 2 {
-        return Ok(StackFacts::Alone(pr_facts(run, number)?));
+    for w in &stack.warnings {
+        eprintln!("warning: {w}");
+    }
+    if !stack.ask() {
+        return Ok(StackFacts::Alone(pr_facts(run, &n.to_string())?));
     }
     let given = stack
         .prs
@@ -677,27 +695,27 @@ pub fn stack_facts(run: Gh, number: &str, max_prs: u64) -> Result<StackFacts, St
         skipped: numbers(State::Closed),
     };
     if scope.open.len() as u64 > max_prs {
-        let open = || stack.prs.iter().filter(|p| p.state == State::Open);
+        let lines: u64 = stack.open().map(StackPr::lines).sum();
         let signals = Signals {
-            lines: open().map(StackPr::lines).sum(),
-            files: open().map(|p| p.changed_files).sum(),
+            lines,
+            files: stack.open().map(|p| p.changed_files).sum(),
+            code_lines: lines,
+            review_lines: lines,
             ..Signals::default()
         };
         return Ok(StackFacts::OverBudget(scope, signals));
     }
-    let parts = crate::common::par::map(&scope.open, crate::common::par::MAX_CONCURRENT, |pr| {
-        pr_part(run, &pr.to_string())
-    })
-    .into_iter()
-    .collect::<Result<Vec<_>, String>>()?;
+    // Each PR runs two calls at once, so half the cap keeps `gh` processes within it.
+    let parts =
+        crate::common::par::map(&scope.open, crate::common::par::MAX_CONCURRENT / 2, |pr| {
+            pr_part(run, &pr.to_string())
+        })
+        .into_iter()
+        .collect::<Result<Vec<_>, String>>()?;
     let me = login(run);
     let facts = parts
         .into_iter()
-        .map(|(files, labels, author)| Facts {
-            files,
-            labels,
-            own: me.as_ref().map(|m| *m == author),
-        })
+        .map(|part| facts_of(part, me.as_deref()))
         .collect();
     Ok(StackFacts::Scored(merge_facts(facts), scope))
 }
@@ -1188,6 +1206,36 @@ mod tests {
             }
             other => panic!("not over budget: {other:?}"),
         }
+        assert!(fetched(&calls).is_empty());
+    }
+
+    #[test]
+    fn the_over_budget_sums_count_open_prs_only() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        match stack_facts(&stack_gh(&calls, "api-bottom-merged", "ana"), "3", 1).unwrap() {
+            StackFacts::OverBudget(scope, signals) => {
+                assert_eq!((scope.open, scope.merged), (vec![2, 3], vec![1]));
+                assert_eq!((signals.lines, signals.review_lines), (24, 24));
+            }
+            other => panic!("not over budget: {other:?}"),
+        };
+    }
+
+    #[test]
+    fn ownership_follows_the_login_and_is_unknown_without_one() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        let other = stack_facts(&stack_gh(&calls, "api-bottom-merged", "bob"), "3", 6);
+        assert_eq!(scored(other).0.own, Some(false));
+        let inner = stack_gh(&calls, "api-bottom-merged", "ana");
+        let no_login = |args: &[&str]| if args.contains(&"/user") { Err("no".to_string()) } else { inner(args) };
+        assert_eq!(scored(stack_facts(&no_login, "3", 6)).0.own, None);
+    }
+
+    #[test]
+    fn a_non_numeric_pr_is_refused_before_any_call() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        let bad = stack_facts(&stack_gh(&calls, "api-bottom-merged", "ana"), "abc", 6).unwrap_err();
+        assert!(bad.contains("is not a PR number"), "{bad}");
         assert!(fetched(&calls).is_empty());
     }
 
