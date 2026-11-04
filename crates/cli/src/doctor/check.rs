@@ -126,7 +126,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 22] = [
+const PROBES: [Probe; 23] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -1613,7 +1613,7 @@ pub fn failed(rows: &[Row]) -> bool {
 mod tests {
     use super::*;
 
-    const PROBE_COUNT: usize = 22;
+    const PROBE_COUNT: usize = 23;
     const COMPLETION_PROBE_AT: usize = PROBE_COUNT - 1;
 
     fn env_for(home: &Path) -> Env {
@@ -1667,7 +1667,7 @@ mod tests {
     }
 
     #[test]
-    fn the_probes_table_has_22_entries_in_order() {
+    fn the_probes_table_has_23_entries_in_order() {
         // Arrange
         let home = crate::common::test_support::scratch_dir("doctor-probes");
         std::fs::create_dir_all(&home).unwrap();
