@@ -21,7 +21,7 @@ const GH_TIMEOUT: Duration = Duration::from_secs(5);
 /// counts when it targeted the default branch and its head is the local branch
 /// tip, so a stacked PR, commits made after the merge, or a reused branch name
 /// never read as landed.
-pub(super) fn gh_pr_state(repo_root: &Path, branch: &str) -> Option<PrState> {
+pub(crate) fn gh_pr_state(repo_root: &Path, branch: &str) -> Option<PrState> {
     let tip = git::output_slow(repo_root, &["rev-parse", &format!("refs/heads/{branch}")])?;
     let default = super::default_branch(repo_root);
     let mut command = Command::new("gh");

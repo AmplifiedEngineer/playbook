@@ -10,7 +10,7 @@
 //! parallel-safe under `cargo test`'s default concurrent execution.
 
 use playbook::hooks::memory_signals::{
-    bump_hit, bump_hits, cached_stale, is_promoted, modify_locked, set_staleness,
+    bump_hit, bump_hits, cached_stale, modify_locked, ranking_signals, set_staleness,
 };
 use serde_json::Value;
 use std::fs;
@@ -18,6 +18,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 // --- Test infrastructure ---------------------------------------------------
+
+fn is_promoted(mem_dir: &Path, node_id: &str) -> bool {
+    ranking_signals(mem_dir)
+        .get(node_id)
+        .is_some_and(|(_, promoted)| *promoted)
+}
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 

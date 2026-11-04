@@ -61,6 +61,46 @@ fn mode_args(mode: &str, rest: Vec<String>) -> Vec<String> {
     args
 }
 
+/// `playbook gc --build-output`: asks on the terminal before it deletes.
+fn run_build_output_flag(
+    home: &std::path::Path,
+    registry: &playbook::gc::Registry,
+    clock: &dyn playbook::gc::Clock,
+) -> (String, i32) {
+    use playbook::gc::build_output::{
+        current_repo_worktrees, flag_command, lsof_in_use, Probes, Terminal,
+    };
+    use std::io::{BufRead, IsTerminal, Write};
+    let limits = registry
+        .stores()
+        .iter()
+        .find(|store| store.name == "build output")
+        .map(|store| store.limits)
+        .unwrap_or_default();
+    let mut confirm = |question: &str| {
+        print!("{question}");
+        let _ = std::io::stdout().flush();
+        let mut answer = String::new();
+        std::io::stdin().lock().read_line(&mut answer).is_ok()
+            && matches!(answer.trim().to_lowercase().as_str(), "y" | "yes")
+    };
+    let mut terminal = Terminal {
+        is_terminal: std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
+        confirm: &mut confirm,
+    };
+    let probes = Probes {
+        space: &playbook::gc::space::RealProbe,
+        in_use: &lsof_in_use,
+    };
+    let (_, hand_made) = current_repo_worktrees(home);
+    flag_command(
+        (registry, clock),
+        &hand_made,
+        &limits,
+        (&probes, &mut terminal),
+    )
+}
+
 /// Windows gives the main thread 1 MiB, against 8 MiB on Linux and macOS. The
 /// clap tree is deep enough to overflow that in a debug build (`doctor check`
 /// died with a stack overflow on the windows-smoke job), so run on a thread
@@ -143,7 +183,9 @@ fn real_main() {
         Command::Hook { name } => run_hook(name),
         // Launcher subcommands land in a later Work Unit; stub for now.
         Command::Cc { sub, args } => match sub {
-            Some(CcCommand::Prune) => cc::retention::prune(&cc::logical_cwd()),
+            Some(CcCommand::Prune) => {
+                cc::retention::prune(&cc::logical_cwd(), playbook::common::time::now_secs())
+            }
             Some(CcCommand::BustCache) => cc::bust_cache::bust(),
             Some(CcCommand::List) => {
                 let cwd = cc::logical_cwd();
@@ -419,6 +461,34 @@ fn real_main() {
             if !report.errors.is_empty() {
                 std::process::exit(1);
             }
+        }
+        Command::Gc {
+            yes,
+            restore,
+            build_output,
+        } => {
+            let home = playbook::common::home_dir();
+            let clock = playbook::gc::default_clock();
+            let registry = playbook::gc::registry(&home);
+            if build_output {
+                let (text, code) = run_build_output_flag(&home, &registry, &*clock);
+                print!("{text}");
+                std::process::exit(code);
+            }
+            if yes || restore.is_some() {
+                let (text, code) = match restore {
+                    Some(id) => playbook::gc::apply::restore_command(&registry, &*clock, &id),
+                    None => playbook::gc::apply::apply_command(&registry, &*clock),
+                };
+                print!("{text}");
+                std::process::exit(code);
+            }
+            let report = playbook::gc::report::report(&registry, clock.now());
+            print!("{}", playbook::gc::report::render(&report));
+            print!(
+                "{}",
+                playbook::gc::apply::render_anomalies(&registry, &*clock)
+            );
         }
         Command::Statusline => std::process::exit(statusline::run()),
         Command::Version => print!("{}", Cli::command().render_version()),
@@ -1002,9 +1072,16 @@ fn real_main() {
             } => match gate_source(source, &plan_slug, Some(&phase)).and_then(|source| {
                 gate::record::run_with(&plan_slug, &command, &phase, &input, &source, stuck)
             }) {
-                Ok(round) => println!(
-                    "gate record: recorded {phase} verdict for {plan_slug} (round {round})"
-                ),
+                Ok(round) => {
+                    let slug = common::repo_slug();
+                    let cap = gate::max_rounds(
+                        &common::home_dir(),
+                        (!slug.is_empty()).then_some(slug.as_str()),
+                    );
+                    println!(
+                        "gate record: recorded {phase} verdict for {plan_slug} (round {round} of {cap})"
+                    );
+                }
                 Err(err) => {
                     eprintln!("gate record: {err}");
                     std::process::exit(1);
@@ -2097,7 +2174,7 @@ fn real_main() {
                 }
                 None => {
                     eprintln!(
-                        "playbook path: could not resolve the storage folder; this repo needs \
+                        "playbook path: could not resolve the storage directory; this repo needs \
                      a git 'origin' remote, refusing to fall back to a repo-local path"
                     );
                     std::process::exit(1);
@@ -2108,7 +2185,7 @@ fn real_main() {
             sub: WorktreeCommand::Review { sub },
         } => match sub {
             ReviewWorktreeCommand::Setup { pr, head_sha } => {
-                match worktree::review::setup(&pr, &head_sha) {
+                match worktree::review::setup(&pr, &head_sha, playbook::gc::default_clock().now()) {
                     Ok(path) => println!("{path}"),
                     Err(err) => {
                         eprintln!("review worktree: {err}");
@@ -2129,12 +2206,21 @@ fn real_main() {
             let repo_root = std::env::current_dir().unwrap_or_default();
             match sub {
                 WorktreeCommand::Sweep { dry_run } => {
-                    let now_epoch = crate::common::time::now_secs();
-                    match worktree::sweep(&repo_root, &home, repo_slug, dry_run, now_epoch) {
-                        Ok(report) => {
+                    let clock = playbook::gc::default_clock();
+                    match playbook::gc::worktrees::sweep_locked(
+                        &home,
+                        &*clock,
+                        (&repo_root, repo_slug),
+                        dry_run,
+                    ) {
+                        Ok(playbook::gc::worktrees::SweepRun::Swept(report)) => {
                             for line in report {
                                 println!("{line}");
                             }
+                        }
+                        Ok(playbook::gc::worktrees::SweepRun::Busy) => {
+                            eprintln!("worktree sweep: gc is running; try again in a moment");
+                            std::process::exit(1);
                         }
                         Err(err) => {
                             eprintln!("worktree sweep: {err}");

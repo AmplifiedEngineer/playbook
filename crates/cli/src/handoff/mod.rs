@@ -7,26 +7,32 @@
 //!
 //! Files live in `repos/<owner>/<repo>/handoff/<slug>-<epoch>-<pid>.md`, or in
 //! `runtime_root()/handoff/` outside a repo with an `origin` remote. A handoff
-//! the hook has loaded moves to `handoff/used/` for 14 days, so `show` can
-//! still print it after the session start consumed it.
+//! the hook has loaded is tombstoned by gc for `gc.handoffGraceDays`, so `show`
+//! can still print it after the session start consumed it.
 
 pub mod compose;
 
 use crate::common::atomic::ensure_private_dir;
+use crate::gc::guard::{FsOps, RealFs};
+use crate::gc::index::{self, Record, State};
+use crate::gc::lock::NoHook;
+use crate::gc::tombstone::{self, MoveOutcome, MoveRequest};
+use crate::gc::{Clock, Registry};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// Age past which a handoff is stale: dropped without injecting, and pruned
-/// from `used/`.
+/// Age past which a handoff is stale: dropped without injecting.
 const MAX_AGE_DAYS: u64 = 14;
 
 /// Most handoffs one SessionStart injects, so a busy directory cannot flood
 /// the context.
 const MAX_INJECTED: usize = 3;
 
-const USED_DIR: &str = "used";
+/// How long a start waits for a busy gc run before leaving the handoff for the
+/// next start.
+const LOCK_WAIT: Duration = Duration::from_millis(500);
 const SECS_PER_DAY: u64 = 86_400;
 const OTHER_DIRS_SHOWN: usize = 5;
 
@@ -176,8 +182,43 @@ pub fn freshest_mtime(dir: &Path, slug: &str) -> Option<SystemTime> {
     unread(dir, slug).first().map(|e| e.modified)
 }
 
-fn loaded(dir: &Path, slug: &str) -> Vec<Entry> {
-    list(&dir.join(USED_DIR), |name| is_handoff_for(name, slug))
+/// The tombstone records of handoffs for `slug` that were loaded from `dir`,
+/// newest first, in the given `state`.
+fn tombstoned(dir: &Path, slug: &str, index: &Path, state: State) -> Vec<(Record, PathBuf)> {
+    let mut found: Vec<(Record, PathBuf)> = index::latest(index::read(index))
+        .into_iter()
+        .filter(|rec| rec.state == state)
+        .filter_map(|rec| {
+            // A handoff that an older version parked in its old "used" folder was moved to
+            // a tombstone by the init migration, with that path as its origin.
+            let used = dir.join("used");
+            let original = rec.paths.iter().find(|path| {
+                (path.parent() == Some(dir) || path.parent() == Some(used.as_path()))
+                    && path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| is_handoff_for(name, slug))
+            })?;
+            let at = rec.member_dest(original);
+            Some((rec.clone(), at))
+        })
+        .collect();
+    found.sort_by_key(|(rec, _)| std::cmp::Reverse(rec.source_mtime));
+    found
+}
+
+/// Handoffs for `slug` that a session start already loaded and gc still keeps,
+/// freshest first.
+fn loaded(dir: &Path, slug: &str, index: &Path) -> Vec<Entry> {
+    tombstoned(dir, slug, index, State::Done)
+        .into_iter()
+        .filter(|(_, at)| at.is_file())
+        .map(|(rec, at)| Entry {
+            path: at,
+            modified: UNIX_EPOCH
+                + Duration::from_secs(u64::try_from(rec.source_mtime).unwrap_or(0)),
+        })
+        .collect()
 }
 
 fn cutoff(now: SystemTime) -> SystemTime {
@@ -228,36 +269,92 @@ pub struct Taken {
     pub total: usize,
 }
 
-fn prune_loaded(dir: &Path, now: SystemTime) {
-    let limit = cutoff(now);
-    for entry in list(&dir.join(USED_DIR), |_| true) {
-        if entry.modified < limit {
-            let _ = fs::remove_file(&entry.path);
+/// Where handoffs go when they are loaded: the gc tombstone folder.
+pub struct Archive<'a> {
+    pub registry: &'a Registry,
+    pub fs: &'a dyn FsOps,
+    pub clock: &'a dyn Clock,
+    /// Days a loaded handoff stays restorable.
+    pub grace_days: u32,
+}
+
+enum Moved {
+    To(PathBuf),
+    /// Another gc run holds the lock. Nothing changed.
+    Busy,
+    /// The tombstone folder cannot be used at all.
+    NoFolder,
+    /// The move was refused or went wrong. The file is still where it was.
+    Failed,
+}
+
+impl Archive<'_> {
+    fn tombstone(&self, path: &Path) -> Moved {
+        let req = MoveRequest {
+            paths: vec![path.to_path_buf()],
+            reason: "loaded by a session start".into(),
+            retain_days: self.grace_days,
+        };
+        let outcome = tombstone::move_to_tombstone(
+            self.registry,
+            self.fs,
+            (self.clock, &NoHook),
+            LOCK_WAIT,
+            &req,
+            None,
+        );
+        match outcome {
+            MoveOutcome::Moved { id } => {
+                self.destination(&id, path).map_or(Moved::Failed, Moved::To)
+            }
+            MoveOutcome::Busy => Moved::Busy,
+            MoveOutcome::Unavailable(_) => Moved::NoFolder,
+            MoveOutcome::Refused(_) | MoveOutcome::Failed(_) => Moved::Failed,
         }
+    }
+
+    fn destination(&self, id: &str, original: &Path) -> Option<PathBuf> {
+        let records = index::read(&index::index_path(self.registry.gc_dir()));
+        let rec = index::latest(records)
+            .into_iter()
+            .find(|rec| rec.id == id)?;
+        Some(rec.member_dest(original))
     }
 }
 
-/// Moves a loaded handoff to `used/`. If the move fails the file is removed
-/// instead, so a stuck file can never re-inject on every session start.
-fn archive(dir: &Path, path: &Path) {
-    if !move_to_used(dir, path) {
+/// Runs `f` with the production archive: the registry under the real home and
+/// the configured grace period.
+fn with_production_archive<T>(f: impl FnOnce(&Archive) -> T) -> T {
+    let home = crate::common::home_dir();
+    let registry = crate::gc::registry(&home);
+    let fs = RealFs::new(&registry);
+    let clock = crate::gc::default_clock();
+    f(&Archive {
+        registry: &registry,
+        fs: &fs,
+        clock: &*clock,
+        grace_days: crate::gc::stores::handoff_grace_days(&home),
+    })
+}
+
+/// Tombstones a loaded handoff. If the tombstone folder cannot be used the file
+/// is removed instead, so a stuck file can never re-inject on every session
+/// start. A busy gc run, a refusal by the guard or a failed copy leave the file
+/// where it is, and the next start tries again.
+fn archive(a: &Archive, path: &Path) {
+    if matches!(a.tombstone(path), Moved::NoFolder) {
         let _ = fs::remove_file(path);
     }
 }
 
-fn move_to_used(dir: &Path, path: &Path) -> bool {
-    let used = dir.join(USED_DIR);
-    ensure_private_dir(&used).is_ok()
-        && path
-            .file_name()
-            .is_some_and(|name| fs::rename(path, used.join(name)).is_ok())
-}
-
 /// The read side of a session start: up to `MAX_INJECTED` fresh handoffs for
-/// `slug`. Loaded ones move to `used/`; stale and over-cap ones are removed.
+/// `slug`. Loaded ones are tombstoned; stale and over-cap ones are removed.
 /// Never panics, and any failure just yields fewer handoffs.
 pub fn take_in(dir: &Path, slug: &str, now: SystemTime) -> Taken {
-    prune_loaded(dir, now);
+    with_production_archive(|a| take_in_with(a, dir, slug, now))
+}
+
+fn take_in_with(a: &Archive, dir: &Path, slug: &str, now: SystemTime) -> Taken {
     prune_hygiene(dir, slug, now);
     let found: Vec<Entry> = unread(dir, slug)
         .into_iter()
@@ -277,7 +374,7 @@ pub fn take_in(dir: &Path, slug: &str, now: SystemTime) -> Taken {
             }
         }
         if keep {
-            archive(dir, &entry.path);
+            archive(a, &entry.path);
         } else {
             let _ = fs::remove_file(&entry.path);
         }
@@ -335,19 +432,23 @@ fn mark_cleared_in(dir: &Path, session_id: &str) {
 /// A session-tagged handoff taken for a start after `/clear` or `/compact`.
 pub struct Resumed {
     pub text: String,
-    /// Where the full handoff now lives: under `used/`, or where it was saved
-    /// when the move to `used/` failed.
+    /// Where the full handoff now lives: in the tombstone folder, or where it
+    /// was saved when the move failed.
     pub path: PathBuf,
 }
 
 /// The read side of a start after `/clear` for one session's own handoff: of
 /// the tagged handoffs for `slug` whose session left a fresh clear marker,
 /// the one with the freshest marker. Its marker is consumed and the file
-/// moves to `used/`, so it does not load twice. If the move fails the file
+/// is tombstoned, so it does not load twice. If the move fails the file
 /// stays, but the consumed marker still stops a second load. A tagged handoff whose
 /// session never cleared, such as a parallel session still running, is left
 /// alone. Never panics.
 pub fn take_cleared_in(dir: &Path, slug: &str, now: SystemTime) -> Option<Resumed> {
+    with_production_archive(|a| take_cleared_with(a, dir, slug, now))
+}
+
+fn take_cleared_with(a: &Archive, dir: &Path, slug: &str, now: SystemTime) -> Option<Resumed> {
     prune_hygiene(dir, slug, now);
     let markers = dir.join(CLEARED_DIR);
     let best = unread(dir, slug)
@@ -362,18 +463,28 @@ pub fn take_cleared_in(dir: &Path, slug: &str, now: SystemTime) -> Option<Resume
         .max_by_key(|(marked, _, entry)| (*marked, entry.modified))?;
     let (_, tag, entry) = best;
     let _ = fs::remove_file(markers.join(tag));
-    load_and_archive(dir, entry)
+    load_and_archive(a, entry)
 }
 
 /// The read side of a start after `/compact`. A compact keeps the session id,
 /// so the handoff tagged with it is this session's own and needs no marker.
-/// The freshest unread one moves to `used/`, so it loads once. If that move
+/// The freshest unread one is tombstoned, so it loads once. If that move
 /// fails the file stays and loads again on a later compact until it expires
 /// after a day. Older ones
-/// with the same tag move there unread because the freshest replaces them. A
+/// with the same tag are tombstoned unread because the freshest replaces them. A
 /// handoff tagged for another session, an untagged one and an empty id are
 /// left alone. Never panics.
 pub fn take_session_in(
+    dir: &Path,
+    slug: &str,
+    session_id: &str,
+    now: SystemTime,
+) -> Option<Resumed> {
+    with_production_archive(|a| take_session_with(a, dir, slug, session_id, now))
+}
+
+fn take_session_with(
+    a: &Archive,
     dir: &Path,
     slug: &str,
     session_id: &str,
@@ -389,15 +500,16 @@ pub fn take_session_in(
         .filter(|entry| tag_of(&entry.path, slug).as_deref() == Some(wanted.as_str()));
     let freshest = own.next()?;
     for superseded in own {
-        archive(dir, &superseded.path);
+        archive(a, &superseded.path);
     }
-    load_and_archive(dir, freshest)
+    load_and_archive(a, freshest)
 }
 
-/// Reads a tagged handoff and moves it to `used/`. An empty file is removed
-/// and yields nothing. When the move fails the file stays where it is, so the
-/// pointer to the full text stays valid; the tag expires it after a day.
-fn load_and_archive(dir: &Path, entry: Entry) -> Option<Resumed> {
+/// Reads a tagged handoff and tombstones it. An empty file is removed and
+/// yields nothing. When the move fails or gc is busy the file stays where it
+/// is, so the pointer to the full text stays valid; the tag expires it after a
+/// day.
+fn load_and_archive(a: &Archive, entry: Entry) -> Option<Resumed> {
     let text = fs::read_to_string(&entry.path)
         .ok()
         .filter(|t| !t.trim().is_empty());
@@ -405,14 +517,9 @@ fn load_and_archive(dir: &Path, entry: Entry) -> Option<Resumed> {
         let _ = fs::remove_file(&entry.path);
         return None;
     };
-    let name = entry.path.file_name()?.to_owned();
-    let used = dir.join(USED_DIR).join(name);
-    // A start running at the same time can win the move, so the file is then
-    // already under `used/`.
-    let path = if move_to_used(dir, &entry.path) || (!entry.path.exists() && used.is_file()) {
-        used
-    } else {
-        entry.path
+    let path = match a.tombstone(&entry.path) {
+        Moved::To(dest) => dest,
+        Moved::Busy | Moved::NoFolder | Moved::Failed => entry.path,
     };
     Some(Resumed { text, path })
 }
@@ -449,7 +556,7 @@ fn render(entry: &Entry, label: &str, now: SystemTime) -> String {
 }
 
 /// What `playbook handoff show` prints. Never deletes or moves anything.
-fn show_in(dir: &Path, slug: &str, all: bool, now: SystemTime) -> String {
+fn show_in(dir: &Path, slug: &str, index: &Path, all: bool, now: SystemTime) -> String {
     let waiting = unread(dir, slug);
     if !waiting.is_empty() {
         let shown = if all { waiting.len() } else { 1 };
@@ -466,7 +573,7 @@ fn show_in(dir: &Path, slug: &str, all: bool, now: SystemTime) -> String {
         }
         return parts.join("\n\n---\n\n");
     }
-    if let Some(entry) = loaded(dir, slug).first() {
+    if let Some(entry) = loaded(dir, slug, index).first() {
         return render(
             entry,
             "Handoff for this directory, already loaded by the last session start",
@@ -474,6 +581,9 @@ fn show_in(dir: &Path, slug: &str, all: bool, now: SystemTime) -> String {
         );
     }
     let mut out = String::from("No handoff saved for this directory.");
+    if !tombstoned(dir, slug, index, State::Expired).is_empty() {
+        out.push_str(" The last one was loaded and has expired.");
+    }
     let others = list(dir, |name| !is_handoff_for(name, slug));
     if !others.is_empty() {
         out.push_str(
@@ -522,7 +632,13 @@ pub fn run_show(dir: Option<&str>, all: bool) -> Result<String, String> {
         }
         None => (current_slug(), root()),
     };
-    Ok(show_in(&root, &slug, all, SystemTime::now()))
+    Ok(show_in(
+        &root,
+        &slug,
+        &production_index(),
+        all,
+        SystemTime::now(),
+    ))
 }
 
 const LOG_FILE: &str = "session-start.log";
@@ -612,7 +728,7 @@ pub fn log_start(source: &str, session_id: &str, slug: &str, injected: usize) {
 
 /// What `playbook handoff status` prints: the last few SessionStart events
 /// and how many handoffs wait or were loaded for this directory.
-fn status_in(dir: &Path, log: &Path, slug: &str) -> String {
+fn status_in(dir: &Path, index: &Path, log: &Path, slug: &str) -> String {
     let text = fs::read_to_string(log).unwrap_or_default();
     let rows: Vec<Vec<&str>> = text
         .lines()
@@ -635,7 +751,7 @@ fn status_in(dir: &Path, log: &Path, slug: &str) -> String {
     out.push_str(&format!(
         "\nThis directory: {} unread, {} already loaded.\n",
         unread(dir, slug).len(),
-        loaded(dir, slug).len()
+        loaded(dir, slug, index).len()
     ));
     out.push_str(
         "If you ran /clear and no `clear` row appears above, Claude Code did not run the hook: run /playbook:session-start to load the handoff on demand.",
@@ -645,15 +761,92 @@ fn status_in(dir: &Path, log: &Path, slug: &str) -> String {
 
 /// CLI entry for `handoff status`.
 pub fn run_status() -> String {
-    status_in(&root(), &log_path(), &current_slug())
+    status_in(&root(), &production_index(), &log_path(), &current_slug())
+}
+
+fn production_index() -> PathBuf {
+    index::index_path(&crate::common::paths::playbook_root().join(crate::gc::GC_DIR))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
+    use crate::gc::lock::with_run_lock;
+    use crate::gc::tombstone::Env;
+    use crate::gc::{Action, FixedClock, Limits, Store, SystemClock};
 
     const SLUG: &str = "-Users-me-repo";
+    const GRACE_DAYS: u32 = 14;
+
+    /// The gc folder that goes with the handoff folder `dir`.
+    fn gc_of(dir: &Path) -> PathBuf {
+        let name = dir.file_name().unwrap().to_string_lossy();
+        dir.with_file_name(format!("{name}-gc"))
+    }
+
+    fn index_of(dir: &Path) -> PathBuf {
+        index::index_path(&gc_of(dir))
+    }
+
+    /// A registry whose only root is the handoff folder `dir`.
+    fn registry_for(dir: &Path) -> Registry {
+        Registry::new(gc_of(dir)).with_store(Store {
+            name: "handoffs",
+            roots: vec![dir.to_path_buf()],
+            scan: |_, _| Vec::new(),
+            action: Action::ReportOnly,
+            retention_key: None,
+            limits: Limits::default(),
+        })
+    }
+
+    fn with_archive<T>(dir: &Path, clock: &dyn Clock, f: impl FnOnce(&Archive) -> T) -> T {
+        let registry = registry_for(dir);
+        let fs = RealFs::new(&registry);
+        f(&Archive {
+            registry: &registry,
+            fs: &fs,
+            clock,
+            grace_days: GRACE_DAYS,
+        })
+    }
+
+    fn take_in(dir: &Path, slug: &str, now: SystemTime) -> Taken {
+        with_archive(dir, &SystemClock, |a| {
+            super::take_in_with(a, dir, slug, now)
+        })
+    }
+
+    fn take_cleared_in(dir: &Path, slug: &str, now: SystemTime) -> Option<Resumed> {
+        with_archive(dir, &SystemClock, |a| {
+            super::take_cleared_with(a, dir, slug, now)
+        })
+    }
+
+    fn take_session_in(dir: &Path, slug: &str, sid: &str, now: SystemTime) -> Option<Resumed> {
+        with_archive(dir, &SystemClock, |a| {
+            super::take_session_with(a, dir, slug, sid, now)
+        })
+    }
+
+    fn loaded(dir: &Path, slug: &str) -> Vec<Entry> {
+        super::loaded(dir, slug, &index_of(dir))
+    }
+
+    fn show_in(dir: &Path, slug: &str, all: bool, now: SystemTime) -> String {
+        super::show_in(dir, slug, &index_of(dir), all, now)
+    }
+
+    fn status_in(dir: &Path, log: &Path, slug: &str) -> String {
+        super::status_in(dir, &index_of(dir), log, slug)
+    }
+
+    /// Makes the tombstone folder impossible to create.
+    fn block_tombstones(dir: &Path) {
+        fs::create_dir_all(gc_of(dir)).unwrap();
+        fs::write(gc_of(dir).join("tombstones"), "blocks the folder").unwrap();
+    }
 
     fn day(n: u64) -> Duration {
         Duration::from_secs(n * SECS_PER_DAY)
@@ -711,7 +904,7 @@ mod tests {
 
         assert_eq!(first.text, "# Mine");
         assert!(
-            first.path.starts_with(dir.join(USED_DIR)),
+            first.path.starts_with(gc_of(&dir).join("tombstones")),
             "{:?}",
             first.path
         );
@@ -780,7 +973,7 @@ mod tests {
     fn a_failed_move_to_used_keeps_the_file_the_pointer_names() {
         let dir = scratch_dir("handoff-move-fails");
         let saved = save_in(&dir, SLUG, "# Long", 100, 7, &session_tag(SESSION)).unwrap();
-        fs::write(dir.join(USED_DIR), "blocks the folder").unwrap();
+        block_tombstones(&dir);
 
         let taken = take_session_in(&dir, SLUG, SESSION, SystemTime::now()).unwrap();
 
@@ -800,7 +993,7 @@ mod tests {
         let dir = scratch_dir("handoff-clear-move-fails");
         let saved = save_in(&dir, SLUG, "# Long", 100, 7, &session_tag(SESSION)).unwrap();
         mark_cleared_in(&dir, SESSION);
-        fs::write(dir.join(USED_DIR), "blocks the folder").unwrap();
+        block_tombstones(&dir);
 
         let taken = take_cleared_in(&dir, SLUG, SystemTime::now()).unwrap();
 
@@ -865,7 +1058,7 @@ mod tests {
     }
 
     #[test]
-    fn a_loaded_handoff_moves_to_used_and_show_still_prints_it() {
+    fn a_loaded_handoff_is_tombstoned_and_show_still_prints_it() {
         let dir = scratch_dir("handoff-take");
         save_in(&dir, SLUG, "# topic\nNEXT-STEP\n", 100, 7, "").unwrap();
 
@@ -897,17 +1090,133 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    /// Expires the tombstones of `dir`'s gc folder as of `now_secs`.
+    fn expire_at(dir: &Path, now_secs: i64) -> usize {
+        let registry = registry_for(dir);
+        let fs = RealFs::new(&registry);
+        let clock = FixedClock(now_secs);
+        let ran = with_run_lock(
+            registry.gc_dir(),
+            Duration::ZERO,
+            &clock,
+            &NoHook,
+            |guard| {
+                crate::gc::apply::expire(&Env {
+                    guard,
+                    registry: &registry,
+                    fs: &fs,
+                })
+            },
+        );
+        match ran {
+            Ok(crate::gc::lock::RunOutcome::Ran(count)) => count,
+            _ => panic!("the gc lock should be free"),
+        }
+    }
+
     #[test]
-    fn loaded_handoffs_are_pruned_after_the_age_limit() {
-        let dir = scratch_dir("handoff-prune");
+    fn a_handoff_tombstoned_from_the_old_used_folder_still_counts_as_loaded() {
+        // Arrange
+        let dir = scratch_dir("handoff-from-used");
+        let live = save_in(&dir, SLUG, "# a\n", 100, 7, "").unwrap();
+        let used = dir.join("used");
+        fs::create_dir_all(&used).unwrap();
+        let parked = used.join(live.file_name().unwrap());
+        fs::rename(&live, &parked).unwrap();
+
+        // Act
+        with_archive(&dir, &SystemClock, |a| super::archive(a, &parked));
+
+        // Assert
+        let found = loaded(&dir, SLUG);
+        assert_eq!(found.len(), 1);
+        assert_eq!(fs::read_to_string(&found[0].path).unwrap(), "# a\n");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn handoff_expires_at_grace_boundary() {
+        // Arrange
+        let dir = scratch_dir("handoff-expire");
         save_in(&dir, SLUG, "# a\n", 100, 7, "").unwrap();
-        take_in(&dir, SLUG, SystemTime::now());
+        let loaded_at = 1_800_000_000;
+        with_archive(&dir, &FixedClock(loaded_at), |a| {
+            super::take_in_with(a, &dir, SLUG, SystemTime::now())
+        });
         let kept = loaded(&dir, SLUG).remove(0).path;
-        backdate(&kept, MAX_AGE_DAYS + 1);
+        let grace = i64::from(GRACE_DAYS) * 86_400;
 
-        take_in(&dir, SLUG, SystemTime::now());
+        // Act
+        let early = expire_at(&dir, loaded_at + grace - 1);
+        let still_there = kept.exists();
+        let on_time = expire_at(&dir, loaded_at + grace);
 
+        // Assert
+        assert_eq!((early, on_time), (0, 1));
+        assert!(still_there);
         assert!(!kept.exists());
+        assert!(loaded(&dir, SLUG).is_empty());
+        let shown = show_in(&dir, SLUG, false, SystemTime::now());
+        assert!(shown.contains("has expired"), "{shown}");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn archive_removes_the_file_when_the_move_fails() {
+        let dir = scratch_dir("handoff-archive-removes");
+        let path = save_in(&dir, SLUG, "# a\n", 100, 7, "").unwrap();
+        block_tombstones(&dir);
+
+        let taken = take_in(&dir, SLUG, SystemTime::now());
+
+        assert_eq!(taken.contents.len(), 1);
+        assert!(!path.exists(), "a stuck file must not re-inject");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn guard_refusal_keeps_handoff_source() {
+        let dir = scratch_dir("handoff-guard-refuses");
+        let path = save_in(&dir, SLUG, "# a\n", 100, 7, "").unwrap();
+        let elsewhere = scratch_dir("handoff-guard-elsewhere");
+        let registry = registry_for(&elsewhere);
+        let fs = RealFs::new(&registry);
+        let archive = Archive {
+            registry: &registry,
+            fs: &fs,
+            clock: &SystemClock,
+            grace_days: GRACE_DAYS,
+        };
+
+        super::archive(&archive, &path);
+
+        assert!(path.is_file(), "a refused move must leave the source");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn busy_lock_keeps_the_source_on_both_paths() {
+        // Arrange
+        let dir = scratch_dir("handoff-busy");
+        let plain = save_in(&dir, SLUG, "# a\n", 100, 7, "").unwrap();
+        let tagged = save_in(&dir, SLUG, "# b\n", 101, 7, &session_tag(SESSION)).unwrap();
+        let registry = registry_for(&dir);
+        let clock = SystemClock;
+
+        // Act
+        let held = with_run_lock(registry.gc_dir(), Duration::ZERO, &clock, &NoHook, |_| {
+            let taken = take_in(&dir, SLUG, SystemTime::now());
+            let resumed = take_session_in(&dir, SLUG, SESSION, SystemTime::now());
+            (taken.contents.len(), resumed.map(|r| r.path))
+        });
+
+        // Assert
+        let Ok(crate::gc::lock::RunOutcome::Ran((injected, pointer))) = held else {
+            panic!("the test should hold the lock");
+        };
+        assert_eq!(injected, 1);
+        assert_eq!(pointer, Some(tagged.clone()));
+        assert!(plain.is_file() && tagged.is_file());
         let _ = fs::remove_dir_all(dir);
     }
 
