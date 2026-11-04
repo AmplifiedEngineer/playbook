@@ -112,7 +112,7 @@ Creates `docs/adr` in the repo if it is missing. Prints `Next number: NNNN   Dat
 
 ### `playbook agents`
 
-Check agent definition files
+Check agent definition files and show their effort variants
 
 Subcommands: `check`, `variants`
 
@@ -122,7 +122,7 @@ Check every agent definition follows the agent rules
 
 Exits 0 when all pass and 1 otherwise.
 
-- `<AGENTS_DIR>`: Folder of agent definitions (default: `plugins/playbook/agents` in the repo, else `agents` at the repo root)
+- `<AGENTS_DIR>`: Directory of agent definitions. Defaults to `plugins/playbook/agents` in the repo, else `agents` at the repo root
 
 ### `playbook agents variants`
 
@@ -132,9 +132,9 @@ Variants such as `reviewer-low` are not files. `playbook cc` and `playbook ccd` 
 
 Example: `playbook agents variants --ceiling medium`
 
-- `<AGENTS_DIR>`: Directory holding the agent definitions, default `plugins/playbook/agents` in the repo, else `<repo root>/agents`
+- `<AGENTS_DIR>`: Directory of agent definitions. Defaults to `plugins/playbook/agents` in the repo, else `agents` at the repo root
 - `--ceiling <CEILING>`: Lowest effort ceiling to apply to every agent (default: none)
-- `--mode <MODE>`: auto, all or off (default: auto)
+- `--mode <MODE>`: One of auto, all or off
 - `--json`: Print the `--agents` JSON
 
 ### `playbook atlassian`
@@ -233,9 +233,9 @@ Example: `playbook ci --strict`
 
 ### `playbook code`
 
-Index and search the repository's source code
+Index and search the repo's source code
 
-The index is a cache kept under the playbook state folder for this worktree. Nothing is written inside the repository.
+The index is a cache kept under the playbook state directory for this worktree. Nothing is written inside the repo.
 
 Subcommands: `context`, `index`, `outline`, `read`, `refs`, `search`, `status`, `symbol`
 
@@ -247,13 +247,13 @@ Describe the task in words. Finds matching declarations and text, widens text hi
 
 Example: `playbook code context "add retry support to payment processing"`
 
-- `<QUERY>`: The task, in words
+- `<QUERY>`: Task, in words
 - `--max-tokens <MAX_TOKENS>`: Budget in tokens for the whole text output, counted as four bytes each
 - `--json`: Print one JSON document
 
 ### `playbook code index`
 
-Build or refresh the code index for this repository
+Build or refresh the code index for this repo
 
 Hashes every file git lists, and reads only the ones that changed. Only one run at a time is allowed.
 
@@ -270,7 +270,7 @@ Parses the file as it is on disk, so it works without an index and never shows o
 
 Example: `playbook code outline lib/payment/service.ts`
 
-- `<PATH>`: The file to outline
+- `<PATH>`: File to outline
 - `--json`: Print one JSON document
 
 ### `playbook code read`
@@ -281,7 +281,7 @@ Reads the file as it is on disk. Prints at most 400 lines or 32 KiB. A range tha
 
 Example: `playbook code read lib/payment/service.ts 10:40`
 
-- `<PATH>`: The file to read
+- `<PATH>`: File to read
 - `<LINES>`: First and last line, 1 based and inclusive, as START:END
 - `--json`: Print one JSON document
 
@@ -293,13 +293,13 @@ Finds identifiers in code that spell the name, including declarations and import
 
 Example: `playbook code refs processPayment`
 
-- `<TARGET>`: The name to look for; a dotted or scoped name uses its last part
+- `<TARGET>`: Name to look for. A dotted or scoped name uses its last part
 - `--limit <LIMIT>`: Most results to show, from 1 to 200
 - `--json`: Print one JSON document
 
 ### `playbook code search`
 
-Search symbols, imports and text of this repository
+Search symbols, imports and text of this repo
 
 Without the text flag, results are ranked in tiers: exact qualified name, exact name, name ignoring case, name prefix, import, text, then a plain substring scan. With it, only indexed text is searched. Words in the query are matched as plain text, so operators have no special meaning. Results are marked stale when a file changed after indexing.
 
@@ -330,7 +330,7 @@ Matches the exact qualified name first (a top level symbol's qualified name is i
 
 Example: `playbook code symbol PaymentService --kind class`
 
-- `<NAME>`: The name to look up
+- `<NAME>`: Name to look up
 - `--kind <KIND>`: Only this kind, for example `function`, `class` or `method`
 - `--lang <LANG>`: Only files of this language: rust, typescript, javascript or python (one of `rust`, `typescript`, `javascript`, `python`)
 - `--path <PATH>`: Only files under this path prefix, for example `lib/payment/`
@@ -1257,15 +1257,19 @@ Subcommands: `commit-msg`, `pr-text`
 
 Clean a commit message file, such as git's `.git/COMMIT_EDITMSG`
 
+Example: `playbook sanitize commit-msg .git/COMMIT_EDITMSG`
+
 - `<FILE>`: File holding the message
-- `--check`: Report what would be removed and exit 1 if anything would, without writing (exits 2 if FILE cannot be read)
+- `--check`: Report what would be removed, without writing. Exits 1 if anything would be removed, and 2 if FILE cannot be read
 
 ### `playbook sanitize pr-text`
 
 Clean a PR title or body saved to a file
 
+Example: `playbook sanitize pr-text /tmp/body.md`
+
 - `<FILE>`: File holding the text
-- `--check`: Report what would be removed and exit 1 if anything would, without writing (exits 2 if FILE cannot be read)
+- `--check`: Report what would be removed, without writing. Exits 1 if anything would be removed, and 2 if FILE cannot be read
 
 ### `playbook segment`
 
@@ -1360,6 +1364,8 @@ Check the shared settings template is valid
 
 Exits 0 when valid and 1 with a message when not.
 
+Example: `playbook settings check seed/settings.shared.json .`
+
 - `<TEMPLATE>`: Shared settings template to check
 - `<REPO_ROOT>`: Repo root that every hook command must resolve inside
 
@@ -1368,6 +1374,8 @@ Exits 0 when valid and 1 with a message when not.
 Create the shared settings template from a live settings.json
 
 Takes the hooks and status line from the live file and keeps the permissions of the current seed. Prints the new seed.
+
+Example: `playbook settings gen ~/.claude/settings.json seed/settings.shared.json`
 
 - `<SRC>`: Live settings.json to start from
 - `<SEED>`: Current seed, whose permissions block is kept
