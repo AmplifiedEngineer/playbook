@@ -765,7 +765,12 @@ mod tests {
             let s = setup(&format!("q-diag-{count}"));
 
             // Act
-            let (got, _) = run_diagnostics(&s, &[s.file.clone()], 1, vec![publish(&s.file, count)]);
+            let (got, _) = run_diagnostics(
+                &s,
+                std::slice::from_ref(&s.file),
+                1,
+                vec![publish(&s.file, count)],
+            );
 
             // Assert
             let Outcome::Answered(answered) = got else {
