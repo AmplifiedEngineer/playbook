@@ -144,10 +144,12 @@ fn write_fact(home: &Path, file: &str, content: &str) {
 
 /// Builds the scratch HOME with a git repo and the four seeded facts.
 fn seed_home() -> PathBuf {
-    let home = std::env::temp_dir().join(format!(
-        "playbook-recall-replay-{}",
-        playbook::testing::run_id()
-    ));
+    seed_home_named("playbook-recall-replay")
+}
+
+/// [`seed_home`] in its own folder, so tests that run in parallel do not share one.
+fn seed_home_named(name: &str) -> PathBuf {
+    let home = std::env::temp_dir().join(format!("{name}-{}", playbook::testing::run_id()));
     let _ = fs::remove_dir_all(&home);
     fs::create_dir_all(memory_dir(&home)).unwrap();
     let repo = home.join("repo");
@@ -391,4 +393,37 @@ fn no_message_exceeds_the_recall_cap() {
             replay.prompt
         );
     }
+}
+
+/// A word found only in a fact's body reaches the model through the real hook:
+/// the rebuild indexes the body and the hook injects the fact with the weak
+/// hint, since a body-only match is never strong.
+#[test]
+fn a_word_only_a_fact_body_holds_recalls_that_fact_as_a_weak_match() {
+    // Arrange
+    let guard = HomeGuard(seed_home_named("playbook-recall-body-only"));
+    let home = &guard.0;
+    let graph = json!({
+        "nodes": [{"id": "global/habitat", "file": "habitat.md", "scope": "global",
+                   "type": "reference", "name": "habitat-notes",
+                   "description": "Where the animals are kept."}],
+        "edges": []
+    })
+    .to_string();
+    write_fact(
+        home,
+        "habitat.md",
+        "---\nname: habitat-notes\n---\n\nThe quokka burrows sit by the north fence. HABITATBODYMARKER\n",
+    );
+    playbook::testing::write_graph_fixture(&memory_dir(home), &graph);
+
+    // Act
+    let message = run_prompt(home, "where do the quokka burrows sit", "body-only");
+
+    // Assert
+    assert!(
+        message.contains("HABITATBODYMARKER"),
+        "fact not injected: {message:?}"
+    );
+    assert!(message.contains(HINT_PREFIX), "no weak hint: {message:?}");
 }

@@ -11,6 +11,7 @@
 
 pub mod config;
 pub mod memory;
+pub mod memory_search;
 pub mod migrate;
 
 use playbook_common::atomic::ensure_private_dir;
