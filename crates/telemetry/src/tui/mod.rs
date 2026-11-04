@@ -194,6 +194,9 @@ fn event_loop(
             }
         }
     }
+    if let Some(why) = autosave.finish(|text| ui_state::save_layout(&home, text)) {
+        crate::say::notice(&why);
+    }
     Ok(())
 }
 

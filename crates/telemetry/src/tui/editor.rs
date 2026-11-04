@@ -18,7 +18,7 @@ const UNDO_DEPTH: usize = 20;
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     Stay,
-    /// Close the editor; every change was already applied.
+    /// Close the editor; every valid change was already applied.
     Close,
     /// Go back to the default layout and clear the stored one.
     Reset,

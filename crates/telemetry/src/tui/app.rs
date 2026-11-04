@@ -635,9 +635,7 @@ impl App {
         let Some(editor) = self.editor.as_mut() else {
             return Effect::None;
         };
-        let outcome = editor.key(code);
-        let (edited, tab) = (editor.layout.clone(), editor.tab);
-        match outcome {
+        match editor.key(code) {
             super::editor::Outcome::Close => {
                 self.editor = None;
                 Effect::None
@@ -647,8 +645,11 @@ impl App {
                 self.use_layout(super::layout::Layout::default(), 0);
                 Effect::SaveLayout(String::new())
             }
-            super::editor::Outcome::Stay if edited == self.layout => Effect::None,
-            super::editor::Outcome::Stay => self.apply_edit(edited, tab),
+            super::editor::Outcome::Stay if editor.layout == self.layout => Effect::None,
+            super::editor::Outcome::Stay => {
+                let (edited, tab) = (editor.layout.clone(), editor.tab);
+                self.apply_edit(edited, tab)
+            }
         }
     }
 
