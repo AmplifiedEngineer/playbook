@@ -30,9 +30,6 @@ const MAX_AGE_DAYS: u64 = 14;
 /// the context.
 const MAX_INJECTED: usize = 3;
 
-/// The folder loaded handoffs used to move to. Still read until the migration
-/// has moved what it holds into the tombstone folder.
-const USED_DIR: &str = "used";
 /// How long a start waits for a busy gc run before leaving the handoff for the
 /// next start.
 const LOCK_WAIT: Duration = Duration::from_millis(500);
@@ -207,10 +204,10 @@ fn tombstoned(dir: &Path, slug: &str, index: &Path, state: State) -> Vec<(Record
     found
 }
 
-/// Handoffs for `slug` that a session start already loaded, freshest first:
-/// the ones in the tombstone folder, then any not yet migrated out of `used/`.
+/// Handoffs for `slug` that a session start already loaded and gc still keeps,
+/// freshest first.
 fn loaded(dir: &Path, slug: &str, index: &Path) -> Vec<Entry> {
-    let mut found: Vec<Entry> = tombstoned(dir, slug, index, State::Done)
+    tombstoned(dir, slug, index, State::Done)
         .into_iter()
         .filter(|(_, at)| at.is_file())
         .map(|(rec, at)| Entry {
@@ -218,10 +215,7 @@ fn loaded(dir: &Path, slug: &str, index: &Path) -> Vec<Entry> {
             modified: UNIX_EPOCH
                 + Duration::from_secs(u64::try_from(rec.source_mtime).unwrap_or(0)),
         })
-        .collect();
-    found.extend(list(&dir.join(USED_DIR), |name| is_handoff_for(name, slug)));
-    found.sort_by_key(|e| std::cmp::Reverse(e.modified));
-    found
+        .collect()
 }
 
 fn cutoff(now: SystemTime) -> SystemTime {
@@ -1200,19 +1194,6 @@ mod tests {
         assert_eq!(injected, 1);
         assert_eq!(pointer, Some(tagged.clone()));
         assert!(plain.is_file() && tagged.is_file());
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn show_falls_back_to_unmigrated_used_dir() {
-        let dir = scratch_dir("handoff-used-fallback");
-        let used = dir.join(USED_DIR);
-        fs::create_dir_all(&used).unwrap();
-        fs::write(used.join(format!("{SLUG}-100-7.md")), "# old\nOLD-TEXT\n").unwrap();
-
-        let shown = show_in(&dir, SLUG, false, SystemTime::now());
-
-        assert!(shown.contains("OLD-TEXT"), "{shown}");
         let _ = fs::remove_dir_all(dir);
     }
 
