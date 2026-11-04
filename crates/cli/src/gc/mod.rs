@@ -189,10 +189,13 @@ impl Registry {
     }
 }
 
-/// The production registry for the playbook root `root`. Each unit that adds a
-/// store adds one line here.
-pub fn registry(root: &Path) -> Registry {
-    Registry::new(root.join(GC_DIR))
+/// The production registry for the user whose home is `home`. Each unit that
+/// adds a store adds it here.
+pub fn registry(home: &Path) -> Registry {
+    let root = crate::common::paths::playbook_root_from(home);
+    stores::small_stores(home)
+        .into_iter()
+        .fold(Registry::new(root.join(GC_DIR)), Registry::with_store)
 }
 
 #[cfg(test)]
@@ -205,7 +208,7 @@ mod tests {
 
         let roots = registry.roots();
 
-        assert!(roots.contains(&PathBuf::from("/pb/gc/tombstones")));
+        assert!(roots.contains(&PathBuf::from("/pb/.config/playbook/gc/tombstones")));
     }
 
     #[test]
