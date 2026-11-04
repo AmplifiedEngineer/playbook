@@ -14,7 +14,9 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # The sender is in the key so a branch update by another actor cannot cancel
+  # a Dependabot run that is still approving.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.sender.login }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
