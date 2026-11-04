@@ -7,9 +7,11 @@
 
 pub mod apply;
 pub mod build_output;
+pub mod gate;
 pub mod guard;
 pub mod index;
 pub mod lock;
+pub mod logs;
 pub mod report;
 pub mod space;
 pub mod stores;
@@ -93,6 +95,9 @@ pub struct Item {
     pub bytes: u64,
     /// Newest modification time found, as epoch seconds.
     pub newest_mtime: i64,
+    /// Files that move with `path` as one group, such as a database's
+    /// `-wal` and `-shm` files.
+    pub also: Vec<PathBuf>,
     /// Set when the store's rule says this item should go now.
     pub due: Option<Due>,
 }
@@ -239,6 +244,7 @@ mod tests {
                     path: PathBuf::from("/x"),
                     bytes: store.limits.max_bytes,
                     newest_mtime: now,
+                    also: Vec::new(),
                     due: None,
                 }]
             },
