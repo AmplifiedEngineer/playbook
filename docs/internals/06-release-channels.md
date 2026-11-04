@@ -115,6 +115,28 @@ A fix at the same version raises `pkgrel`. A real rollback to an older `pkgver` 
 
 A run with `version=` of an older release does not apply, because the job only publishes the latest release. Orphaning or deleting the package goes through the AUR web page.
 
+### apt and dnf repository
+
+After `verify`, two leaf jobs publish a signed repository to GitHub Pages ([ADR 0052](../adr/0052-signed-apt-and-dnf-repository.md)). A failure turns the run red and blocks no other channel. Run `gh workflow run release.yml -f version=X.Y.Z` to try again.
+
+- `package-repo-sign` runs `scripts/package-repo-fetch.sh`, which takes the newest five releases that list packages and checks the attestation of `SHA256SUMS` and of every package. `scripts/package-repo.sh` rebuilds both indexes from them and signs them. `scripts/package-repo-verify.sh` then installs from the built folder in Debian, Ubuntu and Fedora containers, checks that a tampered index is refused and, when two versions exist, that an upgrade keeps a seeded file under `~/.config/playbook`. This job holds the key and has `contents: read` only.
+- `package-repo-deploy` holds the Pages permissions and no key. After the deploy it reads the public URL, retries for up to five minutes, and checks both signatures with the published key.
+- A missing key fails the run on purpose. A dry run signs with a throwaway key and deploys nothing.
+- The signing subkey is RSA 4096 and lasts three years. The build warns under 90 days and fails under 30.
+- To yank a version, add it to `packaging/apt/yanked.txt` in a pull request and run the release workflow again. A rerun alone does not remove a bad release. Pages also keeps the earlier deployment for a manual redeploy.
+- If the key leaks, revoke the subkey, publish a new key and an advisory, replace both secrets and rebuild. Clients fetch the new `playbook.gpg`.
+
+One time setup for the maintainer. The jobs cannot do these:
+
+1. Generate an RSA 4096 primary key offline, with a signing subkey that expires in three years. Keep the primary on an offline token or encrypted media, with a second copy.
+2. Export the subkey only: `gpg --armor --export-secret-subkeys <fingerprint>!`.
+3. Create environment `package-repo` limited to `main`, with secrets `PACKAGE_SIGNING_KEY` (the exported subkey) and `PACKAGE_SIGNING_PASSPHRASE`.
+4. In Settings, Pages, set the source to GitHub Actions, and create environment `github-pages`.
+5. Publish the fingerprint in the release notes and this guide. If you own a custom domain, point it at Pages and change the URL in the install guide before the first release.
+6. Run `gh workflow run release.yml -f version=<latest> -f dry_run=true` to prove the build, then without `dry_run` to publish.
+
+The first real run decides the Pages egress hosts and whether block mode covers container traffic, which is why both jobs use audit mode for now.
+
 ### Scoop
 
 After `verify`, the `scoop` job moves the Windows scoop bucket, the repository `pragmatic-engineer/scoop-bucket` (ADR 0053, Windows is experimental).
