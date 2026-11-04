@@ -1603,7 +1603,7 @@ With no verb it runs in the foreground until you stop it, polling every `watch.p
 
 Example: `playbook watch once`
 
-Subcommands: `approve`, `dry-run`, `log`, `once`, `pause`, `reject`, `resume`, `retry`, `status`
+Subcommands: `approve`, `dry-run`, `install-service`, `log`, `once`, `pause`, `reject`, `resume`, `retry`, `status`, `uninstall-service`
 
 ### `playbook watch approve`
 
@@ -1622,6 +1622,14 @@ Show the rules and what a poll would propose, and change nothing
 Example: `playbook watch dry-run`
 
 - `--since <SINCE>`: Look at events from this UTC time, for example 2026-11-01T00:00:00Z
+
+### `playbook watch install-service`
+
+Install a timer that runs `watch once` every 60 seconds
+
+A launchd agent on macOS and a systemd user timer on Linux. No process stays running between polls. The timer finds the GitHub token through `gh auth token`, so run `gh auth login` first.
+
+Example: `playbook watch install-service`
 
 ### `playbook watch log`
 
@@ -1680,6 +1688,16 @@ Show whether watch runs, the queue, the limits and the dead list
 Example: `playbook watch status --json`
 
 - `--json`: Print the status as JSON
+
+### `playbook watch uninstall-service`
+
+Remove the timer that `install-service` made
+
+The audit log stays unless you ask for it to go.
+
+Example: `playbook watch uninstall-service --delete-log`
+
+- `--delete-log`: Also delete the audit log
 
 ### `playbook worktree`
 

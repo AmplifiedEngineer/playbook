@@ -693,6 +693,22 @@ fn the_kill_switch_is_watch_enabled_read_fresh_each_time() {
 }
 
 #[test]
+fn the_real_service_manager_is_built_only_in_mod_rs() {
+    // Arrange
+    let needle = ["manager", "_for("].concat();
+
+    // Act
+    let offenders: Vec<_> = watch_sources()
+        .into_iter()
+        .filter(|(file, text)| !file.ends_with("mod.rs") && text.contains(&needle))
+        .map(|(file, _)| file)
+        .collect();
+
+    // Assert
+    assert!(offenders.is_empty(), "{offenders:?}");
+}
+
+#[test]
 fn nothing_runs_a_shell() {
     // Arrange
     let needles = [

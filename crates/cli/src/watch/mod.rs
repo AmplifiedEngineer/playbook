@@ -35,6 +35,7 @@ pub mod lock;
 pub mod merge;
 pub mod review;
 pub mod rule;
+pub mod service;
 pub mod settings;
 pub mod source;
 pub mod store;
@@ -360,6 +361,59 @@ pub fn reject<W: GithubWrite, C: Clock>(ctx: &Ctx<'_, W, C>, id: i64) -> Result<
     Ok(format!("item {id} rejected\n"))
 }
 
+/// The token of the `gh` login, when there is one.
+fn gh_token() -> Option<String> {
+    let mut command = std::process::Command::new("gh");
+    command.args(["auth", "token"]);
+    let output =
+        crate::common::proc::run_with_timeout(&mut command, std::time::Duration::from_secs(30))?;
+    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (output.status.success() && !token.is_empty()).then_some(token)
+}
+
+/// `install-service` and `uninstall-service`, which need no token. This is the
+/// only place that builds the real service manager.
+fn service_command(
+    cmd: Option<&WatchCommand>,
+    home: &Path,
+    data: &Path,
+) -> Option<Result<String, String>> {
+    let delete_log = match cmd {
+        Some(WatchCommand::InstallService) => None,
+        Some(WatchCommand::UninstallService { delete_log }) => Some(*delete_log),
+        _ => return None,
+    };
+    Some(service_result(delete_log, home, data))
+}
+
+fn service_result(delete_log: Option<bool>, home: &Path, data: &Path) -> Result<String, String> {
+    let kind = service::kind_here()?;
+    if let Some(why) = crate::service_manager::refusal(home) {
+        return Err(format!("the service was not changed, because {why}"));
+    }
+    let manager = crate::service_manager::manager_for(home);
+    let uid = crate::common::account::uid();
+    match delete_log {
+        None => {
+            let exe = std::env::current_exe().map_err(|e| format!("no path for playbook: {e}"))?;
+            let path_env = std::env::var("PATH").unwrap_or_default();
+            let launch = service::Launch {
+                exe: &exe,
+                path_env: &path_env,
+            };
+            service::install(kind, home, &launch, manager.as_ref(), uid)
+        }
+        Some(delete_log) => service::uninstall(
+            kind,
+            home,
+            manager.as_ref(),
+            uid,
+            &data.join("watch"),
+            delete_log,
+        ),
+    }
+}
+
 /// Builds the real GitHub clients and runs `cmd`, or the foreground loop when
 /// there is none.
 pub fn run(cmd: Option<&WatchCommand>) -> Result<String, String> {
@@ -368,6 +422,9 @@ pub fn run(cmd: Option<&WatchCommand>) -> Result<String, String> {
     let settings = Settings::load(&home)?;
     if matches!(cmd, None | Some(WatchCommand::Once { .. })) && !settings.enabled {
         return Ok(OFF_MESSAGE.to_string());
+    }
+    if let Some(out) = service_command(cmd, &home, &data) {
+        return out;
     }
     let needs_token = matches!(
         cmd,
@@ -378,12 +435,16 @@ pub fn run(cmd: Option<&WatchCommand>) -> Result<String, String> {
     let token = if !needs_token {
         String::new()
     } else {
-        std::env::var(&settings.token_env).map_err(|_| {
-            format!(
-                "set the {} environment variable to a GitHub token",
-                settings.token_env
-            )
-        })?
+        // A timer starts with no shell environment, so `gh` is the fallback.
+        std::env::var(&settings.token_env)
+            .ok()
+            .or_else(gh_token)
+            .ok_or_else(|| {
+                format!(
+                    "set the {} environment variable to a GitHub token, or run `gh auth login`",
+                    settings.token_env
+                )
+            })?
     };
     let write = gh::GhWrite::new(token.clone());
     let clock = SystemClock;
@@ -432,6 +493,9 @@ pub fn run(cmd: Option<&WatchCommand>) -> Result<String, String> {
         WatchCommand::Status { json } => control::status(&ctx, *json),
         WatchCommand::Pause => control::set_paused(&ctx, true),
         WatchCommand::Resume => control::set_paused(&ctx, false),
+        WatchCommand::InstallService | WatchCommand::UninstallService { .. } => {
+            Err("service commands are handled before the token is read".to_string())
+        }
         WatchCommand::Retry { id } => control::retry(&ctx, *id),
         WatchCommand::Log {
             rule,

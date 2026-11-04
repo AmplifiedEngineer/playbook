@@ -586,6 +586,8 @@ fn table() -> Vec<Case> {
         case("watch pause", &["watch", "pause"]).out("watch paused").grows(),
         case("watch resume", &["watch", "resume"]).out("watch resumed").grows(),
         case("watch retry", &["watch", "retry", "1"]).code(1).err("not on the dead list").grows(),
+        case("watch install-service", &["watch", "install-service"]).code(1).err("not changed"),
+        case("watch uninstall-service", &["watch", "uninstall-service"]).code(1).err("not changed"),
         case("watch log", &["watch", "log"]).grows(),
         case("sessions sweep", &["sessions", "sweep", "--dry-run"])
             .out("No finished or stale sessions")

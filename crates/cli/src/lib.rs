@@ -2232,6 +2232,24 @@ pub enum WatchCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Install a timer that runs `watch once` every 60 seconds
+    ///
+    /// A launchd agent on macOS and a systemd user timer on Linux. No process
+    /// stays running between polls. The timer finds the GitHub token through
+    /// `gh auth token`, so run `gh auth login` first.
+    ///
+    /// Example: `playbook watch install-service`
+    InstallService,
+    /// Remove the timer that `install-service` made
+    ///
+    /// The audit log stays unless you ask for it to go.
+    ///
+    /// Example: `playbook watch uninstall-service --delete-log`
+    UninstallService {
+        /// Also delete the audit log
+        #[arg(long)]
+        delete_log: bool,
+    },
 }
 
 /// `playbook worktree` subcommands.
