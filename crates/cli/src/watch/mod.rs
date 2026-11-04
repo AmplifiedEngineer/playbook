@@ -8,7 +8,10 @@
 
 pub mod audit;
 pub mod clock;
+pub mod event;
+pub mod github;
 pub mod lock;
 pub mod rule;
 pub mod settings;
+pub mod source;
 pub mod store;
