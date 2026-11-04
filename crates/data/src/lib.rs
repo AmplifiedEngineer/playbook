@@ -46,6 +46,16 @@ pub fn scoped_db_in(data: &Path, kind: &str, owner: &str, repo: &str, worktree: 
         .join(format!("{worktree}.db"))
 }
 
+/// `<data>/code/<owner>/<repo>/store-v<version>.sqlite3`: the one code index
+/// store of a repo, shared by all its worktrees. The version in the name keeps
+/// two builds with different schemas from opening each other's file.
+pub fn code_store_in(data: &Path, owner: &str, repo: &str, version: i64) -> PathBuf {
+    data.join("code")
+        .join(owner)
+        .join(repo)
+        .join(format!("store-v{version}.sqlite3"))
+}
+
 /// The per-worktree database kinds.
 pub const WORKTREE_KINDS: [&str; 2] = ["gate", "code"];
 
@@ -120,9 +130,32 @@ pub fn scoped_db(kind: &str) -> Option<PathBuf> {
     Some(scoped_db_in(&data_dir(), kind, owner, repo, &id))
 }
 
+/// [`code_store_in`] for the current repo under [`data_dir`]. `None` when the
+/// repo has no `origin` remote or its name has no safe folder path.
+pub fn code_store(version: i64) -> Option<PathBuf> {
+    let slug = repo_slug();
+    let (owner, repo) = slug.split_once('/')?;
+    if !slug.split('/').all(safe_segment) {
+        return None;
+    }
+    Some(code_store_in(&data_dir(), owner, repo, version))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_code_store_name_carries_the_schema_version() {
+        // Arrange
+        let data = Path::new("/d");
+
+        // Act
+        let store = code_store_in(data, "o", "r", 4);
+
+        // Assert
+        assert_eq!(store, PathBuf::from("/d/code/o/r/store-v4.sqlite3"));
+    }
 
     #[test]
     fn data_dir_sits_under_the_playbook_root() {

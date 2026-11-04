@@ -5,6 +5,7 @@
 //! the library functions in `code` return.
 
 use super::host;
+use super::index::Scope;
 use super::output::{Envelope, IndexState};
 use super::search::SearchOptions;
 use super::status;
@@ -690,6 +691,7 @@ fn render_index(env: &Env, json: bool, rebuild: bool) -> Result<String, String> 
                 "removed": report.removed,
                 "skipped": report.skipped,
                 "failed": report.failed,
+                "scope": report.scope.as_str(),
             }),
         );
         envelope.warnings = warnings;
@@ -698,8 +700,13 @@ fn render_index(env: &Env, json: bool, rebuild: bool) -> Result<String, String> 
     for warning in &warnings {
         eprintln!("code: {warning}");
     }
+    let rebuilt = match (report.scope, rebuild) {
+        (Scope::Store, _) => "rebuilt: store\n",
+        (Scope::Worktree, true) => "rebuilt: worktree only\n",
+        (Scope::Worktree, false) => "",
+    };
     Ok(format!(
-        "indexed {} files: {} changed, {} unchanged, {} removed, {} skipped, {} failed\n",
+        "indexed {} files: {} changed, {} unchanged, {} removed, {} skipped, {} failed\n{rebuilt}",
         report.indexed,
         report.changed,
         report.unchanged,

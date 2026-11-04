@@ -3,19 +3,29 @@
 
 //! The code index database. It is a cache: a schema version mismatch or a
 //! corrupt file is deleted and rebuilt by `index`, and query commands never
-//! delete anything. Connection setup follows the usage store's ordering.
+//! delete anything. One store file serves every worktree of a repo, so each
+//! open holds a shared lock on `store-v<N>.lock` and the delete step takes the
+//! exclusive one, which keeps it from pulling the file out from under a
+//! sibling. Connection setup follows the usage store's ordering.
 
 use super::host;
 use playbook_common::sqlite::{retry_busy, OPEN_BUDGET};
 use rusqlite::{Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior};
+use std::fs::{File, OpenOptions, TryLockError};
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Bumped when the table layout changes. A different non-zero value in
-/// `PRAGMA user_version` makes the next `index` run rebuild the file.
-pub const SCHEMA_VERSION: i64 = 3;
+/// Bumped when the table layout changes. The store file name carries it, so a
+/// build never opens a file with another layout.
+pub const SCHEMA_VERSION: i64 = 4;
 
 const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
+
+/// How often a query asks for the shared store lock while a rebuild holds the
+/// exclusive one, and the wait between asks.
+const LOCK_POLL_TRIES: u32 = 5;
+const LOCK_POLL_MS: u64 = 10;
 
 /// Largest size the WAL file keeps on disk after a checkpoint, in bytes.
 pub const WAL_SIZE_LIMIT: i64 = 64 * 1024 * 1024;
@@ -62,7 +72,8 @@ pub fn commit_tx(tx: Transaction<'_>, hooks: &TxHooks) -> rusqlite::Result<()> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenMode {
     /// Used only by `index` after it holds the run lock: creates the file and
-    /// deletes and recreates it once when it is corrupt or from another version.
+    /// deletes and recreates it once when it is corrupt or from another
+    /// version, if no sibling worktree is using it.
     Index,
     /// Used by every other command: never creates or deletes anything.
     Query,
@@ -180,10 +191,11 @@ pub fn fts5_available(conn: &Connection) -> bool {
     options.iter().any(|opt| opt == "ENABLE_FTS5")
 }
 
-/// The db file and the two files SQLite keeps beside it in WAL mode.
+/// The db file and the two files SQLite keeps beside it in WAL mode, with the
+/// main file last so a failed delete leaves it for the next try.
 fn sibling_files(path: &Path) -> Vec<PathBuf> {
     let base = path.as_os_str().to_os_string();
-    ["", "-wal", "-shm"]
+    ["-wal", "-shm", ""]
         .iter()
         .map(|suffix| {
             let mut name = base.clone();
@@ -213,35 +225,254 @@ fn rebuild_hint(path: &Path, why: &str) -> String {
     )
 }
 
-/// Opens the index at `path` for `mode`. See [`OpenMode`].
-pub fn open_index(path: &Path, mode: OpenMode) -> Result<Connection, DbError> {
-    open_index_with(path, mode, delete_index_files)
+/// Test seams of [`open_index`]. Production passes [`DbHooks::default`].
+#[derive(Default)]
+pub struct DbHooks<'a> {
+    /// Called before a new store's schema transaction begins.
+    pub before_schema: Option<&'a dyn Fn()>,
+    /// Called once the store is open and the shared lock is held.
+    pub after_open: Option<&'a dyn Fn()>,
+    /// Called after recovery released the exclusive lock, before the shared
+    /// lock is taken again.
+    pub after_recovery: Option<&'a dyn Fn()>,
+    /// Called each time the shared lock was not available.
+    pub on_poll: Option<&'a dyn Fn()>,
 }
 
-/// [`open_index`] with the file deleter injected, so a test can make the
-/// recreate step fail without relying on directory permissions.
+/// The lock file of a store: shared by every open, exclusive while a damaged
+/// store is deleted and recreated.
+pub fn store_lock_path(store: &Path) -> PathBuf {
+    store.with_extension("lock")
+}
+
+/// A lock on [`store_lock_path`], shared unless recovery holds it exclusive.
+/// Dropping it unlocks explicitly, so a copy of the descriptor that a
+/// concurrent fork holds cannot keep it alive.
+#[derive(Debug)]
+pub struct StoreLock(File);
+
+impl Drop for StoreLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
+impl StoreLock {
+    fn open(store: &Path) -> Result<StoreLock, DbError> {
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(store_lock_path(store))
+            .map_err(|e| {
+                DbError::Failed(format!(
+                    "failed to open the lock of the code index at {}: {e}",
+                    store.display()
+                ))
+            })?;
+        Ok(StoreLock(file))
+    }
+
+    /// Takes the shared lock, asking [`LOCK_POLL_TRIES`] times while a rebuild
+    /// holds the exclusive one.
+    fn share(&self, store: &Path, hooks: &DbHooks) -> Result<(), DbError> {
+        for attempt in 0..LOCK_POLL_TRIES {
+            match self.0.try_lock_shared() {
+                Ok(()) => return Ok(()),
+                Err(TryLockError::WouldBlock) => {
+                    if let Some(poll) = hooks.on_poll {
+                        poll();
+                    }
+                    if attempt + 1 < LOCK_POLL_TRIES {
+                        std::thread::sleep(Duration::from_millis(LOCK_POLL_MS));
+                    }
+                }
+                Err(TryLockError::Error(e)) => {
+                    return Err(DbError::Failed(format!(
+                        "failed to lock the code index at {}: {e}",
+                        store.display()
+                    )))
+                }
+            }
+        }
+        Err(DbError::Failed(
+            "the index is being rebuilt; try again".to_string(),
+        ))
+    }
+
+    /// Swaps the shared lock for the exclusive one without waiting. Returns
+    /// false, with the shared lock held again, when a sibling holds a shared
+    /// lock.
+    fn try_exclusive(&self, store: &Path, hooks: &DbHooks) -> Result<bool, DbError> {
+        let failed = |e: std::io::Error| {
+            DbError::Failed(format!(
+                "failed to lock the code index at {}: {e}",
+                store.display()
+            ))
+        };
+        self.0.unlock().map_err(failed)?;
+        match self.0.try_lock() {
+            Ok(()) => Ok(true),
+            Err(TryLockError::WouldBlock) => self.share(store, hooks).map(|()| false),
+            Err(TryLockError::Error(e)) => Err(failed(e)),
+        }
+    }
+}
+
+/// An open index store: the connection and the shared store lock it holds.
+/// The connection is closed before the lock is released.
+#[derive(Debug)]
+pub struct Store {
+    conn: Connection,
+    _lock: StoreLock,
+    recovered: bool,
+}
+
+impl Store {
+    /// Whether this open deleted a damaged store and created a new one.
+    pub fn recovered(&self) -> bool {
+        self.recovered
+    }
+}
+
+impl Deref for Store {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        &self.conn
+    }
+}
+
+impl DerefMut for Store {
+    fn deref_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+}
+
+/// Opens the index at `path` for `mode`. See [`OpenMode`].
+pub fn open_index(path: &Path, mode: OpenMode) -> Result<Store, DbError> {
+    open_index_with(path, mode, &delete_index_files, &DbHooks::default())
+}
+
+/// [`open_index`] with the file deleter and the test seams injected, so a
+/// test can make the recreate step fail without relying on directory
+/// permissions.
 fn open_index_with(
     path: &Path,
     mode: OpenMode,
-    delete: impl Fn(&Path) -> Result<(), String>,
-) -> Result<Connection, DbError> {
+    delete: &dyn Fn(&Path) -> Result<(), String>,
+    hooks: &DbHooks,
+) -> Result<Store, DbError> {
     if mode == OpenMode::Query && !path.exists() {
         return Err(DbError::Missing);
     }
-    match try_open(path, mode) {
-        Err(DbError::NeedsRebuild(first)) if mode == OpenMode::Index => {
-            delete(path).map_err(|e| {
-                DbError::Failed(format!("{e}; run `{}`", host::command("index --rebuild")))
-            })?;
-            try_open(path, mode).map_err(|second| {
-                DbError::Failed(rebuild_hint(
-                    path,
-                    &format!("could not be recreated ({first}; then {second})"),
-                ))
+    ensure_parent(path, mode)?;
+    let lock = StoreLock::open(path)?;
+    lock.share(path, hooks)?;
+    match try_open(path, mode, hooks) {
+        Ok(conn) => {
+            if let Some(opened) = hooks.after_open {
+                opened();
+            }
+            Ok(Store {
+                conn,
+                _lock: lock,
+                recovered: false,
             })
         }
-        other => other,
+        Err(DbError::NeedsRebuild(first)) if mode == OpenMode::Index => {
+            recover(path, &first, lock, delete, hooks)
+        }
+        Err(e) => Err(e),
     }
+}
+
+/// Deletes and recreates a damaged store, holding the exclusive store lock
+/// only for that step. A sibling that holds the shared lock stops it, and
+/// nothing is deleted. Opening the store again under the lock covers a sibling
+/// that repaired it first.
+fn recover(
+    path: &Path,
+    first: &str,
+    lock: StoreLock,
+    delete: &dyn Fn(&Path) -> Result<(), String>,
+    hooks: &DbHooks,
+) -> Result<Store, DbError> {
+    if !lock.try_exclusive(path, hooks)? {
+        return Err(DbError::Failed(format!(
+            "another worktree is using the code index at {}; try again when its command ends, \
+             then run `{}`",
+            path.display(),
+            host::command("index --rebuild")
+        )));
+    }
+    let recreated = recreate(path, first, delete, hooks);
+    let _ = lock.0.unlock();
+    if let Some(recovered) = hooks.after_recovery {
+        recovered();
+    }
+    lock.share(path, hooks)?;
+    recreated.map(|(conn, deleted)| Store {
+        conn,
+        _lock: lock,
+        recovered: deleted,
+    })
+}
+
+/// The recovery step under the exclusive lock. Returns the connection and
+/// whether it deleted the store.
+fn recreate(
+    path: &Path,
+    first: &str,
+    delete: &dyn Fn(&Path) -> Result<(), String>,
+    hooks: &DbHooks,
+) -> Result<(Connection, bool), DbError> {
+    match try_open(path, OpenMode::Index, hooks) {
+        Ok(conn) => return Ok((conn, false)),
+        Err(DbError::NeedsRebuild(_)) => {}
+        Err(e) => return Err(e),
+    }
+    delete(path)
+        .map_err(|e| DbError::Failed(format!("{e}; run `{}`", host::command("index --rebuild"))))?;
+    try_open(path, OpenMode::Index, hooks)
+        .map(|conn| (conn, true))
+        .map_err(|second| {
+            DbError::Failed(rebuild_hint(
+                path,
+                &format!("could not be recreated ({first}; then {second})"),
+            ))
+        })
+}
+
+/// Deletes the store of `path` and creates an empty one, for a `--rebuild`
+/// that found the store damaged. It stops, and deletes nothing, while another
+/// worktree uses the store.
+pub fn rebuild_store(path: &Path) -> Result<Store, DbError> {
+    ensure_parent(path, OpenMode::Index)?;
+    let lock = StoreLock::open(path)?;
+    let hooks = DbHooks::default();
+    lock.share(path, &hooks)?;
+    recover(
+        path,
+        "failed an integrity check",
+        lock,
+        &delete_index_files,
+        &hooks,
+    )
+}
+
+fn ensure_parent(path: &Path, mode: OpenMode) -> Result<(), DbError> {
+    if mode != OpenMode::Index {
+        return Ok(());
+    }
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    host::ensure_private_dir(parent).map_err(|e| {
+        DbError::Failed(format!(
+            "failed to create directory {}: {e}",
+            parent.display()
+        ))
+    })
 }
 
 fn is_corrupt(err: &rusqlite::Error) -> bool {
@@ -262,22 +493,14 @@ fn step(path: &Path, what: &str, err: &rusqlite::Error) -> DbError {
     }
 }
 
-fn try_open(path: &Path, mode: OpenMode) -> Result<Connection, DbError> {
+fn try_open(path: &Path, mode: OpenMode, hooks: &DbHooks) -> Result<Connection, DbError> {
     if mode == OpenMode::Index {
-        if let Some(parent) = path.parent() {
-            host::ensure_private_dir(parent).map_err(|e| {
-                DbError::Failed(format!(
-                    "failed to create directory {}: {e}",
-                    parent.display()
-                ))
-            })?;
-        }
         host::make_file_private(path).map_err(DbError::Failed)?;
     }
     if mode == OpenMode::Query && std::fs::metadata(path).is_ok_and(|m| m.len() == 0) {
         return Err(DbError::Missing);
     }
-    let conn = Connection::open(path).map_err(|e| step(path, "open the database", &e))?;
+    let mut conn = Connection::open(path).map_err(|e| step(path, "open the database", &e))?;
     conn.busy_timeout(BUSY_TIMEOUT)
         .map_err(|e| step(path, "set busy_timeout", &e))?;
     // Read the version before any pragma that writes the header, so a query on
@@ -318,20 +541,55 @@ fn try_open(path: &Path, mode: OpenMode) -> Result<Connection, DbError> {
     if version == SCHEMA_VERSION {
         return Ok(conn);
     }
-    retry_busy(|| conn.execute_batch(SCHEMA_SQL), OPEN_BUDGET)
-        .map_err(|e| step(path, "create the schema", &e))?;
-    let vacuum: i64 = conn
-        .query_row("PRAGMA auto_vacuum", [], |row| row.get(0))
-        .map_err(|e| step(path, "read auto_vacuum", &e))?;
-    if vacuum != 2 {
-        // The pragma had no effect on this file; the store is still empty, so
-        // a VACUUM applies it cheaply.
-        retry_busy(|| conn.execute_batch("VACUUM"), OPEN_BUDGET)
-            .map_err(|e| step(path, "apply auto_vacuum", &e))?;
+    if create_schema(&mut conn, path, hooks)? {
+        let vacuum: i64 = conn
+            .query_row("PRAGMA auto_vacuum", [], |row| row.get(0))
+            .map_err(|e| step(path, "read auto_vacuum", &e))?;
+        if vacuum != 2 {
+            // The pragma had no effect on this file; the store is still empty,
+            // so a VACUUM applies it cheaply.
+            retry_busy(|| conn.execute_batch("VACUUM"), OPEN_BUDGET)
+                .map_err(|e| step(path, "apply auto_vacuum", &e))?;
+        }
     }
-    conn.pragma_update(None, "user_version", SCHEMA_VERSION)
-        .map_err(|e| step(path, "set user_version", &e))?;
     Ok(conn)
+}
+
+/// Creates the schema in one write transaction. A second cold start that got
+/// the write lock after the first finds the version set and writes nothing.
+/// Returns whether this call created it.
+fn create_schema(conn: &mut Connection, path: &Path, hooks: &DbHooks) -> Result<bool, DbError> {
+    if let Some(before) = hooks.before_schema {
+        before();
+    }
+    let tx =
+        write_tx(conn, &TxHooks::default()).map_err(|e| step(path, "create the schema", &e))?;
+    let version: i64 = tx
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(|e| step(path, "read user_version", &e))?;
+    if version == SCHEMA_VERSION {
+        return Ok(false);
+    }
+    tx.execute_batch(SCHEMA_SQL)
+        .map_err(|e| step(path, "create the schema", &e))?;
+    tx.pragma_update(None, "user_version", SCHEMA_VERSION)
+        .map_err(|e| step(path, "set user_version", &e))?;
+    tx.commit()
+        .map_err(|e| step(path, "create the schema", &e))?;
+    Ok(true)
+}
+
+/// Whether the store passes SQLite's quick check and the FTS5 integrity check.
+pub fn is_healthy(conn: &Connection) -> bool {
+    let quick: rusqlite::Result<String> =
+        conn.query_row("PRAGMA quick_check(1)", [], |row| row.get(0));
+    quick.is_ok_and(|result| result == "ok")
+        && conn
+            .execute(
+                "INSERT INTO chunks_fts(chunks_fts) VALUES ('integrity-check')",
+                [],
+            )
+            .is_ok()
 }
 
 /// Which connection the scoped views are for.
@@ -406,18 +664,18 @@ pub fn create_scope_views(
 /// Opens the index for a query: never creates or deletes anything, finds the
 /// row of `worktree` and creates the scoped views. A store with no row for
 /// this worktree reads as [`DbError::Missing`].
-pub fn open_query(path: &Path, worktree: &str) -> Result<Connection, DbError> {
-    let conn = open_index(path, OpenMode::Query)?;
-    let row: Option<i64> = conn
+pub fn open_query(path: &Path, worktree: &str) -> Result<Store, DbError> {
+    let store = open_index(path, OpenMode::Query)?;
+    let row: Option<i64> = store
         .query_row("SELECT id FROM worktrees WHERE key = ?1", [worktree], |r| {
             r.get(0)
         })
         .optional()
         .map_err(|e| step(path, "read the worktree row", &e))?;
     let id = row.ok_or(DbError::Missing)?;
-    create_scope_views(&conn, id, ScopeKind::Reader)
+    create_scope_views(&store, id, ScopeKind::Reader)
         .map_err(|e| step(path, "create the scoped views", &e))?;
-    Ok(conn)
+    Ok(store)
 }
 
 #[cfg(test)]
@@ -576,7 +834,12 @@ mod tests {
         std::fs::write(&path, vec![0x5Au8; 4096]).expect("garbage");
 
         // Act
-        let got = open_index_with(&path, OpenMode::Index, |_| Err("denied".to_string()));
+        let got = open_index_with(
+            &path,
+            OpenMode::Index,
+            &|_| Err("denied".to_string()),
+            &DbHooks::default(),
+        );
 
         // Assert
         let message = got.expect_err("must fail").to_string();
@@ -774,7 +1037,7 @@ mod tests {
         let conn = open_index(&path, OpenMode::Index).expect("rebuild");
 
         // Assert
-        assert_eq!(pragma(&conn, "user_version"), 3);
+        assert_eq!(pragma(&conn, "user_version"), SCHEMA_VERSION);
         assert_eq!(count(&conn, "worktrees"), 0);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -922,6 +1185,280 @@ mod tests {
             text.contains("SEARCH") && text.contains("manifest_content"),
             "{text}"
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn damage(path: &Path) {
+        std::fs::write(path, vec![0x5Au8; 4096]).expect("garbage");
+    }
+
+    fn try_lock_exclusive(store: &Path) -> bool {
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(store_lock_path(store))
+            .expect("lock file");
+        let got = file.try_lock().is_ok();
+        let _ = file.unlock();
+        got
+    }
+
+    fn lock_file(store: &Path) -> File {
+        OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(store_lock_path(store))
+            .expect("lock file")
+    }
+
+    #[test]
+    fn a_build_opens_only_its_own_store_version() {
+        // Arrange
+        let dir = scratch_dir("code-db-versions");
+        std::fs::create_dir_all(&dir).expect("dir");
+        let v3 = dir.join("store-v3.sqlite3");
+        let v4 = dir.join("store-v4.sqlite3");
+        {
+            let conn = Connection::open(&v3).expect("v3");
+            conn.execute_batch("CREATE TABLE marker(x); INSERT INTO marker VALUES (1);")
+                .expect("seed");
+        }
+        let v3_bytes = std::fs::read(&v3).expect("v3 bytes");
+        let held = lock_file(&v3);
+        held.lock_shared().expect("v3 lock");
+        damage(&v4);
+
+        // Act
+        let query = open_index(&v4, OpenMode::Query);
+
+        // Assert
+        assert!(matches!(query, Err(DbError::NeedsRebuild(_))));
+        assert!(v4.exists());
+
+        // Act
+        let index = open_index(&v4, OpenMode::Index).expect("v4 recovers");
+
+        // Assert
+        assert_eq!(count(&index, "worktrees"), 0);
+        assert_eq!(std::fs::read(&v3).expect("v3 after"), v3_bytes);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn two_cold_starts_create_the_store_once() {
+        // Arrange
+        let dir = scratch_dir("code-db-cold");
+        let path = dir.join("code").join("store-v4.sqlite3");
+        let inner_ok = std::cell::Cell::new(false);
+        let nested = || {
+            inner_ok.set(open_index(&path, OpenMode::Index).is_ok());
+        };
+        let hooks = DbHooks {
+            before_schema: Some(&nested),
+            ..DbHooks::default()
+        };
+
+        // Act
+        let outer = open_index_with(&path, OpenMode::Index, &delete_index_files, &hooks);
+
+        // Assert
+        let outer = outer.expect("outer open");
+        assert!(inner_ok.get(), "the nested open completes");
+        assert_eq!(pragma(&outer, "user_version"), SCHEMA_VERSION);
+        assert!(!outer.recovered());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_open_store_holds_the_shared_lock_in_both_modes() {
+        // Arrange
+        let dir = scratch_dir("code-db-shared");
+        let path = dir.join("store-v4.sqlite3");
+        drop(open_index(&path, OpenMode::Index).expect("create"));
+        let exclusive_while_open = std::cell::Cell::new(true);
+        let probe = || exclusive_while_open.set(try_lock_exclusive(&path));
+
+        for mode in [OpenMode::Index, OpenMode::Query] {
+            exclusive_while_open.set(true);
+            let hooks = DbHooks {
+                after_open: Some(&probe),
+                ..DbHooks::default()
+            };
+
+            // Act
+            let store = open_index_with(&path, mode, &delete_index_files, &hooks);
+
+            // Assert
+            assert!(store.is_ok() || mode == OpenMode::Query);
+            assert!(!exclusive_while_open.get(), "{mode:?}");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_query_waits_briefly_for_an_exclusive_lock() {
+        // Arrange
+        let dir = scratch_dir("code-db-poll");
+        let path = dir.join("store-v4.sqlite3");
+        drop(open_index(&path, OpenMode::Index).expect("create"));
+        let holder = lock_file(&path);
+        holder.lock().expect("exclusive");
+        let polls = std::cell::Cell::new(0u32);
+        let count_poll = || polls.set(polls.get() + 1);
+        let hooks = DbHooks {
+            on_poll: Some(&count_poll),
+            ..DbHooks::default()
+        };
+
+        // Act
+        let got = open_index_with(&path, OpenMode::Query, &delete_index_files, &hooks);
+
+        // Assert
+        let message = got.expect_err("must give up").to_string();
+        assert_eq!(message, "the index is being rebuilt; try again");
+        assert_eq!(polls.get(), LOCK_POLL_TRIES);
+        let _ = holder.unlock();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn recovery_recreates_the_store_and_leaves_the_shared_lock() {
+        // Arrange
+        let dir = scratch_dir("code-db-recover");
+        let path = dir.join("store-v4.sqlite3");
+        std::fs::create_dir_all(&dir).expect("dir");
+        damage(&path);
+        let third_is_healthy = std::cell::Cell::new(false);
+        let third = || {
+            let again = open_index(&path, OpenMode::Index);
+            third_is_healthy.set(again.is_ok_and(|s| !s.recovered()));
+        };
+        let hooks = DbHooks {
+            after_recovery: Some(&third),
+            ..DbHooks::default()
+        };
+
+        // Act
+        let store =
+            open_index_with(&path, OpenMode::Index, &delete_index_files, &hooks).expect("recovers");
+
+        // Assert
+        assert!(store.recovered());
+        assert_eq!(pragma(&store, "auto_vacuum"), 2);
+        assert!(!try_lock_exclusive(&path), "the shared lock is held");
+        assert!(third_is_healthy.get(), "a third open finds a healthy store");
+        drop(store);
+        let before = std::fs::read(&path).expect("bytes");
+        #[cfg(unix)]
+        let inode = std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&path).expect("meta"));
+
+        // Act
+        let second = open_index(&path, OpenMode::Index).expect("second open");
+
+        // Assert
+        assert!(!second.recovered());
+        drop(second);
+        assert_eq!(std::fs::read(&path).expect("after"), before);
+        #[cfg(unix)]
+        assert_eq!(
+            std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&path).expect("meta")),
+            inode
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_damaged_store_a_sibling_uses_is_left_alone() {
+        // Arrange
+        let dir = scratch_dir("code-db-sibling");
+        let path = dir.join("store-v4.sqlite3");
+        std::fs::create_dir_all(&dir).expect("dir");
+        damage(&path);
+        let before = std::fs::read(&path).expect("bytes");
+        let sibling = lock_file(&path);
+        sibling.lock_shared().expect("shared");
+
+        // Act
+        let got = open_index(&path, OpenMode::Index);
+
+        // Assert
+        let message = got.expect_err("must refuse").to_string();
+        assert!(
+            message.contains("another worktree is using the code index"),
+            "{message}"
+        );
+        assert!(message.contains(&path.display().to_string()), "{message}");
+        assert!(message.contains("--rebuild"), "{message}");
+        assert_eq!(std::fs::read(&path).expect("after"), before);
+
+        // Act
+        sibling.unlock().expect("release");
+        let rebuilt = open_index(&path, OpenMode::Index).expect("rebuilds");
+
+        // Assert
+        assert!(rebuilt.recovered());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_wal_and_shm_files_go_before_the_main_file() {
+        // Arrange
+        let path = Path::new("/d/store-v4.sqlite3");
+
+        // Act
+        let order: Vec<String> = sibling_files(path)
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+
+        // Assert
+        assert_eq!(
+            order,
+            [
+                "/d/store-v4.sqlite3-wal",
+                "/d/store-v4.sqlite3-shm",
+                "/d/store-v4.sqlite3"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failed_delete_stops_the_open_without_a_retry() {
+        // Arrange
+        let dir = scratch_dir("code-db-nodelete");
+        let path = dir.join("store-v4.sqlite3");
+        std::fs::create_dir_all(&dir).expect("dir");
+        damage(&path);
+        let calls = std::cell::Cell::new(0u32);
+        let refuse = |_: &Path| {
+            calls.set(calls.get() + 1);
+            Err("the file is open".to_string())
+        };
+
+        // Act
+        let got = open_index_with(&path, OpenMode::Index, &refuse, &DbHooks::default());
+
+        // Assert
+        let message = got.expect_err("must fail").to_string();
+        assert!(message.contains("the file is open"), "{message}");
+        assert_eq!(calls.get(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_fresh_store_passes_the_health_check() {
+        // Arrange
+        let dir = scratch_dir("code-db-health");
+        let path = dir.join("store-v4.sqlite3");
+        let store = open_index(&path, OpenMode::Index).expect("open");
+
+        // Act
+        let healthy = is_healthy(&store);
+
+        // Assert
+        assert!(healthy);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

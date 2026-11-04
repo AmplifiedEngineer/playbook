@@ -83,9 +83,30 @@ impl Options {
     }
 }
 
+/// How much of the store a run replaced.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// Only the rows of the worktree that ran.
+    #[default]
+    Worktree,
+    /// The whole store, because it was damaged and every worktree lost its rows.
+    Store,
+}
+
+impl Scope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Scope::Worktree => "worktree",
+            Scope::Store => "store",
+        }
+    }
+}
+
 /// What one run did.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Report {
+    /// Whether the run replaced one worktree or the whole store.
+    pub scope: Scope,
     /// Files with stored text after the run (status `ok` or `partial`).
     pub indexed: usize,
     /// Files written this run, new or edited.
@@ -652,10 +673,38 @@ fn register_worktree(
     Ok(id)
 }
 
-/// The lock file beside the index. Held for the whole run and released by the
-/// OS if the process dies.
-pub fn lock_path(index: &Path) -> PathBuf {
-    index.with_file_name("index.lock")
+/// Drops this worktree's row and, with it, its manifest, so the run indexes
+/// every file again. Content that no other worktree lists stays in the store.
+fn forget_worktree(conn: &mut Connection, worktree: &str) -> Result<(), String> {
+    let hooks = TxHooks::default();
+    let tx = db::write_tx(conn, &hooks).map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM worktrees WHERE key = ?1", [worktree])
+        .map_err(|e| e.to_string())?;
+    db::commit_tx(tx, &hooks).map_err(|e| e.to_string())
+}
+
+/// The run lock of one worktree, beside the store. Two worktrees index at the
+/// same time; one worktree runs once. Held for the whole run and released by
+/// the OS if the process dies.
+pub fn lock_path(store: &Path, worktree: &str) -> PathBuf {
+    store.with_file_name(format!("{worktree}.lock"))
+}
+
+/// The run lock of an index at the state folder fallback path, which has no
+/// worktree key in its name and serves one worktree. It is not `index.lock`,
+/// because the store lock of that path is.
+pub fn fallback_lock_path(index: &Path) -> PathBuf {
+    index.with_file_name("index.run.lock")
+}
+
+/// The run lock file for `index`: the fallback lock at the fallback path, the
+/// worktree lock beside a shared store.
+pub fn run_lock_path(index: &Path, worktree: &str) -> PathBuf {
+    if index.file_name().is_some_and(|n| n == host::FALLBACK_FILE) {
+        fallback_lock_path(index)
+    } else {
+        lock_path(index, worktree)
+    }
 }
 
 /// The held run lock. Dropping it unlocks explicitly, so a copy of the file
@@ -668,8 +717,8 @@ impl Drop for RunLock {
     }
 }
 
-/// Takes the exclusive run lock, or says another run holds it.
-pub fn acquire_lock(index: &Path) -> Result<RunLock, String> {
+/// Takes the exclusive run lock of `worktree`, or says another run holds it.
+pub fn acquire_lock(index: &Path, worktree: &str) -> Result<RunLock, String> {
     if let Some(parent) = index.parent() {
         host::ensure_private_dir(parent)
             .map_err(|e| format!("failed to create directory {}: {e}", parent.display()))?;
@@ -678,7 +727,7 @@ pub fn acquire_lock(index: &Path) -> Result<RunLock, String> {
         .create(true)
         .truncate(false)
         .write(true)
-        .open(lock_path(index))
+        .open(run_lock_path(index, worktree))
         .map_err(|e| format!("failed to open the index lock: {e}"))?;
     match file.try_lock() {
         Ok(()) => Ok(RunLock(file)),
@@ -695,11 +744,22 @@ pub fn run(
     rebuild: bool,
     opts: &Options,
 ) -> Result<Report, String> {
-    let _lock = acquire_lock(index)?;
-    if rebuild {
-        db::delete_index_files(index)?;
-    }
+    let _lock = acquire_lock(index, worktree)?;
     let mut conn = db::open_index(index, OpenMode::Index).map_err(|e| e.to_string())?;
+    let mut scope = if conn.recovered() {
+        Scope::Store
+    } else {
+        Scope::Worktree
+    };
+    if rebuild {
+        if db::is_healthy(&conn) {
+            forget_worktree(&mut conn, worktree)?;
+        } else {
+            drop(conn);
+            conn = db::rebuild_store(index).map_err(|e| e.to_string())?;
+            scope = Scope::Store;
+        }
+    }
     let started = now_ms();
     let wt = register_worktree(&mut conn, root, worktree, started)?;
     db::create_scope_views(&conn, wt, ScopeKind::Writer).map_err(|e| e.to_string())?;
@@ -708,6 +768,7 @@ pub fn run(
     let existing = load_existing(&conn)?;
     let mut report = Report {
         skipped: found.skipped.len(),
+        scope,
         ..Report::default()
     };
     let mut listed: HashSet<String> = found.files.iter().cloned().collect();
@@ -1109,7 +1170,7 @@ mod tests {
         // Arrange
         let f = fx("idx-lock");
         write(&f.root, "a.rs", b"x\n");
-        let held = acquire_lock(&f.index).expect("first lock");
+        let held = acquire_lock(&f.index, &f.worktree).expect("first lock");
 
         // Act
         let second = run(&f.root, &f.index, &f.worktree, false, &Options::default());
@@ -1129,14 +1190,14 @@ mod tests {
         // Arrange
         let f = fx("idx-lock-dup");
         write(&f.root, "a.rs", b"x\n");
-        let held = acquire_lock(&f.index).expect("first lock");
+        let held = acquire_lock(&f.index, &f.worktree).expect("first lock");
         let copy = held.0.try_clone().expect("clone");
 
         // Act
         drop(held);
 
         // Assert
-        assert!(acquire_lock(&f.index).is_ok());
+        assert!(acquire_lock(&f.index, &f.worktree).is_ok());
         drop(copy);
     }
 
@@ -2101,5 +2162,121 @@ impl P { fn go(&self) {} }
                 .expect("production part");
             assert!(!production.contains("manifest"));
         }
+    }
+
+    #[test]
+    fn a_held_lock_blocks_only_its_own_worktree() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-lock-per-worktree");
+        write(&f.root, "a.rs", b"fn a() {}\n");
+        let other = crate::walker::test_repo::init("idx-lock-per-worktree-b");
+        write(&other, "b.rs", b"fn b() {}\n");
+        let _held = acquire_lock(&f.index, &f.worktree).expect("lock of the first worktree");
+
+        // Act
+        let same = run(&f.root, &f.index, &f.worktree, false, &Options::default());
+        let sibling = run(&other, &f.index, "other", false, &Options::default());
+
+        // Assert
+        assert_eq!(
+            same.expect_err("must be refused"),
+            "another index run is in progress"
+        );
+        assert!(sibling.is_ok(), "{sibling:?}");
+    }
+
+    #[test]
+    fn the_fallback_path_takes_one_lock_named_for_the_index() {
+        // Arrange
+        let fallback = Path::new("/state/code").join(host::FALLBACK_FILE);
+        let store = Path::new("/data/code/o/r/store-v4.sqlite3");
+
+        // Act and assert
+        assert_eq!(
+            run_lock_path(&fallback, "wt"),
+            Path::new("/state/code/index.run.lock")
+        );
+        assert_eq!(
+            fallback_lock_path(&fallback),
+            run_lock_path(&fallback, "wt")
+        );
+        assert_eq!(
+            run_lock_path(store, "wt"),
+            Path::new("/data/code/o/r/wt.lock")
+        );
+    }
+
+    #[test]
+    fn a_run_at_the_fallback_path_is_refused_while_its_lock_is_held() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-fallback-lock");
+        write(&f.root, "a.rs", b"x\n");
+        let index = f.index.with_file_name(host::FALLBACK_FILE);
+        let held = acquire_lock(&index, &f.worktree).expect("fallback lock");
+
+        // Act
+        let got = run(&f.root, &index, &f.worktree, false, &Options::default());
+
+        // Assert
+        assert_eq!(
+            got.expect_err("must be refused"),
+            "another index run is in progress"
+        );
+        drop(held);
+    }
+
+    #[test]
+    fn a_rebuild_of_a_healthy_store_replaces_only_this_worktree() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-rebuild-scope");
+        write(&f.root, "a.rs", b"fn a() {}\n");
+        let other = crate::walker::test_repo::init("idx-rebuild-scope-b");
+        write(&other, "b.rs", b"fn b() {}\n");
+        f.run();
+        run(&other, &f.index, "other", false, &Options::default()).expect("second worktree");
+        let before = paths(&db::open_query(&f.index, "other").expect("other"));
+
+        // Act
+        let report =
+            run(&f.root, &f.index, &f.worktree, true, &Options::default()).expect("rebuild");
+
+        // Assert
+        assert_eq!(report.scope, Scope::Worktree);
+        assert_eq!(report.parsed, 1);
+        assert_eq!(report.unchanged, 0);
+        assert_eq!(
+            paths(&db::open_query(&f.index, "other").expect("other")),
+            before
+        );
+        assert_eq!(paths(&f.conn()), vec!["a.rs"]);
+    }
+
+    #[test]
+    fn a_rebuild_of_a_damaged_store_replaces_the_whole_store() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-rebuild-store");
+        write(&f.root, "a.rs", b"fn a() {}\n");
+        let other = crate::walker::test_repo::init("idx-rebuild-store-b");
+        write(&other, "b.rs", b"fn b() {}\n");
+        f.run();
+        run(&other, &f.index, "other", false, &Options::default()).expect("second worktree");
+        std::fs::write(&f.index, vec![0x5Au8; 8192]).expect("damage");
+        let _ = std::fs::remove_file(f.index.with_extension("sqlite3-wal"));
+
+        // Act
+        let report =
+            run(&f.root, &f.index, &f.worktree, true, &Options::default()).expect("rebuild");
+
+        // Assert
+        assert_eq!(report.scope, Scope::Store);
+        assert_eq!(paths(&f.conn()), vec!["a.rs"]);
+        assert_eq!(
+            db::open_query(&f.index, "other").err(),
+            Some(db::DbError::Missing)
+        );
     }
 }

@@ -6,7 +6,6 @@
 use super::db;
 use super::index::{self, Options, Report};
 use super::walker::test_repo::{git_in, init, write};
-use rusqlite::Connection;
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
@@ -35,7 +34,7 @@ pub(crate) fn fx(tag: &str) -> Fx {
     let root = init(tag);
     let index = playbook_common::test_support::scratch_dir(&format!("{tag}-idx"))
         .join("code")
-        .join("index.sqlite3");
+        .join("store-v4.sqlite3");
     Fx {
         root,
         index,
@@ -60,7 +59,7 @@ impl Fx {
         index::run(&self.root, &self.index, &self.worktree, false, opts).expect("index run")
     }
 
-    pub(crate) fn conn(&self) -> Connection {
+    pub(crate) fn conn(&self) -> db::Store {
         db::open_query(&self.index, &self.worktree).expect("query open")
     }
 
