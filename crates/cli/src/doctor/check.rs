@@ -884,12 +884,20 @@ fn codex_row_from(found: bool, audit: &crate::init::wire::HookAudit) -> Row {
         )
         .hint("Codex skips a hook until you trust it: check /hooks in Codex");
     }
-    Row::new(
-        "-",
-        Level::Warn,
-        "Codex found, the playbook guards are not all in ~/.codex/hooks.json",
-    )
-    .hint("to add them, run: playbook setup --only codex-hooks")
+    // The part is off by default, so none registered is a choice. Only a
+    // partial set is a problem.
+    let (level, message) = if audit.present == 0 {
+        (
+            Level::Info,
+            "Codex found, the optional playbook guards are not in ~/.codex/hooks.json",
+        )
+    } else {
+        (
+            Level::Warn,
+            "Codex found, only some playbook guards are in ~/.codex/hooks.json",
+        )
+    };
+    Row::new("-", level, message).hint("to add them, run: playbook setup --only codex-hooks")
 }
 
 /// The `attribution` key in the user's settings.json (ADR 0042). With
@@ -1568,14 +1576,21 @@ mod tests {
             present: 2,
             ..HookAudit::default()
         };
+        let partial = HookAudit {
+            missing: vec!["precommit-check"],
+            present: 1,
+            ..HookAudit::default()
+        };
 
         let absent = codex_row_from(false, &missing);
         let unregistered = codex_row_from(true, &missing);
+        let partly = codex_row_from(true, &partial);
         let registered = codex_row_from(true, &present);
 
         assert_eq!(absent.level, Level::Info);
         assert_eq!(absent.message, "Codex not found (optional)");
-        assert_eq!(unregistered.level, Level::Warn);
+        assert_eq!(unregistered.level, Level::Info);
+        assert_eq!(partly.level, Level::Warn);
         assert_eq!(
             unregistered.hint.as_deref(),
             Some("to add them, run: playbook setup --only codex-hooks")

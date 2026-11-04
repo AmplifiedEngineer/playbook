@@ -18,7 +18,7 @@ Playbook runs best in Claude Code. Codex gets the skills and, if you register th
 | `WorktreeCreate`, `WorktreeRemove` | Not supported | Codex has no worktree event. |
 | Agents | Not rendered | Codex has subagents and custom agent TOML files, but no per-agent tool allowlist, and a subagent inherits the parent sandbox. Playbook agents such as the critic, fact-checker and reviewer rely on tool restriction to be read-only, which Codex cannot enforce. The command preamble tells the agent to do the step itself or ask Codex to spawn a subagent. |
 | System prompt | Not written | Codex reads `~/.codex/AGENTS.md`. Playbook does not write to it. Skills carry the rules. |
-| Doctor | No Codex row | `playbook doctor` checks the Claude layers only. |
+| Doctor | Codex row | `playbook doctor` reports whether Codex is found and whether the guards are in `~/.codex/hooks.json`. It cannot see whether you trusted them in `/hooks`. |
 | Usage | Works, unpriced | `CodexSource` reads `~/.codex/sessions/**/rollout-*.jsonl`. It has no OpenAI price table, so cost shows as unpriced. Compressed `.jsonl.zst` rollouts are skipped. Whether Codex still writes them, and whether a forked session repeats parent events, is `[unverified]`. |
 | Plugin distribution | Skills sync only | Codex reads Claude-compatible plugin manifests. Whether it loads the playbook plugin folder directly is `[unverified]`. |
 | MCP | Nothing to port | Playbook ships no MCP server. |
