@@ -195,6 +195,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         only: paths.only,
         short_name: paths.short_name,
         policy_guard: false,
+        codex_hooks: false,
         pb_target: paths.pb_target.clone(),
         attribution: paths.attribution,
         completions: paths.completions,
@@ -240,6 +241,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         ("completions", choices.completions),
         ("policy-guard", choices.policy_guard),
         ("attribution", paths.attribution != Attribution::Skip),
+        ("codex-hooks", choices.codex_hooks),
     ];
     for (id, enabled) in flags {
         if paths.only && !enabled {
@@ -292,6 +294,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
                 completions_lines(paths, &completions_step, &after_path, &after_completions)
             }
             "policy-guard" => vec![policy_guard_line(&paths.home)],
+            "codex-hooks" => vec![codex_hooks_line(&paths.home)],
             "path" => file_lines(&before_rc, &after_path, &path_step),
             _ => vec![system_prompt_line(paths)],
         };
@@ -315,6 +318,18 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         );
     }
     out
+}
+
+/// What the codex-hooks part would do. Writes nothing.
+fn codex_hooks_line(home: &Path) -> String {
+    use crate::init::codex_hooks::{audit, hooks_path};
+    if !run::codex_found(home) {
+        return "skipped, Codex was not found".to_string();
+    }
+    match audit(&hooks_path(home)).missing.len() {
+        0 => "~/.codex/hooks.json already has the guards".to_string(),
+        n => format!("adds {n} guard entries to ~/.codex/hooks.json"),
+    }
 }
 
 /// What the policy-guard part would do. Writes nothing.

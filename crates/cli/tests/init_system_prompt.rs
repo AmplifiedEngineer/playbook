@@ -79,6 +79,7 @@ fn base_paths(home: &Path, system_prompt: bool) -> InitPaths {
         only: false,
         short_name: playbook::init::pb_link::Choice::Skip,
         policy_guard: false,
+        codex_hooks: false,
         pb_target: None,
         completions: None,
         attribution: playbook::init::attribution::Choice::Skip,

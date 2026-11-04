@@ -1,7 +1,7 @@
 ---
 description: Use on first install or to repair the local setup. Wires safety guards, settings.json, the pb short name and system prompt.
 allowed-tools: Bash, Read, AskUserQuestion
-argument-hint: "[--only <PART>...] [--yes] [--dry-run] [--explain [<PART>]] [--hooks|--no-hooks] [--statusline|--no-statusline] [--security|--no-security] [--path|--no-path] [--system-prompt|--no-system-prompt] [--telemetry|--no-telemetry] [--short-name|--no-short-name] [--completions|--no-completions] [--policy-guard|--no-policy-guard] [--attribution|--no-attribution] [--help] [--auto] [--ask]"
+argument-hint: "[--only <PART>...] [--yes] [--dry-run] [--explain [<PART>]] [--hooks|--no-hooks] [--statusline|--no-statusline] [--security|--no-security] [--path|--no-path] [--system-prompt|--no-system-prompt] [--telemetry|--no-telemetry] [--short-name|--no-short-name] [--completions|--no-completions] [--policy-guard|--no-policy-guard] [--attribution|--no-attribution] [--codex-hooks|--no-codex-hooks] [--help] [--auto] [--ask]"
 
 model: haiku
 effort: low
@@ -145,7 +145,9 @@ The same flags as `playbook setup`, with the same text as `playbook setup --help
 | `--no-policy-guard` | Do not turn the policy guard on; it is off by default and a stored choice is not changed |
 | `--attribution` | Attribution ON: Claude Code adds its Co-Authored-By trailer, generated-by line and session link. Removes each `attribution` key in settings.json that holds exactly the off value playbook writes, and stores `attribution.enabled` true |
 | `--no-attribution` | Attribution OFF, the default: Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values |
-| `--only <PART>...` | Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON |
+| `--codex-hooks` | Register the playbook Bash guards in the hooks.json of Codex (off unless asked) |
+| `--no-codex-hooks` | Do not register guards in Codex |
+| `--only <PART>...` | Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution, codex-hooks), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON |
 | `-y`, `--yes`, `--defaults` | Never ask: use the default for every part you did not answer with a flag |
 | `--dry-run` | Print what would change for each part and change nothing |
 | `--explain [<PART>]` | Describe a part, or every part when none is named, and change nothing |
@@ -168,5 +170,6 @@ The questions `playbook setup` asks in a terminal, in its order, with its defaul
 | 7 | `completions` | Completions | Install tab completion for `playbook` and `pb` in your shell? It adds small files (bash: ~/.local/share/bash-completion/completions, fish: ~/.config/fish/completions, zsh: ~/.local/share/playbook/completions.zsh) and, for zsh, one marked line in ~/.zshrc, created when missing. | Yes | No completion files are written, and your shell files are not touched. Tab does not complete `playbook` or `pb` until you run `playbook setup --only completions`. |
 | 8 | `policy-guard` | Policy guard | Turn on the policy guard? It denies git commands that skip checks or signing, a hand-run `gh pr create`, memory writes outside playbook's store, Edit or Write on settings.json and settings.local.json, writes to Claude Code's own memory folders, and model-run changes to protected config keys. The choice is stored in ~/.config/playbook. | No | The policy guard setting is not changed. It is off by default, and its hook entry allows every call while off. A guard you turned on stays on until `hooks.policyGuard.enabled` is set to false. Turn it on later with `playbook config set --global hooks.policyGuard.enabled true`. |
 | 9 | `attribution` | Attribution | Turn attribution ON, so Claude Code adds its Co-Authored-By trailer, generated-by line and claude.ai session link to commits and pull requests? The default is OFF: playbook sets `attribution` in ~/.claude/settings.json so Claude Code adds none of them. | No | Attribution is OFF, the default: playbook adds the missing `attribution` keys to ~/.claude/settings.json and keeps your own values, so Claude Code adds no trailer, generated-by line or session link. |
+| 10 | `codex-hooks` | Codex hooks | Register the playbook Bash guards in Codex? It adds the rm-workspace-guard and precommit-check entries to ~/.codex/hooks.json. Codex skips them until you trust them in /hooks. | No | ~/.codex/hooks.json is not touched, and the playbook guards do not run in Codex. Register them later with `playbook setup --only codex-hooks`. |
 
 The security part is never asked about, in a terminal or here. It runs only with `--security` or when `security.defaults` is true.

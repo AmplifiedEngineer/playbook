@@ -55,6 +55,8 @@ pub struct InitPaths {
     pub short_name: crate::init::pb_link::Choice,
     /// Whether to turn the policy guard on (`hooks.policyGuard.enabled`).
     pub policy_guard: bool,
+    /// Whether to register the Bash guards in the hooks.json of Codex.
+    pub codex_hooks: bool,
     /// The shell to install completion for. `None` skips the `completions` step.
     pub completions: Option<crate::init::completion::Setup>,
     /// Where the `pb` link may go. `None` when the binary's location is unknown.
@@ -221,6 +223,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         short_name_step,
         completions_step,
         policy_guard_step,
+        codex_hooks_step(paths, epoch),
         path_step,
     ];
     steps.extend(migrated.steps);
@@ -266,6 +269,9 @@ fn run_only(paths: &InitPaths, epoch: u64) -> InitOutcome {
     }
     if paths.policy_guard {
         steps.push(policy_guard_step(paths));
+    }
+    if paths.codex_hooks {
+        steps.push(codex_hooks_step(paths, epoch));
     }
     if paths.path_setup.is_some() {
         steps.push(path_step(&paths.home, paths.path_setup.as_ref()));
@@ -360,6 +366,43 @@ pub(crate) fn policy_guard_step(paths: &InitPaths) -> StepReport {
             format!("stored {ENABLED_KEY} true; `playbook config set --global {ENABLED_KEY} false` turns it off"),
         ),
         Err(err) => StepReport::failed(PART, format!("could not store {ENABLED_KEY}: {err}")),
+    }
+}
+
+/// Whether Codex is installed: a `~/.codex` folder or a `codex` program on PATH.
+pub(crate) fn codex_found(home: &Path) -> bool {
+    let path = std::env::var("PATH").unwrap_or_default();
+    !crate::skills_sync::detect(home, &path).is_empty()
+}
+
+/// The codex-hooks part: registers the Bash guards in `~/.codex/hooks.json`
+/// when asked and when Codex is installed. Codex skips them until the user
+/// trusts them in `/hooks`.
+pub(crate) fn codex_hooks_step(paths: &InitPaths, epoch: u64) -> StepReport {
+    use crate::init::codex_hooks;
+    const PART: &str = "codex-hooks";
+    if !paths.codex_hooks {
+        return StepReport::skipped(
+            PART,
+            "not requested; pass --codex-hooks to register the guards in Codex",
+        );
+    }
+    if !codex_found(&paths.home) {
+        return StepReport::skipped(
+            PART,
+            "Codex was not found (no ~/.codex folder and no codex on PATH)",
+        );
+    }
+    let file = codex_hooks::hooks_path(&paths.home);
+    match codex_hooks::wire(&file, epoch) {
+        Ok(out) if !out.changed => {
+            StepReport::already_correct(PART, "the guards are already in ~/.codex/hooks.json")
+        }
+        Ok(_) => StepReport::wired(
+            PART,
+            "added the guards to ~/.codex/hooks.json; open /hooks in Codex and trust them, or Codex skips them. Codex runs on when a hook fails, so they are best effort",
+        ),
+        Err(err) => StepReport::failed(PART, format!("could not update ~/.codex/hooks.json: {err}")),
     }
 }
 

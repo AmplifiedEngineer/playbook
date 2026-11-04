@@ -684,6 +684,7 @@ fn real_main() {
                 ),
                 attribution: choices.attribution.resolve(&common::home_dir()),
                 policy_guard: choices.policy_guard,
+                codex_hooks: choices.codex_hooks,
             };
             if flags.dry_run {
                 print!("{}", init::preview::dry_run(&paths, &choices));

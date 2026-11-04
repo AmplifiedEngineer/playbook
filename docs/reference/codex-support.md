@@ -23,6 +23,10 @@ Playbook runs best in Claude Code. Codex gets the skills and, if you wire them b
 | Plugin distribution | Skills sync only | Codex reads Claude-compatible plugin manifests. Whether it loads the playbook plugin folder directly is `[unverified]`. |
 | MCP | Nothing to port | Playbook ships no MCP server. |
 
+## Registering the guards
+
+`playbook setup --only codex-hooks` adds two entries to `~/.codex/hooks.json`, after a backup, and keeps every other entry: `rm-workspace-guard` and `precommit-check`, both on `PreToolUse` for `Bash`. It runs only when Codex is found, and `--yes` leaves it off. Open `/hooks` in Codex afterwards and trust the entries. `playbook uninstall` removes them. The sanitizer is not registered until a live Codex confirms its rewrite is applied.
+
 ## How the guards behave in Codex
 
 - A hook that errors, times out or returns malformed output is reported and the tool call continues. Only an explicit deny or exit code 2 blocks. The Codex docs call hooks "a useful guardrail, not a complete enforcement boundary". Treat the guards as best effort.
