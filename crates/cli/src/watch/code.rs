@@ -87,7 +87,8 @@ impl CodeWork for GitCode<'_> {
     }
 
     fn checkout(&self, repo: &str, number: u64, branch: &str, dir: &str) -> Result<(), String> {
-        let origin = self.git(self.clone, &["remote", "get-url", "origin"])?;
+        // The configured URL, not the one after `url.*.insteadOf` rewrites.
+        let origin = self.git(self.clone, &["config", "--get", "remote.origin.url"])?;
         if !remote_is(&origin, repo) {
             return Err(format!(
                 "the clone watch runs in does not have {repo} as its origin"
@@ -266,6 +267,178 @@ mod tests {
         ];
         for (url, want) in rows {
             assert_eq!(remote_is(url, "o/r"), want, "{url}");
+        }
+    }
+
+    /// Real git against local repositories, no network: a bare repository
+    /// stands in for GitHub, and a URL rewrite sends the clone's configured
+    /// `https://github.com/o/r.git` to it.
+    #[cfg(unix)]
+    mod real_git {
+        use super::*;
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        fn git(dir: &Path, args: &[&str]) -> String {
+            let out = Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
+
+        /// A gpg stand-in that signs anything, so `--gpg-sign` works with no key.
+        fn fake_gpg(root: &Path) -> PathBuf {
+            let path = root.join("fake-gpg");
+            fs::write(
+                &path,
+                "#!/bin/sh\ncat >/dev/null\necho '[GNUPG:] SIG_CREATED D 1 8 00 0 0 0' >&2\n\
+                 printf -- '-----BEGIN PGP SIGNATURE-----\\n\\nZmFrZQ==\\n-----END PGP SIGNATURE-----\\n'\n",
+            )
+            .unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+
+        struct Site {
+            root: PathBuf,
+            bare: PathBuf,
+            clone: PathBuf,
+        }
+
+        /// A bare "GitHub" with `main` and pull request 7, and a clone of it.
+        fn site(tag: &str, origin_url: &str) -> Site {
+            let root = crate::testing::scratch_root(tag);
+            let bare = root.join("origin.git");
+            let seed = root.join("seed");
+            let clone = root.join("clone");
+            fs::create_dir_all(&seed).unwrap();
+            git(&root, &["init", "-q", "--bare", "-b", "main", "origin.git"]);
+            git(&seed, &["init", "-q", "-b", "main"]);
+            for (key, value) in [("user.name", "Seed"), ("user.email", "seed@example.com")] {
+                git(&seed, &["config", key, value]);
+            }
+            fs::write(seed.join("a.txt"), "one\ntwo\n").unwrap();
+            git(&seed, &["add", "-A"]);
+            git(&seed, &["commit", "-q", "-m", "seed"]);
+            let bare_url = bare.display().to_string();
+            git(&seed, &["push", "-q", &bare_url, "HEAD:refs/heads/main"]);
+            git(&seed, &["push", "-q", &bare_url, "HEAD:refs/pull/7/head"]);
+            git(&root, &["clone", "-q", &bare_url, "clone"]);
+            let gpg = fake_gpg(&root).display().to_string();
+            for (key, value) in [
+                ("user.name", "Watch"),
+                ("user.email", "watch@example.com"),
+                ("gpg.program", gpg.as_str()),
+                ("remote.origin.url", origin_url),
+            ] {
+                git(&clone, &["config", key, value]);
+            }
+            git(
+                &clone,
+                &["config", &format!("url.{bare_url}.insteadOf"), origin_url],
+            );
+            Site { root, bare, clone }
+        }
+
+        fn code<'a>(site: &'a Site, home: &'a Path) -> GitCode<'a> {
+            GitCode {
+                clone: &site.clone,
+                worktrees: site.root.join("trees"),
+                home,
+            }
+        }
+
+        const BRANCH: &str = "playbook/watch/r-7";
+
+        #[test]
+        fn a_change_goes_from_checkout_to_a_signed_pushed_branch_and_the_checkout_is_removed() {
+            // Arrange
+            let site = site("watch-git-flow", "https://github.com/o/r.git");
+            let code = code(&site, &site.root);
+            let dir = code.worktree_path(BRANCH);
+
+            // Act
+            code.checkout("o/r", 7, BRANCH, &dir).unwrap();
+            fs::write(Path::new(&dir).join("a.txt"), "one\nTWO\nthree\n").unwrap();
+            fs::write(Path::new(&dir).join("b.txt"), "new\n").unwrap();
+            let size = code.staged_size(&dir).unwrap();
+            code.publish(&dir, BRANCH, "fix: address a pull request comment")
+                .unwrap();
+            code.discard(&dir).unwrap();
+
+            // Assert: two files; a.txt has 2 added and 1 deleted lines, b.txt 1 added.
+            assert_eq!(size, (2, 4));
+            let pushed = git(
+                &site.bare,
+                &["cat-file", "-p", &format!("refs/heads/{BRANCH}")],
+            );
+            assert!(pushed.contains("gpgsig"), "{pushed}");
+            assert!(pushed.contains("Signed-off-by: Watch <watch@example.com>"));
+            let parent = git(&site.bare, &["rev-parse", &format!("refs/heads/{BRANCH}^")]);
+            assert_eq!(parent, git(&site.bare, &["rev-parse", "refs/pull/7/head"]));
+            assert!(!Path::new(&dir).exists());
+            code.discard(&dir).unwrap();
+        }
+
+        #[test]
+        fn the_pull_request_branch_and_main_are_left_alone() {
+            let site = site("watch-git-untouched", "https://github.com/o/r.git");
+            let code = code(&site, &site.root);
+            let dir = code.worktree_path(BRANCH);
+            let main_before = git(&site.bare, &["rev-parse", "refs/heads/main"]);
+
+            code.checkout("o/r", 7, BRANCH, &dir).unwrap();
+            fs::write(Path::new(&dir).join("b.txt"), "new\n").unwrap();
+            code.staged_size(&dir).unwrap();
+            code.publish(&dir, BRANCH, "fix: x").unwrap();
+
+            assert_eq!(
+                git(&site.bare, &["rev-parse", "refs/heads/main"]),
+                main_before
+            );
+            let refs = git(&site.bare, &["for-each-ref", "--format=%(refname)"]);
+            assert_eq!(
+                refs.lines().collect::<Vec<_>>(),
+                [
+                    "refs/heads/main",
+                    "refs/heads/playbook/watch/r-7",
+                    "refs/pull/7/head"
+                ]
+            );
+        }
+
+        #[test]
+        fn a_clone_whose_origin_is_another_repository_is_refused() {
+            let site = site("watch-git-origin", "https://github.com/o/other.git");
+            let code = code(&site, &site.root);
+            let dir = code.worktree_path(BRANCH);
+
+            let err = code.checkout("o/r", 7, BRANCH, &dir).unwrap_err();
+
+            assert!(err.contains("does not have o/r as its origin"), "{err}");
+            assert!(!Path::new(&dir).exists());
+        }
+
+        #[test]
+        fn a_checkout_left_by_an_earlier_try_is_reset_not_an_error() {
+            let site = site("watch-git-retry", "https://github.com/o/r.git");
+            let code = code(&site, &site.root);
+            let dir = code.worktree_path(BRANCH);
+            code.checkout("o/r", 7, BRANCH, &dir).unwrap();
+            code.discard(&dir).unwrap();
+
+            // The branch from the first try still exists locally.
+            code.checkout("o/r", 7, BRANCH, &dir).unwrap();
+
+            assert!(Path::new(&dir).join("a.txt").exists());
         }
     }
 }
