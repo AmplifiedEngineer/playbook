@@ -179,11 +179,14 @@ fn a_clear_start_injects_the_handoff_archives_it_and_logs_the_start() {
         stdout.contains("INJECT-ME"),
         "the hook must inject it: {stdout}"
     );
-    assert_eq!(
-        fs::read_dir(env.handoff_dir().join("used"))
+    let index = fs::read_to_string(env.home.join(".config/playbook/gc/index.jsonl")).unwrap();
+    assert!(index.contains("\"state\":\"done\""), "{index}");
+    assert!(
+        !fs::read_dir(env.handoff_dir())
             .unwrap()
-            .count(),
-        1
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().ends_with(".md")),
+        "the loaded handoff must leave the folder"
     );
     let (_, shown, _) = env.run(&["handoff", "show"], "");
     assert!(
@@ -422,7 +425,7 @@ fn after_clear_the_sessions_own_handoff_loads_once_with_a_pointer() {
     assert!(ctx.contains("RESUME-ALPHA"), "{ctx}");
     assert!(ctx.contains("Full handoff: "), "{ctx}");
     assert!(
-        ctx.contains("/used/"),
+        ctx.contains("/gc/tombstones/"),
         "pointer names the archived file: {ctx}"
     );
     assert!(!again.contains("RESUME-ALPHA"), "consumed: {again}");
@@ -439,7 +442,7 @@ fn after_a_compact_the_sessions_own_handoff_loads_once_with_a_pointer() {
     assert!(ctx.contains("COMPACT-ALPHA"), "{ctx}");
     assert!(ctx.contains("was compacted"), "{ctx}");
     assert!(
-        ctx.contains("/used/"),
+        ctx.contains("/gc/tombstones/"),
         "pointer names the archived file: {ctx}"
     );
     assert!(!again.contains("COMPACT-ALPHA"), "consumed: {again}");

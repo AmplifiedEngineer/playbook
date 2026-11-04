@@ -5,12 +5,17 @@
 //! draws, `worker` keeps it fresh in the background, `app` is the state and
 //! keys, `view` draws a frame, and `run` is the terminal loop around them.
 
+#[cfg(test)]
+mod a11y;
 pub mod app;
+pub mod arrange;
 pub mod budget;
 pub mod burnup;
 pub mod chart;
 pub mod data;
+pub mod dots;
 pub mod editor;
+pub mod editor_view;
 pub mod fmt;
 pub mod icon;
 pub mod keys;
@@ -35,8 +40,9 @@ use super::run::Paths;
 use app::{App, Effect};
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 use sessions_view::SessionsView;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use theme::{ColorDepth, Theme};
+use ui_state::{Autosave, Flushed};
 use worker::{Update, Worker};
 
 /// How long the loop waits for a key before it checks for new data.
@@ -79,6 +85,34 @@ fn state_to_save(app: &App, flag: Option<Range>, saved: &ui_state::UiState) -> u
     state
 }
 
+/// What the loop keeps beside the app, so a finished reset can bring it back
+/// in step with the cleared store.
+struct Reset<'a> {
+    app: &'a mut App,
+    autosave: &'a mut Autosave,
+    flag: &'a mut Option<Range>,
+    saved: &'a mut ui_state::UiState,
+    last_saved: &'a mut ui_state::UiState,
+}
+
+impl Reset<'_> {
+    /// Applies the result of clearing the store. On success the pending layout
+    /// text is dropped and the defaults are not written back, and a `--range`
+    /// flag cannot bring the old range back. On a failure nothing here changes
+    /// except the footer note.
+    fn finish(self, cleared: Result<(), String>) -> Effect {
+        let ok = cleared.is_ok();
+        let effect = self.app.reset_done(cleared);
+        if ok {
+            self.autosave.discard();
+            *self.flag = None;
+            *self.saved = ui_state::UiState::default();
+            *self.last_saved = state_to_save(self.app, *self.flag, self.saved);
+        }
+        effect
+    }
+}
+
 /// Runs the view until the user quits. Restores the terminal on every exit,
 /// including a panic (ratatui installs the hook).
 pub fn run(paths: &Paths, range: Option<Range>) -> Result<(), String> {
@@ -97,9 +131,9 @@ fn event_loop(
     range: Option<Range>,
 ) -> std::io::Result<()> {
     let home = crate::host::home_dir();
-    let saved = ui_state::load(&home);
+    let mut saved = ui_state::load(&home);
     let week = super::entry::configured_week_start();
-    let flag = range;
+    let mut flag = range;
     let range = start_range(flag, &saved, week);
     let mut app = App::new(range);
     let (layout, layout_warning) = ui_state::load_layout(&home);
@@ -107,6 +141,7 @@ fn event_loop(
     app.apply_ui_state(&saved);
     app.note = layout_warning;
     let mut last_saved = state_to_save(&app, flag, &saved);
+    let mut autosave = Autosave::default();
     app.sources = paths.claude_projects.display().to_string();
     app.week_start = super::entry::configured_week_start();
     // NO_COLOR counts when it is set to anything but empty.
@@ -123,6 +158,7 @@ fn event_loop(
         ],
         env("PBTOP_ICON_WIDTH").as_deref(),
     );
+    app.dots_off = env("PBTOP_DOTS").is_some_and(|v| v.trim() == "0");
     app.depth = ColorDepth::detect(
         std::env::var("COLORTERM").ok().as_deref(),
         std::env::var("TERM").ok().as_deref(),
@@ -156,14 +192,33 @@ fn event_loop(
                 Event::Key(key) if key.kind == KeyEventKind::Press => match app.key(key) {
                     Effect::Requery => worker.ask(app.range, &app.filter),
                     Effect::Sessions => sessions.open(),
-                    Effect::SaveLayout(text) => {
-                        let result = ui_state::save_layout(&home, &text);
-                        app.note = ui_state::save_notice(result, &text);
+                    Effect::SaveLayout(text) => autosave.push(text),
+                    Effect::ResetPrefs => {
+                        let cleared = ui_state::reset(&home).map(|_| ());
+                        let reset = Reset {
+                            app: &mut app,
+                            autosave: &mut autosave,
+                            flag: &mut flag,
+                            saved: &mut saved,
+                            last_saved: &mut last_saved,
+                        };
+                        if let Effect::Requery = reset.finish(cleared) {
+                            worker.ask(app.range, &app.filter);
+                        }
                     }
                     Effect::None => {}
                 },
                 _ => {}
             }
+        }
+        // Pending layout changes go out every 200 ms while the editor is open,
+        // and at once when it closes or the program quits.
+        let force = app.editor.is_none() || app.quit;
+        match autosave.flush(Instant::now(), force, |text| {
+            ui_state::save_layout(&home, text)
+        }) {
+            Flushed::Idle | Flushed::Saved => {}
+            Flushed::Notice(text) | Flushed::Failed(text) => app.note = Some(text),
         }
         let now_state = state_to_save(&app, flag, &saved);
         if now_state != last_saved {
@@ -183,6 +238,9 @@ fn event_loop(
                 Update::Indexing(progress) => app.indexing = progress,
             }
         }
+    }
+    if let Some(why) = autosave.finish(|text| ui_state::save_layout(&home, text)) {
+        crate::say::notice(&why);
     }
     Ok(())
 }
@@ -314,5 +372,67 @@ mod tests {
 
         assert_eq!(untouched.range.as_deref(), Some("30d"));
         assert_eq!(changed.range.as_deref(), Some("all"));
+    }
+
+    fn finish_reset(
+        app: &mut App,
+        flag: Option<Range>,
+        cleared: Result<(), String>,
+    ) -> (
+        Effect,
+        Autosave,
+        Option<Range>,
+        ui_state::UiState,
+        ui_state::UiState,
+    ) {
+        let mut autosave = Autosave::default();
+        autosave.push("Old=spend".into());
+        let mut flag = flag;
+        let mut stored = saved(Some("30d"));
+        let mut last_saved = saved(Some("30d"));
+        let effect = Reset {
+            app,
+            autosave: &mut autosave,
+            flag: &mut flag,
+            saved: &mut stored,
+            last_saved: &mut last_saved,
+        }
+        .finish(cleared);
+        (effect, autosave, flag, stored, last_saved)
+    }
+
+    #[test]
+    fn a_cleared_store_drops_the_pending_layout_the_flag_and_the_stored_state() {
+        // Arrange
+        let mut app = App::new(Range::Today);
+
+        // Act
+        let (_, mut autosave, flag, stored, last_saved) =
+            finish_reset(&mut app, Some(Range::Today), Ok(()));
+
+        // Assert
+        let flushed = autosave.flush(Instant::now(), true, |_| Err("unused".into()));
+        assert_eq!(flushed, Flushed::Idle);
+        assert_eq!(flag, None);
+        assert_eq!(stored, ui_state::UiState::default());
+        assert_eq!(last_saved, state_to_save(&app, None, &stored));
+    }
+
+    #[test]
+    fn a_failed_clear_keeps_the_pending_layout_the_flag_and_the_stored_state() {
+        // Arrange
+        let mut app = App::new(Range::Today);
+
+        // Act
+        let (effect, mut autosave, flag, stored, last_saved) =
+            finish_reset(&mut app, Some(Range::Today), Err("locked".into()));
+
+        // Assert
+        let flushed = autosave.flush(Instant::now(), true, |_| Ok(true));
+        assert_eq!(flushed, Flushed::Saved);
+        assert_eq!(effect, Effect::None);
+        assert_eq!(flag, Some(Range::Today));
+        assert_eq!(stored, saved(Some("30d")));
+        assert_eq!(last_saved, saved(Some("30d")));
     }
 }
