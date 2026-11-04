@@ -2265,8 +2265,9 @@ jobs:
           if ($got -ne $want) { throw "$env:EXE hashes to $got, SHA256SUMS says $want" }
           "sha256=$want" >> $env:GITHUB_OUTPUT
 
+      # Also in a dry run, so a wrong pinned version or hash fails before a release.
       - name: Download wingetcreate
-        if: steps.gate.outputs.run == 'true'
+        if: steps.gate.outputs.run == 'true' || env.DRY_RUN == 'true'
         run: |
           $ErrorActionPreference = 'Stop'
           $bin = Join-Path $env:RUNNER_TEMP 'wingetcreate.exe'
