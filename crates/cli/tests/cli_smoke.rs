@@ -518,6 +518,8 @@ fn table() -> Vec<Case> {
             .pre(&["config", "set", "docs.anydocPath", "{ROOT}/missing-anydoc"])
             .code(1)
             .out("anydoc: not found. docs.anydocPath is set to"),
+        // what takes space on disk
+        case("gc", &["gc"]).plain(),
         // health facts
         case("doctor check", &["doctor", "check"]).out("FAIL").plain().writes(),
         case("doctor models", &["doctor", "models"]).out("haiku").plain(),
