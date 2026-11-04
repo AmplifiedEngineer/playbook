@@ -38,7 +38,53 @@ CREATE TABLE IF NOT EXISTS edges (
     PRIMARY KEY (src, dst, relation)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS edges_by_dst ON edges (dst);
-CREATE INDEX IF NOT EXISTS nodes_by_scope ON nodes (scope, project);";
+CREATE INDEX IF NOT EXISTS nodes_by_scope ON nodes (scope, project);
+CREATE TABLE IF NOT EXISTS facts_fts_map (
+    rowid INTEGER PRIMARY KEY,
+    fact_id TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    project TEXT
+);
+CREATE INDEX IF NOT EXISTS facts_fts_map_by_scope ON facts_fts_map (scope, project);";
+
+/// The full text index over fact text. It is contentless, so the text itself
+/// is not stored and `facts_fts_map` maps a row back to its fact. It is not
+/// part of [`SCHEMA_SQL`] because a build without FTS5 must still be able to
+/// write the graph. The tokenizer matches the recall matcher, which splits
+/// words on every non-alphanumeric character.
+pub const FACTS_FTS_SQL: &str = "\
+CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
+    name,
+    description,
+    body,
+    content='',
+    contentless_delete=1,
+    tokenize='unicode61'
+);";
+
+/// Whether the SQLite build can create FTS5 tables.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fts5Support {
+    Available,
+    Unavailable,
+}
+
+impl Fts5Support {
+    /// What the SQLite behind `conn` was compiled with.
+    pub fn probe(conn: &Connection) -> Self {
+        let Ok(mut stmt) = conn.prepare("PRAGMA compile_options") else {
+            return Self::Unavailable;
+        };
+        let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) else {
+            return Self::Unavailable;
+        };
+        if rows.flatten().any(|opt| opt == "ENABLE_FTS5") {
+            Self::Available
+        } else {
+            Self::Unavailable
+        }
+    }
+}
 
 /// The `scope` of a node that stands for a code location (an `anchors:`
 /// target). Every other node is a fact.
@@ -48,7 +94,7 @@ pub const CODE_SCOPE: &str = "code";
 pub const FACT_SCOPES: [&str; 3] = ["global", "org", "project"];
 
 /// The schema version stored in `meta` under `schema_version`.
-pub const SCHEMA_VERSION: &str = "1";
+pub const SCHEMA_VERSION: &str = "2";
 
 const BUSY: Duration = Duration::from_millis(5000);
 
@@ -82,11 +128,23 @@ pub struct EdgeRow {
     pub signals: Option<Vec<String>>,
 }
 
-/// Applies [`SCHEMA_SQL`] and records the schema version. Fails when the file
-/// was written by a newer schema (rebuild it with the newer playbook).
+/// Applies [`SCHEMA_SQL`], creates the fact index when the build has FTS5, and
+/// records the schema version. Fails when the file was written by a newer
+/// schema (rebuild it with the newer playbook).
 pub fn init(conn: &Connection) -> rusqlite::Result<()> {
+    init_with(conn, Fts5Support::probe(conn))
+}
+
+/// [`init`] with the FTS5 support given, so a test can make a build that has
+/// FTS5 behave as one that has not.
+pub fn init_with(conn: &Connection, fts5: Fts5Support) -> rusqlite::Result<()> {
     conn.busy_timeout(BUSY)?;
     conn.execute_batch(SCHEMA_SQL)?;
+    if fts5 == Fts5Support::Available {
+        // The index is derived and readers fall back without it, so a table
+        // that cannot be made must not stop the graph from being written.
+        let _ = conn.execute_batch(FACTS_FTS_SQL);
+    }
     conn.execute(
         "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?1)",
         [SCHEMA_VERSION],
@@ -100,8 +158,25 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
         (Ok(f), Ok(ours)) if f > ours => Err(rusqlite::Error::InvalidParameterName(format!(
             "memory.db has schema version {f}, this build understands {ours}; upgrade"
         ))),
+        (Ok(f), Ok(ours)) if f < ours => conn
+            .execute(
+                "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+                [SCHEMA_VERSION],
+            )
+            .map(|_| ()),
         _ => Ok(()),
     }
+}
+
+/// Whether `conn` holds a usable `facts_fts` virtual table.
+pub fn facts_index_present(conn: &Connection) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'facts_fts' \
+         AND sql LIKE 'CREATE VIRTUAL TABLE%'",
+        [],
+        |_| Ok(()),
+    )
+    .is_ok()
 }
 
 /// Replaces the whole graph in the database at `db` in one transaction, so a
@@ -399,7 +474,7 @@ mod tests {
         Connection::open(&db)
             .unwrap()
             .execute(
-                "UPDATE meta SET value = '2' WHERE key = 'schema_version'",
+                "UPDATE meta SET value = '3' WHERE key = 'schema_version'",
                 [],
             )
             .unwrap();
@@ -482,5 +557,101 @@ mod tests {
             .unwrap();
         let recorded = std::time::UNIX_EPOCH + Duration::from_millis(stored.parse().unwrap());
         assert_eq!(touched_at(&db).unwrap(), Some(recorded));
+    }
+
+    fn open_memory() -> Connection {
+        Connection::open_in_memory().unwrap()
+    }
+
+    #[test]
+    fn init_without_fts5_succeeds_and_makes_no_fact_index() {
+        // Arrange
+        let conn = open_memory();
+
+        // Act
+        let result = init_with(&conn, Fts5Support::Unavailable);
+
+        // Assert
+        assert!(result.is_ok());
+        assert!(!facts_index_present(&conn));
+        assert!(conn.prepare("SELECT 1 FROM facts_fts_map").is_ok());
+    }
+
+    #[test]
+    fn init_succeeds_when_the_fact_index_cannot_be_created() {
+        // Arrange: a plain table already holds the name.
+        let conn = open_memory();
+        conn.execute_batch("CREATE TABLE facts_fts (x TEXT);")
+            .unwrap();
+
+        // Act
+        let result = init_with(&conn, Fts5Support::Available);
+
+        // Assert
+        assert!(result.is_ok());
+        assert!(!facts_index_present(&conn));
+    }
+
+    #[test]
+    fn init_creates_the_fact_index_once_and_is_then_a_no_op() {
+        // Arrange
+        let conn = open_memory();
+
+        // Act
+        init_with(&conn, Fts5Support::Available).unwrap();
+        conn.execute(
+            "INSERT INTO facts_fts (rowid, name) VALUES (1, 'alpha')",
+            [],
+        )
+        .unwrap();
+        init_with(&conn, Fts5Support::Available).unwrap();
+
+        // Assert
+        assert!(facts_index_present(&conn));
+        let hits: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM facts_fts WHERE facts_fts MATCH 'alpha'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hits, 1);
+    }
+
+    #[test]
+    fn the_bundled_sqlite_has_fts5() {
+        // Arrange, Act
+        let support = Fts5Support::probe(&open_memory());
+
+        // Assert
+        assert_eq!(support, Fts5Support::Available, "bundled SQLite lost FTS5");
+    }
+
+    #[test]
+    fn a_version_one_file_is_moved_to_the_current_version() {
+        // Arrange
+        let d = scratch_dir("mem-v1");
+        let db = db_in(&d);
+        write_graph(&db, &[node("a")], &[]).unwrap();
+        let conn = Connection::open(&db).unwrap();
+        conn.execute(
+            "UPDATE meta SET value = '1' WHERE key = 'schema_version'",
+            [],
+        )
+        .unwrap();
+
+        // Act
+        write_graph(&db, &[node("b")], &[]).unwrap();
+
+        // Assert
+        let version: String = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'schema_version'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        assert!(facts_index_present(&conn));
     }
 }
