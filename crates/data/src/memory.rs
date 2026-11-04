@@ -170,13 +170,21 @@ pub fn init_with(conn: &Connection, fts5: Fts5Support) -> rusqlite::Result<()> {
 
 /// Whether `conn` holds a usable `facts_fts` virtual table.
 pub fn facts_index_present(conn: &Connection) -> bool {
+    facts_index_exists(conn).unwrap_or(false)
+}
+
+/// [`facts_index_present`], telling "no such table" (`Ok(false)`) from a file
+/// that cannot be read at all (`Err`).
+pub fn facts_index_exists(conn: &Connection) -> rusqlite::Result<bool> {
+    use rusqlite::OptionalExtension;
     conn.query_row(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'facts_fts' \
          AND sql LIKE 'CREATE VIRTUAL TABLE%'",
         [],
         |_| Ok(()),
     )
-    .is_ok()
+    .optional()
+    .map(|found| found.is_some())
 }
 
 /// Replaces the whole graph in the database at `db` in one transaction, so a

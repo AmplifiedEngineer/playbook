@@ -24,10 +24,14 @@ const MAX_TERMS: usize = 48;
 /// `bm25` column weights for name, description and body.
 const WEIGHTS: &str = "10.0, 5.0, 1.0";
 
-/// One candidate fact. A lower `rank` is a better match (SQLite `bm25`).
+/// One candidate fact with the node fields a caller needs to show it. A lower
+/// `rank` is a better match (SQLite `bm25`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct FactHit {
     pub fact_id: String,
+    pub name: String,
+    pub description: String,
+    pub file: String,
     pub rank: f64,
 }
 
@@ -66,7 +70,7 @@ pub fn search_facts(
     conn.busy_timeout(BUSY).map_err(failed)?;
     // One read snapshot for the freshness check and the query.
     let tx = conn.unchecked_transaction().map_err(failed)?;
-    if !memory::facts_index_present(&tx) {
+    if !memory::facts_index_exists(&tx).map_err(failed)? {
         return Err(SearchError::IndexMissing);
     }
     if !memory::facts_index_is_fresh(&tx) {
@@ -75,8 +79,10 @@ pub fn search_facts(
     let org = repo.split('/').next().unwrap_or(repo);
     let mut stmt = tx
         .prepare(&format!(
-            "SELECT m.fact_id, bm25(facts_fts, {WEIGHTS}) AS rank \
+            "SELECT m.fact_id, COALESCE(n.name, ''), COALESCE(n.description, ''), \
+                    COALESCE(n.file, ''), bm25(facts_fts, {WEIGHTS}) AS rank \
              FROM facts_fts JOIN facts_fts_map m ON m.rowid = facts_fts.rowid \
+             LEFT JOIN nodes n ON n.id = m.fact_id \
              WHERE facts_fts MATCH ?1 \
                AND (m.scope = 'global' \
                     OR (m.scope = 'org' AND m.project = ?2) \
@@ -89,7 +95,10 @@ pub fn search_facts(
         .query_map(rusqlite::params![expression, org, repo, limit], |r| {
             Ok(FactHit {
                 fact_id: r.get(0)?,
-                rank: r.get(1)?,
+                name: r.get(1)?,
+                description: r.get(2)?,
+                file: r.get(3)?,
+                rank: r.get(4)?,
             })
         })
         .map_err(failed)?;
@@ -423,5 +432,35 @@ mod tests {
         assert_eq!(results[0], Err(SearchError::NoDatabase));
         assert_eq!(results[1], Err(SearchError::IndexStale));
         assert_eq!(results[2], Err(SearchError::IndexMissing));
+    }
+
+    #[test]
+    fn a_hit_carries_the_name_description_and_file_of_its_fact() {
+        // Arrange
+        let db = store(
+            "ms-fields",
+            &[global("f1", "ferry-notes", "late departures")],
+        );
+
+        // Act
+        let hits = search_facts(&db, REPO, &words("ferry"), DEFAULT_LIMIT).unwrap();
+
+        // Assert
+        let hit = &hits[0];
+        assert_eq!(
+            (&*hit.fact_id, &*hit.name, &*hit.description, &*hit.file),
+            ("f1", "ferry-notes", "late departures", "f1.md")
+        );
+    }
+
+    #[test]
+    fn a_busy_or_locked_database_is_reported_as_busy() {
+        // Arrange
+        let busy = rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(5), None);
+        let locked = rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(6), None);
+
+        // Act, Assert
+        assert_eq!(failed(busy), SearchError::Busy);
+        assert_eq!(failed(locked), SearchError::Busy);
     }
 }

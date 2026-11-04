@@ -20,7 +20,7 @@ mod recall_corpus;
 mod recall_harness;
 
 use memory_search_fixture::{Fixture, FixtureError, Split, MIN_SCORE_QUERIES};
-use playbook::hooks::memory_anchors::recall_harness::{CandidateSource, ScanSource};
+use playbook::hooks::memory_anchors::recall_harness::{CandidateSource, IndexSource, ScanSource};
 use playbook::hooks::memory_anchors::PromptQuery;
 use recall_corpus::Corpus;
 use recall_harness::{ReversedRanker, TOP_K};
@@ -422,5 +422,116 @@ fn the_harness_runs_end_to_end_on_the_own_store() {
         "own store: {} rows, {answered}/{} fixture queries matched something",
         index.lines().count(),
         run.0.len()
+    );
+}
+
+const STORE_REPO: &str = "synthetic/store";
+
+fn index_source(corpus: &Corpus, root: &Path) -> IndexSource {
+    let mem_dir = write_store(root, STORE_REPO, corpus);
+    let db = playbook_data::memory::db_in(&mem_dir.parent().unwrap().join("data"));
+    IndexSource::new(recall_harness::index_text(corpus), db, STORE_REPO)
+}
+
+/// Ids that `source` returned for each query, split into queries it answers
+/// (an expected id in the top 3) and the rest.
+fn answered(run: &recall_harness::Run, fixture: &Fixture) -> std::collections::BTreeSet<String> {
+    fixture
+        .queries
+        .iter()
+        .filter(|q| run.0[&q.id].iter().any(|id| q.expected.contains(id)))
+        .map(|q| q.id.clone())
+        .collect()
+}
+
+#[test]
+fn the_index_path_returns_the_scans_ordered_results_when_few_facts_match() {
+    // Arrange: only the fixture facts, so no query has more matches than the
+    // index returns candidates for.
+    let fixture = Fixture::load(&fixture_dir()).unwrap();
+    let corpus = Corpus::build(&fixture, fixture.facts.len(), CORPUS_SEED);
+    let dir = scratch("parity");
+    let by_index = index_source(&corpus, &dir.0);
+    let by_scan = recall_harness::scan_source(&corpus);
+
+    // Act
+    let from_index = recall_harness::run(&by_index, &fixture);
+    let from_scan = recall_harness::run(&by_scan, &fixture);
+
+    // Assert
+    assert_eq!(
+        by_index.fallbacks(),
+        0,
+        "the index path fell back to the scan"
+    );
+    let differing: Vec<_> = from_scan
+        .0
+        .iter()
+        .filter(|(q, ids)| from_index.0.get(*q) != Some(*ids))
+        .map(|(q, ids)| format!("{q}: scan {ids:?}, index {:?}", from_index.0[q]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+}
+
+#[test]
+fn the_index_path_loses_no_query_the_scan_answers_among_many_distractors() {
+    // Arrange: with thousands of equal-scoring distractors the two paths may
+    // fill the remaining slots differently, so compare which queries each
+    // answers rather than the filler.
+    let fixture = Fixture::load(&fixture_dir()).unwrap();
+    let corpus = default_corpus(&fixture);
+    let dir = scratch("parity-large");
+    let by_index = index_source(&corpus, &dir.0);
+
+    // Act
+    let from_index = answered(&recall_harness::run(&by_index, &fixture), &fixture);
+    let from_scan = answered(
+        &recall_harness::run(&recall_harness::scan_source(&corpus), &fixture),
+        &fixture,
+    );
+
+    // Assert
+    let lost: Vec<_> = from_scan.difference(&from_index).collect();
+    let won: Vec<_> = from_index.difference(&from_scan).collect();
+    println!(
+        "index path: {} won {won:?}, {} lost {lost:?}",
+        won.len(),
+        lost.len()
+    );
+    assert!(
+        lost.is_empty(),
+        "queries the scan answers and the index path does not: {lost:?}"
+    );
+    assert_eq!(
+        by_index.fallbacks(),
+        0,
+        "the index path fell back to the scan"
+    );
+}
+
+#[test]
+fn the_index_path_matches_its_committed_baseline() {
+    // Arrange
+    let fixture = Fixture::load(&fixture_dir()).unwrap();
+    let corpus = default_corpus(&fixture);
+    let dir = scratch("baseline-index");
+    let source = index_source(&corpus, &dir.0);
+
+    // Act
+    let run = recall_harness::run(&source, &fixture);
+    if std::env::var_os("UPDATE_MEMORY_SEARCH_BASELINE_INDEX").is_some() {
+        let text = recall_harness::baseline_text(&corpus, &run);
+        std::fs::write(fixture_dir().join("baseline-index.json"), text).unwrap();
+    }
+
+    // Assert
+    let baseline = std::fs::read_to_string(fixture_dir().join("baseline-index.json")).unwrap();
+    if let Err(diff) = recall_harness::check_against(&baseline, &corpus, &run) {
+        panic!("index results differ from baseline-index.json:\n{diff}");
+    }
+    assert_eq!(
+        source.fallbacks(),
+        0,
+        "the index path fell back to the scan"
     );
 }

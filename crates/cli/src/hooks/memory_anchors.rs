@@ -37,6 +37,7 @@ use crate::common::{emit_pre_context, emit_prompt_context, repo_slug, session_di
 use crate::hooks::git_toplevel;
 use crate::hooks::memory_signals;
 use crate::hooks::staleness::{self, check_staleness};
+use playbook_data::memory_search::{search_facts, SearchError, DEFAULT_LIMIT};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -78,6 +79,10 @@ const HINTS_FILE: &str = "prompt-recall-hints.tsv";
 
 /// The line written to `HINTS_FILE` for each emitted hint.
 const HINT_MARK: &str = "hint";
+
+/// Session file with one line per prompt that fell back to scanning the
+/// session index.
+const FALLBACKS_FILE: &str = "prompt-recall-fallbacks.tsv";
 
 /// Most recall hints one session may receive.
 const MAX_HINTS_PER_SESSION: usize = 5;
@@ -283,8 +288,15 @@ fn run_prompt(payload: &Payload, dir: &str) {
     let root = git_toplevel();
     let query = PromptQuery::new(&prompt);
     let tokens = &query.tokens;
-    let mut matches = prompt_token_matches(&contents, &query);
     let index = AnchorIndex::parse(&contents);
+    let mut matches = matches_for_prompt(
+        dir,
+        &contents,
+        &index,
+        &query,
+        &fact_index_db(),
+        &repo_slug(),
+    );
     for touched_abs in touched_paths(dir) {
         let relpath = repo_relative_path(&root, &touched_abs);
         if relpath.is_empty() {
@@ -619,10 +631,15 @@ impl RecallMatch {
 /// per from_id; a later anchor row of the same fact can add the crate-folder
 /// bonus to it.
 fn prompt_token_matches(idx_contents: &str, query: &PromptQuery) -> Vec<RecallMatch> {
+    score_rows(idx_contents.lines(), query)
+}
+
+/// [`prompt_token_matches`] over the given index rows.
+fn score_rows<'a>(lines: impl Iterator<Item = &'a str>, query: &PromptQuery) -> Vec<RecallMatch> {
     let tokens = &query.tokens;
     let mut scored: Vec<RecallMatch> = Vec::new();
     let mut seen_from: HashMap<String, usize> = HashMap::new();
-    for line in idx_contents.lines() {
+    for line in lines {
         if line.is_empty() {
             continue;
         }
@@ -815,12 +832,14 @@ fn repo_relative_path(root: &str, raw_path: &str) -> String {
 /// The anchor index parsed once: rows split into columns, plus a map from
 /// anchor text to row numbers so a lookup does not rescan every line.
 struct AnchorIndex<'a> {
+    lines: Vec<&'a str>,
     rows: Vec<Vec<&'a str>>,
     by_anchor: HashMap<&'a str, Vec<usize>>,
 }
 
 impl<'a> AnchorIndex<'a> {
     fn parse(idx_contents: &'a str) -> Self {
+        let mut lines = Vec::new();
         let mut rows = Vec::new();
         let mut by_anchor: HashMap<&str, Vec<usize>> = HashMap::new();
         for line in idx_contents.lines().filter(|l| !l.is_empty()) {
@@ -829,9 +848,14 @@ impl<'a> AnchorIndex<'a> {
                 .entry(cols.first().copied().unwrap_or(""))
                 .or_default()
                 .push(rows.len());
+            lines.push(line);
             rows.push(cols);
         }
-        AnchorIndex { rows, by_anchor }
+        AnchorIndex {
+            lines,
+            rows,
+            by_anchor,
+        }
     }
 
     /// Match the exact repo-relative path first, then any anchor that is a
@@ -862,6 +886,104 @@ impl<'a> AnchorIndex<'a> {
         }
         matches
     }
+}
+
+/// `memory.db`, where the fact index lives, beside the memory folder.
+fn fact_index_db() -> PathBuf {
+    let root = mem_dir();
+    let data = root.parent().unwrap_or(&root).join("data");
+    playbook_data::memory::db_in(&data)
+}
+
+/// Why the fact index could not answer, as one word for the fallback log.
+fn fallback_reason(error: &SearchError) -> &'static str {
+    match error {
+        SearchError::NoDatabase => "no-database",
+        SearchError::IndexMissing => "index-missing",
+        SearchError::IndexStale => "index-stale",
+        SearchError::Busy => "busy",
+        SearchError::Failed(_) => "failed",
+    }
+}
+
+/// Counts one fallback in the session folder, one line per prompt, so a
+/// silent switch to the slower path stays visible.
+fn record_fallback(dir: &str, reason: &str) {
+    let path = Path::new(dir).join(FALLBACKS_FILE);
+    let _ = try_append_seen(&path, &[reason.to_string()]);
+}
+
+/// The scored matches for the prompt: from the fact index when it can be
+/// trusted, else by scoring every row of the session index (and counting the
+/// fallback).
+fn matches_for_prompt(
+    dir: &str,
+    contents: &str,
+    index: &AnchorIndex,
+    query: &PromptQuery,
+    db: &Path,
+    repo: &str,
+) -> Vec<RecallMatch> {
+    match recall_candidates(index, query, db, repo) {
+        Ok(matches) => matches,
+        Err(reason) => {
+            record_fallback(dir, reason);
+            prompt_token_matches(contents, query)
+        }
+    }
+}
+
+/// The scored matches for `query`, chosen by the fact index: its best
+/// candidates plus the facts a crate folder or an alias names, which the
+/// index cannot express. An answer of none is final. `Err` says why the index
+/// could not be trusted, and the caller scans the session index instead.
+///
+/// The index is read live, so a fact saved after the session index was built
+/// can match; it has no session row, so it is scored from its graph row alone
+/// (no anchor, no aliases).
+fn recall_candidates(
+    index: &AnchorIndex,
+    query: &PromptQuery,
+    db: &Path,
+    repo: &str,
+) -> Result<Vec<RecallMatch>, &'static str> {
+    let hits =
+        search_facts(db, repo, &query.tokens, DEFAULT_LIMIT).map_err(|e| fallback_reason(&e))?;
+    let ranked: HashSet<&str> = hits.iter().map(|h| h.fact_id.as_str()).collect();
+    let mut lines: Vec<&str> = Vec::new();
+    let mut indexed: HashSet<&str> = HashSet::new();
+    for (line, cols) in index.lines.iter().zip(&index.rows) {
+        let id = cols.get(1).copied().unwrap_or("");
+        if ranked.contains(id) || names_crate_or_alias(cols, query) {
+            lines.push(line);
+            indexed.insert(id);
+        }
+    }
+    let live: Vec<String> = hits
+        .iter()
+        .filter(|h| !indexed.contains(h.fact_id.as_str()) && !h.file.is_empty())
+        .map(|h| {
+            let desc = h.description.replace('\n', " ");
+            format!("\t{}\t{}\t{desc}\t\t{}\t", h.fact_id, h.name, h.file)
+        })
+        .collect();
+    Ok(score_rows(
+        lines.into_iter().chain(live.iter().map(String::as_str)),
+        query,
+    ))
+}
+
+/// Whether an index row is for a crate folder the prompt names before
+/// "crate", or has an alias the prompt contains.
+fn names_crate_or_alias(cols: &[&str], query: &PromptQuery) -> bool {
+    let anchor = cols.first().copied().unwrap_or("");
+    let crate_hit = anchor.contains(CRATES_DIR)
+        && anchor_crate_name(&anchor.to_lowercase())
+            .is_some_and(|name| query.path_tokens.iter().any(|t| t == name));
+    crate_hit
+        || cols
+            .get(ALIAS_COLUMN)
+            .is_some_and(|aliases| alias_in_prompt(aliases, &query.lower))
 }
 
 fn matching_rows(idx_contents: &str, relpath: &str) -> Vec<Vec<String>> {
@@ -929,7 +1051,8 @@ fn git_last_commit_epoch(path: &Path) -> Option<staleness::DateTime> {
 #[doc(hidden)]
 pub mod recall_harness {
     use super::{PromptQuery, RecallMatch};
-    use std::path::Path;
+    use std::cell::Cell;
+    use std::path::{Path, PathBuf};
 
     /// A way to pick the facts a prompt could recall, best first.
     pub trait CandidateSource {
@@ -951,6 +1074,45 @@ pub mod recall_harness {
     impl CandidateSource for ScanSource {
         fn candidates(&self, query: &PromptQuery, limit: usize) -> Vec<RecallMatch> {
             let mut matches = super::prompt_token_matches(&self.index, query);
+            matches.truncate(limit);
+            matches
+        }
+    }
+
+    /// The shipping pipeline: candidates from the fact index in `db`, scored
+    /// as the hook scores them, with the scan as the fallback. Counts the
+    /// prompts that had to fall back.
+    pub struct IndexSource {
+        index: String,
+        db: PathBuf,
+        repo: String,
+        fallbacks: Cell<usize>,
+    }
+
+    impl IndexSource {
+        pub fn new(index: String, db: PathBuf, repo: &str) -> Self {
+            Self {
+                index,
+                db,
+                repo: repo.to_string(),
+                fallbacks: Cell::new(0),
+            }
+        }
+
+        /// How many prompts so far were answered by the scan.
+        pub fn fallbacks(&self) -> usize {
+            self.fallbacks.get()
+        }
+    }
+
+    impl CandidateSource for IndexSource {
+        fn candidates(&self, query: &PromptQuery, limit: usize) -> Vec<RecallMatch> {
+            let parsed = super::AnchorIndex::parse(&self.index);
+            let mut matches = super::recall_candidates(&parsed, query, &self.db, &self.repo)
+                .unwrap_or_else(|_| {
+                    self.fallbacks.set(self.fallbacks.get() + 1);
+                    super::prompt_token_matches(&self.index, query)
+                });
             matches.truncate(limit);
             matches
         }
@@ -1733,5 +1895,245 @@ mod tests {
 
         // Assert
         assert_eq!(hits, 10_000);
+    }
+
+    mod fact_index {
+        use super::*;
+        use playbook_data::memory::{db_in, write_graph, NodeRow};
+
+        const REPO: &str = "acme/widgets";
+
+        fn node(id: &str, name: &str, desc: &str) -> NodeRow {
+            NodeRow {
+                id: id.into(),
+                file: format!("{id}.md"),
+                scope: "global".into(),
+                project: None,
+                kind: "project".into(),
+                name: Some(name.into()),
+                description: Some(desc.into()),
+                pinned: false,
+            }
+        }
+
+        fn store(tag: &str, nodes: &[NodeRow]) -> PathBuf {
+            let db = db_in(&crate::common::test_support::scratch_dir(tag));
+            write_graph(&db, nodes, &[]).unwrap();
+            db
+        }
+
+        /// Session index text with one unanchored row per node.
+        fn session_index(nodes: &[NodeRow]) -> String {
+            nodes
+                .iter()
+                .map(|n| {
+                    format!(
+                        "\t{}\t{}\t{}\t\t{}\t",
+                        n.id,
+                        n.name.clone().unwrap_or_default(),
+                        n.description.clone().unwrap_or_default(),
+                        n.file
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        fn ids(matches: &[RecallMatch]) -> Vec<String> {
+            matches.iter().map(|m| m.fact_id().to_string()).collect()
+        }
+
+        fn via_index(
+            session: &str,
+            db: &Path,
+            prompt: &str,
+        ) -> Result<Vec<RecallMatch>, &'static str> {
+            let index = AnchorIndex::parse(session);
+            recall_candidates(&index, &PromptQuery::new(prompt), db, REPO)
+        }
+
+        fn nodes() -> Vec<NodeRow> {
+            vec![
+                node(
+                    "ferry",
+                    "ferry-timetable-cache",
+                    "why the schedule looks old",
+                ),
+                node("crane", "crane-queue", "ferry crane backpressure rules"),
+                node("tide", "tide-table-import", "heights are in centimetres"),
+            ]
+        }
+
+        #[test]
+        fn the_index_gives_the_same_ordered_matches_as_the_scan_on_a_static_store() {
+            // Arrange
+            let nodes = nodes();
+            let db = store("fi-parity", &nodes);
+            let session = session_index(&nodes);
+            let prompts = [
+                "ferry timetable",
+                "crane backpressure",
+                "tide table import",
+                "centimetres",
+                "ferry",
+            ];
+
+            for prompt in prompts {
+                // Act
+                let by_index = via_index(&session, &db, prompt).unwrap();
+                let by_scan = prompt_token_matches(&session, &PromptQuery::new(prompt));
+
+                // Assert
+                assert_eq!(ids(&by_index), ids(&by_scan), "prompt {prompt:?}");
+            }
+        }
+
+        #[test]
+        fn a_prompt_that_matches_nothing_is_answered_empty_without_scoring_the_session_index() {
+            // Arrange: the session index holds a row the graph does not, which
+            // only a scan could find.
+            let db = store("fi-empty", &nodes());
+            let session = format!(
+                "{}\n\tonly-in-session\talphabet-soup\tdesc\t\tx.md\t",
+                session_index(&nodes())
+            );
+
+            // Act
+            let result = via_index(&session, &db, "alphabet");
+
+            // Assert
+            assert!(result.unwrap().is_empty());
+        }
+
+        #[test]
+        fn an_alias_only_prompt_is_recovered_from_the_session_index() {
+            // Arrange: "pb" is too short and "code" is a stopword, so the
+            // index gets no term from the prompt.
+            let nodes = vec![node("launcher", "launcher-notes", "unrelated words")];
+            let db = store("fi-alias", &nodes);
+            let session = "\tlauncher\tlauncher-notes\tunrelated words\t\tlauncher.md\tpb code";
+
+            // Act
+            let found = via_index(session, &db, "pb code").unwrap();
+
+            // Assert
+            assert_eq!(ids(&found), ["launcher"]);
+        }
+
+        #[test]
+        fn a_crate_named_before_crate_is_recovered_from_the_session_index() {
+            // Arrange
+            let nodes = vec![node("indexer", "indexer-notes", "unrelated words")];
+            let db = store("fi-crate", &nodes);
+            let session = "crates/code\tindexer\tindexer-notes\tunrelated words\t\tindexer.md\t";
+
+            // Act
+            let found = via_index(session, &db, "change the code crate").unwrap();
+
+            // Assert
+            assert_eq!(ids(&found), ["indexer"]);
+        }
+
+        #[test]
+        fn a_fact_saved_after_the_session_index_was_built_is_recalled() {
+            // Arrange: the graph has "zebra" but the session index does not.
+            let mut all = nodes();
+            let session = session_index(&all);
+            all.push(node("zebra", "zebra-crossing-rules", "painted stripes"));
+            let db = store("fi-fresh", &all);
+
+            // Act
+            let found = via_index(&session, &db, "zebra crossing").unwrap();
+
+            // Assert
+            assert_eq!(ids(&found), ["zebra"]);
+        }
+
+        #[test]
+        fn each_reason_the_index_cannot_be_trusted_is_reported() {
+            // Arrange
+            let dir = crate::common::test_support::scratch_dir("fi-triggers");
+            fs::create_dir_all(&dir).unwrap();
+            let session = session_index(&nodes());
+            let missing = db_in(&dir.join("none"));
+            let stale = store("fi-stale", &nodes());
+            rusqlite::Connection::open(&stale)
+                .unwrap()
+                .execute(
+                    "UPDATE meta SET value = '99' WHERE key = 'graph_generation'",
+                    [],
+                )
+                .unwrap();
+            let no_table = dir.join("no-table.db");
+            rusqlite::Connection::open(&no_table)
+                .unwrap()
+                .execute_batch("CREATE TABLE facts_fts (x TEXT);")
+                .unwrap();
+            let garbage = dir.join("garbage.db");
+            fs::write(&garbage, "this is not a database file at all").unwrap();
+
+            // Act
+            let reasons: Vec<_> = [&missing, &stale, &no_table, &garbage]
+                .iter()
+                .map(|db| via_index(&session, db, "ferry").err())
+                .collect();
+
+            // Assert
+            assert_eq!(
+                reasons,
+                [
+                    Some("no-database"),
+                    Some("index-stale"),
+                    Some("index-missing"),
+                    Some("failed")
+                ]
+            );
+            assert_eq!(fallback_reason(&SearchError::Busy), "busy");
+        }
+
+        #[test]
+        fn a_reader_during_an_open_rebuild_sees_the_previous_whole_graph() {
+            // Arrange
+            let db = store("fi-during", &nodes());
+            let session = session_index(&nodes());
+            let mut writer = rusqlite::Connection::open(&db).unwrap();
+            let tx = writer
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .unwrap();
+            tx.execute_batch("DELETE FROM facts_fts; DELETE FROM facts_fts_map;")
+                .unwrap();
+
+            // Act
+            let found = via_index(&session, &db, "ferry");
+            drop(tx);
+
+            // Assert
+            assert_eq!(ids(&found.unwrap()), ["ferry", "crane"]);
+        }
+
+        #[test]
+        fn a_fallback_is_counted_and_a_served_prompt_is_not() {
+            // Arrange
+            let nodes = nodes();
+            let db = store("fi-count-db", &nodes);
+            let session = session_index(&nodes);
+            let index = AnchorIndex::parse(&session);
+            let query = PromptQuery::new("ferry");
+            let session_dir = crate::common::test_support::scratch_dir("fi-count");
+            fs::create_dir_all(&session_dir).unwrap();
+            let dir = session_dir.to_str().unwrap();
+            let counter = session_dir.join(FALLBACKS_FILE);
+            let missing = db_in(&session_dir.join("none"));
+
+            // Act
+            let served = matches_for_prompt(dir, &session, &index, &query, &db, REPO);
+            let counted_after_served = counter.exists();
+            let scanned = matches_for_prompt(dir, &session, &index, &query, &missing, REPO);
+
+            // Assert
+            assert!(!counted_after_served);
+            assert_eq!(fs::read_to_string(&counter).unwrap(), "no-database\n");
+            assert_eq!(ids(&served), ids(&scanned));
+        }
     }
 }
