@@ -453,4 +453,42 @@ mod tests {
         };
         assert!(message.contains("--rebuild"), "{message}");
     }
+
+    /// This worktree lists the same bytes as `shared.rs` and `again.rs`, and
+    /// another worktree lists them as `sibling.rs` next to a file only it has.
+    fn two_worktrees_sharing(tag: &str) -> (Fx, crate::db::Store) {
+        let f = fx(tag);
+        f.write("shared.rs", "fn widget() { widget(); }\n");
+        f.write("again.rs", "fn widget() { widget(); }\n");
+        f.run();
+        let other = crate::walker::test_repo::init(&format!("{tag}-b"));
+        crate::walker::test_repo::write(&other, "sibling.rs", b"fn widget() { widget(); }\n");
+        crate::walker::test_repo::write(&other, "only_there.rs", b"fn widgetonly() {}\n");
+        crate::index::run(
+            &other,
+            &f.index,
+            "other",
+            false,
+            &crate::index::Options::default(),
+        )
+        .expect("second worktree");
+        let conn = f.conn();
+        (f, conn)
+    }
+
+    #[test]
+    fn references_come_from_this_worktree_only() {
+        let _g = pinned();
+        // Arrange
+        let (f, conn) = two_worktrees_sharing("rf-scope");
+
+        // Act
+        let got = find_refs(&conn, &f.root, &RefsOptions::new("widget")).expect("refs");
+
+        // Assert
+        let mut found: Vec<&str> = got.refs.iter().map(|r| r.path.as_str()).collect();
+        found.sort_unstable();
+        found.dedup();
+        assert_eq!(found, vec!["again.rs", "shared.rs"]);
+    }
 }
