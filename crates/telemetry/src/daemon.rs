@@ -964,6 +964,9 @@ mod tests {
         let secs = i64::try_from(window.as_secs()).unwrap();
 
         assert!(take_stamp_soon(&p, window, now));
+        // Only a fresh stamp may refuse now, not a copy of the file held by a
+        // child another test spawned.
+        assert!(crate::util::wait_unlocked(&stamp_path(&p)));
         assert!(!take_stamp(&p, window, now + secs - 1));
         assert!(take_stamp_soon(&p, window, now + secs));
         let text = std::fs::read_to_string(stamp_path(&p)).unwrap();
