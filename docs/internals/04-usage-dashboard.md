@@ -331,9 +331,9 @@ When the 7 day or 5 hour window is reached, or its pace reaches the cap before i
 | 5 hour | `! 5h CAP HIT` | `! 5h cap in 1h20m` |
 
 - **Time left.** Days and hours when it is a day or more (`4d9h`, `2d`), hours and minutes under a day (`1h20m`, `3h`), minutes under an hour (`45m`) and `<1m` under a minute. Each rounds down.
-- **When it is absent.** On a window within its cap, in its first hour, past its reset time or with no reset time, the line is left out and the statusline keeps its three lines. Line 3 keeps its own percentages.
+- **When it is absent.** On a window within its cap, past its reset time or with no reset time, the line is left out and the statusline keeps its other lines. A window that is not yet reached also stays out of the line in its first hour, because the pace is not known yet; a reached window shows at any time. Line 3 keeps its own percentages.
 - **Colour.** The line is red, and the leading `!` and the words carry the meaning, so it reads the same without colour.
-- **Width.** The line is fitted to `COLUMNS` (120 when unset or not a number). The 7 day segment comes first and is kept, and the 5 hour segment is dropped whole on a terminal too narrow for both.
+- **Width.** The line is fitted to `COLUMNS` (120 when unset, and 0 when it is not a number, which leaves only the 7 day segment). The 7 day segment comes first and is kept, and the 5 hour segment is dropped whole on a terminal too narrow for both.
 - **No switch.** There is no setting that hides the line.
 
 ### The Projection panel
