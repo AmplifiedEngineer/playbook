@@ -28,7 +28,7 @@ Issue #534 asks for `playbook watch`: a process on your machine that listens to 
 | Data and log folders | `docs/internals/11-data-folder.md` | Databases live in `~/.config/playbook/data` (mode 0700). Logs and per-session files live in `~/.config/playbook/runtime`. |
 | Service files | `crates/cli/src/service_manager.rs` | Only removes the retired collector service files. [ADR 0048](0048-collector-daemon-started-by-commands.md) deleted the service because the service and the on-demand collector fought over a port and the service cost 2436 lines. |
 | Command names | `playbook commands` | No `watch`, `once`, `pause` or `resume`. `status` exists under `usage`, and `log` under `effort`. A subcommand of `watch` does not clash with them. |
-| unsafe code | `Cargo.toml:19` sets only `undocumented_unsafe_blocks = "warn"`. A search of `crates/**/*.rs` finds 65 lines that contain `unsafe`, and `libc` is a dependency | The rule for this work is no `unsafe`. The workspace does not yet forbid it. See the open questions. |
+| unsafe code | When this ADR was written, `Cargo.toml` set only `undocumented_unsafe_blocks = "warn"` and the tree had `unsafe` and `libc`. The workspace now sets `unsafe_code = "forbid"` | The rule for this work is no `unsafe`, and the lint now enforces it. See the maintainer answers. |
 
 ### What GitHub gives a poller (read from the GitHub REST docs on 2026-10-25)
 
@@ -367,7 +367,7 @@ stateDiagram-v2
 
 On 2026-11-04 the maintainer delegated these questions and took the recommended answer for each.
 
-1. `unsafe` stays unforbidden workspace wide for now. Watch mode adds none and uses the lock in place of pid probes. Forbidding it workspace wide is a separate change.
+1. `unsafe` is forbidden workspace wide, since the build change that set `unsafe_code = "forbid"` in `Cargo.toml`. Watch mode adds none and uses the lock in place of pid probes. It stops a process group by running `kill`.
 2. `install-service` installs a timer that runs `watch once` every 60 seconds. No resident unit.
 3. `propose` goes through the local queue and `watch approve`. Proposals are not mirrored to GitHub first.
 4. The ladder for `auto` is accepted: 10 approved proposals of a class over 28 days with none failed or rolled back. `label` and fixed text comments are exempt from day one. Every other class waits for the ladder.
