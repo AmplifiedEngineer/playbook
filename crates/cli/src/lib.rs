@@ -123,7 +123,7 @@ pub use usage::command::UsageCommand;
 /// Configure and support Claude Code from the command line.
 ///
 /// playbook installs hooks and a session launcher, shows the Agent Budget Dashboard,
-/// and helps with pull requests, reviews, worktrees and session handoffs.
+/// and helps with PRs, reviews, worktrees and session handoffs.
 #[derive(Parser, Debug)]
 #[command(
     name = "playbook",
@@ -715,10 +715,10 @@ pub enum Command {
     /// List recent agent sessions and their state
     ///
     /// Shows the repo, branch, worktree, linked PR, state, context size and
-    /// cost of each session. Read only. A session is done when the pull request
-    /// of its branch is merged or closed, and stale after
-    /// `sessions.staleAfterDays` without activity. Suggestions are printed, never acted on, and a worktree with
-    /// uncommitted changes is flagged, never removed.
+    /// cost of each session. Read only. A session is done when the PR of its
+    /// branch is merged or closed, and stale after `sessions.staleAfterDays`
+    /// without activity. Suggestions are printed, never acted on, and a
+    /// worktree with uncommitted changes is flagged, never removed.
     ///
     /// Example: `playbook sessions --json`
     Sessions {
@@ -2661,21 +2661,11 @@ mod tests {
         // Assert
         assert!(texts.len() > 100, "the walk found too little help text");
         for (place, text) in texts {
-            for banned in ["src/", "shell/", "::"] {
+            for banned in ["src/", "shell/", "::", ".rs", ".sh", ".py"] {
                 assert!(
                     !text.contains(banned),
                     "help for `{place}` leaks `{banned}`: {text}"
                 );
-            }
-            // A file extension ends the word, so `.sh` must not match `.shared`.
-            for ext in [".rs", ".sh", ".py"] {
-                let leaked = text.match_indices(ext).any(|(at, _)| {
-                    !text[at + ext.len()..]
-                        .chars()
-                        .next()
-                        .is_some_and(char::is_alphanumeric)
-                });
-                assert!(!leaked, "help for `{place}` leaks `{ext}`: {text}");
             }
             assert!(
                 !text.contains('\u{2014}') && !text.contains('\u{2013}'),
