@@ -14,7 +14,7 @@ pub const ALARM_MARK: &str = "! ";
 
 /// Segments with a lower number are kept longer on a narrow terminal.
 pub const PRIORITY_SEVEN_DAY: u8 = 0;
-/// Below the monthly spend segment, whose place is 1.
+/// Kept after the 7 day segment on a narrow terminal.
 pub const PRIORITY_FIVE_HOUR: u8 = 2;
 
 /// One thing line 4 says.
@@ -47,12 +47,12 @@ pub fn build(input: &str, now: i64) -> Vec<Segment> {
             };
             let headroom = limit.headroom(now)?;
             let brief = brief(limit, &headroom, now)?;
-            let mark = if brief.alarm { ALARM_MARK } else { "" };
+            // A brief is only given for a cap that is hit or on pace to be.
             Some(Segment {
-                text: format!("{mark}{}", brief.text),
+                text: format!("{ALARM_MARK}{}", brief.text),
                 short: None,
                 priority,
-                alarm: brief.alarm,
+                alarm: true,
             })
         })
         .collect()
