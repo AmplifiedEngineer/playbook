@@ -359,13 +359,12 @@ mod tests {
     use crate::gc::index::Mode;
     use crate::gc::lock::NoHook as TestNoHook;
     use crate::gc::tombstone::tests::{fx, Fx, NOW};
-    use crate::gc::{Due, FixedClock, Item, Registry, Store};
-    use std::path::PathBuf;
+    use crate::gc::{Due, FixedClock, Item, Limits, Registry, Store};
 
     const WEEK: i64 = 7 * SECS_PER_DAY;
 
-    fn scan_old(roots: &[PathBuf], _now: i64) -> Vec<Item> {
-        let mut found: Vec<Item> = fs::read_dir(&roots[0])
+    fn scan_old(store: &Store, _now: i64) -> Vec<Item> {
+        let mut found: Vec<Item> = fs::read_dir(&store.roots[0])
             .unwrap()
             .flatten()
             .filter(|e| e.file_name().to_string_lossy().starts_with("old-"))
@@ -390,6 +389,7 @@ mod tests {
             scan: scan_old,
             action: Action::Tombstone,
             retention_key: None,
+            limits: Limits::default(),
         };
         fx.registry = Registry::new(fx.gc.clone()).with_store(store);
         fx

@@ -234,7 +234,7 @@ impl FsOps for RealFs {
 mod tests {
     use super::*;
     use crate::gc::lock::{with_run_lock, NoHook};
-    use crate::gc::{Action, FixedClock, Store};
+    use crate::gc::{Action, FixedClock, Limits, Store};
     use std::time::Duration;
 
     const NOW: i64 = 1_800_000_000;
@@ -292,6 +292,7 @@ mod tests {
             scan: |_, _| Vec::new(),
             action: Action::Delete,
             retention_key: None,
+            limits: Limits::default(),
         };
         let ops = RealFs::new(&Registry::new(fx.gc.clone()).with_store(store));
 

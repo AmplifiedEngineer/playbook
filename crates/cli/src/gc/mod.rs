@@ -104,9 +104,21 @@ pub struct Due {
     pub retain_days: u32,
 }
 
-/// Lists the items under a store's roots. Takes `now` so a rule can be tested
+/// Lists the items under a store's roots, judged by its limits. Takes `now` so a rule can be tested
 /// without the wall clock.
-pub type ScanFn = fn(roots: &[PathBuf], now: i64) -> Vec<Item>;
+pub type ScanFn = fn(store: &Store, now: i64) -> Vec<Item>;
+
+/// The numbers a store's rule reads, taken from config when the registry is
+/// built so a scan never touches config itself.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Limits {
+    /// Days without a change before an item is due.
+    pub idle_days: u32,
+    /// Size above which an item is due, in bytes. Zero means no size rule.
+    pub max_bytes: u64,
+    /// Days a tombstone of this store's items is kept.
+    pub retain_days: u32,
+}
 
 /// One kind of on-disk state with a retention rule.
 #[derive(Debug, Clone)]
@@ -117,11 +129,12 @@ pub struct Store {
     pub action: Action,
     /// The config key that sets this store's retention, if it has one.
     pub retention_key: Option<&'static str>,
+    pub limits: Limits,
 }
 
 impl Store {
     pub fn items(&self, now: i64) -> Vec<Item> {
-        (self.scan)(&self.roots, now)
+        (self.scan)(self, now)
     }
 }
 
@@ -203,12 +216,42 @@ mod tests {
             scan: |_, _| Vec::new(),
             action: Action::Delete,
             retention_key: None,
+            limits: Limits::default(),
         };
         let registry = Registry::new(PathBuf::from("/pb/gc")).with_store(store);
 
         let roots = registry.roots();
 
         assert!(roots.contains(&PathBuf::from("/a")) && roots.contains(&PathBuf::from("/b")));
+    }
+
+    #[test]
+    fn scan_reads_the_limits_of_its_store() {
+        // Arrange
+        let store = Store {
+            name: "t",
+            roots: Vec::new(),
+            scan: |store, now| {
+                vec![Item {
+                    path: PathBuf::from("/x"),
+                    bytes: store.limits.max_bytes,
+                    newest_mtime: now,
+                    due: None,
+                }]
+            },
+            action: Action::Delete,
+            retention_key: None,
+            limits: Limits {
+                max_bytes: 9,
+                ..Limits::default()
+            },
+        };
+
+        // Act
+        let items = store.items(5);
+
+        // Assert
+        assert_eq!((items[0].bytes, items[0].newest_mtime), (9, 5));
     }
 
     #[test]
