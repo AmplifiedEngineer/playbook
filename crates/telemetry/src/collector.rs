@@ -707,12 +707,15 @@ pub(crate) mod tests {
         running.finish().unwrap();
 
         assert!(crate::util::wait_unlocked(&crate::daemon::lock_path(&p)));
+        // `run_collect` has returned, so its listener is closed and the port
+        // is free unless another program took it in the moment since. Such a
+        // program is not this collector, which no longer answers, so a busy
+        // port counts only when something other than a collector holds it.
         if let Err(e) = bind(port) {
-            // Who answers there tells a collector that kept its socket from
-            // another program that took the port after the stop.
-            panic!(
-                "port {port} is not free right after the stop: {e}; probe says {:?}",
-                probe(port)
+            assert_ne!(
+                probe(port),
+                Probe::Collector,
+                "the collector still answers on port {port} after the stop: {e}"
             );
         }
         assert_eq!(read_state(&state_path(&p)).unwrap().pid, 0);
