@@ -23,7 +23,7 @@ pub struct Flags {
     /// Do not set or change statusLine in settings.json
     #[arg(long, overrides_with = "statusline")]
     pub no_statusline: bool,
-    /// Also apply the security defaults (permissions rules); off unless asked or `security.defaults` is true
+    /// Also apply the security defaults (permissions rules). Off unless asked or `security.defaults` is true
     #[arg(long, overrides_with = "no_security")]
     pub security: bool,
     /// Do not apply the security defaults, even when `security.defaults` is true
@@ -44,10 +44,10 @@ pub struct Flags {
     /// Install the playbook system prompt (an existing copy is refreshed either way)
     #[arg(long, overrides_with = "no_system_prompt")]
     pub system_prompt: bool,
-    /// Do not install the system prompt, and store `systemPrompt.enabled` false so `pb cc` starts with Claude Code's own
+    /// Do not install the system prompt. Stores `systemPrompt.enabled` false so `pb cc` starts with Claude Code's own
     #[arg(long, overrides_with = "system_prompt")]
     pub no_system_prompt: bool,
-    /// Answer yes to the telemetry question: write the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry`
+    /// Answer yes to the telemetry question. Writes the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry`
     #[arg(long, overrides_with = "no_telemetry")]
     pub telemetry: bool,
     /// Do not write telemetry variables into settings.json
@@ -71,7 +71,7 @@ pub struct Flags {
     /// Retired with `--disk-ballast`
     #[arg(long, hide = true, overrides_with = "disk_ballast")]
     pub no_disk_ballast: bool,
-    /// Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free
+    /// Add `pb` as a short name for `playbook`. Makes a `pb -> playbook` symlink in the install directory, only when `pb` is free
     #[arg(long, overrides_with = "no_short_name")]
     pub short_name: bool,
     /// Do not add the `pb` short name
@@ -83,7 +83,7 @@ pub struct Flags {
     /// Do not install shell completion
     #[arg(long, overrides_with = "completions")]
     pub no_completions: bool,
-    /// Turn the policy guard on (`hooks.policyGuard.enabled`): it denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes and settings.json edits
+    /// Turn the policy guard on (`hooks.policyGuard.enabled`). It denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes and settings.json edits
     #[arg(long, overrides_with = "no_policy_guard")]
     pub policy_guard: bool,
     /// Do not turn the policy guard on; it is off by default and a stored choice is not changed
@@ -98,7 +98,7 @@ pub struct Flags {
     #[arg(
         long,
         overrides_with_all = ["attribution", "attribution_off", "no_attribution_off"],
-        help = "Attribution OFF, the default: Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values"
+        help = "Attribution OFF. Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values. This is what setup applies when you choose nothing"
     )]
     pub no_attribution: bool,
     /// Deprecated name for `--no-attribution`, from 0.36 and 0.37.
@@ -112,7 +112,7 @@ pub struct Flags {
         value_name = "PART",
         value_delimiter = ',',
         num_args = 1..,
-        help = "Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
+        help = "Run only these parts and ask nothing. Parts, comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution. Everything else stays untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
     )]
     pub only: Vec<String>,
     /// Never ask: use the default for every part you did not answer with a flag

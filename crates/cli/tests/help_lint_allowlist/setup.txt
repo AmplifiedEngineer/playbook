@@ -1,8 +1,0 @@
-H12 setup --short-name
-H6 setup --no-system-prompt
-H6 setup --only
-H6 setup --policy-guard
-H6 setup --security
-H6 setup --short-name
-H6 setup --telemetry
-H8 setup --no-attribution
