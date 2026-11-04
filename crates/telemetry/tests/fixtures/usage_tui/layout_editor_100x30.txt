@@ -6,22 +6,22 @@
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  F1 Charts ╭┤ Layout: tabs and panels ├─────────────────────────────────────────────────╮
 ╭─┤¹Spend p│  Charts  Numbers  Sessions                                                 │──────────╮
-│total $20.│                                                                            │ 20.6K/day│
-│Thu 2026-0│ [> spend                            ][  tokens                           ] │  2 msgs  │
-│ $8┤┄┄┄┄┄┄│ [  burnup                                                                ] │┄┄┄┄┄▆┄┄▆┄│
-│   │      │                                                                            │     █  █ │
-│   │      │                                                                            │     █  █ │
-│ $4┤┄┄┄┄┄┄│                                                                            │┄▇▇┄┄█┄┄█┄│
-│   │      │                                                                            │ ██  █  █ │
-│ $0┤▁█▁  ▅│                                                                            │ ██  █  █ │
-│    5 7  9│                                                                            │ 29  1  3 │
-╰──────────│                                                                            │■■■ high├─╯
-╭─┤Burn-up├│ spend: cost per day as a chart or a daily table                            │iod, UTC├─╮
-│no burn-up│                                                                            │          │
-│          │ Left/Right tab   h/l j/k move cursor   H/J/K/L move panel   f width        │          │
-│          │ a add   d remove   u undo   < > move tab   n new   x delete   r rename     │          │
-│          │ R reset   esc or q close   changes are saved as you make them              │          │
-│          ╰────────────────────────────────────────────────────────────────────────────╯          │
+│Thu 2026-0│                                                                            │7.6K tok  │
+│ $8┤┄┄┄┄┄┄│ [> spend.total                      ][  spend.model                      ] │┄┄┄┄┄┄┄┄┄┄│
+│ $4┤┄┄┄┄┄┄│ [  tokens                                                                ] │┄┄┄┄┄┄┄┄┄┄│
+│ $0┤▁▄▁  ▂│ [  burnup                                                                ] │ ▃▂  ▅  ▄ │
+│    5 7  9│                                                                            │ 29 31  3 │
+╰┤peak $6.0│                                                                            │ haiku-5├─╯
+╭─┤²Tokens │                                                                            │──────────╮
+│total 618.│                                                                            │          │
+│Thu 2026-0│                                                                            │          │
+│ 50K┤┄┄┄┄┄│                                                                            │▇▇┄┄┄┄▇▇▇┄│
+│ 25K┤▃▃┄▃▃│ spend.total: total cost per day as a chart, always this view               │██┄┄┄┄███┄│
+│   0┤██ ██│                                                                            │██    ███ │
+│     5  6 │ Left/Right tab   h/l j/k move cursor   H/J/K/L move panel   f width        │1  2  3   │
+╰──────────│ a add   d remove   u undo   < > move tab   n new   x delete   r rename     │■■■ high├─╯
+╭─┤Burn-up├│ R reset   esc or q close   changes are saved as you make them              │iod, UTC├─╮
+│no burn-up╰────────────────────────────────────────────────────────────────────────────╯          │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │

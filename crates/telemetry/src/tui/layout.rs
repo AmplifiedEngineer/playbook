@@ -205,12 +205,23 @@ impl Default for Layout {
             panels: panels.to_vec(),
             rows: None,
         };
+        // Cost per day and cost per model side by side, tokens and the
+        // burn-up each across the full width.
+        let charts = Tab {
+            rows: Some(vec![2, 1, 1]),
+            ..tab(
+                "Charts",
+                &[
+                    PanelId::SpendTotal,
+                    PanelId::SpendModel,
+                    PanelId::Tokens,
+                    PanelId::Burnup,
+                ],
+            )
+        };
         Layout {
             tabs: vec![
-                tab(
-                    "Charts",
-                    &[PanelId::Spend, PanelId::Tokens, PanelId::Burnup],
-                ),
+                charts,
                 tab(
                     "Numbers",
                     &[
@@ -587,13 +598,12 @@ mod tests {
 
     #[test]
     fn every_old_layout_string_loads_unchanged() {
-        let default_text = Layout::default().to_text();
         for old in [
             "Charts=spend,tokens",
             "Money=budget,models;Live=live",
             "Charts=spend,tokens;Numbers=models,breakdown,budget,projection;Sessions=live,sessions",
             "T0=spend;T1=spend;T2=spend;T3=spend;T4=spend;T5=spend;T6=spend;T7=spend;T8=spend",
-            default_text.as_str(),
+            "Charts=spend,tokens,burnup;Numbers=models,breakdown,budget,projection;Sessions=live,sessions",
         ] {
             let layout = Layout::parse(old).unwrap();
 
@@ -602,6 +612,35 @@ mod tests {
         }
         let spaced = Layout::parse("Money = budget , models ; Live=live").unwrap();
         assert_eq!(spaced.to_text(), "Money=budget,models;Live=live");
+    }
+
+    #[test]
+    fn the_default_charts_tab_splits_spend_and_arranges_the_rows() {
+        // Arrange
+        let layout = Layout::default();
+
+        // Act
+        let charts = &layout.tabs[0];
+        let text = layout.to_text();
+
+        // Assert
+        assert_eq!(charts.rows, Some(vec![2, 1, 1]));
+        assert_eq!(
+            charts.panels[..2],
+            [PanelId::SpendTotal, PanelId::SpendModel]
+        );
+        assert!(
+            text.starts_with("Charts=spend.total,spend.model|tokens|burnup;"),
+            "{text}"
+        );
+        assert_eq!(Layout::parse(&text).unwrap(), layout);
+    }
+
+    #[test]
+    fn a_stored_spend_word_keeps_the_switcher() {
+        let layout = Layout::parse("Charts=spend,tokens").unwrap();
+
+        assert_eq!(layout.tabs[0].panels[0], PanelId::Spend);
     }
 
     #[test]

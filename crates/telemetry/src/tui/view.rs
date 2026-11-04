@@ -1637,13 +1637,13 @@ mod tests {
     }
 
     #[test]
-    fn from_a_hidden_focus_the_bracket_key_lands_on_the_second_panel() {
+    fn from_a_hidden_focus_the_bracket_key_lands_on_the_second_slot() {
         let mut app = tabbed_app();
         app.focus = crate::tui::sort::Panel::Sessions;
 
         app.key(press(KeyCode::Char(']')));
 
-        assert_eq!(app.focus, crate::tui::sort::Panel::Tokens);
+        assert_eq!(app.focus_slot(), Some(PanelId::SpendModel));
     }
 
     #[test]

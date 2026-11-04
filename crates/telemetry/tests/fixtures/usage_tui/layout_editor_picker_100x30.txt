@@ -6,22 +6,22 @@
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  F1 Charts ╭┤ Layout: tabs and panels ├─────────────────────────────────────────────────╮
 ╭─┤¹Spend p│  Charts  Numbers  Sessions                                                 │──────────╮
-│total $20.│                                                                            │ 20.6K/day│
-│Thu 2026-0│ Add after spend   enter add   esc back   j/k choose                        │  2 msgs  │
-│ $8┤┄┄┄┄┄┄│ > models             cost and tokens per model                             │┄┄┄┄┄▆┄┄▆┄│
-│   │      │   breakdown          projects, agents, skills, tools or health (v switches)│     █  █ │
-│   │      │   live               sessions with a message in the last 15 minutes        │     █  █ │
-│ $4┤┄┄┄┄┄┄│   sessions           every session of the period, grouped by day           │┄▇▇┄┄█┄┄█┄│
-│   │      │   budget             limits and how fast you are using them                │ ██  █  █ │
-│ $0┤▁█▁  ▅│   projection         when each limit is reached at the current pace        │ ██  █  █ │
-│    5 7  9│   spend.total        total cost per day as a chart, always this view       │ 29  1  3 │
-╰──────────│   spend.model        cost per model per day as a chart, always this view   │■■■ high├─╯
-╭─┤Burn-up├│ spend: cost per day as a chart or a daily table                            │iod, UTC├─╮
-│no burn-up│                                                                            │          │
-│          │ Left/Right tab   h/l j/k move cursor   H/J/K/L move panel   f width        │          │
-│          │ a add   d remove   u undo   < > move tab   n new   x delete   r rename     │          │
-│          │ R reset   esc or q close   changes are saved as you make them              │          │
-│          ╰────────────────────────────────────────────────────────────────────────────╯          │
+│Thu 2026-0│                                                                            │7.6K tok  │
+│ $8┤┄┄┄┄┄┄│ Add after spend.total   enter add   esc back   j/k choose                  │┄┄┄┄┄┄┄┄┄┄│
+│ $4┤┄┄┄┄┄┄│ > spend              cost per day as a chart or a daily table              │┄┄┄┄┄┄┄┄┄┄│
+│ $0┤▁▄▁  ▂│   models             cost and tokens per model                             │ ▃▂  ▅  ▄ │
+│    5 7  9│   breakdown          projects, agents, skills, tools or health (v switches)│ 29 31  3 │
+╰┤peak $6.0│   live               sessions with a message in the last 15 minutes        │ haiku-5├─╯
+╭─┤²Tokens │   sessions           every session of the period, grouped by day           │──────────╮
+│total 618.│   budget             limits and how fast you are using them                │          │
+│Thu 2026-0│   projection         when each limit is reached at the current pace        │          │
+│ 50K┤┄┄┄┄┄│   spend.daily        cost per day as a table, always this view             │▇▇┄┄┄┄▇▇▇┄│
+│ 25K┤▃▃┄▃▃│ spend.total: total cost per day as a chart, always this view               │██┄┄┄┄███┄│
+│   0┤██ ██│                                                                            │██    ███ │
+│     5  6 │ Left/Right tab   h/l j/k move cursor   H/J/K/L move panel   f width        │1  2  3   │
+╰──────────│ a add   d remove   u undo   < > move tab   n new   x delete   r rename     │■■■ high├─╯
+╭─┤Burn-up├│ R reset   esc or q close   changes are saved as you make them              │iod, UTC├─╮
+│no burn-up╰────────────────────────────────────────────────────────────────────────────╯          │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
