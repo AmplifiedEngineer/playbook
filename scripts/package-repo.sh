@@ -128,7 +128,7 @@ build_rpm() {
 }
 
 build() {
-  local site="${1:-}" root="${2:-}" yank="${3:-}" work v dir name n=0 f
+  local site="${1:-}" root="${2:-}" yank="${3:-}" v dir name n=0 f
   [ -n "$site" ] && [ -n "$root" ] && [ -n "$yank" ] || fail "usage: package-repo.sh build <site-dir> <assets-root> <yanked.txt>"
   [ -d "$root" ] || fail "assets folder $root does not exist"
   [ -n "${PACKAGE_SIGNING_KEY:-}" ] && [ -n "${PACKAGE_SIGNING_PASSPHRASE:-}" ] \
@@ -138,7 +138,7 @@ build() {
     command -v "$tool" > /dev/null || fail "$tool is required"
   done
 
-  work="$(mktemp -d)"
+  work="$(mktemp -d)" # global: the EXIT trap runs after this function returns
   chmod 700 "$work"
   trap 'gpgconf --kill gpg-agent 2> /dev/null || true; rm -rf "$work"' EXIT
   export GNUPGHOME="$work/gnupg"
