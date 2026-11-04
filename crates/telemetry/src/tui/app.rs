@@ -400,8 +400,15 @@ impl App {
     }
 
     /// The focusable panels of the selected tab, in the order they are drawn.
+    /// A panel drawn twice, like `spend` beside `spend.total`, counts once.
     fn tab_panels(&self) -> Vec<Panel> {
-        self.tab_ids().iter().filter_map(|id| id.panel()).collect()
+        let mut panels: Vec<Panel> = Vec::new();
+        for panel in self.tab_ids().iter().filter_map(|id| id.panel()) {
+            if !panels.contains(&panel) {
+                panels.push(panel);
+            }
+        }
+        panels
     }
 
     /// Keeps the focus on a panel the selected tab shows.
@@ -440,11 +447,9 @@ impl App {
         {
             return None;
         }
-        let id = if panel == Panel::Tokens {
-            super::layout::PanelId::Tokens
-        } else {
-            super::layout::PanelId::Spend
-        };
+        // The chart sits in the first id of the tab that draws this panel, which
+        // can be a pinned word like `spend.model`.
+        let id = *self.tab_ids().iter().find(|id| id.panel() == Some(panel))?;
         let area = view::panel_rect(self.area, self.tab_ids(), self.layout.tabs.len() > 1, id)?;
         Some(panels::chart_plot(area, data, panel))
     }
@@ -1085,6 +1090,30 @@ mod tests {
 
     fn today() -> i64 {
         NOW.div_euclid(DAY)
+    }
+
+    #[test]
+    fn tab_moves_through_each_panel_once_when_a_tab_draws_spend_twice() {
+        let mut app = charted(Range::LastDays(30), 30);
+        app.layout = crate::tui::layout::Layout::parse("A=spend,spend.total,tokens").unwrap();
+        app.go_tab(0);
+        app.focus = Panel::Spend;
+
+        app.key(press(KeyCode::Tab));
+
+        assert_eq!(app.focus, Panel::Tokens);
+    }
+
+    #[test]
+    fn the_chart_cursor_moves_on_a_tab_that_draws_spend_only_as_a_pinned_word() {
+        let mut app = charted(Range::LastDays(30), 30);
+        app.layout = crate::tui::layout::Layout::parse("A=spend.total,tokens").unwrap();
+        app.go_tab(0);
+        app.focus = Panel::Spend;
+
+        app.key(press(KeyCode::Left));
+
+        assert_eq!(app.cursor, Some(today() - 1));
     }
 
     #[test]

@@ -292,7 +292,7 @@ fn parse_rows(name: &str, list: &str) -> Result<(Vec<PanelId>, Option<Vec<u8>>),
 
 impl Layout {
     /// One tab with the panels of the single screen pbtop had before tabs, which
-    /// is every panel except Projection and Burnup.
+    /// is every panel except Projection, Burnup and the pinned view words.
     pub fn classic() -> Layout {
         Layout {
             tabs: vec![Tab {
@@ -425,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn the_classic_layout_keeps_the_original_six_panels() {
+    fn the_classic_layout_keeps_the_original_seven_panels() {
         let classic = Layout::classic();
 
         assert_eq!(
