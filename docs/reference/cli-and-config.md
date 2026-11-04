@@ -740,10 +740,12 @@ Check that recorded phase verdicts still pass
 
 Exits 0 only if every named phase is PASS or WARN and its source is unchanged. Exits 1 on any other verdict, a stale one, or no phases.
 
+Example: `playbook gate check my-plan plan adversarial test-review`
+
 - `<PLAN_SLUG>`: Plan slug to check
 - `<COMMAND>`: Command running this check
 - `<PHASES>`: Phase names to check
-- `--source <SOURCE>`: File with the current source content, compared against what each verdict saw; defaults to the shared draft, `<plans>/<slug>.gate-source.md`
+- `--source <SOURCE>`: File with the current source content, compared against what each verdict saw. Defaults to the shared draft, `<plans>/<slug>.gate-source.md`
 - `--json`: Print one JSON object instead of text (exit codes stay the same)
 
 ### `playbook gate record`
@@ -752,12 +754,14 @@ Save a phase verdict for a plan
 
 Reads a phase agent's output, finds its `VERDICT:` line, and stores it.
 
+Example: `playbook gate record my-plan plan adversarial out.md`
+
 - `<PLAN_SLUG>`: Plan slug the phase belongs to
 - `<COMMAND>`: Command that produced this verdict
 - `<PHASE>`: Which phase this verdict is for
 - `<INPUT>`: File with the phase agent's output, or "-" to read stdin
-- `--source <SOURCE>`: File with the source content the verdict covers, used to spot a stale verdict later; defaults to the phase's snapshot, `<plans>/<slug>.gate-source.<phase>.md`
-- `--stuck`: Store a FAIL report as STUCK: the revise and re-run loop stopped because the blocking findings made no progress. Refused for any other verdict
+- `--source <SOURCE>`: File with the source content the verdict covers. Used to spot a stale verdict later. Defaults to the phase's snapshot, `<plans>/<slug>.gate-source.<phase>.md`
+- `--stuck`: Store a FAIL report as STUCK. Use it when the revise and re-run loop stopped because the blocking findings made no progress. Refused for any other verdict
 
 ### `playbook gate snapshot`
 
@@ -784,7 +788,7 @@ Append one entry line to `GLOSSARY.md` at the repo root
 
 ### `playbook handoff`
 
-Save and show notes that carry a session over to the next one
+Save and show notes that carry over to the next session
 
 A handoff is a markdown note for one directory. The next session started there loads it when the SessionStart hook is installed and runs, and `/playbook:session-start` loads it on demand.
 
@@ -1155,7 +1159,7 @@ Prints `path:line: finding` for each problem. Fenced code, inline code, URLs, fi
 
 ### `playbook review`
 
-Setup for the review commands
+Run the mechanical steps behind the review commands
 
 Subcommands: `checks`, `prepare`, `size`, `suggest`, `triage-merge`
 
@@ -1165,7 +1169,9 @@ Run a project's own type check, lint and tests in a directory
 
 Prints their output. A failing check is output, not an error.
 
-- `<DIR>`: The review worktree to run in
+Example: `playbook review checks /tmp/review-wt`
+
+- `<DIR>`: Review worktree to run in
 
 ### `playbook review prepare`
 
@@ -1176,7 +1182,7 @@ Takes the raw arguments of the review command as one string. Prints `KEY=value` 
 Example: `playbook review prepare deep "#4265 --self"`
 
 - `<KIND>`: Which review: `quick` or `deep` (one of `quick`, `deep`)
-- `<ARGS>`: The review command's arguments, as one string
+- `<ARGS>`: Review command arguments as one string, such as `#12 --self`
 - `--auto`: Accepted for compatibility; auto mode does not skip the post question
 
 ### `playbook review size`
@@ -1187,10 +1193,10 @@ Counts the changed lines of `BASE...HEAD` and prints `lines=N files=M path=singl
 
 Example: `playbook review size --base main`
 
-- `--base <BASE>`: The ref the diff starts from
-- `--head <HEAD>`: The ref the diff ends at
+- `--base <BASE>`: Ref the diff starts from
+- `--head <HEAD>`: Ref the diff ends at
 - `--all-lenses`: Always take the swarm path
-- `--dir <DIR>`: The repository to measure in; defaults to the current directory
+- `--dir <DIR>`: Repo directory to measure in. Defaults to the current directory
 
 ### `playbook review suggest`
 
@@ -1201,7 +1207,7 @@ Reads the changed files from git (the branch against the default branch, no netw
 Example: `playbook review suggest 4265 --json`
 
 - `<PR>`: PR number (default: the current branch against the default branch)
-- `--base <BASE>`: Base branch when no PR number is given (default: the repo's default branch; pass the parent branch for a stacked change)
+- `--base <BASE>`: Base branch when no PR number is given. Defaults to the repo's default branch; pass the parent branch for a stacked change
 - `--dir <DIR>`: Work in this directory instead of the current one
 - `--json`: Print JSON instead of text lines
 
@@ -1589,24 +1595,36 @@ Subcommands: `remove`, `review`, `sweep`
 
 Remove one worktree if it has landed and is not in use
 
+Example: `playbook worktree remove ../my-branch`
+
 - `<PATH>`: Worktree path, as shown by `git worktree list`
 
 ### `playbook worktree review`
 
-Create or remove the locked review worktrees `/playbook:quick-review` and `/playbook:deep-review` run in
+Create or remove the locked review worktrees
+
+`/playbook:quick-review` and `/playbook:deep-review` run in them.
 
 Subcommands: `setup`, `teardown`
 
 ### `playbook worktree review setup`
 
-Fetch a PR head, add a locked detached worktree for it, and print its absolute path on stdout (warnings go to stderr)
+Add a locked worktree for a PR head and print its path
 
-- `<PR>`: Pull request number
+Fetches the PR head, adds a locked detached worktree for it, and prints its absolute path on stdout. Warnings go to stderr.
+
+Example: `playbook worktree review setup 12 abc1234`
+
+- `<PR>`: PR number
 - `<HEAD_SHA>`: Head commit the review was resolved against
 
 ### `playbook worktree review teardown`
 
-Remove a review worktree, even a dirty one. Always exits 0
+Remove a review worktree, even a dirty one
+
+Always exits 0.
+
+Example: `playbook worktree review teardown /tmp/review-wt`
 
 - `<PATH>`: Worktree path printed by `setup`
 

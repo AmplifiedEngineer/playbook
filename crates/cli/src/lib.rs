@@ -758,7 +758,7 @@ pub enum Command {
         #[command(subcommand)]
         sub: MemoryCommand,
     },
-    /// Save and show notes that carry a session over to the next one
+    /// Save and show notes that carry over to the next session
     ///
     /// A handoff is a markdown note for one directory. The next session started
     /// there loads it when the SessionStart hook is installed and runs, and
@@ -983,7 +983,7 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Setup for the review commands
+    /// Run the mechanical steps behind the review commands
     Review {
         #[command(subcommand)]
         sub: ReviewCommand,
@@ -1778,7 +1778,7 @@ pub enum ReviewCommand {
         /// Which review: `quick` or `deep`
         #[arg(value_parser = ["quick", "deep"])]
         kind: String,
-        /// The review command's arguments, as one string
+        /// Review command arguments as one string, such as `#12 --self`
         #[arg(default_value = "")]
         args: String,
         /// Accepted for compatibility; auto mode does not skip the post question
@@ -1806,8 +1806,8 @@ pub enum ReviewCommand {
     Suggest {
         /// PR number (default: the current branch against the default branch)
         pr: Option<String>,
-        /// Base branch when no PR number is given (default: the repo's default
-        /// branch; pass the parent branch for a stacked change)
+        /// Base branch when no PR number is given. Defaults to the repo's default
+        /// branch; pass the parent branch for a stacked change
         #[arg(long)]
         base: Option<String>,
         /// Work in this directory instead of the current one
@@ -1820,8 +1820,10 @@ pub enum ReviewCommand {
     /// Run a project's own type check, lint and tests in a directory
     ///
     /// Prints their output. A failing check is output, not an error.
+    ///
+    /// Example: `playbook review checks /tmp/review-wt`
     Checks {
-        /// The review worktree to run in
+        /// Review worktree to run in
         dir: PathBuf,
     },
     /// Measure a diff and say which review path it takes
@@ -1833,16 +1835,16 @@ pub enum ReviewCommand {
     ///
     /// Example: `playbook review size --base main`
     Size {
-        /// The ref the diff starts from
+        /// Ref the diff starts from
         #[arg(long)]
         base: String,
-        /// The ref the diff ends at
+        /// Ref the diff ends at
         #[arg(long, default_value = "HEAD")]
         head: String,
         /// Always take the swarm path
         #[arg(long)]
         all_lenses: bool,
-        /// The repository to measure in; defaults to the current directory
+        /// Repo directory to measure in. Defaults to the current directory
         #[arg(long)]
         dir: Option<PathBuf>,
     },
@@ -1874,6 +1876,8 @@ pub enum GateCommand {
     /// Save a phase verdict for a plan
     ///
     /// Reads a phase agent's output, finds its `VERDICT:` line, and stores it.
+    ///
+    /// Example: `playbook gate record my-plan plan adversarial out.md`
     Record {
         /// Plan slug the phase belongs to
         plan_slug: String,
@@ -1883,12 +1887,12 @@ pub enum GateCommand {
         phase: String,
         /// File with the phase agent's output, or "-" to read stdin
         input: String,
-        /// File with the source content the verdict covers, used to spot a stale verdict later;
-        /// defaults to the phase's snapshot, `<plans>/<slug>.gate-source.<phase>.md`
+        /// File with the source content the verdict covers. Used to spot a stale verdict later.
+        /// Defaults to the phase's snapshot, `<plans>/<slug>.gate-source.<phase>.md`
         #[arg(long)]
         source: Option<String>,
-        /// Store a FAIL report as STUCK: the revise and re-run loop stopped because the
-        /// blocking findings made no progress. Refused for any other verdict
+        /// Store a FAIL report as STUCK. Use it when the revise and re-run loop stopped
+        /// because the blocking findings made no progress. Refused for any other verdict
         #[arg(long)]
         stuck: bool,
     },
@@ -1911,6 +1915,8 @@ pub enum GateCommand {
     ///
     /// Exits 0 only if every named phase is PASS or WARN and its source is
     /// unchanged. Exits 1 on any other verdict, a stale one, or no phases.
+    ///
+    /// Example: `playbook gate check my-plan plan adversarial test-review`
     Check {
         /// Plan slug to check
         plan_slug: String,
@@ -1918,8 +1924,8 @@ pub enum GateCommand {
         command: String,
         /// Phase names to check
         phases: Vec<String>,
-        /// File with the current source content, compared against what each verdict saw;
-        /// defaults to the shared draft, `<plans>/<slug>.gate-source.md`
+        /// File with the current source content, compared against what each verdict saw.
+        /// Defaults to the shared draft, `<plans>/<slug>.gate-source.md`
         #[arg(long)]
         source: Option<String>,
         /// Print one JSON object instead of text (exit codes stay the same)
@@ -2139,12 +2145,15 @@ pub enum WorktreeCommand {
         dry_run: bool,
     },
     /// Remove one worktree if it has landed and is not in use
+    ///
+    /// Example: `playbook worktree remove ../my-branch`
     Remove {
         /// Worktree path, as shown by `git worktree list`
         path: PathBuf,
     },
-    /// Create or remove the locked review worktrees `/playbook:quick-review`
-    /// and `/playbook:deep-review` run in
+    /// Create or remove the locked review worktrees
+    ///
+    /// `/playbook:quick-review` and `/playbook:deep-review` run in them.
     Review {
         #[command(subcommand)]
         sub: ReviewWorktreeCommand,
@@ -2154,17 +2163,25 @@ pub enum WorktreeCommand {
 /// `playbook worktree review` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum ReviewWorktreeCommand {
-    /// Fetch a PR head, add a locked detached worktree for it, and print its
-    /// absolute path on stdout (warnings go to stderr).
+    /// Add a locked worktree for a PR head and print its path
+    ///
+    /// Fetches the PR head, adds a locked detached worktree for it, and
+    /// prints its absolute path on stdout. Warnings go to stderr.
+    ///
+    /// Example: `playbook worktree review setup 12 abc1234`
     Setup {
-        /// Pull request number.
+        /// PR number
         pr: String,
-        /// Head commit the review was resolved against.
+        /// Head commit the review was resolved against
         head_sha: String,
     },
-    /// Remove a review worktree, even a dirty one. Always exits 0.
+    /// Remove a review worktree, even a dirty one
+    ///
+    /// Always exits 0.
+    ///
+    /// Example: `playbook worktree review teardown /tmp/review-wt`
     Teardown {
-        /// Worktree path printed by `setup`.
+        /// Worktree path printed by `setup`
         path: PathBuf,
     },
 }
