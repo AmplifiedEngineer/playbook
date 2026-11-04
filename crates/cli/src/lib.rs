@@ -114,6 +114,7 @@ pub use playbook_telemetry as usage;
 pub mod service_manager;
 pub mod skills_sync;
 pub mod usage_host;
+pub mod watch;
 pub mod worktree;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -748,6 +749,24 @@ pub enum Command {
         /// Print the sessions as JSON
         #[arg(long)]
         json: bool,
+    },
+    /// Poll GitHub issues and comments and act on them by rules
+    ///
+    /// Rules live in `watch.rule.<id>` and `watch.repos` lists the repos. At
+    /// the default level a matching event becomes a proposal that nothing
+    /// acts on until you approve it. The GitHub token is read from the
+    /// environment variable named by `watch.tokenEnv` (`GITHUB_TOKEN` when
+    /// unset).
+    ///
+    /// With no verb it runs in the foreground until you stop it, polling every
+    /// `watch.pollSeconds` and picking up after a laptop sleep from where it
+    /// stopped. A second foreground run prints `watch already running` and
+    /// exits 1.
+    ///
+    /// Example: `playbook watch once`
+    Watch {
+        #[command(subcommand)]
+        sub: Option<WatchCommand>,
     },
     /// Check how well the review triage classifier sorts real PRs
     ///
@@ -2221,6 +2240,105 @@ pub enum SessionsCommand {
         /// Report only and change nothing (required)
         #[arg(long, required = true)]
         dry_run: bool,
+    },
+}
+
+/// `playbook watch` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum WatchCommand {
+    /// Poll every repo once and run the items you approved
+    ///
+    /// A repo watched for the first time starts from now, so turning watch
+    /// mode on never replays old issues. Prints `watch already running` and
+    /// exits when another watch process holds the lock.
+    ///
+    /// Example: `playbook watch once --since 2026-11-01T00:00:00Z`
+    Once {
+        /// Replay events from this UTC time, for example 2026-11-01T00:00:00Z
+        #[arg(long)]
+        since: Option<String>,
+    },
+    /// Show the rules and what a poll would propose, and change nothing
+    ///
+    /// Example: `playbook watch dry-run`
+    DryRun {
+        /// Look at events from this UTC time, for example 2026-11-01T00:00:00Z
+        #[arg(long)]
+        since: Option<String>,
+    },
+    /// Carry out a proposal
+    ///
+    /// Runs the action now. When another watch process is running it only
+    /// marks the item and that process carries it out.
+    ///
+    /// Example: `playbook watch approve 3`
+    Approve {
+        /// Proposal number printed by `watch once`
+        id: i64,
+    },
+    /// Drop a proposal without acting on it
+    ///
+    /// Example: `playbook watch reject 3`
+    Reject {
+        /// Proposal number printed by `watch once`
+        id: i64,
+    },
+    /// Show whether watch runs, the queue, the limits and the dead list
+    ///
+    /// Example: `playbook watch status --json`
+    Status {
+        /// Print the status as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Stop starting new actions
+    ///
+    /// An action that is already running finishes. Proposals still queue.
+    ///
+    /// Example: `playbook watch pause`
+    Pause,
+    /// Start new actions again after a pause
+    ///
+    /// Example: `playbook watch resume`
+    Resume,
+    /// Put a dead item back in the queue
+    ///
+    /// Example: `playbook watch retry 3`
+    Retry {
+        /// Number of the dead item, shown by `watch status`
+        id: i64,
+    },
+    /// Print the audit log, oldest first
+    ///
+    /// Example: `playbook watch log --rule triage --outcome done`
+    Log {
+        /// Only records of this rule
+        #[arg(long)]
+        rule: Option<String>,
+        /// Only records with this outcome, such as `done` or `retry`
+        #[arg(long)]
+        outcome: Option<String>,
+        /// Print each record as a JSON line
+        #[arg(long)]
+        json: bool,
+    },
+    /// Install a timer that runs `watch once` every 60 seconds
+    ///
+    /// A launchd agent on macOS and a systemd user timer on Linux. No process
+    /// stays running between polls. The timer finds the GitHub token through
+    /// `gh auth token`, so run `gh auth login` first.
+    ///
+    /// Example: `playbook watch install-service`
+    InstallService,
+    /// Remove the timer that `install-service` made
+    ///
+    /// The audit log stays unless you ask for it to go.
+    ///
+    /// Example: `playbook watch uninstall-service --delete-log`
+    UninstallService {
+        /// Also delete the audit log
+        #[arg(long)]
+        delete_log: bool,
     },
 }
 

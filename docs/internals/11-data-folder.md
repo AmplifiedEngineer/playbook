@@ -10,6 +10,9 @@ Every database a playbook tool creates lives in `~/.config/playbook/data`, share
 | `memory.db` | The memory graph: one row per fact and per link, built from the fact files | Yes: `playbook memory rebuild` makes it again |
 | `usage.db` | Token and cost events from the usage view | No: events outlive Claude Code's own history |
 | `gate/<owner>/<repo>/<worktree-id>.db` | Gate records of one worktree (`gate record`, `gate check`) | Only when the worktree is gone |
+| `watch.db` | Watch mode: polling cursors, events already seen, and the work queue | No: deleting it forgets what was seen and what is queued |
+| `watch/audit.jsonl` | Watch mode: one line per decision, rotated at 10 MiB, five files kept | Yes: it is a record, nothing reads it back |
+| `watch.lock` | The one-instance lock of watch mode, held by the OS while a watch process runs | Yes |
 | `code/<owner>/<repo>/store-v<N>.sqlite3` | The code index of a repo: one store for all its worktrees, with a `<worktree-id>.lock` run lock beside it | Yes: `playbook code index` rebuilds it |
 
 Per-worktree gate files keep worktrees of one repo apart, as the old `repos/<owner>/<repo>/<worktree-id>/` folders did. The code store holds one manifest per worktree and one copy of each distinct file content, so worktrees share the parsing work and the disk, and a query still sees only its own worktree's paths. Memory facts stay Markdown files under `~/.config/playbook/memory` and are the source of truth for `memory.db`. Plans, implement notes and worktree folders stay under `repos/`.

@@ -145,6 +145,7 @@ const PROBES: [Probe; 24] = [
     |env| {
         leftover_service_row(&env.home)
             .into_iter()
+            .chain(watch_service_row(&env.home))
             .chain(telemetry_rows(env))
             .collect()
     },
@@ -985,6 +986,33 @@ fn attribution_on_row(state: &crate::init::attribution::State, held: &[&str]) ->
         State::OtherShape => Row::new("-", Level::Info, attribution::OTHER_SHAPE),
         State::Unreadable(why) => Row::new("-", Level::Warn, format!("attribution: {why}")),
     }
+}
+
+/// The row for the timer `watch install-service` made: shown only when the
+/// timer is installed, and a warning while watch mode is off, because the
+/// timer then polls nothing.
+fn watch_service_row(home: &Path) -> Option<Row> {
+    use crate::watch::service;
+    let kind = service::kind_here().ok()?;
+    if !service::installed(kind, home) {
+        return None;
+    }
+    let enabled = config::resolve_valid("watch.enabled", home, None)
+        .is_ok_and(|(value, _, _)| value.as_bool() == Some(true));
+    Some(if enabled {
+        Row::new(
+            "-",
+            Level::Pass,
+            "watch timer installed: it runs `watch once` every 60 seconds",
+        )
+    } else {
+        Row::new(
+            "-",
+            Level::Warn,
+            "watch timer installed, but watch mode is off so it does nothing",
+        )
+        .hint("run: playbook config set watch.enabled true")
+    })
 }
 
 /// What doctor says while a file of the retired collector service remains.

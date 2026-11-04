@@ -87,6 +87,15 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `update.mode` | `notify` | `notify`, `auto`, `off` |
 | `update.checkIntervalHours` | `24` | a number, see the config keys page for the range |
 | `update.plugin` | `auto` | `auto`, `ask`, `off` |
+| `watch.enabled` | `false` | `true`, `false` |
+| `watch.repos` | `[]` | see the config keys page |
+| `watch.autonomy` | `propose` | `off`, `propose`, `auto` |
+| `watch.pollSeconds` | `60` | a number, see the config keys page for the range |
+| `watch.maxCatchupHours` | `72` | a number, see the config keys page for the range |
+| `watch.allowedAuthors` | `[]` | see the config keys page |
+| `watch.tokenEnv` | empty | see the config keys page |
+| `watch.limits.actionsPerDay` | `50` | a number, see the config keys page for the range |
+| `watch.limits.usdPerDay` | `5` | a number, see the config keys page for the range |
 | `gc.enabled` | `true` | `true`, `false` |
 | `gc.graceDays` | `7` | a number, see the config keys page for the range |
 | `gc.handoffGraceDays` | `14` | a number, see the config keys page for the range |
@@ -101,6 +110,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `gc.freeSpaceWarnGiB` | `10` | a number, see the config keys page for the range |
 | `gc.freeSpaceWarnPercent` | `5` | a number, see the config keys page for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
+| `watch.rule.<id>` | empty | one rule as JSON text |
 
 ## Commands
 
@@ -110,7 +120,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows the Agent Budget Dashboard, and helps with PRs, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `completions`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `gc`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `completions`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `gc`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `watch`, `worktree`
 
 ### `playbook adr`
 
@@ -1674,6 +1684,112 @@ Example: `playbook usage stop`
 ### `playbook version`
 
 Print the installed version, same as `--version`
+
+### `playbook watch`
+
+Poll GitHub issues and comments and act on them by rules
+
+Rules live in `watch.rule.<id>` and `watch.repos` lists the repos. At the default level a matching event becomes a proposal that nothing acts on until you approve it. The GitHub token is read from the environment variable named by `watch.tokenEnv` (`GITHUB_TOKEN` when unset).
+
+With no verb it runs in the foreground until you stop it, polling every `watch.pollSeconds` and picking up after a laptop sleep from where it stopped. A second foreground run prints `watch already running` and exits 1.
+
+Example: `playbook watch once`
+
+Subcommands: `approve`, `dry-run`, `install-service`, `log`, `once`, `pause`, `reject`, `resume`, `retry`, `status`, `uninstall-service`
+
+### `playbook watch approve`
+
+Carry out a proposal
+
+Runs the action now. When another watch process is running it only marks the item and that process carries it out.
+
+Example: `playbook watch approve 3`
+
+- `<ID>`: Proposal number printed by `watch once`
+
+### `playbook watch dry-run`
+
+Show the rules and what a poll would propose, and change nothing
+
+Example: `playbook watch dry-run`
+
+- `--since <SINCE>`: Look at events from this UTC time, for example 2026-11-01T00:00:00Z
+
+### `playbook watch install-service`
+
+Install a timer that runs `watch once` every 60 seconds
+
+A launchd agent on macOS and a systemd user timer on Linux. No process stays running between polls. The timer finds the GitHub token through `gh auth token`, so run `gh auth login` first.
+
+Example: `playbook watch install-service`
+
+### `playbook watch log`
+
+Print the audit log, oldest first
+
+Example: `playbook watch log --rule triage --outcome done`
+
+- `--rule <RULE>`: Only records of this rule
+- `--outcome <OUTCOME>`: Only records with this outcome, such as `done` or `retry`
+- `--json`: Print each record as a JSON line
+
+### `playbook watch once`
+
+Poll every repo once and run the items you approved
+
+A repo watched for the first time starts from now, so turning watch mode on never replays old issues. Prints `watch already running` and exits when another watch process holds the lock.
+
+Example: `playbook watch once --since 2026-11-01T00:00:00Z`
+
+- `--since <SINCE>`: Replay events from this UTC time, for example 2026-11-01T00:00:00Z
+
+### `playbook watch pause`
+
+Stop starting new actions
+
+An action that is already running finishes. Proposals still queue.
+
+Example: `playbook watch pause`
+
+### `playbook watch reject`
+
+Drop a proposal without acting on it
+
+Example: `playbook watch reject 3`
+
+- `<ID>`: Proposal number printed by `watch once`
+
+### `playbook watch resume`
+
+Start new actions again after a pause
+
+Example: `playbook watch resume`
+
+### `playbook watch retry`
+
+Put a dead item back in the queue
+
+Example: `playbook watch retry 3`
+
+- `<ID>`: Number of the dead item, shown by `watch status`
+
+### `playbook watch status`
+
+Show whether watch runs, the queue, the limits and the dead list
+
+Example: `playbook watch status --json`
+
+- `--json`: Print the status as JSON
+
+### `playbook watch uninstall-service`
+
+Remove the timer that `install-service` made
+
+The audit log stays unless you ask for it to go.
+
+Example: `playbook watch uninstall-service --delete-log`
+
+- `--delete-log`: Also delete the audit log
 
 ### `playbook worktree`
 

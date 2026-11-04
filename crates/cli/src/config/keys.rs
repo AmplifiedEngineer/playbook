@@ -119,6 +119,15 @@ pub const KNOWN_KEYS: &[&str] = &[
     "update.mode",
     "update.checkIntervalHours",
     "update.plugin",
+    "watch.enabled",
+    "watch.repos",
+    "watch.autonomy",
+    "watch.pollSeconds",
+    "watch.maxCatchupHours",
+    "watch.allowedAuthors",
+    "watch.tokenEnv",
+    "watch.limits.actionsPerDay",
+    "watch.limits.usdPerDay",
     "gc.enabled",
     "gc.graceDays",
     "gc.handoffGraceDays",
@@ -220,6 +229,13 @@ pub const USER_KEYS: &[&str] = &[
     "systemPrompt.enabled",
     "attribution.enabled",
     "hooks.policyGuard.enabled",
+    "watch.enabled",
+    "watch.repos",
+    "watch.pollSeconds",
+    "watch.maxCatchupHours",
+    "watch.tokenEnv",
+    "watch.limits.actionsPerDay",
+    "watch.limits.usdPerDay",
 ];
 
 /// Whether `key` is a per-user setting. `config set` writes it to the global
@@ -250,11 +266,21 @@ fn is_effort_component_key(key: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
+/// Whether `key` is `watch.rule.<id>`: a rule id of lowercase letters, digits
+/// and hyphens. The value is the rule as JSON text, checked when it is set.
+pub fn is_watch_rule_key(key: &str) -> bool {
+    key.strip_prefix("watch.rule.")
+        .is_some_and(crate::watch::rule::is_rule_id)
+}
+
 /// The default value for a known key, or `None` if `key` is not in
 /// `KNOWN_KEYS`.
 pub fn default_value(key: &str) -> Option<Value> {
     if is_effort_component_key(key) {
         return Some(Value::String("auto".to_string()));
+    }
+    if is_watch_rule_key(key) {
+        return Some(Value::String(String::new()));
     }
     match key {
         "autoReview.enabled" => Some(Value::Bool(true)),
@@ -326,6 +352,14 @@ pub fn default_value(key: &str) -> Option<Value> {
         "update.mode" => Some(Value::String("notify".to_string())),
         "update.checkIntervalHours" => Some(Value::Number(24.into())),
         "update.plugin" => Some(Value::String("auto".to_string())),
+        "watch.enabled" => Some(Value::Bool(false)),
+        "watch.repos" | "watch.allowedAuthors" => Some(Value::Array(Vec::new())),
+        "watch.autonomy" => Some(Value::String("propose".to_string())),
+        "watch.pollSeconds" => Some(Value::Number(60.into())),
+        "watch.maxCatchupHours" => Some(Value::Number(72.into())),
+        "watch.tokenEnv" => Some(Value::String(String::new())),
+        "watch.limits.actionsPerDay" => Some(Value::Number(50.into())),
+        "watch.limits.usdPerDay" => Some(Value::Number(5.into())),
         "gc.enabled" => Some(Value::Bool(true)),
         _ => gc_number(key).map(|entry| Value::Number(entry.default.into())),
     }
@@ -353,6 +387,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "hooks.proseLint.mode" => Some(&["warn", "block", "off"]),
         "update.mode" => Some(&["notify", "auto", "off"]),
         "update.plugin" => Some(&["auto", "ask", "off"]),
+        "watch.autonomy" => Some(&["off", "propose", "auto"]),
         "pr.rules.template"
         | "pr.rules.length"
         | "pr.rules.issue"

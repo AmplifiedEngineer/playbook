@@ -539,7 +539,7 @@ impl ToolCall {
 }
 
 /// True when some simple command in `command` runs `playbook` to switch the
-/// mode, to set `mode`, `auto.*` or `fix.*`, to import a config document, or
+/// mode, to set `mode`, `auto.*`, `fix.*` or `watch.*`, to import a config document, or
 /// names the config database. Quoted text is data, so prose
 /// that merely mentions such a command is left alone.
 ///
@@ -579,7 +579,10 @@ fn is_guarded_invocation(words: &[String]) -> bool {
             .iter()
             .find(|word| !word.starts_with('-'))
             .is_some_and(|key| {
-                key == "mode" || key.starts_with("auto.") || key.starts_with("fix.")
+                key == "mode"
+                    || key.starts_with("auto.")
+                    || key.starts_with("fix.")
+                    || key.starts_with("watch.")
             }),
         _ => false,
     }
@@ -906,6 +909,17 @@ fn write_atomic(path: &Path, value: &impl Serialize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_model_cannot_set_a_watch_key_in_auto_mode() {
+        assert!(is_guarded_command(
+            "playbook config set watch.autonomy auto"
+        ));
+        assert!(is_guarded_command(
+            "playbook config set --global watch.rule.triage '{}'"
+        ));
+        assert!(!is_guarded_command("playbook config get watch.autonomy"));
+    }
 
     #[test]
     fn the_raise_command_doubles_the_cap_in_whole_dollars() {
