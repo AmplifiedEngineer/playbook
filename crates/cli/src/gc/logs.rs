@@ -36,7 +36,22 @@ pub struct RealLogFs;
 
 impl LogFs for RealLogFs {
     fn copy(&self, from: &Path, to: &Path) -> io::Result<()> {
-        fs::copy(from, to).map(|_| ())
+        // A leftover or planted file at `to` is removed (a symlink is removed
+        // itself, not followed), and the new file must not already exist, so
+        // the copy can never write through a link.
+        match fs::remove_file(to) {
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err),
+        }
+        let mut src = fs::File::open(from)?;
+        let mut dst = fs::File::options().write(true).create_new(true).open(to)?;
+        if let Err(err) = io::copy(&mut src, &mut dst) {
+            drop(dst);
+            let _ = fs::remove_file(to);
+            return Err(err);
+        }
+        Ok(())
     }
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         fs::rename(from, to)
@@ -204,6 +219,25 @@ mod tests {
             .iter()
             .filter(|item| item.due.is_some())
             .count()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rotation_does_not_write_through_a_planted_symlink() {
+        // Arrange
+        let root = scratch("logs-symlink-tmp");
+        let target = root.join("victim.txt");
+        fs::write(&target, "keep me").unwrap();
+        let path = log(&root, "collector.log", 10, 0);
+        std::os::unix::fs::symlink(&target, sibling(&path, ".gc-rotate.tmp")).unwrap();
+
+        // Act
+        let result = rotate(&path, &RealLogFs, true).unwrap();
+
+        // Assert
+        assert_eq!(result, Rotation::Rotated);
+        assert_eq!(fs::read_to_string(&target).unwrap(), "keep me");
+        assert_eq!(fs::metadata(sibling(&path, ".1")).unwrap().len(), 10);
     }
 
     #[test]
