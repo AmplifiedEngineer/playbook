@@ -677,7 +677,7 @@ pub(super) mod tests {
     use super::*;
     use crate::gc::guard::{GuardError, RealFs};
     use crate::gc::lock::NoHook;
-    use crate::gc::{Action, FixedClock, Store};
+    use crate::gc::{Action, FixedClock, Limits, Store};
     use std::cell::{Cell, RefCell};
     use std::time::{Duration, UNIX_EPOCH};
 
@@ -751,6 +751,7 @@ pub(super) mod tests {
             scan: |_, _| Vec::new(),
             action: Action::Tombstone,
             retention_key: None,
+            limits: Limits::default(),
         };
         let registry = Registry::new(gc.clone()).with_store(store);
         let fs = TestFs {

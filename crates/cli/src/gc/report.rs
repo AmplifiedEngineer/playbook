@@ -107,15 +107,15 @@ pub fn render(report: &Report) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gc::{Item, Store};
+    use crate::gc::{Item, Limits, Store};
     use std::fs;
     use std::path::PathBuf;
 
     const NOW: i64 = 1_800_000_000;
 
-    fn scan_files(roots: &[PathBuf], _now: i64) -> Vec<Item> {
+    fn scan_files(store: &Store, _now: i64) -> Vec<Item> {
         let mut items = Vec::new();
-        for root in roots {
+        for root in &store.roots {
             let Ok(entries) = fs::read_dir(root) else {
                 continue;
             };
@@ -139,6 +139,7 @@ mod tests {
             scan: scan_files,
             action,
             retention_key: None,
+            limits: Limits::default(),
         }
     }
 
