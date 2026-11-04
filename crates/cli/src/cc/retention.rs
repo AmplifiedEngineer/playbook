@@ -61,7 +61,13 @@ fn tombstone_runtime_dir(sid: &str, now: i64) {
     }
     let registry = crate::gc::registry(&home);
     let clock = crate::gc::FixedClock(now);
-    crate::gc::apply::tombstone_now(&registry, &clock, &dir, "its session was pruned");
+    use crate::gc::tombstone::MoveOutcome;
+    match crate::gc::apply::tombstone_now(&registry, &clock, &dir, "its session was pruned") {
+        MoveOutcome::Moved { .. } | MoveOutcome::Busy => {}
+        MoveOutcome::Refused(why) | MoveOutcome::Failed(why) => {
+            eprintln!("playbook: gc left {} in place: {why}", dir.display());
+        }
+    }
 }
 
 /// `None` means retention is off. Values below the floor are raised to it.
