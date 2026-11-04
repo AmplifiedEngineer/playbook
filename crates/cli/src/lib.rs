@@ -465,14 +465,12 @@ pub enum Command {
         #[command(subcommand)]
         sub: DocCommand,
     },
-    /// Read single facts that the health check uses
+    /// Check the playbook setup, or read one fact the check uses
     ///
-    /// The full health check is the `/playbook:doctor` command inside Claude
-    /// Code. These subcommands print one fact each, such as pending
-    /// migrations, plugin version or hook wiring, and help when a layer
-    /// reports a miss.
-    ///
-    /// Example: `playbook doctor pending-migrations`
+    /// `playbook doctor check` runs the full health check, the same one the
+    /// `/playbook:doctor` command uses. The other subcommands print one fact
+    /// each, such as pending migrations, plugin version or hook wiring, and
+    /// help when a layer reports a miss.
     ///
     /// `playbook doctor --fix` repairs playbook's own files after an upgrade
     /// and prints the list of what still needs you, the same as
@@ -480,6 +478,8 @@ pub enum Command {
     /// attribution OFF, the default, by adding the missing `attribution`
     /// keys; that yes is the only Claude Code setting it writes. A no stores
     /// attribution ON.
+    ///
+    /// Example: `playbook doctor pending-migrations`
     #[command(args_conflicts_with_subcommands = true, subcommand_required = false)]
     Doctor {
         /// Run the safe migrations for playbook's own files, then list what needs you
@@ -1998,7 +1998,7 @@ pub enum DoctorCommand {
         #[arg(long)]
         json: bool,
     },
-    /// List files you edited after playbook placed them
+    /// List the manual migration findings that need you
     ///
     /// Prints one line per finding, or nothing when none is pending.
     PendingMigrations,
@@ -2102,10 +2102,10 @@ pub enum ToolsCommand {
 /// `playbook deps` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum DepsCommand {
-    /// Install the missing tools a Brewfile lists with Homebrew
+    /// Install missing Brewfile tools with Homebrew
     ///
-    /// Keeps each tool already on PATH and installs only the missing ones,
-    /// from the `brew` and `tap` lines of the Brewfile.
+    /// Leaves each tool already on PATH alone, and reads the `brew` and `tap`
+    /// lines of the Brewfile.
     ///
     /// Example: `playbook deps ensure --builtin`
     Ensure {
