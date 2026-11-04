@@ -40,16 +40,20 @@ pub enum On {
 pub enum Do {
     Label,
     Comment,
+    /// A model picks one label from `with.labels`. It earns `auto` by the
+    /// trust ladder.
+    TriageIssue,
 }
 
 impl Do {
-    pub const ALL: [Do; 2] = [Do::Label, Do::Comment];
+    pub const ALL: [Do; 3] = [Do::Label, Do::Comment, Do::TriageIssue];
 
     /// The name the rule file and the audit log use.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Label => "label",
             Self::Comment => "comment",
+            Self::TriageIssue => "triage_issue",
         }
     }
 
@@ -185,9 +189,15 @@ impl Stored {
         let rule: Rule =
             serde_json::from_value(value).map_err(|e| RuleError(format!("invalid rule: {e}")))?;
         match rule.action {
-            Do::Label if rule.with.labels.is_empty() => {
+            Do::TriageIssue if rule.decide != Decide::Model => {
                 return Err(RuleError(
-                    "the label action needs at least one entry in with.labels".to_string(),
+                    "the triage_issue action needs decide set to model".to_string(),
+                ));
+            }
+            Do::Label | Do::TriageIssue if rule.with.labels.is_empty() => {
+                return Err(RuleError(
+                    "the label and triage_issue actions need at least one entry in with.labels"
+                        .to_string(),
                 ));
             }
             Do::Comment

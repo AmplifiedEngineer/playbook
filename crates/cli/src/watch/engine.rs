@@ -412,7 +412,7 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
             return Ok(Step::Skipped("body_changed"));
         }
         match rule.action {
-            Do::Label => {
+            Do::Label | Do::TriageIssue => {
                 let mut cost = 0.0;
                 let wanted: Vec<String> = if rule.decide == Decide::Model {
                     let text = wrap_untrusted(&format!("Title: {}\n\n{}", view.title, view.body));
@@ -1300,5 +1300,118 @@ mod tests {
         assert!(matches(&r, &e, "me"));
         e.author = "bob".into();
         assert!(!matches(&r, &e, "me"));
+    }
+    const TRIAGE: &str = r#"{"on":"issue.opened","do":"triage_issue","decide":"model","autonomy":"auto","with":{"labels":["bug","docs"]}}"#;
+
+    /// Ten approved triage items that finished 30 days ago.
+    fn earn_the_ladder(f: &mut Fixture) {
+        let long_ago = f.clock.now() - 30 * 86_400;
+        f.store
+            .transaction(|tx| {
+                for n in 0..10 {
+                    let key = format!("old:{n}");
+                    let item = NewWork {
+                        key: &key,
+                        rule: "r",
+                        class: "triage_issue",
+                        repo: "o/r",
+                        object: 100 + n,
+                        body_hash: [1; 32],
+                    };
+                    let Insert::Queued(id) = tx.insert_work(&item, long_ago)? else {
+                        panic!("not queued");
+                    };
+                    tx.set_state(id, "done", Some("done"))?;
+                    tx.stamp_approved(id, long_ago)?;
+                }
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    fn agreeing(label: &str) -> Scripted {
+        Scripted(RefCell::new(vec![label_reply(label); 3]))
+    }
+
+    #[test]
+    fn triage_issue_adds_one_label_and_repeat_adds_none() {
+        // Arrange
+        let mut f = fixture("watch-triage-repeat");
+        earn_the_ladder(&mut f);
+        let spy = Spy::default();
+        let rules = rules(TRIAGE);
+        let events = [issue(7, "stranger")];
+
+        // Act
+        ingest_at(&mut f, &spy, &events, &rules, Autonomy::Auto);
+        engine_with(&mut f, &spy, &agreeing("bug"))
+            .run_approved("o/r", &rules)
+            .unwrap();
+        ingest_at(&mut f, &spy, &events, &rules, Autonomy::Auto);
+        engine_with(&mut f, &spy, &agreeing("bug"))
+            .run_approved("o/r", &rules)
+            .unwrap();
+
+        // Assert
+        assert_eq!(spy.calls.borrow().len(), 1);
+    }
+
+    #[test]
+    fn triage_issue_skips_when_the_object_changed() {
+        // Arrange: the body was edited after the event.
+        let mut f = fixture("watch-triage-changed");
+        earn_the_ladder(&mut f);
+        let spy = Spy {
+            hash: Some([9; 32]),
+            ..Spy::default()
+        };
+        let rules = rules(TRIAGE);
+        let ids = ingest_at(&mut f, &spy, &[issue(7, "a")], &rules, Autonomy::Auto);
+
+        // Act
+        engine_with(&mut f, &spy, &agreeing("bug"))
+            .run_approved("o/r", &rules)
+            .unwrap();
+
+        // Assert
+        assert_eq!(state(&f, ids[0]), ("done".into(), Some("skipped".into())));
+        assert!(spy.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn triage_issue_never_exceeds_its_highest_level() {
+        // Arrange: no track record, then a propose ceiling with a track record.
+        let rules = rules(TRIAGE);
+        let mut f = fixture("watch-triage-ladder");
+        let spy = Spy::default();
+        let ids = ingest_at(&mut f, &spy, &[issue(7, "a")], &rules, Autonomy::Auto);
+
+        // Act
+        engine_with(&mut f, &spy, &agreeing("bug"))
+            .run_approved("o/r", &rules)
+            .unwrap();
+
+        // Assert: the ladder holds it back, and the model was never asked.
+        assert_eq!(
+            state(&f, ids[0]),
+            ("proposed".into(), Some("ladder".into()))
+        );
+        assert!(spy.calls.borrow().is_empty());
+
+        let mut g = fixture("watch-triage-ceiling");
+        earn_the_ladder(&mut g);
+        let spy = Spy::default();
+        let ids = ingest_at(&mut g, &spy, &[issue(7, "a")], &rules, Autonomy::Propose);
+        engine_with(&mut g, &spy, &agreeing("bug"))
+            .run_approved("o/r", &rules)
+            .unwrap();
+        assert_eq!(state(&g, ids[0]).0, "proposed");
+        assert!(spy.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_triage_rule_without_a_model_is_refused() {
+        let text = r#"{"on":"issue.opened","do":"triage_issue","with":{"labels":["bug"]}}"#;
+        assert!(Stored::parse(text).is_err());
     }
 }
