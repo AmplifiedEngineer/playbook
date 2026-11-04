@@ -188,3 +188,23 @@ fn sweep_never_follows_symlink_out_of_root() {
     assert!(out.status.success(), "{out:?}");
     assert_eq!(fs::read_to_string(outside.join("keep")).unwrap(), "x");
 }
+
+#[test]
+fn second_gc_process_reports_busy() {
+    // Arrange
+    let home = scratch_home("busy");
+    let lock = home.join(".config/playbook/gc/.lock");
+    fs::create_dir_all(&lock).unwrap();
+    backdate(&lock, 0);
+    let session = home.join(".config/playbook/runtime/idle");
+    fs::create_dir_all(&session).unwrap();
+    backdate(&session, 30);
+
+    // Act
+    let out = gc_at_fixed_now(&home, &["--yes"]);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("gc already running"));
+    assert!(session.exists());
+}

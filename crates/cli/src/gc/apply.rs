@@ -7,6 +7,7 @@
 
 use std::fs;
 use std::io;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 use std::time::Duration;
 
@@ -36,6 +37,8 @@ pub struct ApplyOutcome {
     pub rotated: usize,
     pub expired: usize,
     pub compacted: usize,
+    /// Indexes of stores whose scan panicked or whose items failed to move.
+    pub failed_stores: Vec<usize>,
     /// Items that could not be moved, and a lost lock if there was one.
     pub failures: Vec<String>,
 }
@@ -49,7 +52,7 @@ fn grace_secs(rec: &Record) -> i64 {
 /// of the next store, or `None` when the lock was lost and the run must stop.
 fn run_stores(
     env: &Env,
-    cursor: usize,
+    (cursor, skip): (usize, &[usize]),
     budget: Option<i64>,
     out: &mut ApplyOutcome,
 ) -> Option<usize> {
@@ -59,10 +62,18 @@ fn run_stores(
         if index > cursor && budget.is_some_and(|limit| env.now() - start >= limit) {
             return Some(index);
         }
-        if !matches!(store.action, Action::Tombstone | Action::Rotate) {
+        if skip.contains(&index) || !matches!(store.action, Action::Tombstone | Action::Rotate) {
             continue;
         }
-        for item in store.items(env.now()) {
+        let failures_before = out.failures.len();
+        let scanned = catch_unwind(AssertUnwindSafe(|| store.items(env.now())));
+        let Ok(items) = scanned else {
+            out.failures
+                .push(format!("the {} store failed while scanning", store.name));
+            out.failed_stores.push(index);
+            continue;
+        };
+        for item in items {
             let Some(due) = item.due else { continue };
             if env.guard.verify().is_err() {
                 out.failures
@@ -108,6 +119,9 @@ fn run_stores(
             let _ = env.guard.touch();
         }
         let _ = env.guard.touch();
+        if out.failures.len() > failures_before {
+            out.failed_stores.push(index);
+        }
     }
     Some(stores.len())
 }
@@ -175,12 +189,21 @@ pub fn compact(env: &Env) -> usize {
 /// than `budget` seconds have passed on the injected clock. Expiry and
 /// compaction run on every call, including a cut-short one.
 pub fn run_apply(env: &Env, cursor: usize, budget: Option<i64>) -> ApplyOutcome {
+    run_apply_skipping(env, (cursor, &[]), budget)
+}
+
+/// [`run_apply`] that leaves the stores in the second part of `start` alone.
+pub fn run_apply_skipping(
+    env: &Env,
+    start: (usize, &[usize]),
+    budget: Option<i64>,
+) -> ApplyOutcome {
     let mut out = ApplyOutcome {
         findings: reconcile(env),
-        next_store: cursor,
+        next_store: start.0,
         ..ApplyOutcome::default()
     };
-    let Some(next) = run_stores(env, cursor, budget, &mut out) else {
+    let Some(next) = run_stores(env, start, budget, &mut out) else {
         return out;
     };
     out.next_store = next;
@@ -354,6 +377,44 @@ pub fn apply_command(registry: &Registry, clock: &dyn Clock) -> (String, i32) {
         }
         Ok(RunOutcome::AlreadyRunning) => ("gc already running; nothing was changed\n".into(), 1),
         Err(err) => (format!("gc: {err}\n"), 1),
+    }
+}
+
+/// Tombstones `path` for a caller that has decided on its own that it should
+/// go, such as session retention. The path must sit inside a store root. When
+/// another gc run holds the lock the answer is `Busy` and nothing changes, so
+/// the scheduled sweep picks the item up later.
+pub fn tombstone_now(
+    registry: &Registry,
+    clock: &dyn Clock,
+    path: &Path,
+    reason: &str,
+) -> MoveOutcome {
+    let Some(store) = registry
+        .stores()
+        .iter()
+        .find(|store| store.roots.iter().any(|root| path.starts_with(root)))
+    else {
+        return MoveOutcome::Refused("no gc store covers this path".into());
+    };
+    let req = MoveRequest {
+        paths: vec![path.to_path_buf()],
+        reason: reason.into(),
+        retain_days: store.limits.retain_days,
+    };
+    let fs = RealFs::new(registry);
+    let ran = with_run_lock(registry.gc_dir(), Duration::ZERO, clock, &NoHook, |guard| {
+        let env = Env {
+            guard,
+            registry,
+            fs: &fs,
+        };
+        move_locked(&env, &req, None)
+    });
+    match ran {
+        Ok(RunOutcome::Ran(outcome)) => outcome,
+        Ok(RunOutcome::AlreadyRunning) => MoveOutcome::Busy,
+        Err(err) => MoveOutcome::Failed(err.to_string()),
     }
 }
 

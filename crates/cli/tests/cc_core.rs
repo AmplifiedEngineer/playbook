@@ -93,6 +93,13 @@ fn age_apart(paths: &[PathBuf]) {
 mod retention_tests {
     use super::*;
 
+    /// A fixed time for the gc lock that prune takes.
+    const NOW: i64 = 1_800_000_000;
+
+    fn playbook_runtime(sb: &Sandbox, sid: &str) -> PathBuf {
+        sb.home.join(".config/playbook/runtime").join(sid)
+    }
+
     /// Serialises the env mutations, since CCD_KEEP and HOME are process-wide.
     fn with_env<T>(home: &Path, keep: Option<&str>, f: impl FnOnce() -> T) -> T {
         let _guard = lock_env();
@@ -124,8 +131,9 @@ mod retention_tests {
             let sid = format!("sess{i}");
             files.push(sb.touch(&format!("{dir}/{sid}.jsonl")));
             sb.mkdir(&format!("{dir}/{sid}"));
-            sb.mkdir(&format!("runtime/{sid}"));
+            fs::create_dir_all(playbook_runtime(sb, &sid)).expect("runtime dir");
         }
+        sb.touch("runtime/sentinel");
         age_apart(&files);
         files
     }
@@ -135,7 +143,7 @@ mod retention_tests {
         let sb = Sandbox::new("keep2");
         let cwd = "/tmp/proj";
         let files = seed(&sb, cwd, 3);
-        with_env(&sb.home, Some("2"), || retention::prune(cwd));
+        with_env(&sb.home, Some("2"), || retention::prune(cwd, NOW));
 
         // seed() ages oldest first, so the last written is newest.
         assert!(exists(&files[2]), "newest must survive");
@@ -148,12 +156,71 @@ mod retention_tests {
             "the sidecar directory goes with its transcript"
         );
         assert!(
-            !exists(&sb.claude().join("runtime").join("sess0")),
-            "runtime state goes with its transcript"
+            !exists(&playbook_runtime(&sb, "sess0")),
+            "the playbook runtime folder is tombstoned with its transcript"
+        );
+        assert!(
+            exists(&playbook_runtime(&sb, "sess2")),
+            "a surviving session keeps its runtime folder"
+        );
+        assert!(
+            exists(&sb.claude().join("runtime/sentinel")),
+            "nothing under the Claude runtime folder is touched"
         );
         assert!(
             exists(&dir.join("sess2")),
             "a surviving transcript keeps its sidecar"
+        );
+    }
+
+    #[test]
+    fn retention_leaves_claude_runtime_alone() {
+        let sb = Sandbox::new("claude-runtime");
+        let cwd = "/tmp/proj";
+        seed(&sb, cwd, 3);
+        sb.mkdir("runtime/sess0");
+
+        with_env(&sb.home, Some("2"), || retention::prune(cwd, NOW));
+
+        assert!(exists(&sb.claude().join("runtime/sess0")));
+    }
+
+    #[test]
+    fn pruned_runtime_folder_can_be_restored() {
+        let sb = Sandbox::new("restore");
+        let cwd = "/tmp/proj";
+        seed(&sb, cwd, 3);
+        fs::write(playbook_runtime(&sb, "sess0").join("state"), "kept").expect("state");
+
+        with_env(&sb.home, Some("2"), || retention::prune(cwd, NOW));
+        let index = fs::read_to_string(sb.home.join(".config/playbook/gc/index.jsonl"))
+            .expect("the move is recorded");
+
+        assert!(!exists(&playbook_runtime(&sb, "sess0")));
+        assert!(index.contains("sess0"));
+    }
+
+    #[test]
+    fn retention_skips_when_locked() {
+        let sb = Sandbox::new("locked");
+        let cwd = "/tmp/proj";
+        seed(&sb, cwd, 3);
+        let gc_dir = sb.home.join(".config/playbook/gc");
+        let now = playbook::common::time::now_secs();
+        let clock = playbook::gc::FixedClock(now);
+
+        let held = playbook::gc::lock::with_run_lock(
+            &gc_dir,
+            std::time::Duration::ZERO,
+            &clock,
+            &playbook::gc::lock::NoHook,
+            |_guard| with_env(&sb.home, Some("2"), || retention::prune(cwd, now)),
+        );
+
+        assert!(held.is_ok());
+        assert!(
+            exists(&playbook_runtime(&sb, "sess0")),
+            "a held gc lock leaves the folder for the next sweep"
         );
     }
 
@@ -164,7 +231,7 @@ mod retention_tests {
         let sb = Sandbox::new("floor");
         let cwd = "/tmp/proj";
         let files = seed(&sb, cwd, 3);
-        with_env(&sb.home, Some("1"), || retention::prune(cwd));
+        with_env(&sb.home, Some("1"), || retention::prune(cwd, NOW));
 
         assert!(exists(&files[2]), "newest survives");
         assert!(exists(&files[1]), "the floor keeps the second newest");
@@ -176,7 +243,7 @@ mod retention_tests {
         let sb = Sandbox::new("zero");
         let cwd = "/tmp/proj";
         let files = seed(&sb, cwd, 3);
-        with_env(&sb.home, Some("0"), || retention::prune(cwd));
+        with_env(&sb.home, Some("0"), || retention::prune(cwd, NOW));
         for f in &files {
             assert!(exists(f), "nothing may be deleted when disabled");
         }
@@ -187,7 +254,7 @@ mod retention_tests {
         let sb = Sandbox::new("under");
         let cwd = "/tmp/proj";
         let files = seed(&sb, cwd, 2);
-        with_env(&sb.home, Some("5"), || retention::prune(cwd));
+        with_env(&sb.home, Some("5"), || retention::prune(cwd, NOW));
         for f in &files {
             assert!(exists(f), "under the limit nothing is pruned");
         }
@@ -196,7 +263,9 @@ mod retention_tests {
     #[test]
     fn a_missing_project_directory_is_a_no_op() {
         let sb = Sandbox::new("missing");
-        with_env(&sb.home, Some("2"), || retention::prune("/tmp/never-used"));
+        with_env(&sb.home, Some("2"), || {
+            retention::prune("/tmp/never-used", NOW)
+        });
     }
 
     /// The slug has to match the shell's `${PWD//[^a-zA-Z0-9]/-}` exactly, or
