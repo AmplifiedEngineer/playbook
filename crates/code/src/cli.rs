@@ -5,6 +5,7 @@
 //! the library functions in `code` return.
 
 use super::host::{self, LspSettings};
+use super::lsp;
 use super::output::{Envelope, IndexState};
 use super::search::SearchOptions;
 use super::status;
@@ -159,6 +160,44 @@ pub enum CodeCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Manage and inspect language servers
+    ///
+    /// Language servers answer exact questions about code. They run workspace
+    /// code, so they start only in a repo you trust.
+    ///
+    /// Example: `playbook code lsp status`
+    Lsp {
+        #[command(subcommand)]
+        sub: LspCommand,
+    },
+}
+
+/// `playbook code lsp` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum LspCommand {
+    /// List the language servers playbook can use
+    ///
+    /// Shows each server with the languages it handles, its license and where
+    /// playbook looks for it.
+    ///
+    /// Example: `playbook code lsp list`
+    List {
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show which language servers are installed and what they still need
+    ///
+    /// Reports the server found for each language, where it came from, its
+    /// version, any missing prerequisite and whether this repo is trusted to
+    /// run servers. It starts no server and needs no trust.
+    ///
+    /// Example: `playbook code lsp status --json`
+    Status {
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn parse_range_arg(spec: &str) -> Result<(usize, usize), String> {
@@ -213,6 +252,7 @@ pub fn run(sub: CodeCommand, env: &Env) -> Result<String, String> {
             limit,
             json,
         } => render_refs(env, &target, limit as usize, json),
+        CodeCommand::Lsp { sub } => Ok(render_lsp(sub, env)),
         CodeCommand::Symbol {
             name,
             kind,
@@ -632,6 +672,31 @@ fn render_read(
         text.push_str("output truncated\n");
     }
     Ok(text)
+}
+
+fn render_lsp(sub: LspCommand, env: &Env) -> String {
+    let (command, json, text, results) = match sub {
+        LspCommand::List { json } => (
+            "lsp list",
+            json,
+            lsp::status::list_text(),
+            lsp::status::list_json(),
+        ),
+        LspCommand::Status { json } => {
+            let statuses = lsp::status::collect(&env.lsp, &lsp::status::Machine::real());
+            (
+                "lsp status",
+                json,
+                lsp::status::status_text(&env.lsp, &statuses),
+                lsp::status::status_json(&env.lsp, &statuses),
+            )
+        }
+    };
+    if json {
+        Envelope::new(command, IndexState::NotUsed, String::new(), results).to_json()
+    } else {
+        text
+    }
 }
 
 fn render_status(env: &Env, json: bool) -> Result<String, String> {

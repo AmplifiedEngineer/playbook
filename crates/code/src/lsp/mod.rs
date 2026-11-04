@@ -11,4 +11,5 @@ pub(crate) mod fake;
 pub mod framing;
 pub mod process;
 pub mod registry;
+pub mod status;
 pub mod transport;

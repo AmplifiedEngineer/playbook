@@ -4,7 +4,7 @@
 //! The `code.*` settings, resolved into what `playbook code` needs. This
 //! crate owns the config store, so `playbook-code` receives plain values.
 
-use super::resolve;
+use super::{resolve, Source};
 use playbook_code::host::LspSettings;
 use playbook_code::lsp::registry::SERVERS;
 use serde_json::Value;
@@ -18,10 +18,11 @@ pub fn lsp_settings(home: &Path, repo_slug: Option<&str>) -> LspSettings {
         Ok((Value::String(s), _)) if !s.is_empty() => Some(PathBuf::from(s)),
         _ => None,
     };
-    let trust_workspace = matches!(
-        resolve("code.lsp.trustWorkspace", home, repo_slug),
-        Ok((Value::Bool(true), _))
-    );
+    // An org row is refused on write, but a hand edited store could hold one.
+    let trust_tier = match resolve("code.lsp.trustWorkspace", home, repo_slug) {
+        Ok((Value::Bool(true), source @ (Source::Repo | Source::Global))) => Some(source.label()),
+        _ => None,
+    };
     let server_paths = SERVERS
         .iter()
         .filter_map(|spec| {
@@ -30,7 +31,8 @@ pub fn lsp_settings(home: &Path, repo_slug: Option<&str>) -> LspSettings {
         })
         .collect();
     LspSettings {
-        trust_workspace,
+        trust_workspace: trust_tier.is_some(),
+        trust_tier: trust_tier.map(str::to_string),
         server_paths,
         python_interpreter: text("code.python.interpreter"),
     }
@@ -96,6 +98,7 @@ mod tests {
 
         // Assert
         assert!(got.trust_workspace);
+        assert_eq!(got.trust_tier.as_deref(), Some("repo"));
         assert_eq!(got.server_path("gopls"), Some(Path::new("/opt/gopls")));
         assert_eq!(got.python_interpreter, Some(PathBuf::from("/opt/py")));
         assert!(!elsewhere.trust_workspace, "trust is per repo");

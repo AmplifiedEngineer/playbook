@@ -75,6 +75,8 @@ pub fn command(args: &str) -> String {
 pub struct LspSettings {
     /// `code.lsp.trustWorkspace`: whether servers may run in this repo.
     pub trust_workspace: bool,
+    /// The config tier that supplied the trust value; `None` for the default.
+    pub trust_tier: Option<String>,
     /// `code.lsp.<id>.path` values that are not empty, by server id.
     pub server_paths: Vec<(String, PathBuf)>,
     /// `code.python.interpreter`, when set.

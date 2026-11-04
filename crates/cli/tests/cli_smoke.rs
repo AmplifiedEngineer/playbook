@@ -628,6 +628,8 @@ fn table() -> Vec<Case> {
         case("code read", &["code", "read", "src/lib.rs", "1:5"]).code(1).err("no such file"),
         case("code refs", &["code", "refs", "foo"]).code(1).err("no index yet"),
         case("code context", &["code", "context", "foo"]).code(1).err("no index yet"),
+        case("code lsp list", &["code", "lsp", "list"]).out("rust-analyzer"),
+        case("code lsp status", &["code", "lsp", "status"]).out("workspace trust"),
         case( "sanitize commit-msg", &["sanitize", "commit-msg", "{ROOT}/m.txt"], ).file("m.txt", "feat: add a thing\n"),
         case("sanitize pr-text", &["sanitize", "pr-text", "{ROOT}/m.txt"]).file("m.txt", "A plain description.\n"),
         case("ci", &["ci"]).out("ci: 0 passed"),

@@ -239,7 +239,7 @@ Index and search the repo's source code
 
 The index is a cache kept under the playbook state directory for this worktree. Nothing is written inside the repo.
 
-Subcommands: `context`, `index`, `outline`, `read`, `refs`, `search`, `status`, `symbol`
+Subcommands: `context`, `index`, `lsp`, `outline`, `read`, `refs`, `search`, `status`, `symbol`
 
 ### `playbook code context`
 
@@ -263,6 +263,36 @@ Example: `playbook code index --json`
 
 - `--json`: Print one JSON document
 - `--rebuild`: Delete the cache first and index everything again
+
+### `playbook code lsp`
+
+Manage and inspect language servers
+
+Language servers answer exact questions about code. They run workspace code, so they start only in a repo you trust.
+
+Example: `playbook code lsp status`
+
+Subcommands: `list`, `status`
+
+### `playbook code lsp list`
+
+List the language servers playbook can use
+
+Shows each server with the languages it handles, its license and where playbook looks for it.
+
+Example: `playbook code lsp list`
+
+- `--json`: Print one JSON document
+
+### `playbook code lsp status`
+
+Show which language servers are installed and what they still need
+
+Reports the server found for each language, where it came from, its version, any missing prerequisite and whether this repo is trusted to run servers. It starts no server and needs no trust.
+
+Example: `playbook code lsp status --json`
+
+- `--json`: Print one JSON document
 
 ### `playbook code outline`
 
