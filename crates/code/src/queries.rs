@@ -6,6 +6,7 @@
 //! not answer and the command layer answers from the index.
 
 use crate::lsp::client::{ClientError, Encoding};
+use crate::lsp::pyenv;
 use crate::lsp::session::{Launcher, Options, Session, Unavailable};
 use crate::lsp::uri;
 use crate::semantic::{lsp_position, Fallback, Target};
@@ -143,7 +144,8 @@ fn ask<T>(
     }
     match request_with_retry(&mut session, method, &params, total) {
         Ok(value) => {
-            let (value, warnings) = parse(&value, encoding, ctx.root);
+            let (value, mut warnings) = parse(&value, encoding, ctx.root);
+            warnings.extend(session.python().and_then(pyenv::warning));
             session.finish();
             Ok(Outcome::Answered(Answered {
                 value,

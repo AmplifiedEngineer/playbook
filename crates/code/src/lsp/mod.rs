@@ -10,6 +10,7 @@ pub mod discover;
 pub(crate) mod fake;
 pub mod framing;
 pub mod process;
+pub mod pyenv;
 pub mod registry;
 pub mod session;
 pub mod status;

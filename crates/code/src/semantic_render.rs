@@ -29,6 +29,8 @@ pub struct Request<'a> {
     pub env: &'a crate::cli::Env,
     pub spec: &'a str,
     pub timeout_ms: Option<u64>,
+    /// `--python`: the interpreter for Python files.
+    pub python: Option<&'a str>,
     pub json: bool,
 }
 
@@ -184,12 +186,14 @@ pub fn diagnostics(
     env: &crate::cli::Env,
     path: Option<&str>,
     timeout_ms: Option<u64>,
+    python: Option<&str>,
     json: bool,
 ) -> Result<String, String> {
     let request = Request {
         env,
         spec: path.unwrap_or(""),
         timeout_ms,
+        python,
         json,
     };
     let root = location::repo_root(&env.cwd)?;
@@ -328,6 +332,7 @@ fn with_production_ctx<T>(
     };
     let signals = Signals::install();
     let path_dirs = discover::process_path();
+    let virtual_env = std::env::var_os("VIRTUAL_ENV").map(PathBuf::from);
     let options = Options {
         settings: &request.env.lsp,
         path_dirs: &path_dirs,
@@ -335,6 +340,8 @@ fn with_production_ctx<T>(
         probe_timeout: discover::PROBE_TIMEOUT,
         timeout: request.timeout_ms.map(Duration::from_millis),
         interrupt: Some(Arc::clone(&signals.any)),
+        python_flag: request.python.map(Path::new),
+        virtual_env: virtual_env.as_deref(),
     };
     let ctx = Ctx {
         root,

@@ -148,6 +148,9 @@ pub enum CodeCommand {
         /// Longest wait for the server, in milliseconds, for a position
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..=600_000))]
         timeout: Option<u64>,
+        /// Python interpreter for Python files, overriding the repo's environment
+        #[arg(long)]
+        python: Option<String>,
         /// Print one JSON document
         #[arg(long)]
         json: bool,
@@ -185,6 +188,9 @@ pub enum CodeCommand {
         /// Longest wait for the server, in milliseconds
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..=600_000))]
         timeout: Option<u64>,
+        /// Python interpreter for Python files, overriding the repo's environment
+        #[arg(long)]
+        python: Option<String>,
         /// Print one JSON document
         #[arg(long)]
         json: bool,
@@ -203,6 +209,9 @@ pub enum CodeCommand {
         /// Longest wait for the server, in milliseconds
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..=600_000))]
         timeout: Option<u64>,
+        /// Python interpreter for Python files, overriding the repo's environment
+        #[arg(long)]
+        python: Option<String>,
         /// Print one JSON document
         #[arg(long)]
         json: bool,
@@ -219,6 +228,9 @@ pub enum CodeCommand {
         /// Longest wait for the server, in milliseconds
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..=600_000))]
         timeout: Option<u64>,
+        /// Python interpreter for Python files, overriding the repo's environment
+        #[arg(long)]
+        python: Option<String>,
         /// Print one JSON document
         #[arg(long)]
         json: bool,
@@ -314,12 +326,14 @@ pub fn run(sub: CodeCommand, env: &Env) -> Result<String, String> {
             target,
             limit,
             timeout,
+            python,
             json,
         } if semantic::looks_like_position(&target) => semantic_render::refs(
             &semantic_render::Request {
                 env,
                 spec: &target,
                 timeout_ms: timeout,
+                python: python.as_deref(),
                 json,
             },
             limit as usize,
@@ -333,26 +347,31 @@ pub fn run(sub: CodeCommand, env: &Env) -> Result<String, String> {
         CodeCommand::Diagnostics {
             path,
             timeout,
+            python,
             json,
-        } => semantic_render::diagnostics(env, path.as_deref(), timeout, json),
+        } => semantic_render::diagnostics(env, path.as_deref(), timeout, python.as_deref(), json),
         CodeCommand::Definition {
             target,
             timeout,
+            python,
             json,
         } => semantic_render::definition(&semantic_render::Request {
             env,
             spec: &target,
             timeout_ms: timeout,
+            python: python.as_deref(),
             json,
         }),
         CodeCommand::Hover {
             target,
             timeout,
+            python,
             json,
         } => semantic_render::hover(&semantic_render::Request {
             env,
             spec: &target,
             timeout_ms: timeout,
+            python: python.as_deref(),
             json,
         }),
         CodeCommand::Lsp { sub } => Ok(render_lsp(sub, env)),

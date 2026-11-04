@@ -5,8 +5,9 @@
 //! discovery, start and `initialize`. A call that cannot get a server returns
 //! why, and the caller falls back to the index.
 
-use super::client::{Client, ClientConfig, ClientError};
+use super::client::{Client, ClientConfig, ClientError, ConfigurationReply};
 use super::discover::{self, BadPath};
+use super::pyenv::{self, Interpreter};
 use super::registry::{self, ServerSpec};
 use super::uri;
 use crate::host::{self, LspSettings};
@@ -30,6 +31,10 @@ pub struct Options<'a> {
     pub timeout: Option<Duration>,
     /// Set by a signal handler; every wait then ends with `Interrupted`.
     pub interrupt: Option<Arc<AtomicBool>>,
+    /// `--python`: the interpreter Pyright should use.
+    pub python_flag: Option<&'a Path>,
+    /// The `VIRTUAL_ENV` variable.
+    pub virtual_env: Option<&'a Path>,
 }
 
 /// How to start one server process.
@@ -139,6 +144,7 @@ pub struct Session {
     client: Client,
     spec: &'static ServerSpec,
     root: PathBuf,
+    python: Option<Interpreter>,
     // Held until the session ends so the lock outlives the server.
     _lock: WorkspaceLock,
 }
@@ -180,6 +186,17 @@ impl Session {
         if let Some(flag) = &options.interrupt {
             client.set_interrupt(Arc::clone(flag));
         }
+        let python = (spec.id == "pyright").then(|| {
+            pyenv::discover(&pyenv::Inputs {
+                root,
+                flag: options.python_flag,
+                configured: options.settings.python_interpreter.as_deref(),
+                virtual_env: options.virtual_env,
+            })
+        });
+        if let Some(Interpreter::Found { path, .. }) = &python {
+            client.set_configuration_reply(python_configuration(path));
+        }
         client
             .initialize(&uri::from_path(root), initialization_options(spec, root))
             .map_err(Unavailable::Failed)?;
@@ -187,6 +204,7 @@ impl Session {
             client,
             spec,
             root: root.to_path_buf(),
+            python,
             _lock: lock,
         })
     }
@@ -201,6 +219,11 @@ impl Session {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// The Python environment chosen for Pyright; `None` for other servers.
+    pub fn python(&self) -> Option<&Interpreter> {
+        self.python.as_ref()
     }
 
     /// Sends `didOpen` with the file's current text from disk.
@@ -228,6 +251,23 @@ impl Session {
     pub fn finish(self) {
         self.client.shutdown();
     }
+}
+
+/// Answers Pyright's `workspace/configuration` requests with the interpreter.
+fn python_configuration(interpreter: &Path) -> ConfigurationReply {
+    let python = interpreter.display().to_string();
+    Box::new(move |params| {
+        let sections = params["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|item| match item["section"].as_str() {
+                Some("python") => json!({"pythonPath": python}),
+                Some("python.analysis") => json!({}),
+                _ => Value::Null,
+            });
+        Value::Array(sections.collect())
+    })
 }
 
 /// Options sent at `initialize`. The TypeScript server uses the repo's own
@@ -390,5 +430,74 @@ mod tests {
         assert_eq!(doc["languageId"], "typescript");
         assert_eq!(doc["uri"], uri::from_path(&s.file));
         assert_eq!(doc["text"], "export const a = 1;\n");
+    }
+
+    #[test]
+    fn pyright_gets_the_resolved_interpreter_through_workspace_configuration() {
+        // Arrange
+        let s = setup("sess-py");
+        let python = s.root.join(".venv/bin/python");
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        std::fs::write(&python, "").unwrap();
+        let file = s.root.join("m.py");
+        std::fs::write(&file, "x = 1\n").unwrap();
+        crate::lsp::testkit::install_server(&s.bin, "pyright-langserver");
+        let (client_side, server) = pipe_pair().unwrap();
+        let mut steps = initialize_script(json!({}));
+        steps.push(Step::Request {
+            id: 10,
+            method: "workspace/configuration",
+            params: json!({"items": [{"section": "python"}, {"section": "python.analysis"}, {"section": "other"}]}),
+        });
+        steps.push(Step::Reply {
+            method: "ping",
+            result: Value::Null,
+        });
+        // Keep the connection open until the client's answer to the request arrives.
+        steps.push(Step::Read(1));
+        let fake = Fake::spawn(server, steps);
+        let launcher = FakeLauncher::new(Some(client_side));
+        let settings = trusted();
+        let dirs = [s.bin.clone()];
+
+        // Act
+        let mut session =
+            Session::for_file(&s.root, &file, &options(&s, &settings, &dirs), &launcher).unwrap();
+        session.client().request("ping", json!({})).unwrap();
+        let found = session.python().cloned();
+        drop(session);
+        let log = fake.finish();
+
+        // Assert
+        assert!(matches!(found, Some(Interpreter::Found { .. })));
+        let answer = log
+            .iter()
+            .find(|m| m["id"] == 10 && m.get("method").is_none())
+            .unwrap();
+        assert_eq!(
+            answer["result"],
+            json!([{"pythonPath": python.display().to_string()}, {}, null])
+        );
+    }
+
+    #[test]
+    fn other_servers_have_no_python_environment() {
+        // Arrange
+        let s = setup("sess-nopy");
+        let (client_side, server) = pipe_pair().unwrap();
+        let fake = Fake::spawn(server, initialize_script(json!({})));
+        let launcher = FakeLauncher::new(Some(client_side));
+        let settings = trusted();
+        let dirs = [s.bin.clone()];
+
+        // Act
+        let session =
+            Session::for_file(&s.root, &s.file, &options(&s, &settings, &dirs), &launcher).unwrap();
+        let python = session.python().cloned();
+        drop(session);
+        fake.finish();
+
+        // Assert
+        assert_eq!(python, None);
     }
 }

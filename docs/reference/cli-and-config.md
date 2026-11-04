@@ -263,6 +263,7 @@ Example: `playbook code definition src/app.ts:12:5`
 
 - `<TARGET>`: Position, as `<path>:<line>:<column>`
 - `--timeout <TIMEOUT>`: Longest wait for the server, in milliseconds
+- `--python <PYTHON>`: Python interpreter for Python files, overriding the repo's environment
 - `--json`: Print one JSON document
 
 ### `playbook code diagnostics`
@@ -275,6 +276,7 @@ Example: `playbook code diagnostics src/app.ts`
 
 - `<PATH>`: File to check
 - `--timeout <TIMEOUT>`: Longest wait for the server, in milliseconds
+- `--python <PYTHON>`: Python interpreter for Python files, overriding the repo's environment
 - `--json`: Print one JSON document
 
 ### `playbook code hover`
@@ -287,6 +289,7 @@ Example: `playbook code hover src/app.ts:12:5`
 
 - `<TARGET>`: Position, as `<path>:<line>:<column>`
 - `--timeout <TIMEOUT>`: Longest wait for the server, in milliseconds
+- `--python <PYTHON>`: Python interpreter for Python files, overriding the repo's environment
 - `--json`: Print one JSON document
 
 ### `playbook code index`
@@ -366,6 +369,7 @@ Example: `playbook code refs processPayment`
 - `<TARGET>`: Name to look for, or a position as `<path>:<line>:<column>`. A dotted or scoped name uses its last part
 - `--limit <LIMIT>`: Most results to show, from 1 to 200
 - `--timeout <TIMEOUT>`: Longest wait for the server, in milliseconds, for a position
+- `--python <PYTHON>`: Python interpreter for Python files, overriding the repo's environment
 - `--json`: Print one JSON document
 
 ### `playbook code search`

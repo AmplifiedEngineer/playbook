@@ -21,15 +21,15 @@ pub(crate) fn scratch(tag: &str) -> PathBuf {
 }
 
 #[cfg(unix)]
-fn install_ts_server(dir: &Path) {
+pub(crate) fn install_server(dir: &Path, name: &str) {
     use std::os::unix::fs::PermissionsExt;
-    let path = dir.join("typescript-language-server");
+    let path = dir.join(name);
     std::fs::write(&path, "#!/bin/sh\necho 6.0.1\n").unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
 #[cfg(not(unix))]
-fn install_ts_server(_dir: &Path) {}
+pub(crate) fn install_server(_dir: &Path, _name: &str) {}
 
 /// Hands back one prepared client and counts how often it was asked.
 pub(crate) struct FakeLauncher {
@@ -68,7 +68,7 @@ pub(crate) fn setup(tag: &str) -> Setup {
     let file = root.join("a.ts");
     std::fs::write(&file, "export const a = 1;\n").unwrap();
     let bin = scratch(&format!("{tag}-bin"));
-    install_ts_server(&bin);
+    install_server(&bin, "typescript-language-server");
     Setup {
         root,
         file,
@@ -96,6 +96,8 @@ pub(crate) fn options<'a>(
         probe_timeout: Duration::from_secs(10),
         timeout: Some(Duration::from_secs(10)),
         interrupt: None,
+        python_flag: None,
+        virtual_env: None,
     }
 }
 
