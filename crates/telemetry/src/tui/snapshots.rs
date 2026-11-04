@@ -283,7 +283,7 @@ fn the_daily_table_marks_today_and_the_peak_day() {
     let p = panels();
     // Newest first, so today is the first row.
     let today = &buf[(p.spend.x + 2, p.spend.y + 2)];
-    let hi = rgb(0xb5, 0x40, 0x40);
+    let hi = rgb(0x56, 0xb4, 0xe9);
     assert_eq!(today.fg, hi);
     assert!(today
         .modifier
@@ -299,7 +299,7 @@ fn the_daily_table_marks_today_and_the_peak_day() {
             row.contains("$6.01")
         })
         .expect("the peak day is in the table");
-    assert_eq!(buf[(p.spend.x + 2, peak_row)].fg, rgb(0xff, 0xb8, 0x14));
+    assert_eq!(buf[(p.spend.x + 2, peak_row)].fg, rgb(0xe6, 0x9f, 0x00));
 }
 
 fn with_limits(
@@ -481,8 +481,8 @@ fn the_default_theme_paints_a_black_ground_and_gray_text() {
     let buf = buffer(&app(Theme::Standard), 100, 30);
     // Every cell has the black ground.
     assert!(buf.content().iter().all(|c| c.bg == rgb(0, 0, 0)
-        || c.bg == rgb(0x6a, 0x2f, 0x2f)
-        || c.bg == rgb(0xb5, 0x40, 0x40)));
+        || c.bg == rgb(0x1f, 0x4e, 0x79)
+        || c.bg == rgb(0x56, 0xb4, 0xe9)));
     // The header's totals use the main text color.
     let (x, y) = find(&buf, "$", 2);
     assert_eq!(buf[(x, y)].fg, rgb(0xcc, 0xcc, 0xcc));
@@ -519,13 +519,13 @@ fn each_box_has_its_own_outline_color() {
         );
         buf[(r.x, r.y)].fg
     };
-    assert_eq!(corner(p.header), rgb(0x55, 0x6d, 0x59)); // header: cpu
-    assert_eq!(corner(p.spend), rgb(0x55, 0x6d, 0x59)); // spend: cpu
-    assert_eq!(corner(p.tokens), rgb(0x5c, 0x58, 0x8d)); // tokens: net
-    assert_eq!(corner(p.models), rgb(0x6c, 0x6c, 0x4b)); // models: mem
-    assert_eq!(corner(p.projects), rgb(0x6c, 0x6c, 0x4b)); // projects: mem
-    assert_eq!(corner(p.live), rgb(0x80, 0x52, 0x52)); // live: proc
-    assert_eq!(corner(p.sessions), rgb(0x80, 0x52, 0x52)); // sessions: proc
+    assert_eq!(corner(p.header), rgb(0x3f, 0x89, 0xb8)); // header: cpu
+    assert_eq!(corner(p.spend), rgb(0x3f, 0x89, 0xb8)); // spend: cpu
+    assert_eq!(corner(p.tokens), rgb(0xa0, 0x67, 0x8a)); // tokens: net
+    assert_eq!(corner(p.models), rgb(0xb0, 0x7d, 0x00)); // models: mem
+    assert_eq!(corner(p.projects), rgb(0xb0, 0x7d, 0x00)); // projects: mem
+    assert_eq!(corner(p.live), rgb(0x8a, 0x8a, 0x8a)); // live: proc
+    assert_eq!(corner(p.sessions), rgb(0x8a, 0x8a, 0x8a)); // sessions: proc
 }
 
 #[test]
@@ -534,12 +534,12 @@ fn titles_carry_a_hint_in_the_accent_color() {
     let p = panels();
     // The hint follows the corner, a dash and the `┤`.
     let (x, y) = find(&buf, "\u{b9}", p.spend.y);
-    assert_eq!(buf[(x, y)].fg, rgb(0xb5, 0x40, 0x40));
+    assert_eq!(buf[(x, y)].fg, rgb(0x56, 0xb4, 0xe9));
     assert_eq!(buf[(x - 1, y)].symbol(), "\u{2524}");
     assert_eq!(buf[(x + 1, y)].fg, rgb(0xee, 0xee, 0xee));
     // The focused panel (models, hint 3) wears a badge: title on accent.
     let (x, y) = find(&buf, "\u{b3}", p.models.y);
-    assert_eq!(buf[(x, y)].bg, rgb(0xb5, 0x40, 0x40));
+    assert_eq!(buf[(x, y)].bg, rgb(0x56, 0xb4, 0xe9));
 }
 
 #[test]
@@ -575,8 +575,8 @@ fn the_selected_row_of_the_focused_panel_is_highlighted() {
     let p = panels();
     let first = p.models.y + 2;
     // Models is focused: its first data row has the selection ground.
-    assert_eq!(buf[(2, first)].bg, rgb(0x6a, 0x2f, 0x2f));
-    assert_eq!(buf[(2, first)].fg, rgb(0xee, 0xee, 0xee));
+    assert_eq!(buf[(2, first)].bg, rgb(0x1f, 0x4e, 0x79));
+    assert_eq!(buf[(2, first)].fg, rgb(0xff, 0xff, 0xff));
     assert_eq!(buf[(2, first + 1)].bg, rgb(0, 0, 0));
     // The projects panel is not focused, so it shows no selection.
     assert_eq!(buf[(p.projects.x + 2, first)].bg, rgb(0, 0, 0));
@@ -589,7 +589,7 @@ fn meters_use_the_gradient_and_the_dim_color_for_the_rest() {
     let first = p.models.y + 2;
     // The haiku share is tiny: a dim dot at the end of its row.
     let (x, y) = find(&buf, "\u{b7}", first + 2);
-    assert_eq!(buf[(x, y)].fg, rgb(0x40, 0x40, 0x40));
+    assert_eq!(buf[(x, y)].fg, rgb(0x6b, 0x6b, 0x6b));
     // The opus share fills most of its row with colored squares.
     let squares: Vec<Color> = (0..50)
         .filter(|x| buf[(*x, first)].symbol() == "\u{25a0}")
