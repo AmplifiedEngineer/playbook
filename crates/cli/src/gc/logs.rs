@@ -160,6 +160,7 @@ mod tests {
                 idle_days: 30,
                 max_bytes: 5 * MIB,
                 retain_days: 7,
+                ..Limits::default()
             },
         }
     }

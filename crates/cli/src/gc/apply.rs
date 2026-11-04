@@ -62,7 +62,17 @@ fn run_stores(
         if index > cursor && budget.is_some_and(|limit| env.now() - start >= limit) {
             return Some(index);
         }
-        if skip.contains(&index) || !matches!(store.action, Action::Tombstone | Action::Rotate) {
+        if skip.contains(&index)
+            || !matches!(
+                store.action,
+                Action::Tombstone | Action::Rotate | Action::Delete
+            )
+        {
+            continue;
+        }
+        if store.action == Action::Delete {
+            let removed = super::build_output::sweep(env, &store.limits);
+            out.failures.extend(removed.failures);
             continue;
         }
         let failures_before = out.failures.len();

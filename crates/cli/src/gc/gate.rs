@@ -181,6 +181,7 @@ mod tests {
                 idle_days: 30,
                 max_bytes: 0,
                 retain_days: 7,
+                ..Limits::default()
             },
         };
         Fx { repo, gate, store }

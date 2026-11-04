@@ -40,16 +40,6 @@ fn gc_report_lists_nothing_and_creates_nothing() {
 }
 
 #[test]
-fn gc_build_output_flag_is_refused_until_it_is_wired() {
-    let home = scratch_home("flags");
-
-    let out = gc(&home, &["--build-output"]);
-
-    assert_eq!(out.status.code(), Some(2));
-    assert!(!home.join(".config/playbook/gc").exists());
-}
-
-#[test]
 fn gc_yes_and_restore_cannot_be_combined() {
     let home = scratch_home("conflict");
 

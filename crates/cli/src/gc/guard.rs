@@ -155,19 +155,44 @@ pub fn checked_swept_worktree_remove(
     crate::worktree::remove_worktree(repo_root, path, force_twice).map_err(GuardError::Worktree)
 }
 
-/// Removes one build folder inside one worktree. The body arrives with the
-/// build output unit; until then every call is refused.
+/// Removes one build folder inside one worktree. It takes that worktree as its
+/// root for this one call: the folder must be a real directory (not a link)
+/// that sits inside the worktree and is named like an entry of the ecosystem
+/// table.
 pub fn checked_build_output_remove(
     guard: &RunGuard,
     worktree_root: &Path,
     folder: &Path,
 ) -> Result<(), GuardError> {
     guard.verify()?;
-    Err(refuse(format!(
-        "build output removal is not enabled ({} in {})",
-        folder.display(),
-        worktree_root.display()
-    )))
+    let named_like_build_output = folder
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            super::build_output::TABLE
+                .iter()
+                .any(|eco| eco.folders.contains(&name))
+        });
+    if !named_like_build_output {
+        return Err(refuse(format!(
+            "{} is not a build folder name",
+            folder.display()
+        )));
+    }
+    if !fs::symlink_metadata(folder)?.is_dir() {
+        return Err(refuse(format!("{} is not a real folder", folder.display())));
+    }
+    let root = fs::canonicalize(worktree_root)?;
+    let parent = folder.parent().map(fs::canonicalize).transpose()?;
+    if !parent.is_some_and(|dir| dir.starts_with(&root)) {
+        return Err(refuse(format!(
+            "{} is outside the worktree {}",
+            folder.display(),
+            worktree_root.display()
+        )));
+    }
+    fs::remove_dir_all(folder)?;
+    Ok(())
 }
 
 /// Removes a lock folder: `gc/.lock` or `gc/.lock.stale-*` directly under

@@ -124,6 +124,14 @@ pub struct Limits {
     pub max_bytes: u64,
     /// Days a tombstone of this store's items is kept.
     pub retain_days: u32,
+    /// Build output only: the shorter idle limit used while disk space is low.
+    pub pressure_idle_days: u32,
+    /// Build output only: minutes a recent change keeps a folder in use.
+    pub active_minutes: u32,
+    /// Build output only: free GiB under which space counts as low.
+    pub warn_gib: u32,
+    /// Build output only: free percent under which space counts as low.
+    pub warn_percent: u32,
 }
 
 /// One kind of on-disk state with a retention rule.

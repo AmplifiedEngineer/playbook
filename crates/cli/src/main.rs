@@ -61,6 +61,46 @@ fn mode_args(mode: &str, rest: Vec<String>) -> Vec<String> {
     args
 }
 
+/// `playbook gc --build-output`: asks on the terminal before it deletes.
+fn run_build_output_flag(
+    home: &std::path::Path,
+    registry: &playbook::gc::Registry,
+    clock: &dyn playbook::gc::Clock,
+) -> (String, i32) {
+    use playbook::gc::build_output::{
+        current_repo_worktrees, flag_command, lsof_in_use, Probes, Terminal,
+    };
+    use std::io::{BufRead, IsTerminal, Write};
+    let limits = registry
+        .stores()
+        .iter()
+        .find(|store| store.name == "build output")
+        .map(|store| store.limits)
+        .unwrap_or_default();
+    let mut confirm = |question: &str| {
+        print!("{question}");
+        let _ = std::io::stdout().flush();
+        let mut answer = String::new();
+        std::io::stdin().lock().read_line(&mut answer).is_ok()
+            && matches!(answer.trim().to_lowercase().as_str(), "y" | "yes")
+    };
+    let mut terminal = Terminal {
+        is_terminal: std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
+        confirm: &mut confirm,
+    };
+    let probes = Probes {
+        space: &playbook::gc::space::RealProbe,
+        in_use: &lsof_in_use,
+    };
+    let (_, hand_made) = current_repo_worktrees(home);
+    flag_command(
+        (registry, clock),
+        &hand_made,
+        &limits,
+        (&probes, &mut terminal),
+    )
+}
+
 /// Windows gives the main thread 1 MiB, against 8 MiB on Linux and macOS. The
 /// clap tree is deep enough to overflow that in a debug build (`doctor check`
 /// died with a stack overflow on the windows-smoke job), so run on a thread
@@ -427,15 +467,14 @@ fn real_main() {
             restore,
             build_output,
         } => {
-            if build_output {
-                eprintln!(
-                    "gc: --build-output is not available yet; run `playbook gc` for the report"
-                );
-                std::process::exit(2);
-            }
             let home = playbook::common::home_dir();
             let clock = playbook::gc::default_clock();
             let registry = playbook::gc::registry(&home);
+            if build_output {
+                let (text, code) = run_build_output_flag(&home, &registry, &*clock);
+                print!("{text}");
+                std::process::exit(code);
+            }
             if yes || restore.is_some() {
                 let (text, code) = match restore {
                     Some(id) => playbook::gc::apply::restore_command(&registry, &*clock, &id),

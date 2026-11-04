@@ -215,8 +215,23 @@ fn store(
             idle_days: configured_number(home, idle_key),
             max_bytes: 0,
             retain_days: configured_number(home, "gc.graceDays"),
+            ..Limits::default()
         },
     }
+}
+
+/// The build output store, with every rule number read from the config.
+fn build_output_store(home: &Path) -> Store {
+    let mut store = super::build_output::store();
+    store.limits = Limits {
+        idle_days: configured_number(home, "gc.buildOutputIdleDays"),
+        pressure_idle_days: configured_number(home, "gc.buildOutputPressureIdleDays"),
+        active_minutes: configured_number(home, "gc.buildOutputActiveMinutes"),
+        warn_gib: configured_number(home, "gc.freeSpaceWarnGiB"),
+        warn_percent: configured_number(home, "gc.freeSpaceWarnPercent"),
+        ..Limits::default()
+    };
+    store
 }
 
 /// Days a loaded handoff stays restorable, from `gc.handoffGraceDays`.
@@ -250,7 +265,7 @@ pub fn small_stores(home: &Path) -> Vec<Store> {
             home,
         ),
         log_store(home),
-        super::build_output::store(),
+        build_output_store(home),
     ]
 }
 
@@ -307,6 +322,7 @@ mod tests {
                 idle_days,
                 max_bytes: 0,
                 retain_days: 7,
+                ..Limits::default()
             },
         }
     }
