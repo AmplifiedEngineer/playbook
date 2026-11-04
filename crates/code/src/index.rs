@@ -67,6 +67,8 @@ pub struct Hooks {
     pub tx: TxHooks,
     /// Makes each batch fail with this SQLite result code right after `BEGIN`.
     pub fail_write: Option<i32>,
+    /// Runs after the content hint is read and before the first batch.
+    pub after_hint: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 /// How often a batch is tried again after `SQLITE_BUSY`.
@@ -143,6 +145,8 @@ pub struct Report {
     pub skipped: usize,
     /// Files that could not be read or written this run.
     pub failed: usize,
+    /// Files that took stored content with the same key and were not parsed.
+    pub reused: usize,
 }
 
 struct Chunk {
@@ -167,8 +171,24 @@ struct Prepared {
     parsed: bool,
 }
 
+/// The content keys of the current parser that the store held at the start of
+/// a run, as `(sha256, grammar)`. A hint only: it decides which files to
+/// parse, and the batch looks the row up again when it adopts one.
+type Hint = HashSet<(String, String)>;
+
+/// A file whose content the store already holds.
+struct Adopted {
+    path: String,
+    sha: String,
+    grammar: &'static str,
+    lang: Option<&'static str>,
+    size: u64,
+    mtime_ns: i64,
+}
+
 enum Outcome {
     Unchanged,
+    Adopt(Adopted),
     Touch {
         path: String,
         size: u64,
@@ -289,7 +309,13 @@ struct Syntax {
     parsed: bool,
 }
 
-fn prepare(root: &Path, path: &str, existing: Option<&Existing>, opts: &Options) -> Outcome {
+fn prepare(
+    root: &Path,
+    path: &str,
+    existing: Option<&Existing>,
+    hint: Option<&Hint>,
+    opts: &Options,
+) -> Outcome {
     let full = root.join(path);
     let meta = match std::fs::metadata(&full) {
         Ok(meta) => meta,
@@ -333,6 +359,17 @@ fn prepare(root: &Path, path: &str, existing: Option<&Existing>, opts: &Options)
             };
         }
     }
+    let grammar = Lang::for_path(path).map_or(lang::TEXT_GRAMMAR, Lang::grammar_id);
+    if hint.is_some_and(|h| h.contains(&(sha.clone(), grammar.to_string()))) {
+        return Outcome::Adopt(Adopted {
+            path: path.to_string(),
+            sha,
+            grammar,
+            lang: Lang::for_path(path).map(Lang::name),
+            size,
+            mtime_ns: mtime,
+        });
+    }
     let valid = std::str::from_utf8(&bytes).is_ok();
     let text = String::from_utf8_lossy(&bytes);
     let mut syntax = Syntax::default();
@@ -359,7 +396,7 @@ fn prepare(root: &Path, path: &str, existing: Option<&Existing>, opts: &Options)
         } else {
             "partial"
         },
-        grammar: Lang::for_path(path).map_or(lang::TEXT_GRAMMAR, Lang::grammar_id),
+        grammar,
         chunks: make_chunks(&text, opts.chunk_lines),
         lang: syntax.lang,
         symbols: syntax.symbols,
@@ -395,6 +432,53 @@ fn ensure_content(conn: &Connection, p: &Prepared, parser: &str) -> rusqlite::Re
         |r| r.get(0),
     )?;
     Ok((id, inserted))
+}
+
+/// Deletes the symbols, imports, chunks and FTS rows of a content row, so a
+/// rebuild can write them again.
+fn clear_children(conn: &Connection, content: i64) -> rusqlite::Result<()> {
+    conn.execute(
+        "DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE content = ?1)",
+        [content],
+    )?;
+    for table in ["symbols", "imports", "chunks"] {
+        conn.execute(
+            &format!("DELETE FROM {table} WHERE content = ?1"),
+            [content],
+        )?;
+    }
+    Ok(())
+}
+
+/// Points the manifest row of `a.path` at the stored content with its key.
+/// Returns false, and writes nothing, when a cleanup removed that content
+/// after the hint was read: the file is then parsed.
+fn adopt(conn: &Connection, a: &Adopted, parser: &str, wt: i64) -> rusqlite::Result<bool> {
+    let found: Option<(i64, bool)> = conn
+        .query_row(
+            "SELECT id, partial FROM content WHERE sha256 = ?1 AND grammar = ?2 AND parser = ?3",
+            params![a.sha, a.grammar, parser],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let Some((content, partial)) = found else {
+        return Ok(false);
+    };
+    upsert_manifest(
+        conn,
+        wt,
+        &ManifestRow {
+            path: &a.path,
+            content: Some(content),
+            lang: a.lang,
+            sha: &a.sha,
+            size: a.size,
+            mtime_ns: a.mtime_ns,
+            status: if partial { "partial" } else { "ok" },
+            error: None,
+        },
+    )?;
+    Ok(true)
 }
 
 /// Deletes a content row that no manifest row references, with its FTS rows
@@ -506,13 +590,22 @@ fn insert_syntax(conn: &Connection, content: i64, p: &Prepared) -> rusqlite::Res
     Ok(())
 }
 
-fn apply(conn: &Connection, outcome: &Outcome, opts: &Options, wt: i64) -> Result<(), String> {
+fn apply(
+    conn: &Connection,
+    outcome: &Outcome,
+    opts: &Options,
+    wt: i64,
+    replace: bool,
+) -> Result<(), String> {
     let sql = |e: rusqlite::Error| e.to_string();
     match outcome {
         Outcome::Write(p) => {
             opts.before_file(&p.path)?;
             let (content, inserted) = ensure_content(conn, p, &opts.parser).map_err(sql)?;
-            if inserted {
+            if replace && !inserted {
+                clear_children(conn, content).map_err(sql)?;
+            }
+            if inserted || replace {
                 insert_syntax(conn, content, p).map_err(sql)?;
                 for chunk in &p.chunks {
                     conn.execute(
@@ -572,7 +665,7 @@ fn apply(conn: &Connection, outcome: &Outcome, opts: &Options, wt: i64) -> Resul
             )
             .map_err(sql)?;
         }
-        Outcome::Unchanged | Outcome::Missing(_) | Outcome::Failed { .. } => {}
+        Outcome::Unchanged | Outcome::Adopt(_) | Outcome::Missing(_) | Outcome::Failed { .. } => {}
     }
     Ok(())
 }
@@ -593,7 +686,8 @@ fn mark_failed(conn: &Connection, wt: i64, path: &str, error: &str) -> rusqlite:
     Ok(())
 }
 
-/// Writes one batch in a single transaction. A busy store makes the whole
+/// Writes one batch in a single transaction and returns the paths of adopted
+/// files whose content vanished, which the run parses in a later batch. A busy store makes the whole
 /// batch start again, up to [`BATCH_RETRIES`] times, and the report counts
 /// only the attempt that committed.
 fn write_batch(
@@ -601,16 +695,18 @@ fn write_batch(
     batch: &[Outcome],
     opts: &Options,
     wt: i64,
+    replace: bool,
     report: &mut Report,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     for attempt in 0..=BATCH_RETRIES {
         let mut staged = Report::default();
-        match write_batch_once(conn, batch, opts, wt, &mut staged) {
-            Ok(()) => {
+        match write_batch_once(conn, batch, opts, wt, replace, &mut staged) {
+            Ok(redo) => {
                 report.changed += staged.changed;
                 report.parsed += staged.parsed;
                 report.failed += staged.failed;
-                return Ok(());
+                report.reused += staged.reused;
+                return Ok(redo);
             }
             Err(e) if is_busy(&e) && attempt < BATCH_RETRIES => {}
             Err(e) => return Err(db::map_sql_error("failed to write the index", &e)),
@@ -628,8 +724,9 @@ fn write_batch_once(
     batch: &[Outcome],
     opts: &Options,
     wt: i64,
+    replace: bool,
     report: &mut Report,
-) -> rusqlite::Result<()> {
+) -> rusqlite::Result<Vec<String>> {
     let hooks = opts.tx_hooks();
     let mut tx = db::write_tx(conn, hooks)?;
     #[cfg(test)]
@@ -640,7 +737,20 @@ fn write_batch_once(
         ));
     }
     let mut failures: Vec<(String, String)> = Vec::new();
+    let mut redo: Vec<String> = Vec::new();
     for outcome in batch {
+        if let Outcome::Adopt(a) = outcome {
+            let sp = tx.savepoint()?;
+            if adopt(&sp, a, &opts.parser, wt)? {
+                sp.commit()?;
+                report.changed += 1;
+                report.reused += 1;
+            } else {
+                drop(sp);
+                redo.push(a.path.clone());
+            }
+            continue;
+        }
         let path = match outcome {
             Outcome::Write(p) => p.path.clone(),
             Outcome::Skip(s) => s.path.clone(),
@@ -649,10 +759,10 @@ fn write_batch_once(
                 failures.push((path.clone(), error.clone()));
                 continue;
             }
-            Outcome::Unchanged | Outcome::Missing(_) => continue,
+            Outcome::Unchanged | Outcome::Adopt(_) | Outcome::Missing(_) => continue,
         };
         let sp = tx.savepoint()?;
-        match apply(&sp, outcome, opts, wt) {
+        match apply(&sp, outcome, opts, wt, replace) {
             Ok(()) => {
                 sp.commit()?;
                 if let Outcome::Write(p) = outcome {
@@ -672,7 +782,20 @@ fn write_batch_once(
         mark_failed(&tx, wt, &path, &error)?;
         report.failed += 1;
     }
-    db::commit_tx(tx, hooks)
+    db::commit_tx(tx, hooks)?;
+    Ok(redo)
+}
+
+/// The content keys of `parser` that the store holds.
+fn load_hint(conn: &Connection, parser: &str) -> Result<Hint, String> {
+    let fail = |e: rusqlite::Error| db::map_sql_error("failed to read the index", &e);
+    let mut stmt = conn
+        .prepare("SELECT sha256, grammar FROM content WHERE parser = ?1")
+        .map_err(fail)?;
+    let rows = stmt
+        .query_map([parser], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(fail)?;
+    rows.collect::<Result<Hint, _>>().map_err(fail)
 }
 
 pub(crate) fn load_existing(conn: &Connection) -> Result<HashMap<String, Existing>, String> {
@@ -825,6 +948,15 @@ pub fn run(
 
     let found = walker::discover(root, &opts.limits)?;
     let existing = load_existing(&conn)?;
+    let hint = if rebuild {
+        None
+    } else {
+        Some(load_hint(&conn, &opts.parser)?)
+    };
+    #[cfg(test)]
+    if let Some(after_hint) = &opts.hooks.after_hint {
+        after_hint();
+    }
     let mut report = Report {
         skipped: found.skipped.len(),
         scope,
@@ -855,16 +987,17 @@ pub fn run(
     let mut batch_no = 0usize;
     let mut batch: Vec<Outcome> = Vec::new();
     let mut run_error: Option<String> = None;
+    let mut redo: Vec<String> = Vec::new();
 
     std::thread::scope(|scope| {
         for _ in 0..workers {
             let tx = tx.clone();
-            let (files, existing, next) = (&found.files, &existing, &next);
+            let (files, existing, next, hint) = (&found.files, &existing, &next, &hint);
             scope.spawn(move || loop {
                 let i = next.fetch_add(1, Ordering::Relaxed);
                 let Some(path) = files.get(i) else { break };
                 if tx
-                    .send(prepare(root, path, existing.get(path), opts))
+                    .send(prepare(root, path, existing.get(path), hint.as_ref(), opts))
                     .is_err()
                 {
                     break;
@@ -877,7 +1010,7 @@ pub fn run(
             if batch.is_empty() {
                 return Ok(());
             }
-            write_batch(&mut conn, batch, opts, wt, report)?;
+            redo.extend(write_batch(&mut conn, batch, opts, wt, rebuild, report)?);
             batch.clear();
             batch_no += 1;
             opts.after_batch(batch_no)
@@ -930,6 +1063,18 @@ pub fn run(
     });
     if let Some(e) = run_error {
         return Err(e);
+    }
+    for chunk in redo.chunks(opts.batch_size.max(1)) {
+        let mut writes: Vec<Outcome> = Vec::new();
+        for path in chunk {
+            match prepare(root, path, None, None, opts) {
+                Outcome::Missing(path) => {
+                    listed.remove(&path);
+                }
+                other => writes.push(other),
+            }
+        }
+        write_batch(&mut conn, &writes, opts, wt, rebuild, &mut report)?;
     }
 
     report.removed = remove_unlisted(&mut conn, wt, &listed)?;
@@ -2438,5 +2583,262 @@ impl P { fn go(&self) {} }
         // Assert
         let message = got.expect_err("must fail");
         assert!(message.contains("--rebuild"), "{message}");
+    }
+
+    /// A second worktree of the fixture's store, with its own checkout.
+    fn sibling(f: &crate::testkit::Fx, tag: &str, files: &[(&str, &[u8])]) -> PathBuf {
+        let root = crate::walker::test_repo::init(tag);
+        for (name, bytes) in files {
+            write(&root, name, bytes);
+        }
+        let _ = f;
+        root
+    }
+
+    fn run_in(f: &crate::testkit::Fx, root: &Path, key: &str, opts: &Options) -> Report {
+        run(root, &f.index, key, false, opts).expect("sibling run")
+    }
+
+    const THREE: [(&str, &[u8]); 3] = [
+        ("a.rs", b"fn a() {}\n"),
+        ("b.py", b"def b():\n    pass\n"),
+        ("c.ts", b"export const c = 1;\n"),
+    ];
+
+    fn seeded(tag: &str) -> crate::testkit::Fx {
+        let f = fx(tag);
+        for (name, bytes) in THREE {
+            write(&f.root, name, bytes);
+        }
+        f.run();
+        f
+    }
+
+    #[test]
+    fn a_new_worktree_with_the_same_files_parses_nothing() {
+        let _g = pinned();
+        // Arrange
+        let f = seeded("reuse-same");
+        let b = sibling(&f, "reuse-same-b", &THREE);
+
+        // Act
+        let report = run_in(&f, &b, "other", &Options::default());
+
+        // Assert
+        assert_eq!(report.parsed, 0);
+        assert_eq!(report.reused, 3);
+        assert_eq!(count(&f.conn(), "SELECT COUNT(*) FROM content"), 3);
+    }
+
+    #[test]
+    fn one_different_file_is_parsed_and_the_rest_reused() {
+        let _g = pinned();
+        // Arrange
+        let f = seeded("reuse-one-diff");
+        let b = sibling(
+            &f,
+            "reuse-one-diff-b",
+            &[THREE[0], THREE[1], ("c.ts", b"export const other = 2;\n")],
+        );
+
+        // Act
+        let report = run_in(&f, &b, "other", &Options::default());
+
+        // Assert
+        assert_eq!(report.parsed, 1);
+        assert_eq!(report.reused, 2);
+    }
+
+    #[test]
+    fn an_edit_to_bytes_the_store_holds_moves_the_row_and_drops_the_old_content() {
+        let _g = pinned();
+        // Arrange
+        let f = seeded("reuse-edit");
+        let b = sibling(&f, "reuse-edit-b", &[("x.rs", b"fn only_in_b() {}\n")]);
+        run_in(&f, &b, "other", &Options::default());
+        write(&b, "x.rs", b"fn a() {}\n");
+
+        // Act
+        let report = run_in(&f, &b, "other", &Options::default());
+
+        // Assert
+        assert_eq!(report.reused, 1);
+        assert_eq!(report.parsed, 0);
+        let conn = db::open_query(&f.index, "other").expect("b");
+        assert_eq!(symbol_names(&conn, "x.rs"), vec!["a"]);
+        assert_eq!(count(&f.conn(), "SELECT COUNT(*) FROM content"), 3);
+    }
+
+    #[test]
+    fn content_removed_after_the_hint_is_parsed_in_a_trailing_batch() {
+        let _g = pinned();
+        // Arrange
+        let f = seeded("reuse-race");
+        let b = sibling(&f, "reuse-race-b", &THREE);
+        let index = f.index.clone();
+        let hook = move || {
+            let raw = Connection::open(&index).expect("raw");
+            raw.pragma_update(None, "foreign_keys", "ON").expect("fk");
+            let id: i64 = raw
+                .query_row(
+                    "SELECT content FROM manifest WHERE path = 'c.ts'",
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("content id");
+            raw.execute("DELETE FROM manifest WHERE path = 'c.ts'", [])
+                .expect("manifest");
+            raw.execute(
+                "DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE content = ?1)",
+                [id],
+            )
+            .expect("fts");
+            raw.execute("DELETE FROM content WHERE id = ?1", [id])
+                .expect("content");
+        };
+        let opts = Options {
+            hooks: Hooks {
+                after_hint: Some(Box::new(hook)),
+                ..Hooks::default()
+            },
+            ..Options::default()
+        };
+
+        // Act
+        let report = run_in(&f, &b, "other", &opts);
+
+        // Assert
+        assert_eq!(report.failed, 0);
+        assert_eq!(report.reused, 2);
+        assert_eq!(report.parsed, 1);
+        let conn = db::open_query(&f.index, "other").expect("b");
+        assert_eq!(paths(&conn), vec!["a.rs", "b.py", "c.ts"]);
+        assert_eq!(symbol_names(&conn, "c.ts"), vec!["c"]);
+    }
+
+    #[test]
+    fn a_new_parser_key_parses_every_file_and_leaves_the_old_queries_alone() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("reuse-parser");
+        for (name, bytes) in THREE {
+            write(&f.root, name, bytes);
+        }
+        let old = Options {
+            parser: "0.39.0.1".to_string(),
+            ..Options::default()
+        };
+        f.run_with(&old);
+        let b = sibling(&f, "reuse-parser-b", &THREE);
+        let new = Options {
+            parser: "0.40.0.1".to_string(),
+            ..Options::default()
+        };
+
+        // Act
+        let report = run_in(&f, &b, "other", &new);
+
+        // Assert
+        assert_eq!(report.parsed, 3);
+        assert_eq!(report.reused, 0);
+        assert_eq!(count(&f.conn(), "SELECT COUNT(*) FROM content"), 6);
+        assert_eq!(symbol_names(&f.conn(), "a.rs"), vec!["a"]);
+    }
+
+    #[test]
+    fn a_partial_file_stays_partial_in_the_worktree_that_adopts_it() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("reuse-partial");
+        let files: [(&str, &[u8]); 2] = [
+            ("bad.rs", b"fn ok() {}\nfn broken( {\n"),
+            ("bin.txt", b"caf\xe9\n"),
+        ];
+        for (name, bytes) in files {
+            write(&f.root, name, bytes);
+        }
+        f.run();
+        let b = sibling(&f, "reuse-partial-b", &files);
+
+        // Act
+        let report = run_in(&f, &b, "other", &Options::default());
+
+        // Assert
+        assert_eq!(report.reused, 2);
+        let conn = db::open_query(&f.index, "other").expect("b");
+        let statuses: Vec<String> = conn
+            .prepare("SELECT status FROM files ORDER BY path")
+            .expect("prepare")
+            .query_map([], |r| r.get(0))
+            .expect("rows")
+            .map(|r| r.expect("status"))
+            .collect();
+        assert_eq!(statuses, vec!["partial", "partial"]);
+    }
+
+    #[test]
+    fn a_text_file_is_adopted_with_the_text_grammar() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("reuse-text");
+        write(&f.root, "notes.txt", b"plain words\n");
+        f.run();
+        let b = sibling(&f, "reuse-text-b", &[("notes.txt", b"plain words\n")]);
+
+        // Act
+        let report = run_in(&f, &b, "other", &Options::default());
+
+        // Assert
+        assert_eq!((report.parsed, report.reused), (0, 1));
+        assert_eq!(
+            count(
+                &f.conn(),
+                "SELECT COUNT(*) FROM content WHERE grammar = 'text'"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn the_same_bytes_under_another_grammar_are_parsed() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("reuse-grammar");
+        write(&f.root, "a.ts", b"export const v = 1;\n");
+        f.run();
+        let b = sibling(
+            &f,
+            "reuse-grammar-b",
+            &[("a.tsx", b"export const v = 1;\n")],
+        );
+
+        // Act
+        let report = run_in(&f, &b, "other", &Options::default());
+
+        // Assert
+        assert_eq!((report.parsed, report.reused), (1, 0));
+    }
+
+    #[test]
+    fn a_rebuild_writes_the_symbols_of_stored_content_again() {
+        let _g = pinned();
+        // Arrange
+        let f = seeded("reuse-rebuild");
+        let b = sibling(&f, "reuse-rebuild-b", &THREE);
+        run_in(&f, &b, "other", &Options::default());
+        {
+            let raw = Connection::open(&f.index).expect("raw");
+            raw.execute("DELETE FROM symbols", []).expect("delete");
+        }
+
+        // Act
+        let report =
+            run(&f.root, &f.index, &f.worktree, true, &Options::default()).expect("rebuild");
+
+        // Assert
+        assert_eq!(report.parsed, 3);
+        assert_eq!(symbol_names(&f.conn(), "a.rs"), vec!["a"]);
+        let conn = db::open_query(&f.index, "other").expect("b");
+        assert_eq!(symbol_names(&conn, "a.rs"), vec!["a"]);
     }
 }

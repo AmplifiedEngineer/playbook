@@ -149,6 +149,7 @@ fn index_prints_the_envelope_and_a_second_run_is_all_unchanged() {
     assert_eq!(first["command"], "index");
     assert_eq!(first["results"]["indexed"], 3);
     assert_eq!(first["results"]["changed"], 3);
+    assert_eq!(first["results"]["reused"], 0);
     let second = json_of(&second);
     assert_eq!(second["results"]["unchanged"], 3);
     assert_eq!(second["results"]["changed"], 0);
@@ -741,4 +742,26 @@ fn an_empty_repo_indexes_zero_files_into_a_store() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert_eq!(json_of(&out)["results"]["indexed"], 0);
+}
+
+#[test]
+fn a_second_worktree_with_the_same_files_reuses_them() {
+    // Arrange
+    let a = Fixture::new("reuse", true);
+    let b = a.add_worktree("reuse-b");
+    for fx in [&a, &b] {
+        fx.write("a.rs", "fn a() {}\n");
+        fx.write("b.ts", "export const b = 1;\n");
+        fx.write("c.py", "def c():\n    pass\n");
+    }
+    a.playbook(&["code", "index"]);
+
+    // Act
+    let json = json_of(&b.playbook(&["code", "index", "--json"]));
+    let text = Fixture::playbook(&b, &["code", "index", "--rebuild"]);
+
+    // Assert
+    assert_eq!(json["results"]["reused"], 3);
+    assert_eq!(json["results"]["parsed"], 0);
+    assert!(String::from_utf8_lossy(&text.stdout).contains("reused: 0"));
 }

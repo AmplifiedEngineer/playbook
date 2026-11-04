@@ -691,6 +691,7 @@ fn render_index(env: &Env, json: bool, rebuild: bool) -> Result<String, String> 
                 "removed": report.removed,
                 "skipped": report.skipped,
                 "failed": report.failed,
+                "reused": report.reused,
                 "scope": report.scope.as_str(),
             }),
         );
@@ -706,13 +707,14 @@ fn render_index(env: &Env, json: bool, rebuild: bool) -> Result<String, String> 
         (Scope::Worktree, false) => "",
     };
     Ok(format!(
-        "indexed {} files: {} changed, {} unchanged, {} removed, {} skipped, {} failed\n{rebuilt}",
+        "indexed {} files: {} changed, {} unchanged, {} removed, {} skipped, {} failed\nreused: {}\n{rebuilt}",
         report.indexed,
         report.changed,
         report.unchanged,
         report.removed,
         report.skipped,
-        report.failed
+        report.failed,
+        report.reused
     ))
 }
 
