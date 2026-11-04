@@ -853,7 +853,7 @@ pub enum Command {
         #[arg(long)]
         create: bool,
     },
-    /// Manage the plan files that `/playbook:plan` writes
+    /// Save plan checkpoints, write Work Unit briefs, clear scratch files
     Plan {
         #[command(subcommand)]
         sub: PlanCommand,
@@ -884,7 +884,7 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Work with ADR records, such as the next free number
+    /// Work with ADRs, such as the next free record number
     Adr {
         #[command(subcommand)]
         sub: AdrCommand,
@@ -1228,7 +1228,7 @@ pub enum SettingsCommand {
     /// Takes the hooks and status line from the live file and keeps the
     /// permissions of the current seed. Prints the new seed.
     ///
-    /// Example: `playbook settings gen ~/.claude/settings.json seed/template.json`
+    /// Example: `playbook settings gen ~/.claude/settings.json my-template.json`
     Gen {
         /// Live settings.json to start from
         src: PathBuf,
@@ -1239,7 +1239,7 @@ pub enum SettingsCommand {
     ///
     /// Exits 0 when valid and 1 with a message when not.
     ///
-    /// Example: `playbook settings check seed/template.json .`
+    /// Example: `playbook settings check my-template.json .`
     Check {
         /// Shared settings template to check
         template: PathBuf,
@@ -1571,7 +1571,7 @@ pub enum PrCommand {
 pub enum PlanCommand {
     /// Print a topic's checkpoint path, or save the checkpoint
     ///
-    /// Without `--write` it creates the plans folder and prints the path, then
+    /// Without `--write` it creates the plans directory and prints the path, then
     /// `found` or `not-found`. With `--write` it replaces the checkpoint with
     /// stdin under a directory lock. A failed save prints a one-line notice and
     /// still exits 0, so planning continues without resume safety.
@@ -1590,7 +1590,7 @@ pub enum PlanCommand {
     /// `<slug>.gate-source*.md` from `playbook path plans`, never the final plan
     /// or its quality report. Prints the removed file names, one per line. Safe
     /// to repeat: nothing to remove exits 0. Exit 1 for a bad slug or flags, 2
-    /// when a symlink leaves the folder or a removal fails (nothing removed
+    /// when a symlink leaves the directory or a removal fails (nothing removed
     /// after a refusal). `--stale` lists leftovers of every slug that already
     /// has a final plan and deletes them only with `--yes`.
     ///
@@ -1608,7 +1608,7 @@ pub enum PlanCommand {
         /// Clear leftovers for every slug that already has a final plan; dry run unless `--yes`
         #[arg(long)]
         stale: bool,
-        /// Only clear files at least this many days old. Needs `--stale`. A plan being re-planned today is left alone with the default
+        /// Only clear files at least this many days old. Needs `--stale`. By default a plan being re-planned today is left alone, because files under one day old are kept
         #[arg(long, default_value_t = 1, requires = "stale")]
         older_than: u64,
         /// With `--stale`, actually delete
@@ -1856,7 +1856,7 @@ pub enum ReviewCommand {
         /// Always take the swarm path
         #[arg(long)]
         all_lenses: bool,
-        /// The repository to measure in; defaults to the current directory
+        /// Repo directory to measure in. Defaults to the current directory
         #[arg(long)]
         dir: Option<PathBuf>,
     },
@@ -2771,7 +2771,7 @@ pub enum SegmentCommand {
     Branch {
         #[command(flatten)]
         naming: SegmentNaming,
-        /// How the Segment relates to the previous one
+        /// How the plan's Segments are delivered
         #[arg(long, value_enum)]
         topology: SegmentTopology,
         /// Previous Segment's branch, for a stacked Segment past the first

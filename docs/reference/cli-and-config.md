@@ -100,7 +100,7 @@ Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`
 
 ### `playbook adr`
 
-Work with ADR records, such as the next free number
+Work with ADRs, such as the next free record number
 
 Subcommands: `next`
 
@@ -973,7 +973,7 @@ First moves any legacy folders from the old repo-local location. `plugin-root` p
 
 ### `playbook plan`
 
-Manage the plan files that `/playbook:plan` writes
+Save plan checkpoints, write Work Unit briefs, clear scratch files
 
 Subcommands: `brief`, `checkpoint`, `cleanup`
 
@@ -998,7 +998,7 @@ Example: `playbook plan brief docs/plan.md WU-1 WU-2 --out /tmp/briefs --verify 
 
 Print a topic's checkpoint path, or save the checkpoint
 
-Without `--write` it creates the plans folder and prints the path, then `found` or `not-found`. With `--write` it replaces the checkpoint with stdin under a directory lock. A failed save prints a one-line notice and still exits 0, so planning continues without resume safety.
+Without `--write` it creates the plans directory and prints the path, then `found` or `not-found`. With `--write` it replaces the checkpoint with stdin under a directory lock. A failed save prints a one-line notice and still exits 0, so planning continues without resume safety.
 
 Example: `playbook plan checkpoint my-topic`
 
@@ -1009,7 +1009,7 @@ Example: `playbook plan checkpoint my-topic`
 
 Remove the scratch files a finished plan leaves in the plans directory
 
-Removes exactly `<slug>.checkpoint.md`, `<slug>.checkpoint.md.lock` and `<slug>.gate-source*.md` from `playbook path plans`, never the final plan or its quality report. Prints the removed file names, one per line. Safe to repeat: nothing to remove exits 0. Exit 1 for a bad slug or flags, 2 when a symlink leaves the folder or a removal fails (nothing removed after a refusal). `--stale` lists leftovers of every slug that already has a final plan and deletes them only with `--yes`.
+Removes exactly `<slug>.checkpoint.md`, `<slug>.checkpoint.md.lock` and `<slug>.gate-source*.md` from `playbook path plans`, never the final plan or its quality report. Prints the removed file names, one per line. Safe to repeat: nothing to remove exits 0. Exit 1 for a bad slug or flags, 2 when a symlink leaves the directory or a removal fails (nothing removed after a refusal). `--stale` lists leftovers of every slug that already has a final plan and deletes them only with `--yes`.
 
 Example: `playbook plan cleanup my-topic --dry-run`
 
@@ -1017,7 +1017,7 @@ Example: `playbook plan cleanup my-topic --dry-run`
 - `--dry-run`: Only list what would be removed
 - `--json`: Print the result as JSON
 - `--stale`: Clear leftovers for every slug that already has a final plan; dry run unless `--yes`
-- `--older-than <OLDER_THAN>`: Only clear files at least this many days old. Needs `--stale`. A plan being re-planned today is left alone with the default
+- `--older-than <OLDER_THAN>`: Only clear files at least this many days old. Needs `--stale`. By default a plan being re-planned today is left alone, because files under one day old are kept
 - `--yes`: With `--stale`, actually delete
 
 ### `playbook plans`
@@ -1196,7 +1196,7 @@ Example: `playbook review size --base main`
 - `--base <BASE>`: The ref the diff starts from
 - `--head <HEAD>`: The ref the diff ends at
 - `--all-lenses`: Always take the swarm path
-- `--dir <DIR>`: The repository to measure in; defaults to the current directory
+- `--dir <DIR>`: Repo directory to measure in. Defaults to the current directory
 
 ### `playbook review suggest`
 
@@ -1293,7 +1293,7 @@ Example: `playbook segment branch --type feat --plan-slug my-plan --n 2 --title 
 - `--title <TITLE>`: Segment title, kebab-cased and truncated into the branch name
 - `--default-branch <DEFAULT_BRANCH>`: Default branch of the repo
 - `--dir <DIR>`: Repo directory to run in. Defaults to the current directory
-- `--topology <TOPOLOGY>`: How the Segment relates to the previous one (one of `stacked`, `independent`, `single`)
+- `--topology <TOPOLOGY>`: How the plan's Segments are delivered (one of `stacked`, `independent`, `single`)
 - `--prev-branch <PREV_BRANCH>`: Previous Segment's branch, for a stacked Segment past the first
 - `--land`: Branch off the fetched origin default branch, at the land boundary
 
@@ -1366,7 +1366,7 @@ Check the shared settings template is valid
 
 Exits 0 when valid and 1 with a message when not.
 
-Example: `playbook settings check seed/template.json .`
+Example: `playbook settings check my-template.json .`
 
 - `<TEMPLATE>`: Shared settings template to check
 - `<REPO_ROOT>`: Repo root that every hook command must resolve inside
@@ -1377,7 +1377,7 @@ Create the shared settings template from a live settings.json
 
 Takes the hooks and status line from the live file and keeps the permissions of the current seed. Prints the new seed.
 
-Example: `playbook settings gen ~/.claude/settings.json seed/template.json`
+Example: `playbook settings gen ~/.claude/settings.json my-template.json`
 
 - `<SRC>`: Live settings.json to start from
 - `<SEED>`: Current seed, whose permissions block is kept
