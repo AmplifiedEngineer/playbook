@@ -64,6 +64,7 @@ How the machine works, and why it is shaped this way.
 - [The memory system](internals/13-memory-system.md): the global, org, and project fact store, typed edges, and how it feeds the commands.
 - [Why the pieces are shaped this way](internals/14-why-the-pieces-are-shaped-this-way.md): why commands, skills, agents and hooks are separate, why each model and effort level was chosen, and where to change them.
 - [Codex skills](internals/15-codex-skills.md): where `playbook skills sync` puts the playbook skills for Codex, how names, ownership and rendering work, and what Codex lacks.
+- [Code intelligence](internals/16-code-intelligence.md): how `playbook code definition`, `hover`, `refs` and `diagnostics` use language servers, the trust gate, the output states and the limits.
 
 ## Decisions
 
