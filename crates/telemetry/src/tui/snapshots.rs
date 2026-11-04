@@ -27,10 +27,17 @@ use std::path::PathBuf;
 const NOW: i64 = 1_788_400_000;
 const DAY: i64 = 86_400;
 
-fn event(age_secs: i64, session: &str, model: &str, repo: &str, cost: f64) -> UsageEvent {
+fn event_at(
+    now: i64,
+    age_secs: i64,
+    session: &str,
+    model: &str,
+    repo: &str,
+    cost: f64,
+) -> UsageEvent {
     UsageEvent {
         event_id: format!("{age_secs}{session}{model}"),
-        timestamp: NOW - age_secs,
+        timestamp: now - age_secs,
         session_id: session.into(),
         model: model.into(),
         repo: repo.into(),
@@ -44,12 +51,17 @@ fn event(age_secs: i64, session: &str, model: &str, repo: &str, cost: f64) -> Us
 }
 
 fn fixture() -> Vec<UsageEvent> {
+    fixture_at(NOW)
+}
+
+/// The fixed events as they would look when the clock reads `now`.
+pub(super) fn fixture_at(now: i64) -> Vec<UsageEvent> {
     let mut events = vec![
-        event(20, "s-live", "claude-opus-5", "alpha", 0.75),
-        event(300, "s-live", "claude-opus-5", "alpha", 0.5),
-        event(2 * DAY, "s-old", "claude-sonnet-5", "beta", 1.25),
-        event(9 * DAY, "s-old", "claude-opus-5", "beta", 6.0),
-        event(20 * DAY, "s-older", "claude-haiku-5", "gamma", 0.1),
+        event_at(now, 20, "s-live", "claude-opus-5", "alpha", 0.75),
+        event_at(now, 300, "s-live", "claude-opus-5", "alpha", 0.5),
+        event_at(now, 2 * DAY, "s-old", "claude-sonnet-5", "beta", 1.25),
+        event_at(now, 9 * DAY, "s-old", "claude-opus-5", "beta", 6.0),
+        event_at(now, 20 * DAY, "s-older", "claude-haiku-5", "gamma", 0.1),
     ];
     // A few more days of synthetic spend so the charts have a shape. Every
     // fifth day is idle. Haiku stays the smallest model by a wide margin.
@@ -63,7 +75,8 @@ fn fixture() -> Vec<UsageEvent> {
             1 => ("claude-sonnet-5", "beta", base / 2.0),
             _ => ("claude-haiku-5", "gamma", base / 100.0),
         };
-        events.push(event(
+        events.push(event_at(
+            now,
             d * DAY + 3 * 3_600,
             &format!("s-{d}"),
             model,

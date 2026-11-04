@@ -26,6 +26,8 @@ pub mod panels;
 mod parity;
 pub mod projection;
 pub mod scale;
+#[cfg(test)]
+mod screenshot;
 pub mod sessions_view;
 #[cfg(test)]
 mod snapshots;

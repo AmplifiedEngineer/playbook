@@ -6,6 +6,8 @@
 
 The monthly view with sample data. Press `m` for this month, or run `pbtop --range month`.
 
+The picture is drawn by a test from the real view and the default theme, so its colors follow the theme. After a change to the view or the theme, rebuild it with `UPDATE_SNAPSHOTS=1 cargo test -p playbook-telemetry --lib tui::screenshot`. The same test fails when the committed file differs from what the code draws.
+
 Install it with either command:
 
 ```bash
