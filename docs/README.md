@@ -64,6 +64,7 @@ How the machine works, and why it is shaped this way.
 - [The memory system](internals/13-memory-system.md): the global, org, and project fact store, typed edges, and how it feeds the commands.
 - [Why the pieces are shaped this way](internals/14-why-the-pieces-are-shaped-this-way.md): why commands, skills, agents and hooks are separate, why each model and effort level was chosen, and where to change them.
 - [Codex skills](internals/15-codex-skills.md): where `playbook skills sync` puts the playbook skills for Codex, how names, ownership and rendering work, and what Codex lacks.
+- [PR-Agent and the review pipeline](internals/16-pr-agent-and-the-review-pipeline.md): the decision to try PR-Agent's ideas in the playbook review pipeline first, and which ones.
 
 ## Decisions
 
