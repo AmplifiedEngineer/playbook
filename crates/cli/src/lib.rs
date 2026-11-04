@@ -442,7 +442,7 @@ pub enum Command {
     ///
     /// Example: `playbook completions zsh`
     Completions {
-        /// The shell to print the script for
+        /// Shell to print the script for
         #[arg(value_enum)]
         shell: completions::CompletionShell,
     },
@@ -465,14 +465,12 @@ pub enum Command {
         #[command(subcommand)]
         sub: DocCommand,
     },
-    /// Read single facts that the health check uses
+    /// Check the playbook setup, or read one fact the check uses
     ///
-    /// The full health check is the `/playbook:doctor` command inside Claude
-    /// Code. These subcommands print one fact each, such as pending
-    /// migrations, plugin version or hook wiring, and help when a layer
-    /// reports a miss.
-    ///
-    /// Example: `playbook doctor pending-migrations`
+    /// `playbook doctor check` runs the full health check, the same one the
+    /// `/playbook:doctor` command uses. The other subcommands print one fact
+    /// each, such as pending migrations, plugin version or hook wiring, and
+    /// help when a layer reports a miss.
     ///
     /// `playbook doctor --fix` repairs playbook's own files after an upgrade
     /// and prints the list of what still needs you, the same as
@@ -480,6 +478,8 @@ pub enum Command {
     /// attribution OFF, the default, by adding the missing `attribution`
     /// keys; that yes is the only Claude Code setting it writes. A no stores
     /// attribution ON.
+    ///
+    /// Example: `playbook doctor pending-migrations`
     #[command(args_conflicts_with_subcommands = true, subcommand_required = false)]
     Doctor {
         /// Run the safe migrations for playbook's own files, then list what needs you
@@ -513,7 +513,7 @@ pub enum Command {
     ///
     /// Example: `playbook migrate --status`
     Migrate {
-        /// List each migration with the release that ships it, its scope and state, the recorded and running versions, and what needs you, writing nothing
+        /// List each migration with its release, scope and state, writing nothing
         #[arg(long, conflicts_with = "dry_run")]
         status: bool,
         /// Show the migrations a run would start and what needs you, writing nothing
@@ -878,7 +878,7 @@ pub enum Command {
     ///
     /// Example: `playbook commands pr`
     Commands {
-        /// A command or group, such as `pr` or `worktree review`
+        /// Command or group to list, such as `pr` or `worktree review`
         group: Vec<String>,
         /// Print a JSON array with one object per command: command, purpose, access, args, subcommands, intents
         #[arg(long)]
@@ -1015,6 +1015,8 @@ pub enum Command {
     /// Writes to `~/.claude.json` so Claude Code's first-launch trust prompt
     /// does not block `playbook cc` or `playbook ccd`. Always exits 0, even on failure, so a
     /// script can call it without checking.
+    ///
+    /// Example: `playbook trust /Users/me/project`
     Trust {
         /// Absolute path of the directory to trust
         path: String,
@@ -2004,36 +2006,44 @@ pub enum DoctorCommand {
         #[arg(long)]
         json: bool,
     },
-    /// List files you edited after playbook placed them
+    /// List the manual migration findings that need you
     ///
     /// Prints one line per finding, or nothing when none is pending.
     PendingMigrations,
     /// Print the version from a plugin manifest
     ///
     /// Prints an empty line if the file is missing, unreadable, or has no version.
+    ///
+    /// Example: `playbook doctor plugin-version plugin.json`
     PluginVersion {
-        /// Plugin manifest to read
+        /// Path of the plugin manifest to read
         path: PathBuf,
     },
     /// Print the status line command from a settings.json
     ///
     /// Prints an empty line if the file is missing, unreadable, or has none.
+    ///
+    /// Example: `playbook doctor statusline-command settings.json`
     StatuslineCommand {
-        /// settings.json to read
+        /// Path of the settings.json to read
         path: PathBuf,
     },
     /// List every hook command in a settings.json, one per line
     ///
     /// Prints nothing if the file is unreadable, invalid, or has no hooks.
+    ///
+    /// Example: `playbook doctor hook-commands settings.json`
     HookCommands {
-        /// settings.json to read
+        /// Path of the settings.json to read
         path: PathBuf,
     },
     /// Count the commands wired to each named guard for one event
     ///
     /// Prints one `guard=count` line per guard.
+    ///
+    /// Example: `playbook doctor hook-commands-for-event settings.json PreToolUse rm-workspace-guard`
     HookCommandsForEvent {
-        /// settings.json to read
+        /// Path of the settings.json to read
         path: PathBuf,
         /// Event name, such as `PreToolUse`
         event: String,
@@ -2043,12 +2053,14 @@ pub enum DoctorCommand {
     /// Count hook commands that match a pattern
     ///
     /// Counts across every event, or only one if you name it.
+    ///
+    /// Example: `playbook doctor hook-commands-matching settings.json guard`
     HookCommandsMatching {
-        /// settings.json to read
+        /// Path of the settings.json to read
         path: PathBuf,
         /// Regex to look for anywhere in a command
         pattern: String,
-        /// Only count this event (default: every event)
+        /// Event to count, every event when left out
         event: Option<String>,
     },
 }
@@ -2098,13 +2110,17 @@ pub enum ToolsCommand {
 /// `playbook deps` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum DepsCommand {
-    /// Keep each tool on PATH and install only the missing ones with
-    /// Homebrew, from the `brew` and `tap` lines of a Brewfile.
+    /// Install missing Brewfile tools with Homebrew
+    ///
+    /// Leaves each tool already on PATH alone, and reads the `brew` and `tap`
+    /// lines of the Brewfile.
+    ///
+    /// Example: `playbook deps ensure --builtin`
     Ensure {
-        /// Brewfile to read; defaults to `Brewfile` in the current directory.
+        /// Brewfile to read, `Brewfile` in the current directory by default
         #[arg(conflicts_with = "builtin")]
         brewfile: Option<PathBuf>,
-        /// Read the Brewfile built into this binary instead of a file.
+        /// Read the Brewfile built into this binary instead of a file
         #[arg(long)]
         builtin: bool,
     },
@@ -2575,11 +2591,21 @@ mod tests {
         // Assert
         assert!(texts.len() > 100, "the walk found too little help text");
         for (place, text) in texts {
-            for banned in ["src/", "shell/", "::", ".rs", ".sh", ".py"] {
+            for banned in ["src/", "shell/", "::"] {
                 assert!(
                     !text.contains(banned),
                     "help for `{place}` leaks `{banned}`: {text}"
                 );
+            }
+            // A file extension ends the word, so `.sh` must not match `.shared`.
+            for ext in [".rs", ".sh", ".py"] {
+                let leaked = text.match_indices(ext).any(|(at, _)| {
+                    !text[at + ext.len()..]
+                        .chars()
+                        .next()
+                        .is_some_and(char::is_alphanumeric)
+                });
+                assert!(!leaked, "help for `{place}` leaks `{ext}`: {text}");
             }
             assert!(
                 !text.contains('\u{2014}') && !text.contains('\u{2013}'),
