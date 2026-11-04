@@ -1149,7 +1149,8 @@ jobs:
     timeout-minutes: 30
     environment: package-repo
     concurrency:
-      group: package-repo
+      # A dry run deploys nothing, so it must not queue behind or replace a real release.
+      group: ${{ needs.plan.outputs.dry_run == 'true' && 'package-repo-dry-run' || 'package-repo' }}
       cancel-in-progress: false
     permissions:
       contents: read
@@ -1157,6 +1158,9 @@ jobs:
     outputs:
       # true when a signed site was uploaded for package-repo-deploy.
       built: ${{ steps.build.outputs.built }}
+      # The hashes the public URL must serve once the deployment is live.
+      inrelease_sha: ${{ steps.build.outputs.inrelease_sha }}
+      repomd_sha: ${{ steps.build.outputs.repomd_sha }}
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -1185,8 +1189,9 @@ jobs:
       - name: Build and sign the repository
         id: build
         env:
-          SECRET_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
-          SECRET_PASSPHRASE: ${{ secrets.PACKAGE_SIGNING_PASSPHRASE }}
+          # A dry run signs with a throwaway key, so it never receives the real one.
+          SECRET_KEY: ${{ needs.plan.outputs.dry_run != 'true' && secrets.PACKAGE_SIGNING_KEY || '' }}
+          SECRET_PASSPHRASE: ${{ needs.plan.outputs.dry_run != 'true' && secrets.PACKAGE_SIGNING_PASSPHRASE || '' }}
           SOURCE_DATE_EPOCH: ${{ steps.fetch.outputs.epoch }}
         run: |
           set -euo pipefail
@@ -1213,6 +1218,8 @@ jobs:
             echo "version=${versions[-1]}"
             echo "previous=${versions[-2]:-}"
             echo "built=true"
+            echo "inrelease_sha=$(sha256sum "$RUNNER_TEMP/site/apt/dists/stable/InRelease" | cut -d' ' -f1)"
+            echo "repomd_sha=$(sha256sum "$RUNNER_TEMP/site/rpm/x86_64/repodata/repomd.xml" | cut -d' ' -f1)"
           } >> "$GITHUB_OUTPUT"
 
       - name: Install from the built repository in containers
@@ -1252,15 +1259,20 @@ jobs:
       - name: Check the public URL
         env:
           URL: ${{ steps.deployment.outputs.page_url }}
+          INRELEASE_SHA: ${{ needs.package-repo-sign.outputs.inrelease_sha }}
+          REPOMD_SHA: ${{ needs.package-repo-sign.outputs.repomd_sha }}
         run: |
           set -euo pipefail
           home="$(mktemp -d)"
           export GNUPGHOME="$home"
           for _ in $(seq 1 30); do
+            # The served files must be the ones this run built, not an earlier release.
             if curl -fsSL -o key.asc "${URL}playbook.asc" \
               && curl -fsSL -o InRelease "${URL}apt/dists/stable/InRelease" \
               && curl -fsSL -o repomd.xml "${URL}rpm/x86_64/repodata/repomd.xml" \
-              && curl -fsSL -o repomd.xml.asc "${URL}rpm/x86_64/repodata/repomd.xml.asc"; then
+              && curl -fsSL -o repomd.xml.asc "${URL}rpm/x86_64/repodata/repomd.xml.asc" \
+              && [ "$(sha256sum InRelease | cut -d' ' -f1)" = "$INRELEASE_SHA" ] \
+              && [ "$(sha256sum repomd.xml | cut -d' ' -f1)" = "$REPOMD_SHA" ]; then
               gpg --batch --quiet --import key.asc
               gpg --batch --verify InRelease
               gpg --batch --verify repomd.xml.asc repomd.xml
