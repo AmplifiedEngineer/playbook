@@ -1,6 +1,6 @@
 # Code intelligence: language servers behind `playbook code`
 
-`playbook code` answers from a local Tree-sitter index. Four commands add exact answers from a language server: `definition`, `hover`, `refs <path>:<line>:<column>` and `diagnostics`. This page records how they work, what they print and the rules that keep them safe. The decision is in [ADR 0058](../adr/0058-answer-symbol-questions-with-language-servers.md).
+`playbook code` answers from a local Tree-sitter index. Four commands add exact answers from a language server: `definition`, `hover`, `refs <path>:<line>:<column>` and `diagnostics`. This page records how they work, what they print and the rules that keep them safe.
 
 ## What runs when
 
