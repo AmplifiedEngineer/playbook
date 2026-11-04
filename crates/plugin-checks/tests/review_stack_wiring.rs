@@ -49,3 +49,43 @@ fn this_pr_only_is_the_default_and_the_auto_choice() {
     assert!(text.contains("never the default branch"));
     assert!(!text.contains("Assumed: whole stack"));
 }
+
+#[test]
+fn review_asks_the_scope_before_the_depth() {
+    let text = read("commands/review.md");
+    for needle in [
+        "## Step 1b: Stack scope",
+        "Intent: pr-stack",
+        "--scope stack",
+        "--this-pr",
+        "--whole-stack",
+        "Assumed: this PR only (auto mode).",
+        "--this-pr and --whole-stack conflict",
+        "stack-review.md",
+        "), scope: <this PR | whole stack | not a stack>.",
+    ] {
+        assert!(text.contains(needle), "review.md lacks `{needle}`");
+    }
+    assert!(
+        !text.contains("changed in the stack question"),
+        "the child no longer asks when called from review"
+    );
+    let at = |needle: &str| text.find(needle).unwrap_or_else(|| panic!("no `{needle}`"));
+    let scope_step = at("## Step 1b: Stack scope");
+    assert!(scope_step < at("## Step 2"), "scope must come before depth");
+    let in_scope_step = &text[scope_step..at("## Step 2")];
+    let summary = in_scope_step
+        .find("Stack of <n> PRs")
+        .expect("summary line");
+    let question = in_scope_step
+        .find("1. This PR only")
+        .expect("scope question");
+    assert!(summary < question, "summary must come before the question");
+}
+
+#[test]
+fn routing_scores_a_whole_stack_on_the_union_of_the_open_files() {
+    let text = read("skills/grounding-review/references/review-routing.md");
+    assert!(text.contains("union of the open PRs' files"));
+    assert!(text.contains("review.stackMaxPrs"));
+}
