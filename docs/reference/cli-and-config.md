@@ -100,7 +100,7 @@ Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`
 
 ### `playbook adr`
 
-ADR helpers
+Work with ADRs, such as the next free record number
 
 Subcommands: `next`
 
@@ -139,13 +139,13 @@ Example: `playbook agents variants --ceiling medium`
 
 ### `playbook atlassian`
 
-Checks for the `playbook:atlassian` skill
+Check the Atlassian tools the `playbook:atlassian` skill uses
 
 Subcommands: `check`
 
 ### `playbook atlassian check`
 
-Check that `acli` meets the minimum version and whether `twg` is installed
+Check the `acli` version and whether `twg` is installed
 
 Prints one line for `acli` (`ok`, `too old` with the `brew upgrade atlassian/acli/acli` hint, `version unreadable` or `missing`) and one for `twg`. Exits 0 when `acli` is usable and 1 otherwise, so the skill can fall back to the next route. Whether the Atlassian MCP tools are connected is left to the skill.
 
@@ -804,7 +804,7 @@ Example: `playbook gate snapshot my-plan adversarial test-review`
 
 ### `playbook glossary`
 
-Append to the repo's `GLOSSARY.md`
+Append entries to the repo's `GLOSSARY.md` file
 
 Subcommands: `add`
 
@@ -812,7 +812,9 @@ Subcommands: `add`
 
 Append one entry line to `GLOSSARY.md` at the repo root
 
-- `<ENTRY>`: The entry text
+Example: `playbook glossary add "WU: Work Unit"`
+
+- `<ENTRY>`: Entry text to append
 
 ### `playbook handoff`
 
@@ -868,15 +870,15 @@ Lists the hooks setup adds to settings.json, grouped by purpose. Changes nothing
 
 ### `playbook learn`
 
-Helpers for `/playbook:learn-project`
+Gather the repo facts that `/playbook:learn-project` reads
 
 Subcommands: `collect`, `preflight`
 
 ### `playbook learn collect`
 
-Count the git history or the repo layout for the learn-project collectors
+Count the git history or the repo layout
 
-`git` prints contributors, churn hotspots, commit types, remote branch prefixes, recent tags and commits per month. `structure` prints the top level, languages, entry points, build manifests with their scripts and targets, test and lint config, Dockerfiles, CI, infrastructure as code, migrations, model files and `scripts/`. Both print one JSON object, read only through `git`, with every count capped.
+Feeds the `/playbook:learn-project` collectors. `git` prints contributors, churn hotspots, commit types, remote branch prefixes, recent tags and commits per month. `structure` prints the top level, languages, entry points, build manifests with their scripts and targets, test and lint config, Dockerfiles, CI, infrastructure as code, migrations, model files and `scripts/`. Both print one JSON object, read only through `git`, with every count capped.
 
 Example: `playbook learn collect git structure`
 
@@ -1005,23 +1007,23 @@ First moves any legacy folders from the old repo-local location. `plugin-root` p
 
 ### `playbook plan`
 
-Helpers for `/playbook:plan`
+Save plan checkpoints, write Work Unit briefs, clear scratch files
 
 Subcommands: `brief`, `checkpoint`, `cleanup`
 
 ### `playbook plan brief`
 
-Write the per-Work-Unit brief files `/playbook:implement` gives its subagents
+Write the brief file for each Work Unit
 
-Each `<OUT>/<wu-id>.brief.md` holds a short header (plan, worktree, scoped verify), the Work Unit's own section of the plan verbatim, and a "Relevant memory" list of the facts anchored to its files or matching its title. Every id is checked first: a missing one writes nothing and exits 1. Prints the paths written, one per line.
+`/playbook:implement` gives these files to its subagents. Each `<OUT>/<wu-id>.brief.md` holds a short header (plan, worktree, scoped verify), the Work Unit's own section of the plan verbatim, and a "Relevant memory" list of the facts anchored to its files or matching its title. Every id is checked first: a missing one writes nothing and exits 1. Prints the paths written, one per line.
 
 Example: `playbook plan brief docs/plan.md WU-1 WU-2 --out /tmp/briefs --verify 'cargo test {tests}'`
 
-- `<PLAN>`: The plan or blueprint file
+- `<PLAN>`: Plan or blueprint file
 - `<WUS>`: Work Unit ids, such as `WU-1`
-- `--out <OUT>`: Folder to write the briefs into
+- `--out <OUT>`: Directory to write the briefs into
 - `--worktree <WORKTREE>`: One worktree path for every brief
-- `--worktree-base <WORKTREE_BASE>`: Folder holding one worktree per Work Unit, named by its lower case id
+- `--worktree-base <WORKTREE_BASE>`: Directory holding one worktree per Work Unit, named by its lower case id
 - `--verify <VERIFY>`: Scoped verify command; `{tests}` and `{files}` become the Work Unit's paths
 - `--repo <REPO>`: Repo slug (`owner/name`) for the memory scope; defaults to the origin remote's
 - `--graph <GRAPH>`: Graph JSON file; defaults to the graph in `~/.config/playbook/data/memory.db`
@@ -1030,16 +1032,18 @@ Example: `playbook plan brief docs/plan.md WU-1 WU-2 --out /tmp/briefs --verify 
 
 Print a topic's checkpoint path, or save the checkpoint
 
-Without `--write` it creates the plans folder and prints the path, then `found` or `not-found`. With `--write` it replaces the checkpoint with stdin under a directory lock. A failed save prints a one-line notice and still exits 0, so planning continues without resume safety.
+Without `--write` it creates the plans directory and prints the path, then `found` or `not-found`. With `--write` it replaces the checkpoint with stdin under a directory lock. A failed save prints a one-line notice and still exits 0, so planning continues without resume safety.
+
+Example: `playbook plan checkpoint my-topic`
 
 - `<SLUG>`: Kebab-case topic slug, or the ticket id in lower case
 - `--write`: Replace the checkpoint with stdin
 
 ### `playbook plan cleanup`
 
-Remove the scratch files a finished plan leaves in the plans folder
+Remove the scratch files a finished plan leaves in the plans directory
 
-Removes exactly `<slug>.checkpoint.md`, `<slug>.checkpoint.md.lock` and `<slug>.gate-source*.md` from `playbook path plans`, never the final plan or its quality report. Prints the removed file names, one per line. Safe to repeat: nothing to remove exits 0. Exit 1 for a bad slug or flags, 2 when a symlink leaves the folder or a removal fails (nothing removed after a refusal). `--stale` lists leftovers of every slug that already has a final plan and deletes them only with `--yes`.
+Removes exactly `<slug>.checkpoint.md`, `<slug>.checkpoint.md.lock` and `<slug>.gate-source*.md` from `playbook path plans`, never the final plan or its quality report. Prints the removed file names, one per line. Safe to repeat: nothing to remove exits 0. Exit 1 for a bad slug or flags, 2 when a symlink leaves the directory or a removal fails (nothing removed after a refusal). `--stale` lists leftovers of every slug that already has a final plan and deletes them only with `--yes`.
 
 Example: `playbook plan cleanup my-topic --dry-run`
 
@@ -1047,7 +1051,7 @@ Example: `playbook plan cleanup my-topic --dry-run`
 - `--dry-run`: Only list what would be removed
 - `--json`: Print the result as JSON
 - `--stale`: Clear leftovers for every slug that already has a final plan; dry run unless `--yes`
-- `--older-than <OLDER_THAN>`: With `--stale`, only files at least this many days old (default 1, so a plan being re-planned today is left alone)
+- `--older-than <OLDER_THAN>`: Only clear files at least this many days old. Needs `--stale`. By default a plan being re-planned today is left alone, because files under one day old are kept
 - `--yes`: With `--stale`, actually delete
 
 ### `playbook plans`
@@ -1196,6 +1200,8 @@ Lint files for banned phrases, structures and em or en dashes
 
 Prints `path:line: finding` for each problem. Fenced code, inline code, URLs, file paths and quoted lines are skipped. Exits 0 unless `--strict` is given and a hard finding exists, or a file cannot be read. With `GITHUB_ACTIONS=true` it prints annotations.
 
+Example: `playbook prose check README.md`
+
 - `<FILES>`: Files to check
 - `--strict`: Exit 1 when a hard finding exists
 
@@ -1317,7 +1323,7 @@ Example: `playbook sanitize pr-text /tmp/body.md`
 
 ### `playbook segment`
 
-The git recipes `/playbook:implement` runs for a Segment
+Run the git recipes `/playbook:implement` uses for a Segment
 
 Subcommands: `branch`, `resplit`, `size`
 
@@ -1330,14 +1336,14 @@ Names the branch `<type>/<plan-slug>-s<N>-<title>` and creates it from the right
 Example: `playbook segment branch --type feat --plan-slug my-plan --n 2 --title "Parser core" --topology stacked --prev-branch feat/my-plan-s1-schema`
 
 - `--type <KIND>`: Conventional commit type for the branch name, such as feat
-- `--plan-slug <PLAN_SLUG>`: The plan slug
-- `--n <N>`: The Segment number
-- `--title <TITLE>`: The Segment title, kebab-cased and truncated into the branch name
-- `--default-branch <DEFAULT_BRANCH>`: The repository's default branch
-- `--dir <DIR>`: The repository to run in; defaults to the current directory
-- `--topology <TOPOLOGY>`: stacked, independent or single (one of `stacked`, `independent`, `single`)
-- `--prev-branch <PREV_BRANCH>`: The previous Segment's branch, for a stacked Segment past the first
-- `--land`: The land boundary: branch off the fetched origin default branch
+- `--plan-slug <PLAN_SLUG>`: Plan slug
+- `--n <N>`: Segment number
+- `--title <TITLE>`: Segment title, kebab-cased and truncated into the branch name
+- `--default-branch <DEFAULT_BRANCH>`: Default branch of the repo
+- `--dir <DIR>`: Repo directory to run in. Defaults to the current directory
+- `--topology <TOPOLOGY>`: How the plan's Segments are delivered (one of `stacked`, `independent`, `single`)
+- `--prev-branch <PREV_BRANCH>`: Previous Segment's branch, for a stacked Segment past the first
+- `--land`: Branch off the fetched origin default branch, at the land boundary
 
 ### `playbook segment resplit`
 
@@ -1348,12 +1354,12 @@ Finds the last commit that keeps `BASE...commit` within the limit, renames the c
 Example: `playbook segment resplit --base main --type feat --plan-slug my-plan --n 2 --title "Parser core"`
 
 - `--type <KIND>`: Conventional commit type for the branch name, such as feat
-- `--plan-slug <PLAN_SLUG>`: The plan slug
-- `--n <N>`: The Segment number
-- `--title <TITLE>`: The Segment title, kebab-cased and truncated into the branch name
-- `--default-branch <DEFAULT_BRANCH>`: The repository's default branch
-- `--dir <DIR>`: The repository to run in; defaults to the current directory
-- `--base <BASE>`: The Segment's base ref
+- `--plan-slug <PLAN_SLUG>`: Plan slug
+- `--n <N>`: Segment number
+- `--title <TITLE>`: Segment title, kebab-cased and truncated into the branch name
+- `--default-branch <DEFAULT_BRANCH>`: Default branch of the repo
+- `--dir <DIR>`: Repo directory to run in. Defaults to the current directory
+- `--base <BASE>`: Base ref of the Segment
 - `--limit <LIMIT>`: Changed lines at which a Segment is over budget
 
 ### `playbook segment size`
@@ -1364,9 +1370,9 @@ Prints `lines=N files=M over=true|false` for `BASE...HEAD`; `over` is true past 
 
 Example: `playbook segment size --base main`
 
-- `--base <BASE>`: The Segment's base ref
+- `--base <BASE>`: Base ref of the Segment
 - `--limit <LIMIT>`: Changed lines at which a Segment is over budget
-- `--dir <DIR>`: The repository to run in; defaults to the current directory
+- `--dir <DIR>`: Repo directory to run in. Defaults to the current directory
 
 ### `playbook sessions`
 

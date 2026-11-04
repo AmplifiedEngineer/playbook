@@ -856,12 +856,12 @@ pub enum Command {
         #[arg(long)]
         create: bool,
     },
-    /// Helpers for `/playbook:plan`
+    /// Save plan checkpoints, write Work Unit briefs, clear scratch files
     Plan {
         #[command(subcommand)]
         sub: PlanCommand,
     },
-    /// Append to the repo's `GLOSSARY.md`
+    /// Append entries to the repo's `GLOSSARY.md` file
     Glossary {
         #[command(subcommand)]
         sub: GlossaryCommand,
@@ -887,7 +887,7 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// ADR helpers
+    /// Work with ADRs, such as the next free record number
     Adr {
         #[command(subcommand)]
         sub: AdrCommand,
@@ -897,12 +897,12 @@ pub enum Command {
         #[command(subcommand)]
         sub: ProseCommand,
     },
-    /// Checks for the `playbook:atlassian` skill
+    /// Check the Atlassian tools the `playbook:atlassian` skill uses
     Atlassian {
         #[command(subcommand)]
         sub: AtlassianCommand,
     },
-    /// Helpers for `/playbook:learn-project`
+    /// Gather the repo facts that `/playbook:learn-project` reads
     Learn {
         #[command(subcommand)]
         sub: LearnCommand,
@@ -991,7 +991,7 @@ pub enum Command {
         #[command(subcommand)]
         sub: ReviewCommand,
     },
-    /// The git recipes `/playbook:implement` runs for a Segment
+    /// Run the git recipes `/playbook:implement` uses for a Segment
     Segment {
         #[command(subcommand)]
         sub: SegmentCommand,
@@ -1590,10 +1590,12 @@ pub enum PrCommand {
 pub enum PlanCommand {
     /// Print a topic's checkpoint path, or save the checkpoint
     ///
-    /// Without `--write` it creates the plans folder and prints the path, then
+    /// Without `--write` it creates the plans directory and prints the path, then
     /// `found` or `not-found`. With `--write` it replaces the checkpoint with
     /// stdin under a directory lock. A failed save prints a one-line notice and
     /// still exits 0, so planning continues without resume safety.
+    ///
+    /// Example: `playbook plan checkpoint my-topic`
     Checkpoint {
         /// Kebab-case topic slug, or the ticket id in lower case
         slug: String,
@@ -1601,13 +1603,13 @@ pub enum PlanCommand {
         #[arg(long)]
         write: bool,
     },
-    /// Remove the scratch files a finished plan leaves in the plans folder
+    /// Remove the scratch files a finished plan leaves in the plans directory
     ///
     /// Removes exactly `<slug>.checkpoint.md`, `<slug>.checkpoint.md.lock` and
     /// `<slug>.gate-source*.md` from `playbook path plans`, never the final plan
     /// or its quality report. Prints the removed file names, one per line. Safe
     /// to repeat: nothing to remove exits 0. Exit 1 for a bad slug or flags, 2
-    /// when a symlink leaves the folder or a removal fails (nothing removed
+    /// when a symlink leaves the directory or a removal fails (nothing removed
     /// after a refusal). `--stale` lists leftovers of every slug that already
     /// has a final plan and deletes them only with `--yes`.
     ///
@@ -1625,16 +1627,16 @@ pub enum PlanCommand {
         /// Clear leftovers for every slug that already has a final plan; dry run unless `--yes`
         #[arg(long)]
         stale: bool,
-        /// With `--stale`, only files at least this many days old (default 1, so a plan being re-planned today is left alone)
+        /// Only clear files at least this many days old. Needs `--stale`. By default a plan being re-planned today is left alone, because files under one day old are kept
         #[arg(long, default_value_t = 1, requires = "stale")]
         older_than: u64,
         /// With `--stale`, actually delete
         #[arg(long, requires = "stale")]
         yes: bool,
     },
-    /// Write the per-Work-Unit brief files `/playbook:implement` gives its subagents
+    /// Write the brief file for each Work Unit
     ///
-    /// Each `<OUT>/<wu-id>.brief.md` holds a short header (plan, worktree,
+    /// `/playbook:implement` gives these files to its subagents. Each `<OUT>/<wu-id>.brief.md` holds a short header (plan, worktree,
     /// scoped verify), the Work Unit's own section of the plan verbatim, and a
     /// "Relevant memory" list of the facts anchored to its files or matching
     /// its title. Every id is checked first: a missing one writes nothing and
@@ -1642,18 +1644,18 @@ pub enum PlanCommand {
     ///
     /// Example: `playbook plan brief docs/plan.md WU-1 WU-2 --out /tmp/briefs --verify 'cargo test {tests}'`
     Brief {
-        /// The plan or blueprint file
+        /// Plan or blueprint file
         plan: PathBuf,
         /// Work Unit ids, such as `WU-1`
         #[arg(required = true)]
         wus: Vec<String>,
-        /// Folder to write the briefs into
+        /// Directory to write the briefs into
         #[arg(long)]
         out: PathBuf,
         /// One worktree path for every brief
         #[arg(long, conflicts_with = "worktree_base")]
         worktree: Option<String>,
-        /// Folder holding one worktree per Work Unit, named by its lower case id
+        /// Directory holding one worktree per Work Unit, named by its lower case id
         #[arg(long)]
         worktree_base: Option<String>,
         /// Scoped verify command; `{tests}` and `{files}` become the Work Unit's paths
@@ -1672,8 +1674,10 @@ pub enum PlanCommand {
 #[derive(Subcommand, Debug)]
 pub enum GlossaryCommand {
     /// Append one entry line to `GLOSSARY.md` at the repo root
+    ///
+    /// Example: `playbook glossary add "WU: Work Unit"`
     Add {
-        /// The entry text
+        /// Entry text to append
         #[arg(allow_hyphen_values = true)]
         entry: String,
     },
@@ -1688,6 +1692,8 @@ pub enum ProseCommand {
     /// code, URLs, file paths and quoted lines are skipped. Exits 0 unless
     /// `--strict` is given and a hard finding exists, or a file cannot be
     /// read. With `GITHUB_ACTIONS=true` it prints annotations.
+    ///
+    /// Example: `playbook prose check README.md`
     Check {
         /// Files to check
         #[arg(required = true)]
@@ -1711,7 +1717,7 @@ pub enum AdrCommand {
 /// `playbook atlassian` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum AtlassianCommand {
-    /// Check that `acli` meets the minimum version and whether `twg` is installed
+    /// Check the `acli` version and whether `twg` is installed
     ///
     /// Prints one line for `acli` (`ok`, `too old` with the
     /// `brew upgrade atlassian/acli/acli` hint, `version unreadable` or
@@ -1726,9 +1732,9 @@ pub enum AtlassianCommand {
 pub enum LearnCommand {
     /// Name the repo and memory store, probe the tools, and tally JIRA keys
     Preflight,
-    /// Count the git history or the repo layout for the learn-project collectors
+    /// Count the git history or the repo layout
     ///
-    /// `git` prints contributors, churn hotspots, commit types, remote branch
+    /// Feeds the `/playbook:learn-project` collectors. `git` prints contributors, churn hotspots, commit types, remote branch
     /// prefixes, recent tags and commits per month. `structure` prints the
     /// top level, languages, entry points, build manifests with their scripts
     /// and targets, test and lint config, Dockerfiles, CI, infrastructure as
@@ -2814,19 +2820,19 @@ pub struct SegmentNaming {
     /// Conventional commit type for the branch name, such as feat
     #[arg(long = "type")]
     pub kind: String,
-    /// The plan slug
+    /// Plan slug
     #[arg(long)]
     pub plan_slug: String,
-    /// The Segment number
+    /// Segment number
     #[arg(long)]
     pub n: u32,
-    /// The Segment title, kebab-cased and truncated into the branch name
+    /// Segment title, kebab-cased and truncated into the branch name
     #[arg(long)]
     pub title: String,
-    /// The repository's default branch
+    /// Default branch of the repo
     #[arg(long, default_value = "main")]
     pub default_branch: String,
-    /// The repository to run in; defaults to the current directory
+    /// Repo directory to run in. Defaults to the current directory
     #[arg(long)]
     pub dir: Option<PathBuf>,
 }
@@ -2848,13 +2854,13 @@ pub enum SegmentCommand {
     Branch {
         #[command(flatten)]
         naming: SegmentNaming,
-        /// stacked, independent or single
+        /// How the plan's Segments are delivered
         #[arg(long, value_enum)]
         topology: SegmentTopology,
-        /// The previous Segment's branch, for a stacked Segment past the first
+        /// Previous Segment's branch, for a stacked Segment past the first
         #[arg(long)]
         prev_branch: Option<String>,
-        /// The land boundary: branch off the fetched origin default branch
+        /// Branch off the fetched origin default branch, at the land boundary
         #[arg(long)]
         land: bool,
     },
@@ -2865,13 +2871,13 @@ pub enum SegmentCommand {
     ///
     /// Example: `playbook segment size --base main`
     Size {
-        /// The Segment's base ref
+        /// Base ref of the Segment
         #[arg(long)]
         base: String,
         /// Changed lines at which a Segment is over budget
         #[arg(long, default_value_t = 1500)]
         limit: u64,
-        /// The repository to run in; defaults to the current directory
+        /// Repo directory to run in. Defaults to the current directory
         #[arg(long)]
         dir: Option<PathBuf>,
     },
@@ -2888,7 +2894,7 @@ pub enum SegmentCommand {
     Resplit {
         #[command(flatten)]
         naming: SegmentNaming,
-        /// The Segment's base ref
+        /// Base ref of the Segment
         #[arg(long)]
         base: String,
         /// Changed lines at which a Segment is over budget
