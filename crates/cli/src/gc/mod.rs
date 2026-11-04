@@ -5,6 +5,7 @@
 //! through, and one run lock. Stores arrive in later units; this module holds
 //! the types they share.
 
+pub mod apply;
 pub mod build_output;
 pub mod guard;
 pub mod index;

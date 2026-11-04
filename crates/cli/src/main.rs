@@ -425,17 +425,26 @@ fn real_main() {
             restore,
             build_output,
         } => {
-            if yes || restore.is_some() || build_output {
+            if build_output {
                 eprintln!(
-                    "gc: applying changes is not available yet; run `playbook gc` for the report"
+                    "gc: --build-output is not available yet; run `playbook gc` for the report"
                 );
                 std::process::exit(2);
             }
             let root = playbook::common::paths::playbook_root();
             let clock = playbook::gc::default_clock();
+            if yes || restore.is_some() {
+                let (text, code) = match restore {
+                    Some(id) => playbook::gc::apply::restore_command(&root, &*clock, &id),
+                    None => playbook::gc::apply::apply_command(&root, &*clock),
+                };
+                print!("{text}");
+                std::process::exit(code);
+            }
             let registry = playbook::gc::registry(&root);
             let report = playbook::gc::report::report(&registry, clock.now());
             print!("{}", playbook::gc::report::render(&report));
+            print!("{}", playbook::gc::apply::render_anomalies(&root, &*clock));
         }
         Command::Statusline => std::process::exit(statusline::run()),
         Command::Version => print!("{}", Cli::command().render_version()),
