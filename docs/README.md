@@ -94,7 +94,7 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0021](adr/0021-reviewer-at-opus-medium.md) | Ship the reviewer agent at Opus medium | Accepted | 2026-10-10 |
 | [0022](adr/0022-effort-auto-tune-from-evidence.md) | Tune effort from local evidence, in three stages | Accepted | 2026-10-10 |
 | [0023](adr/0023-commands-at-medium.md) | Ship the Opus and Sonnet commands at medium | Accepted | 2026-10-11 |
-| [0024](adr/0024-session-management-view-and-lifecycle.md) | Session management view with a derived record and suggest first lifecycle | Proposed | 2026-10-11 |
+| [0024](adr/0024-session-management-view-and-lifecycle.md) | Session management view with a derived record and suggest first lifecycle | Accepted | 2026-10-11 |
 | [0025](adr/0025-self-improving-playbook.md) | A self improving playbook proposes config patches behind a staged trust ladder | Proposed, amended on 2026-10-21 | 2026-10-11 |
 | [0026](adr/0026-local-code-index-in-the-binary.md) | Ship a local code index in the binary, accepting about 5 MB of size | Accepted | 2026-10-12 |
 | [0027](adr/0027-anydoc-as-optional-local-tool.md) | Use anydoc as an optional local tool found on PATH, never vendored | Superseded by 0051 | 2026-10-12 |

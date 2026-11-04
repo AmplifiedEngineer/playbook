@@ -1,8 +1,8 @@
 # ADR-0024: A Session Management View With a Derived Record and a Suggest-First Lifecycle
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date created:** 2026-10-11
-- **Date modified:** 2026-10-11
+- **Date modified:** 2026-11-04
 
 ## Context
 
@@ -104,7 +104,7 @@ Linking uses the branch first. A session whose branch is the default branch (`ma
 | Anything on a tree with uncommitted or untracked changes, or unpushed commits | never | never. The session goes to a needs attention list. |
 | Anything on a session with activity in the last 15 minutes | never | never |
 
-No code path may call `git reset`, `git checkout --`, `git clean`, `git worktree remove --force` or `git branch -D`. Cleanup is the existing `worktree::remove`, which does not use `--force`, and the existing `worktree-sweep.log` records what it took.
+No lifecycle code path may call `git reset`, `git checkout --`, `git clean` or `git branch -D`. Cleanup is the existing `worktree::remove` and `sweep`, and the existing `worktree-sweep.log` records what it took. Those do call `git worktree remove --force`, so the safety rests on the checks that run first: landed, not in use, clean (untracked files count) and not locked by a live process. The `--force` only lets git drop a tree that has passed those checks, ignored files included. A new lifecycle path must go through the same checks and never add its own forced removal.
 
 Where it runs: a read in the view and in `sessions list` (always), and the existing daily `SessionStart` sweep (`maybe_sweep_worktrees`) for the `auto` cleanup of worktrees. No new daemon and no OS scheduler. A repo nobody opens is not swept, the same known limit as today. Watch mode (#534) can call the same function later.
 
@@ -181,7 +181,7 @@ The record is agent neutral. `agent` comes from the store and Codex rows already
 | Risk | Mitigation |
 | --- | --- |
 | A session wrongly called done and its worktree removed | Cleanup is only the existing `worktree::remove` guards (landed, clean, unlocked), only at `auto`, off by default. A merged PR plus clean tree is the first and only automatic case. |
-| Uncommitted work lost | No forced git command anywhere. A dirty tree moves the session to needs attention. |
+| Uncommitted work lost | No new forced git command. The existing removal runs only after the clean, landed, not in use and unlocked checks. A dirty tree moves the session to needs attention. |
 | `gh` missing, offline or rate limited | `unknown` link, no action. |
 | Hook payload changes between Claude Code releases | Fields are read as optional and a missing field degrades the row. Stage 3 is verified against the installed version in its PR. |
 | Transcript layout changes | The cwd lookup falls back to the repo name from the store. |
