@@ -776,6 +776,7 @@ fn telemetry_off(app: &App) -> String {
     crate::telemetry_status::empty_panel_lines(app.telemetry).join("\n")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn telemetry_split(
     frame: &mut Frame,
     area: Rect,
