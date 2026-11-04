@@ -92,6 +92,20 @@ pub fn for_extension(extension: &str) -> Option<&'static ServerSpec> {
     })
 }
 
+/// The LSP `languageId` for a file extension.
+pub fn language_id(extension: &str) -> &'static str {
+    match extension.to_ascii_lowercase().as_str() {
+        "ts" | "mts" | "cts" => "typescript",
+        "tsx" => "typescriptreact",
+        "js" | "mjs" | "cjs" => "javascript",
+        "jsx" => "javascriptreact",
+        "rs" => "rust",
+        "py" | "pyi" => "python",
+        "go" => "go",
+        _ => "plaintext",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,6 +137,15 @@ mod tests {
         assert_eq!(for_extension("txt").map(|s| s.id), None);
         assert_eq!(by_id("gopls").map(|s| s.executable), Some("gopls"));
         assert!(by_id("nosuch").is_none());
+    }
+
+    #[test]
+    fn every_registered_extension_has_a_language_id() {
+        for spec in &SERVERS {
+            for extension in spec.extensions {
+                assert_ne!(language_id(extension), "plaintext", ".{extension}");
+            }
+        }
     }
 
     #[test]

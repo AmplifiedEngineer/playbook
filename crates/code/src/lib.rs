@@ -20,6 +20,7 @@ pub mod output;
 pub mod ranked;
 pub mod refs;
 pub mod search;
+pub mod semantic;
 pub mod source;
 pub mod status;
 #[cfg(test)]
