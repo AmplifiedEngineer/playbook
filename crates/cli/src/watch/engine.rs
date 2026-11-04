@@ -69,6 +69,8 @@ pub enum EngineError {
     Store(StoreError),
     /// The id is unknown or the item is not waiting for approval.
     NotProposed(i64),
+    /// The id is unknown or the item is not on the dead list.
+    NotDead(i64),
 }
 
 impl std::fmt::Display for EngineError {
@@ -76,6 +78,7 @@ impl std::fmt::Display for EngineError {
         match self {
             Self::Store(e) => e.fmt(f),
             Self::NotProposed(id) => write!(f, "item {id} is not waiting for approval"),
+            Self::NotDead(id) => write!(f, "item {id} is not on the dead list"),
         }
     }
 }
@@ -219,7 +222,8 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
             tx.set_state(id, "approved", None)?;
             tx.stamp_approved(id, now)
         })?;
-        if !lock_free {
+        // A paused watch starts nothing, even for a person's approval.
+        if !lock_free || self.paused()? {
             self.record(&row.rule, &row.key, "approved");
             return Ok(ApproveOutcome::Handed);
         }
@@ -236,12 +240,67 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
     pub fn run_approved(&mut self, repo: &str, rules: &[NamedRule]) -> Result<usize, EngineError> {
         let mut ran = 0;
         for id in self.store.ids_due("approved", self.clock.now())? {
+            if self.paused()? {
+                break;
+            }
             if let Some(row) = self.store.work(id)?.filter(|r| r.repo == repo) {
                 self.run(id, &row, rules)?;
                 ran += 1;
             }
         }
         Ok(ran)
+    }
+
+    /// Decides the queued items of `repo`, which are the ones put back by
+    /// `retry`: a proposal, or an approved item for a rule that runs on its own.
+    pub fn redecide(
+        &mut self,
+        repo: &str,
+        rules: &[NamedRule],
+        ceiling: Autonomy,
+    ) -> Result<usize, EngineError> {
+        let mut decided = 0;
+        for id in self.store.ids_in_state("queued")? {
+            let Some(row) = self.store.work(id)?.filter(|r| r.repo == repo) else {
+                continue;
+            };
+            let level = rules
+                .iter()
+                .find(|(name, _)| name == &row.rule)
+                .map_or(Autonomy::Off, |(_, rule)| effective(rule.autonomy, ceiling));
+            let (state, reason) = match level {
+                Autonomy::Off => ("done", Some("rule_missing")),
+                Autonomy::Propose => ("proposed", None),
+                Autonomy::Auto => ("approved", Some(AUTO)),
+            };
+            self.set(id, state, reason)?;
+            decided += 1;
+        }
+        Ok(decided)
+    }
+
+    /// Puts a dead item back in the queue with a fresh count of tries.
+    pub fn retry(&mut self, id: i64) -> Result<(), EngineError> {
+        let row = self.store.work(id)?.filter(|r| r.state == "dead");
+        let Some(row) = row else {
+            return Err(EngineError::NotDead(id));
+        };
+        self.store
+            .transaction(|tx| tx.set_retry(id, "queued", None, 0, 0))?;
+        self.record(&row.rule, &row.key, "retry");
+        Ok(())
+    }
+
+    pub fn paused(&self) -> Result<bool, EngineError> {
+        Ok(self.store.control("paused")?.as_deref() == Some("1"))
+    }
+
+    pub fn set_paused(&mut self, paused: bool) -> Result<(), EngineError> {
+        let value = if paused { "1" } else { "0" };
+        self.store
+            .transaction(|tx| tx.set_control("paused", value))?;
+        self.record("-", "-", if paused { "pause" } else { "resume" });
+        Ok(())
     }
 
     pub fn reject(&mut self, id: i64) -> Result<(), EngineError> {
@@ -912,6 +971,71 @@ mod tests {
             engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
         }
         assert_eq!(state(&f, id), ("dead".into(), Some("HTTP 502".into())));
+    }
+
+    #[test]
+    fn retry_puts_a_dead_item_back_with_no_tries_and_the_audit_says_so() {
+        // Arrange
+        let mut f = fixture("watch-engine-requeue");
+        let spy = Spy {
+            fail: Some("HTTP 502".into()),
+            ..Spy::default()
+        };
+        let rules = rules(AUTO_LABEL);
+        let id = ingest_at(&mut f, &spy, &[issue(7, "a")], &rules, Autonomy::Auto)[0];
+        for _ in 0..5 {
+            f.clock.advance(4_000);
+            engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+        }
+
+        // Act
+        engine(&mut f, &spy).retry(id).unwrap();
+
+        // Assert
+        let row = f.store.work(id).unwrap().unwrap();
+        assert_eq!((row.state.as_str(), row.attempts), ("queued", 0));
+        let audit = std::fs::read_to_string(f.dir.join("runtime/audit.jsonl")).unwrap();
+        assert!(audit.contains(r#""outcome":"retry""#));
+        // The next cycle decides it again and, with GitHub back, runs it.
+        let ok = Spy::default();
+        engine(&mut f, &ok)
+            .redecide("o/r", &rules, Autonomy::Auto)
+            .unwrap();
+        engine(&mut f, &ok).run_approved("o/r", &rules).unwrap();
+        assert_eq!(state(&f, id).0, "done");
+        assert!(engine(&mut f, &ok).retry(id).is_err());
+    }
+
+    #[test]
+    fn a_paused_watch_starts_no_action_until_it_is_resumed() {
+        // Arrange
+        let mut f = fixture("watch-engine-pause");
+        let spy = Spy::default();
+        let rules = rules(AUTO_LABEL);
+        ingest_at(&mut f, &spy, &[issue(7, "a")], &rules, Autonomy::Auto);
+        engine(&mut f, &spy).set_paused(true).unwrap();
+
+        // Act
+        let paused_run = engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+        engine(&mut f, &spy).set_paused(false).unwrap();
+        let resumed_run = engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+
+        // Assert
+        assert_eq!((paused_run, resumed_run), (0, 1));
+        assert_eq!(spy.calls.borrow().len(), 1);
+    }
+
+    #[test]
+    fn a_person_approving_while_paused_only_marks_the_item() {
+        let mut f = fixture("watch-engine-pause-approve");
+        let spy = Spy::default();
+        let id = ingest(&mut f, &spy, &[issue(7, "a")], &rules(LABEL))[0];
+        engine(&mut f, &spy).set_paused(true).unwrap();
+        let out = engine(&mut f, &spy)
+            .approve(id, &rules(LABEL), true)
+            .unwrap();
+        assert_eq!(out, ApproveOutcome::Handed);
+        assert!(spy.calls.borrow().is_empty());
     }
 
     #[test]

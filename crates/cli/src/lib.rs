@@ -2188,6 +2188,45 @@ pub enum WatchCommand {
         /// Proposal number printed by `watch once`
         id: i64,
     },
+    /// Show whether watch runs, the queue, the limits and the dead list
+    ///
+    /// Example: `playbook watch status --json`
+    Status {
+        /// Print the status as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Stop starting new actions
+    ///
+    /// An action that is already running finishes. Proposals still queue.
+    ///
+    /// Example: `playbook watch pause`
+    Pause,
+    /// Start new actions again after a pause
+    ///
+    /// Example: `playbook watch resume`
+    Resume,
+    /// Put a dead item back in the queue
+    ///
+    /// Example: `playbook watch retry 3`
+    Retry {
+        /// Number of the dead item, shown by `watch status`
+        id: i64,
+    },
+    /// Print the audit log, oldest first
+    ///
+    /// Example: `playbook watch log --rule triage --outcome done`
+    Log {
+        /// Only records of this rule
+        #[arg(long)]
+        rule: Option<String>,
+        /// Only records with this outcome, such as `done` or `retry`
+        #[arg(long)]
+        outcome: Option<String>,
+        /// Print each record as a JSON line
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `playbook worktree` subcommands.

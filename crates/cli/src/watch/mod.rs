@@ -17,6 +17,7 @@ use crate::WatchCommand;
 pub mod audit;
 pub mod backoff;
 pub mod clock;
+pub mod control;
 pub mod engine;
 pub mod event;
 pub mod gh;
@@ -252,6 +253,9 @@ pub fn once<W: GithubWrite, C: Clock, H: Http>(
             caps: settings.caps,
             me: ctx.me,
         };
+        engine
+            .redecide(repo, &rules, level)
+            .map_err(|e| e.to_string())?;
         let ran = engine
             .run_approved(repo, &rules)
             .map_err(|e| e.to_string())?;
@@ -390,7 +394,11 @@ pub fn run(cmd: &WatchCommand) -> Result<String, String> {
     let home = crate::common::session::home_dir();
     let data = playbook_data::data_dir_from(&home);
     let settings = Settings::load(&home)?;
-    let token = if matches!(cmd, WatchCommand::Reject { .. }) {
+    let needs_token = matches!(
+        cmd,
+        WatchCommand::Once { .. } | WatchCommand::DryRun { .. } | WatchCommand::Approve { .. }
+    );
+    let token = if !needs_token {
         String::new()
     } else {
         std::env::var(&settings.token_env).map_err(|_| {
@@ -404,7 +412,7 @@ pub fn run(cmd: &WatchCommand) -> Result<String, String> {
     let clock = SystemClock;
     let me = match cmd {
         WatchCommand::Once { .. } | WatchCommand::DryRun { .. } => write.login()?,
-        WatchCommand::Approve { .. } | WatchCommand::Reject { .. } => String::new(),
+        _ => String::new(),
     };
     let ctx = Ctx {
         home: &home,
@@ -422,6 +430,15 @@ pub fn run(cmd: &WatchCommand) -> Result<String, String> {
         }
         WatchCommand::Approve { id } => approve(&ctx, *id),
         WatchCommand::Reject { id } => reject(&ctx, *id),
+        WatchCommand::Status { json } => control::status(&ctx, *json),
+        WatchCommand::Pause => control::set_paused(&ctx, true),
+        WatchCommand::Resume => control::set_paused(&ctx, false),
+        WatchCommand::Retry { id } => control::retry(&ctx, *id),
+        WatchCommand::Log {
+            rule,
+            outcome,
+            json,
+        } => control::log(&ctx, rule.as_deref(), outcome.as_deref(), *json),
     }
 }
 

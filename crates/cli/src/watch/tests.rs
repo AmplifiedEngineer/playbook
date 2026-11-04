@@ -321,6 +321,74 @@ fn a_repo_tombstone_switches_the_global_rule_off_for_that_repo() {
     assert!(!out.contains("rule triage"), "{out}");
 }
 
+#[test]
+fn status_reports_the_queue_the_lock_and_the_limits() {
+    // Arrange
+    let e = env("watch-cmd-status", true);
+    e.once(Some(EARLIER)).unwrap();
+    let _held = hold(&e.data);
+
+    // Act
+    let json = control::status_json(&e.ctx()).unwrap();
+    let text = control::status(&e.ctx(), false).unwrap();
+
+    // Assert
+    assert_eq!(json["queue"]["proposed"], 1);
+    assert_eq!(json["running"], true);
+    assert_eq!(json["paused"], false);
+    assert_eq!(json["today"]["actions_limit"], 50);
+    assert!(
+        text.contains("proposed: 1") && text.contains("running: true"),
+        "{text}"
+    );
+}
+
+#[test]
+fn pause_stops_a_rule_that_runs_on_its_own_and_resume_lets_it_through() {
+    // Arrange
+    let e = env("watch-cmd-pause", true);
+    let root = crate::common::paths::playbook_root_from(&e.home);
+    let auto = RULE.replace(r#""do":"label""#, r#""do":"label","autonomy":"auto""#);
+    config_store::put(&root, Tier::Global, None, "watch.rule.triage", &json!(auto)).unwrap();
+    config_store::put(&root, Tier::Global, None, "watch.autonomy", &json!("auto")).unwrap();
+    control::set_paused(&e.ctx(), true).unwrap();
+
+    // Act
+    e.once(Some(EARLIER)).unwrap();
+    let paused_calls = e.spy.calls.borrow().len();
+    control::set_paused(&e.ctx(), false).unwrap();
+    e.once(None).unwrap();
+
+    // Assert
+    assert_eq!(paused_calls, 0);
+    assert_eq!(e.spy.calls.borrow().len(), 1);
+}
+
+#[test]
+fn log_filters_by_rule_and_outcome_and_prints_no_control_characters() {
+    // Arrange
+    let e = env("watch-cmd-log", true);
+    let audit = AuditLog::new(&e.data.join("watch"));
+    for (rule, outcome) in [("a", "proposed"), ("b", "done"), ("a", "done")] {
+        audit
+            .append(&json!({"time": 1, "rule": rule, "key": "k\u{1b}[31m", "outcome": outcome}))
+            .unwrap();
+    }
+
+    // Act
+    let all = control::log(&e.ctx(), None, None, false).unwrap();
+    let one = control::log(&e.ctx(), Some("a"), Some("done"), false).unwrap();
+    let as_json = control::log(&e.ctx(), None, None, true).unwrap();
+
+    // Assert
+    assert_eq!(all.lines().count(), 3);
+    assert_eq!(one.lines().count(), 1);
+    assert!(!all.chars().any(|c| c.is_control() && c != '\n'), "{all:?}");
+    assert!(as_json
+        .lines()
+        .all(|l| serde_json::from_str::<serde_json::Value>(l).is_ok()));
+}
+
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();

@@ -43,6 +43,8 @@ pub enum Do {
 }
 
 impl Do {
+    pub const ALL: [Do; 2] = [Do::Label, Do::Comment];
+
     /// The name the rule file and the audit log use.
     pub fn as_str(self) -> &'static str {
         match self {

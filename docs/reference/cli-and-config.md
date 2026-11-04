@@ -1601,7 +1601,7 @@ Rules live in `watch.rule.<id>` and `watch.repos` lists the repos. At the defaul
 
 Example: `playbook watch once`
 
-Subcommands: `approve`, `dry-run`, `once`, `reject`
+Subcommands: `approve`, `dry-run`, `log`, `once`, `pause`, `reject`, `resume`, `retry`, `status`
 
 ### `playbook watch approve`
 
@@ -1621,6 +1621,16 @@ Example: `playbook watch dry-run`
 
 - `--since <SINCE>`: Look at events from this UTC time, for example 2026-11-01T00:00:00Z
 
+### `playbook watch log`
+
+Print the audit log, oldest first
+
+Example: `playbook watch log --rule triage --outcome done`
+
+- `--rule <RULE>`: Only records of this rule
+- `--outcome <OUTCOME>`: Only records with this outcome, such as `done` or `retry`
+- `--json`: Print each record as a JSON line
+
 ### `playbook watch once`
 
 Poll every repo once and run the items you approved
@@ -1631,6 +1641,14 @@ Example: `playbook watch once --since 2026-11-01T00:00:00Z`
 
 - `--since <SINCE>`: Replay events from this UTC time, for example 2026-11-01T00:00:00Z
 
+### `playbook watch pause`
+
+Stop starting new actions
+
+An action that is already running finishes. Proposals still queue.
+
+Example: `playbook watch pause`
+
 ### `playbook watch reject`
 
 Drop a proposal without acting on it
@@ -1638,6 +1656,28 @@ Drop a proposal without acting on it
 Example: `playbook watch reject 3`
 
 - `<ID>`: Proposal number printed by `watch once`
+
+### `playbook watch resume`
+
+Start new actions again after a pause
+
+Example: `playbook watch resume`
+
+### `playbook watch retry`
+
+Put a dead item back in the queue
+
+Example: `playbook watch retry 3`
+
+- `<ID>`: Number of the dead item, shown by `watch status`
+
+### `playbook watch status`
+
+Show whether watch runs, the queue, the limits and the dead list
+
+Example: `playbook watch status --json`
+
+- `--json`: Print the status as JSON
 
 ### `playbook worktree`
 

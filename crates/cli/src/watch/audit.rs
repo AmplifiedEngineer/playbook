@@ -58,6 +58,27 @@ impl AuditLog {
         file.write_all(line.as_bytes())
     }
 
+    /// Every record still on disk, oldest first, with control characters
+    /// removed again in case the file was edited. A line that is not JSON is
+    /// skipped.
+    pub fn records(&self) -> io::Result<Vec<Value>> {
+        let mut files: Vec<PathBuf> = (1..FILES).rev().map(|n| self.rotated(n)).collect();
+        files.push(self.live());
+        let mut out = Vec::new();
+        for file in files {
+            match fs::read_to_string(&file) {
+                Ok(text) => out.extend(
+                    text.lines()
+                        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                        .map(|v| clean(&v)),
+                ),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(out)
+    }
+
     fn rotate(&self) -> io::Result<()> {
         let oldest = self.rotated(FILES - 1);
         if oldest.exists() {
@@ -111,6 +132,31 @@ mod tests {
             .unwrap();
         let text = fs::read_to_string(d.join("audit.jsonl")).unwrap();
         assert_eq!(text.lines().count(), 2);
+    }
+
+    #[test]
+    fn records_come_back_oldest_first_across_rotated_files() {
+        // Arrange
+        let d = dir("watch-audit-records");
+        let log = AuditLog::with_limit(&d, 30);
+        for n in 0..4 {
+            log.append(&json!({"n": n})).unwrap();
+        }
+
+        // Act
+        let got: Vec<i64> = log
+            .records()
+            .unwrap()
+            .iter()
+            .filter_map(|r| r["n"].as_i64())
+            .collect();
+
+        // Assert
+        assert_eq!(got, vec![0, 1, 2, 3]);
+        assert!(AuditLog::new(&dir("watch-audit-none"))
+            .records()
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

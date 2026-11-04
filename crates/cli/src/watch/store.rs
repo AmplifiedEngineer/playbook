@@ -157,6 +157,10 @@ impl Store {
                  usd REAL NOT NULL,
                  PRIMARY KEY (day, scope)
              );
+             CREATE TABLE IF NOT EXISTS control (
+                 key TEXT PRIMARY KEY,
+                 value TEXT NOT NULL
+             );
              CREATE TABLE IF NOT EXISTS acted (
                  rule TEXT NOT NULL,
                  repo TEXT NOT NULL,
@@ -207,6 +211,16 @@ impl Store {
             .prepare("SELECT id FROM work WHERE state = ?1 AND not_before <= ?2 ORDER BY id")?;
         let ids = stmt.query_map(params![state, now], |r| r.get(0))?;
         Ok(ids.collect::<Result<_, _>>()?)
+    }
+
+    /// A control flag such as `paused`.
+    pub fn control(&self, key: &str) -> Result<Option<String>, StoreError> {
+        Ok(self
+            .conn
+            .query_row("SELECT value FROM control WHERE key = ?1", [key], |r| {
+                r.get(0)
+            })
+            .optional()?)
     }
 
     /// Actions taken and dollars spent under `scope` (`*` or a rule id) on `day`.
@@ -312,6 +326,15 @@ impl Tx<'_> {
         self.tx.execute(
             "UPDATE work SET state = ?2, reason = ?3 WHERE id = ?1",
             params![id, state, reason],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_control(&self, key: &str, value: &str) -> Result<(), StoreError> {
+        self.tx.execute(
+            "INSERT INTO control (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![key, value],
         )?;
         Ok(())
     }
@@ -544,6 +567,19 @@ mod tests {
             (row.state.as_str(), row.attempts, row.not_before),
             ("proposed", 0, 0)
         );
+    }
+
+    #[test]
+    fn a_control_flag_is_stored_and_replaced() {
+        let mut store = Store::open(&db("watch-store-control")).unwrap();
+        assert_eq!(store.control("paused").unwrap(), None);
+        store
+            .transaction(|tx| tx.set_control("paused", "1"))
+            .unwrap();
+        store
+            .transaction(|tx| tx.set_control("paused", "0"))
+            .unwrap();
+        assert_eq!(store.control("paused").unwrap().as_deref(), Some("0"));
     }
 
     #[test]
