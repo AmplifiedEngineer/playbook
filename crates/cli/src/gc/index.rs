@@ -58,6 +58,12 @@ pub struct Fingerprint {
 }
 
 impl Fingerprint {
+    /// Whether `self` differs from `recorded` in any way. Used while a source
+    /// is held still, where any difference means someone wrote to it.
+    pub fn changed_since(&self, recorded: &Self) -> bool {
+        self != recorded
+    }
+
     /// Whether `self` shows more or newer data than `recorded`. A source with
     /// less data is a partly removed one, which is not a change.
     pub fn grew_since(&self, recorded: &Self) -> bool {

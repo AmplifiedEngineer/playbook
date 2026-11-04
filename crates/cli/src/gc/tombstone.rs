@@ -126,16 +126,29 @@ fn copy_entry(guard: &RunGuard, from: &Path, to: &Path, copied: &mut usize) -> i
             let entry = entry?;
             copy_entry(guard, &entry.path(), &to.join(entry.file_name()), copied)?;
         }
+        sync_dir(to);
     } else if meta.file_type().is_symlink() {
         copy_link(from, to)?;
     } else {
-        fs::copy(from, to)?;
-        fs::File::options()
-            .write(true)
-            .open(to)?
-            .set_modified(meta.modified()?)?;
+        // Copy by hand: `fs::copy` carries a read-only mode over, and the
+        // mtime and the sync both need a writable handle.
+        let mut src = fs::File::open(from)?;
+        let mut dst = fs::File::create(to)?;
+        io::copy(&mut src, &mut dst)?;
+        dst.set_modified(meta.modified()?)?;
+        dst.sync_all()?;
+        drop(dst);
+        fs::set_permissions(to, meta.permissions())?;
     }
     Ok(())
+}
+
+/// Flushes a folder's entries to disk. Best effort: not every platform lets a
+/// folder be opened for sync.
+pub(crate) fn sync_dir(dir: &Path) {
+    if let Ok(handle) = fs::File::open(dir) {
+        let _ = handle.sync_all();
+    }
 }
 
 #[cfg(unix)]
@@ -199,7 +212,7 @@ fn refused(what: &str, err: impl std::fmt::Display) -> MoveOutcome {
 
 /// Checks the request and builds its `pending` record.
 fn prepare(env: &Env, req: &MoveRequest, mode: Option<Mode>) -> Result<Record, MoveOutcome> {
-    let roots = env.registry.roots();
+    let roots = env.registry.store_roots();
     let mut missing = Vec::new();
     for path in &req.paths {
         match guard::validate(&roots, path) {
@@ -226,7 +239,7 @@ fn prepare(env: &Env, req: &MoveRequest, mode: Option<Mode>) -> Result<Record, M
     fs::create_dir_all(&date_dir).map_err(|e| refused("cannot create the tombstone folder", e))?;
     let (id, dest) = fresh_id(&date_dir, first, now);
     let fingerprint = measure(present.iter().copied());
-    let mode = mode.unwrap_or(if same_filesystem(first, &date_dir) {
+    let mode = mode.unwrap_or(if present.iter().all(|p| same_filesystem(p, &date_dir)) {
         Mode::Rename
     } else {
         Mode::Copy
@@ -257,7 +270,7 @@ fn rename_members(env: &Env, rec: &Record) -> Result<(), RenameStop> {
             "cannot create the tombstone folder: {e}"
         )))
     })?;
-    for path in &rec.paths {
+    for path in rec.paths.iter().filter(|p| !rec.missing.contains(p)) {
         let to = rec.member_dest(path);
         if exists(&to) || !exists(path) {
             continue;
@@ -265,7 +278,7 @@ fn rename_members(env: &Env, rec: &Record) -> Result<(), RenameStop> {
         env.guard
             .verify()
             .map_err(|e| stop(refused("the run lock was lost", e)))?;
-        match env.fs.rename(path, &to) {
+        match env.fs.rename(env.guard, path, &to) {
             Ok(()) => {}
             Err(err) if err.kind() == io::ErrorKind::CrossesDevices => {
                 return Err(RenameStop::CrossDevice)
@@ -307,18 +320,25 @@ fn copy_members(env: &Env, rec: &Record) -> Result<(), MoveOutcome> {
         discard(env, &tmp);
         return Err(MoveOutcome::Failed(format!("could not copy: {err}")));
     }
-    if measure(present.iter().copied()).grew_since(&before) {
+    if measure(present.iter().copied()).changed_since(&before) {
         discard(env, &tmp);
         let _ = env.append(&rec.with_state(State::Dropped, env.now()));
         return Err(MoveOutcome::Failed(
             "the source changed while it was copied".into(),
         ));
     }
-    if let Err(err) = env.fs.rename(&tmp, &rec.dest) {
+    if let Err(err) = env.guard.verify() {
+        discard(env, &tmp);
+        return Err(refused("the run lock was lost", err));
+    }
+    if let Err(err) = env.fs.rename(env.guard, &tmp, &rec.dest) {
         discard(env, &tmp);
         return Err(MoveOutcome::Failed(format!(
             "could not put the copy in place: {err}"
         )));
+    }
+    if let Some(parent) = rec.dest.parent() {
+        sync_dir(parent);
     }
     let copied_record = Record {
         fingerprint: Some(before),
@@ -426,14 +446,14 @@ mod tests {
     }
 
     impl FsOps for TestFs {
-        fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        fn rename(&self, guard: &RunGuard, from: &Path, to: &Path) -> io::Result<()> {
             if let Some(kind) = self.rename_error.get() {
                 if self.rename_error_once.get() {
                     self.rename_error.set(None);
                 }
                 return Err(io::Error::from(kind));
             }
-            self.real.rename(from, to)
+            self.real.rename(guard, from, to)
         }
 
         fn copy(&self, guard: &RunGuard, from: &Path, to: &Path) -> io::Result<()> {
@@ -630,6 +650,38 @@ mod tests {
             "deep"
         );
         assert!(!folder.exists() && !rec.tmp_dest().exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_mode_moves_a_read_only_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let fx = fx("tomb-copy-readonly");
+        let file = fx.file("ro.txt", "locked");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o444)).unwrap();
+
+        let id = moved_id(fx.mv(&[&file], Some(Mode::Copy)));
+
+        let rec = fx.records().into_iter().find(|r| r.id == id).unwrap();
+        let copy = rec.member_dest(&file);
+        assert_eq!(fs::read_to_string(&copy).unwrap(), "locked");
+        assert_eq!(
+            fs::metadata(&copy).unwrap().permissions().mode() & 0o777,
+            0o444
+        );
+        assert!(!file.exists());
+    }
+
+    #[test]
+    fn a_path_inside_the_tombstone_folder_is_not_a_move_source() {
+        let fx = fx("tomb-source-in-tombstones");
+        let inside = fx.registry.tombstones_dir().join("2026-11-04").join("x");
+        fs::create_dir_all(&inside).unwrap();
+
+        let outcome = fx.mv(&[&inside], None);
+
+        assert!(matches!(outcome, MoveOutcome::Refused(_)), "{outcome:?}");
+        assert!(inside.exists());
     }
 
     #[test]

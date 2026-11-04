@@ -158,14 +158,18 @@ impl Registry {
         self.gc_dir.join(TOMBSTONES_DIR)
     }
 
+    /// The roots of the registered stores: where an item may be moved from.
+    pub fn store_roots(&self) -> Vec<PathBuf> {
+        self.stores
+            .iter()
+            .flat_map(|store| store.roots.iter().cloned())
+            .collect()
+    }
+
     /// The paths gc may remove inside: each store's roots and the tombstones
     /// folder.
     pub fn roots(&self) -> Vec<PathBuf> {
-        let mut roots: Vec<PathBuf> = self
-            .stores
-            .iter()
-            .flat_map(|store| store.roots.iter().cloned())
-            .collect();
+        let mut roots = self.store_roots();
         roots.push(self.tombstones_dir());
         roots
     }

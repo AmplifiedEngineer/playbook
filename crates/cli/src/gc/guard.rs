@@ -187,7 +187,8 @@ pub fn checked_remove_lock(gc_dir: &Path, lock: &Path) -> Result<(), GuardError>
 
 /// The filesystem calls gc makes, behind a trait so a test can make one fail.
 pub trait FsOps {
-    fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
+    /// Renames `from` to `to`. The real call re-checks the run lock first.
+    fn rename(&self, guard: &RunGuard, from: &Path, to: &Path) -> io::Result<()>;
     /// Copies a file or folder to `to`, touching the run lock as it goes.
     fn copy(&self, guard: &RunGuard, from: &Path, to: &Path) -> io::Result<()>;
     /// Runs after a copy finished and before anything else looks at the source.
@@ -211,7 +212,8 @@ impl RealFs {
 }
 
 impl FsOps for RealFs {
-    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+    fn rename(&self, guard: &RunGuard, from: &Path, to: &Path) -> io::Result<()> {
+        guard.verify().map_err(io::Error::other)?;
         fs::rename(from, to)
     }
 
