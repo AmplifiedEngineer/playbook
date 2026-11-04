@@ -112,7 +112,7 @@ Creates `docs/adr` in the repo if it is missing. Prints `Next number: NNNN   Dat
 
 ### `playbook agents`
 
-Check agent definition files and their effort variants
+Check agent definition files and show their effort variants
 
 Subcommands: `check`, `variants`
 
@@ -132,7 +132,7 @@ Variants such as `reviewer-low` are not files. `playbook cc` and `playbook ccd` 
 
 Example: `playbook agents variants --ceiling medium`
 
-- `<AGENTS_DIR>`: Directory holding the agent definitions. Defaults to `plugins/playbook/agents` in the repo, else `<repo root>/agents`
+- `<AGENTS_DIR>`: Directory of agent definitions. Defaults to `plugins/playbook/agents` in the repo, else `agents` at the repo root
 - `--ceiling <CEILING>`: Lowest effort ceiling to apply to every agent (default: none)
 - `--mode <MODE>`: One of auto, all or off
 - `--json`: Print the `--agents` JSON
@@ -235,7 +235,7 @@ Example: `playbook ci --strict`
 
 Index and search the repo's source code
 
-The index is a cache kept under the playbook state directory for this worktree. Nothing is written inside the repository.
+The index is a cache kept under the playbook state directory for this worktree. Nothing is written inside the repo.
 
 Subcommands: `context`, `index`, `outline`, `read`, `refs`, `search`, `status`, `symbol`
 
@@ -1360,7 +1360,7 @@ Check the shared settings template is valid
 
 Exits 0 when valid and 1 with a message when not.
 
-Example: `playbook settings check settings.template.json .`
+Example: `playbook settings check seed/settings.shared.json .`
 
 - `<TEMPLATE>`: Shared settings template to check
 - `<REPO_ROOT>`: Repo root that every hook command must resolve inside
@@ -1371,7 +1371,7 @@ Create the shared settings template from a live settings.json
 
 Takes the hooks and status line from the live file and keeps the permissions of the current seed. Prints the new seed.
 
-Example: `playbook settings gen ~/.claude/settings.json seed.json`
+Example: `playbook settings gen ~/.claude/settings.json seed/settings.shared.json`
 
 - `<SRC>`: Live settings.json to start from
 - `<SEED>`: Current seed, whose permissions block is kept

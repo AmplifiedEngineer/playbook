@@ -790,7 +790,7 @@ pub enum Command {
         #[command(subcommand)]
         sub: ManifestCommand,
     },
-    /// Check agent definition files and their effort variants
+    /// Check agent definition files and show their effort variants
     Agents {
         #[command(subcommand)]
         sub: AgentsCommand,
@@ -805,7 +805,7 @@ pub enum Command {
     /// Index and search the repo's source code
     ///
     /// The index is a cache kept under the playbook state directory for this
-    /// worktree. Nothing is written inside the repository.
+    /// worktree. Nothing is written inside the repo.
     Code {
         #[command(subcommand)]
         sub: CodeCommand,
@@ -1228,7 +1228,7 @@ pub enum SettingsCommand {
     /// Takes the hooks and status line from the live file and keeps the
     /// permissions of the current seed. Prints the new seed.
     ///
-    /// Example: `playbook settings gen ~/.claude/settings.json seed.json`
+    /// Example: `playbook settings gen ~/.claude/settings.json seed/settings.shared.json`
     Gen {
         /// Live settings.json to start from
         src: PathBuf,
@@ -1239,7 +1239,7 @@ pub enum SettingsCommand {
     ///
     /// Exits 0 when valid and 1 with a message when not.
     ///
-    /// Example: `playbook settings check settings.template.json .`
+    /// Example: `playbook settings check seed/settings.shared.json .`
     Check {
         /// Shared settings template to check
         template: PathBuf,
@@ -1354,7 +1354,7 @@ pub enum AgentsCommand {
     ///
     /// Example: `playbook agents variants --ceiling medium`
     Variants {
-        /// Directory holding the agent definitions. Defaults to `plugins/playbook/agents` in the repo, else `<repo root>/agents`
+        /// Directory of agent definitions. Defaults to `plugins/playbook/agents` in the repo, else `agents` at the repo root
         agents_dir: Option<PathBuf>,
         /// Lowest effort ceiling to apply to every agent (default: none)
         #[arg(long)]
