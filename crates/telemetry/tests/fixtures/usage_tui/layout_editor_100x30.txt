@@ -1,30 +1,30 @@
 ╭─┤Agent Budget Dashboard├──┤UTC├──────────────────────────────────────────────────────────────────╮
 │last 30 days Aug 5 to Sep 3, 2026  (no previous period to compare)                                │
 │cost          $20.27                                                                              │
-│tokens        618.8K                                                                              │
-│messages          26                                                                              │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- F1 Charts  F2 Numbers  F3 Sessions
-╭─┤¹Spend p╭┤ Layout: tabs and panels ├─────────────────────────────────────────────────╮──────────╮
-│total $20.│  Charts  Numbers  Sessions                                                 │ 20.6K/day│
-│Thu 2026-0│                                                                            │  2 msgs  │
-│ $8┤┄┄┄┄┄┄│ > [1] spend      cost per day as a chart or a daily table                  │┄┄┄┄┄▆┄┄▆┄│
-│   │      │   [2] tokens     tokens per day as a chart                                 │     █  █ │
-│   │      │   [ ] models     cost and tokens per model                                 │     █  █ │
-│ $4┤┄┄┄┄┄┄│   [ ] breakdown  projects, agents, skills, tools or health (v switches)    │┄▇▇┄┄█┄┄█┄│
-│   │      │   [ ] live       sessions with a message in the last 15 minutes            │ ██  █  █ │
-│ $0┤▁█▁  ▅│   [ ] sessions   every session of the period, grouped by day               │ ██  █  █ │
-│    5 7  9│   [ ] budget     limits and how fast you are using them                    │ 29  1  3 │
-╰──────────│   [ ] projection when each limit is reached at the current pace            │■■■ high├─╯
-╭─┤Burn-up├│   [3] burnup     how much of a limit is used over its period, with a projec│iod, UTC├─╮
-│no burn-up│                                                                            │          │
+│tokens    ╭┤ Layout: tabs and panels ├─────────────────────────────────────────────────╮          │
+│messages  │  Charts  Numbers  Sessions                                                 │          │
+╰──────────│                                                                            │──────────╯
+ F1 Charts │ > [1] spend              cost per day as a chart or a daily table          │
+╭─┤¹Spend p│   [2] tokens             tokens per day as a chart                         │──────────╮
+│total $20.│   [ ] models             cost and tokens per model                         │ 20.6K/day│
+│Thu 2026-0│   [ ] breakdown          projects, agents, skills, tools or health (v switc│  2 msgs  │
+│ $8┤┄┄┄┄┄┄│   [ ] live               sessions with a message in the last 15 minutes    │┄┄┄┄┄▆┄┄▆┄│
+│   │      │   [ ] sessions           every session of the period, grouped by day       │     █  █ │
+│   │      │   [ ] budget             limits and how fast you are using them            │     █  █ │
+│ $4┤┄┄┄┄┄┄│   [ ] projection         when each limit is reached at the current pace    │┄▇▇┄┄█┄┄█┄│
+│   │      │   [3] burnup             how much of a limit is used over its period, with │ ██  █  █ │
+│ $0┤▁█▁  ▅│   [ ] spend.total        total cost per day as a chart, always this view   │ ██  █  █ │
+│    5 7  9│   [ ] spend.model        cost per model per day as a chart, always this vie│ 29  1  3 │
+╰──────────│   [ ] spend.daily        cost per day as a table, always this view         │■■■ high├─╯
+╭─┤Burn-up├│   [ ] breakdown.projects cost per project, always this view                │iod, UTC├─╮
+│no burn-up│   [ ] breakdown.agents   cost per agent, always this view                  │          │
+│          │   [ ] breakdown.skills   cost per skill, always this view                  │          │
+│          │   [ ] breakdown.tools    latency and errors per tool, always this view     │          │
+│          │   [ ] breakdown.health   API errors, retries and cache hits, always this vi│          │
+│          │                                                                            │          │
 │          │ Left/Right tab   j/k line   space add or remove   J/K move panel           │          │
 │          │ < > move tab   n new   x delete   r rename   w save   R reset   esc cancel │          │
 │          ╰────────────────────────────────────────────────────────────────────────────╯          │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  Tab tab w week m month r range v view / filter h help q quit        updated 01:46:40 UTC, every 5s

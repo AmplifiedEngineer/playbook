@@ -382,11 +382,11 @@ mod tests {
     fn the_line_keys_stop_at_the_first_and_last_panel() {
         let mut e = editor();
 
-        for _ in 0..10 {
+        for _ in 0..=ALL.len() {
             e.key(KeyCode::Char('j'));
         }
         let bottom = e.row;
-        for _ in 0..10 {
+        for _ in 0..=ALL.len() {
             e.key(KeyCode::Char('k'));
         }
 

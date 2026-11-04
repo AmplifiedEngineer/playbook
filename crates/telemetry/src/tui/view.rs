@@ -228,10 +228,18 @@ pub fn render(frame: &mut Frame, app: &App) {
             }
             for (id, rect) in &p.panels {
                 match id {
-                    PanelId::Spend => panels::spend(frame, *rect, app, data, &pal),
+                    PanelId::Spend
+                    | PanelId::SpendTotal
+                    | PanelId::SpendModel
+                    | PanelId::SpendDaily => panels::spend(frame, *rect, app, data, &pal),
                     PanelId::Tokens => panels::tokens(frame, *rect, app, data, &pal),
                     PanelId::Models => panels::models(frame, *rect, app, data, &pal),
-                    PanelId::Breakdown => panels::projects(frame, *rect, app, data, &pal),
+                    PanelId::Breakdown
+                    | PanelId::BreakdownProjects
+                    | PanelId::BreakdownAgents
+                    | PanelId::BreakdownSkills
+                    | PanelId::BreakdownTools
+                    | PanelId::BreakdownHealth => panels::projects(frame, *rect, app, data, &pal),
                     PanelId::Live => panels::live(frame, *rect, app, data, &pal),
                     PanelId::Sessions => panels::sessions(frame, *rect, app, data, &pal),
                     PanelId::Projection => projection::render(frame, *rect, data, &pal),
@@ -319,7 +327,7 @@ fn render_editor(frame: &mut Frame, area: Rect, ed: &super::editor::Editor, pal:
             None => "[ ]".to_string(),
         };
         let pointer = if i == ed.row { ">" } else { " " };
-        let text = format!(" {pointer} {mark} {:<10} {}", id.word(), id.describe());
+        let text = format!(" {pointer} {mark} {:<18} {}", id.word(), id.describe());
         lines.push(if i == ed.row {
             Line::styled(text, accent)
         } else {
