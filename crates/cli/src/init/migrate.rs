@@ -77,6 +77,9 @@ const POLICY_GUARD_NOTICE: &str = "the policy guard is now off by default; to tu
 /// The `Owned` notice that the rm guard is now a short fixed rule (ADR 0045,
 /// 2026-10-19 amendment). It changes nothing and is recorded once it has run.
 pub const RM_GUARD_NOTICE_MIGRATION: &str = "rm-guard-simplified";
+/// The `Owned` removal of the per-worktree code index files (ADR 0056). The
+/// shared store replaces them.
+pub const CODE_INDEX_FILES_MIGRATION: &str = "code-index-per-worktree-files";
 /// The step name of that notice, which the heal line shows in full.
 pub const RM_GUARD_NOTICE_STEP: &str = "rm guard";
 /// What the notice says (docs/guides/07-rm-guard.md).
@@ -414,7 +417,120 @@ pub fn registry() -> Vec<Migration> {
             scope: Scope::Owned,
             run: rm_guard_simplified_notice,
         },
+        Migration {
+            id: CODE_INDEX_FILES_MIGRATION,
+            since: "next",
+            kind: Kind::Auto,
+            scope: Scope::Owned,
+            run: code_index_per_worktree_files,
+        },
     ]
+}
+
+/// The code index files that earlier versions kept per worktree: the
+/// `<worktree-id>.db` files and `index.lock` under `data/code/<owner>/<repo>/`,
+/// and the index under the worktree state folder when its schema is older
+/// than this build's. A current file at that state path is the fallback store
+/// of a repo with no safe data folder path, so it stays, and so does a file
+/// that is not SQLite or comes from a newer build.
+fn code_index_per_worktree_files(ctx: &Ctx) -> Outcome {
+    const STEP: &str = "code index files";
+    let root = playbook_root_from(&ctx.home);
+    let mut doomed = per_worktree_code_files(&playbook_data::data_dir_from(&ctx.home));
+    doomed.extend(old_state_indexes(&root.join("repos")));
+    let mut removed = 0;
+    for file in doomed {
+        for path in with_sidecars(&file) {
+            match fs::remove_file(&path) {
+                Ok(()) => removed += 1,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    return Outcome::Failed(StepReport::failed(
+                        STEP,
+                        format!("could not delete {}: {e}", path.display()),
+                    ))
+                }
+            }
+        }
+    }
+    if removed == 0 {
+        return Outcome::Done(StepReport::skipped(
+            STEP,
+            "no per-worktree code index files",
+        ));
+    }
+    Outcome::Done(StepReport::wired(
+        STEP,
+        format!("deleted {removed} per-worktree code index file(s); `playbook code index` builds the shared store"),
+    ))
+}
+
+fn with_sidecars(file: &Path) -> Vec<PathBuf> {
+    ["-wal", "-shm", ""]
+        .iter()
+        .map(|suffix| {
+            let mut name = file.as_os_str().to_owned();
+            name.push(suffix);
+            PathBuf::from(name)
+        })
+        .collect()
+}
+
+fn subdirs(dir: &Path) -> Vec<PathBuf> {
+    fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect()
+}
+
+/// `data/code/<owner>/<repo>/*.db` and the old repo-wide `index.lock`.
+fn per_worktree_code_files(data: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for owner in subdirs(&data.join("code")) {
+        for repo in subdirs(&owner) {
+            for entry in fs::read_dir(&repo).into_iter().flatten().flatten() {
+                let path = entry.path();
+                let is_db = path.extension().is_some_and(|x| x == "db");
+                let is_lock = path.file_name().is_some_and(|n| n == "index.lock");
+                if path.is_file() && (is_db || is_lock) {
+                    out.push(path);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `repos/<owner>/<repo>/<worktree-id>/code/index.sqlite3` files whose
+/// `user_version` is below the current schema.
+fn old_state_indexes(repos: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for owner in subdirs(repos) {
+        for repo in subdirs(&owner) {
+            for worktree in subdirs(&repo) {
+                let file = worktree
+                    .join("code")
+                    .join(playbook_code::host::FALLBACK_FILE);
+                if file.is_file()
+                    && schema_version(&file).is_some_and(|v| v < playbook_code::db::SCHEMA_VERSION)
+                {
+                    out.push(file);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `PRAGMA user_version` of a SQLite file, or `None` for any other file.
+fn schema_version(file: &Path) -> Option<i64> {
+    let conn =
+        rusqlite::Connection::open_with_flags(file, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .ok()?;
+    conn.query_row("PRAGMA user_version", [], |r| r.get(0)).ok()
 }
 
 /// One notice for an install that has the policy guard wired and never stored
@@ -2967,5 +3083,118 @@ mod tests {
             assert!(plan.iter().all(|p| p.id != id), "{id} is planned");
             assert!(open.iter().all(|i| i.id != id), "{id} is open");
         }
+    }
+
+    fn sqlite_file(path: &Path, user_version: i64) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let conn = rusqlite::Connection::open(path).unwrap();
+        conn.execute_batch(&format!(
+            "CREATE TABLE t(x); PRAGMA user_version = {user_version};"
+        ))
+        .unwrap();
+    }
+
+    fn plain_file(path: &Path) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, b"x").unwrap();
+    }
+
+    fn state_index(h: &Path, worktree: &str) -> PathBuf {
+        playbook_root_from(h)
+            .join("repos/o/r")
+            .join(worktree)
+            .join("code/index.sqlite3")
+    }
+
+    #[test]
+    fn the_per_worktree_code_files_go_and_the_store_and_gate_files_stay() {
+        // Arrange
+        let h = home("code-index-files");
+        let data = playbook_root_from(&h).join("data");
+        let code = data.join("code/o/r");
+        for name in ["wt.db", "wt.db-wal", "wt.db-shm", "index.lock"] {
+            plain_file(&code.join(name));
+        }
+        for name in ["store-v4.sqlite3", "store-v4.lock", "wt.lock"] {
+            plain_file(&code.join(name));
+        }
+        plain_file(&data.join("gate/o/r/wt.db"));
+        let old = state_index(&h, "wt");
+        sqlite_file(&old, playbook_code::db::SCHEMA_VERSION - 2);
+        plain_file(&PathBuf::from(format!("{}-wal", old.display())));
+        plain_file(&PathBuf::from(format!("{}-shm", old.display())));
+
+        // Act
+        let outcome = code_index_per_worktree_files(&ctx(&h));
+
+        // Assert
+        let Outcome::Done(step) = outcome else {
+            panic!("the migration finishes");
+        };
+        assert_eq!(step.status, crate::init::run::StepStatus::Wired);
+        for gone in ["wt.db", "wt.db-wal", "wt.db-shm", "index.lock"] {
+            assert!(!code.join(gone).exists(), "{gone}");
+        }
+        assert!(!old.exists());
+        assert!(!PathBuf::from(format!("{}-wal", old.display())).exists());
+        assert!(!PathBuf::from(format!("{}-shm", old.display())).exists());
+        for kept in ["store-v4.sqlite3", "store-v4.lock", "wt.lock"] {
+            assert!(code.join(kept).exists(), "{kept}");
+        }
+        assert!(data.join("gate/o/r/wt.db").exists());
+    }
+
+    #[test]
+    fn an_older_schema_at_the_state_path_goes_and_a_current_or_newer_one_stays() {
+        // Arrange
+        let h = home("code-index-state-versions");
+        let current = playbook_code::db::SCHEMA_VERSION;
+        sqlite_file(&state_index(&h, "older-1"), current - 1);
+        sqlite_file(&state_index(&h, "older-2"), current - 2);
+        sqlite_file(&state_index(&h, "current"), current);
+        sqlite_file(&state_index(&h, "newer"), current + 1);
+        let junk = state_index(&h, "not-sqlite");
+        fs::create_dir_all(junk.parent().unwrap()).unwrap();
+        fs::write(&junk, vec![b'x'; 4096]).unwrap();
+
+        // Act
+        let outcome = code_index_per_worktree_files(&ctx(&h));
+
+        // Assert
+        assert!(matches!(outcome, Outcome::Done(_)));
+        assert!(!state_index(&h, "older-1").exists());
+        assert!(!state_index(&h, "older-2").exists());
+        for kept in ["current", "newer", "not-sqlite"] {
+            assert!(state_index(&h, kept).exists(), "{kept}");
+        }
+    }
+
+    #[test]
+    fn the_code_index_migration_runs_once_and_a_home_without_code_files_reports_nothing() {
+        // Arrange
+        let h = home("code-index-once");
+        let ctx = ctx(&h);
+        plain_file(&playbook_root_from(&h).join("data/code/o/r/wt.db"));
+        let ms = [Migration {
+            id: CODE_INDEX_FILES_MIGRATION,
+            since: "0.1.0",
+            kind: Kind::Auto,
+            scope: Scope::Owned,
+            run: code_index_per_worktree_files,
+        }];
+        let (mut first, mut second) = (Report::default(), Report::default());
+
+        // Act
+        run_auto(&ms, &ctx, &mut first, None);
+        run_auto(&ms, &ctx, &mut second, None);
+        let empty = code_index_per_worktree_files(&super::Ctx::for_home(&home("code-index-none")));
+
+        // Assert
+        assert_eq!(first.steps.len(), 1);
+        assert!(second.steps.is_empty(), "recorded, so not run again");
+        let Outcome::Done(step) = empty else {
+            panic!("the migration finishes");
+        };
+        assert_eq!(step.status, crate::init::run::StepStatus::Skipped);
     }
 }
