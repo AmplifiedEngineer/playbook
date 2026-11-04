@@ -303,6 +303,125 @@ mod tests {
         assert_eq!(events, Events::default());
     }
 
+    fn rollout_lines(session: &str, totals: &[(u32, u64)]) -> String {
+        let mut text = format!(
+            "{{\"timestamp\":\"2026-10-20T10:00:00.000Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session}\",\"cwd\":\"/work/p\"}}}}\n"
+        );
+        for (second, total) in totals {
+            text.push_str(&format!(
+                "{{\"timestamp\":\"2026-10-20T10:00:{second:02}.000Z\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"info\":{{\"total_token_usage\":{{\"total_tokens\":{total}}},\"last_token_usage\":{{\"input_tokens\":100,\"cached_input_tokens\":0,\"output_tokens\":10}}}}}}}}\n"
+            ));
+        }
+        text
+    }
+
+    fn write_rollouts(tag: &str, files: &[(&str, String)]) -> PathBuf {
+        let dir = crate::util::scratch_dir(tag);
+        for (name, text) in files {
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(name), text).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn a_continuation_file_with_the_parent_session_id_keeps_every_event_id_distinct() {
+        // Arrange: the shape of a real `<parent>_<child>` rollout, whose totals
+        // continue from the parent's last total instead of repeating it.
+        let dir = write_rollouts(
+            "codex-continuation",
+            &[
+                (
+                    "rollout-2026-10-20T10-00-00-0199aaaa-0000-7000-8000-0000000000aa.jsonl",
+                    rollout_lines("0199aaaa-0000-7000-8000-0000000000aa", &[(10, 110), (20, 220)]),
+                ),
+                (
+                    "rollout-2026-10-20T10-05-00-0199aaaa-0000-7000-8000-0000000000aa_0199bbbb-0000-7000-8000-0000000000bb.jsonl",
+                    rollout_lines("0199aaaa-0000-7000-8000-0000000000aa", &[(40, 330), (50, 440)]),
+                ),
+            ],
+        );
+        // Act
+        let events = CodexSource::new(dir.clone()).events_since(0).unwrap();
+        // Assert
+        let mut ids: Vec<_> = events.usage.iter().map(|e| e.event_id.clone()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(events.usage.len(), 4);
+        assert_eq!(ids.len(), 4, "every event has its own id");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_child_file_that_repeats_the_parent_lines_gets_the_same_event_ids() {
+        // Arrange: the child repeats the parent's two events and adds one
+        let dir = write_rollouts(
+            "codex-repeat",
+            &[
+                (
+                    "rollout-2026-10-20T10-00-00-0199aaaa-0000-7000-8000-0000000000aa.jsonl",
+                    rollout_lines("0199aaaa-0000-7000-8000-0000000000aa", &[(10, 110), (20, 220)]),
+                ),
+                (
+                    "rollout-2026-10-20T10-05-00-0199aaaa-0000-7000-8000-0000000000aa_0199bbbb-0000-7000-8000-0000000000bb.jsonl",
+                    rollout_lines(
+                        "0199aaaa-0000-7000-8000-0000000000aa",
+                        &[(10, 110), (20, 220), (40, 330)],
+                    ),
+                ),
+            ],
+        );
+        // Act
+        let events = CodexSource::new(dir.clone()).events_since(0).unwrap();
+        // Assert: the store keys on the id, so repeated lines collapse to three rows
+        let mut ids: Vec<_> = events.usage.iter().map(|e| e.event_id.clone()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(events.usage.len(), 5);
+        assert_eq!(ids.len(), 3);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn two_sessions_with_distinct_history_both_count() {
+        // Arrange
+        let dir = write_rollouts(
+            "codex-two-sessions",
+            &[
+                (
+                    "rollout-2026-10-20T10-00-00-0199aaaa-0000-7000-8000-0000000000aa.jsonl",
+                    rollout_lines("0199aaaa-0000-7000-8000-0000000000aa", &[(10, 110)]),
+                ),
+                (
+                    "rollout-2026-10-20T10-00-00-0199bbbb-0000-7000-8000-0000000000bb.jsonl",
+                    rollout_lines("0199bbbb-0000-7000-8000-0000000000bb", &[(10, 110)]),
+                ),
+            ],
+        );
+        // Act
+        let events = CodexSource::new(dir.clone()).events_since(0).unwrap();
+        // Assert
+        assert_eq!(events.usage.len(), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_compressed_rollout_is_skipped() {
+        // Arrange: Codex compresses older rollouts to `.jsonl.zst`.
+        let dir = write_rollouts(
+            "codex-zst",
+            &[(
+                "rollout-2026-10-20T10-00-00-0199aaaa-0000-7000-8000-0000000000aa.jsonl.zst",
+                rollout_lines("0199aaaa-0000-7000-8000-0000000000aa", &[(10, 110)]),
+            )],
+        );
+        // Act
+        let events = CodexSource::new(dir.clone()).events_since(0).unwrap();
+        // Assert
+        assert!(events.usage.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn rerunning_ingest_does_not_duplicate_events() {
         let dir = crate::util::scratch_dir("codex-ingest");
