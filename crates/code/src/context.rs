@@ -1208,4 +1208,33 @@ mod tests {
         let expected = (2.0 + 3.0 / (1.0 + 2.0_f64)).ln();
         assert!((weights[0] - expected).abs() < 1e-9, "{weights:?}");
     }
+
+    #[test]
+    fn symbols_of_another_worktree_do_not_count_or_match() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("cx-scope-own");
+        f.write("a.rs", "fn other() {}\n");
+        let elsewhere = crate::walker::test_repo::init("cx-scope-other");
+        crate::walker::test_repo::write(&elsewhere, "b.rs", b"fn widget() {}\n");
+        f.run();
+        crate::index::run(
+            &elsewhere,
+            &f.index,
+            "other",
+            false,
+            &crate::index::Options::default(),
+        )
+        .expect("second worktree");
+        let conn = f.conn();
+
+        // Act
+        let weights = term_weights(&conn, &["widget".to_string()]).expect("weights");
+        let cands = symbol_cands(&conn, "widget").expect("cands");
+
+        // Assert: only the one symbol of this worktree exists, none match.
+        let expected = (2.0 + 1.0 / (1.0 + 0.0_f64)).ln();
+        assert!((weights[0] - expected).abs() < 1e-9, "{weights:?}");
+        assert!(cands.is_empty());
+    }
 }

@@ -13,7 +13,7 @@ use std::time::Duration;
 
 /// Bumped when the table layout changes. A different non-zero value in
 /// `PRAGMA user_version` makes the next `index` run rebuild the file.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
 
@@ -751,22 +751,32 @@ mod tests {
     }
 
     #[test]
-    fn a_version_2_file_is_rebuilt_in_index_mode_and_kept_in_query_mode() {
+    fn an_older_version_file_is_rebuilt_in_index_mode_and_kept_in_query_mode() {
+        for old in [2, 3] {
+            check_old_version_is_rebuilt(old);
+        }
+    }
+
+    fn check_old_version_is_rebuilt(old: i64) {
         // Arrange
-        let dir = scratch_dir("code-db-v2");
+        let dir = scratch_dir(&format!("code-db-v{old}"));
         let path = dir.join("index.sqlite3");
         std::fs::create_dir_all(&dir).expect("dir");
         {
             let conn = Connection::open(&path).expect("raw db");
-            conn.execute_batch("CREATE TABLE files(x); PRAGMA user_version = 2;")
-                .expect("seed");
+            conn.execute_batch(&format!(
+                "CREATE TABLE files(x); PRAGMA user_version = {old};"
+            ))
+            .expect("seed");
         }
 
         // Act
         let query = open_index(&path, OpenMode::Query);
 
         // Assert
-        let message = query.expect_err("query must not open v2").to_string();
+        let message = query
+            .expect_err("query must not open an old version")
+            .to_string();
         assert!(message.contains("--rebuild"), "{message}");
         assert!(path.exists(), "query mode must not delete the file");
 
@@ -774,7 +784,7 @@ mod tests {
         let conn = open_index(&path, OpenMode::Index).expect("rebuild");
 
         // Assert
-        assert_eq!(pragma(&conn, "user_version"), 3);
+        assert_eq!(pragma(&conn, "user_version"), SCHEMA_VERSION);
         assert_eq!(count(&conn, "worktrees"), 0);
         let _ = std::fs::remove_dir_all(dir);
     }

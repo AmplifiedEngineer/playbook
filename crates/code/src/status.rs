@@ -449,4 +449,30 @@ mod tests {
         assert!(!one.is_empty());
         assert_eq!(one, two);
     }
+
+    #[test]
+    fn an_interrupted_run_is_reported_only_for_its_own_worktree() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("st-interrupted-own");
+        f.write("a.rs", "fn a() {}\n");
+        f.run();
+        let elsewhere = crate::walker::test_repo::init("st-interrupted-other");
+        crate::walker::test_repo::write(&elsewhere, "b.rs", b"fn b() {}\n");
+        let stop = crate::index::Options {
+            hooks: crate::index::Hooks {
+                after_batch_commit: Some(Box::new(|_| Err("stop".to_string()))),
+                before_file_insert: None,
+            },
+            ..crate::index::Options::default()
+        };
+        let _ = crate::index::run(&elsewhere, &f.index, "other", false, &stop);
+
+        // Act
+        let own = status(&f.conn(), &f.index, &f.root, &f.worktree).expect("status");
+
+        // Assert
+        assert!(!own.interrupted);
+        assert_eq!(own.state, IndexState::Fresh);
+    }
 }

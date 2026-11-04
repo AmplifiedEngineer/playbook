@@ -971,17 +971,18 @@ mod tests {
         let conn = f.conn();
         assert_eq!(paths(&conn), vec!["stay.rs"]);
         assert!(fts_paths(&conn, "vanishingtext").is_empty());
-        let orphans: i64 = conn
-            .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
-            .expect("count");
-        let stay_chunks: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM chunks c JOIN files f ON f.id = c.file_id WHERE f.path = 'stay.rs'",
-                [],
-                |r| r.get(0),
-            )
-            .expect("count");
-        assert_eq!(orphans, stay_chunks);
+        let writer = db::open_index(&f.index, OpenMode::Index).expect("writer");
+        let stored = count(&writer, "SELECT COUNT(*) FROM main.chunks");
+        let stay_chunks = count(&conn, "SELECT COUNT(*) FROM chunks");
+        assert!(stay_chunks > 0);
+        assert_eq!(stored, stay_chunks);
+        assert_eq!(
+            count(
+                &writer,
+                "SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH 'vanishingtext'"
+            ),
+            0
+        );
     }
 
     #[cfg(unix)]
@@ -1811,6 +1812,14 @@ impl P { fn go(&self) {} }
         let conn = f.conn();
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM manifest"), 1);
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM content"), 1);
+        let writer = db::open_index(&f.index, OpenMode::Index).expect("writer");
+        assert_eq!(
+            count(
+                &writer,
+                "SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH 'gone'"
+            ),
+            0
+        );
     }
 
     #[test]
@@ -1975,6 +1984,27 @@ impl P { fn go(&self) {} }
         assert_eq!(count(&b, "SELECT COUNT(*) FROM symbols"), 1);
         assert_eq!(fts_paths(&b, "only_in_a"), Vec::<String>::new());
         assert_eq!(count(&f.conn(), "SELECT COUNT(*) FROM content"), 2);
+    }
+
+    #[test]
+    fn removing_a_path_keeps_content_another_worktree_still_uses() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-shared-content");
+        write(&f.root, "a.rs", b"fn shared_name() {}\n");
+        let other = crate::walker::test_repo::init("idx-shared-content-b");
+        write(&other, "b.rs", b"fn shared_name() {}\n");
+        f.run();
+        run(&other, &f.index, "other", false, &Options::default()).expect("second worktree");
+        std::fs::remove_file(f.root.join("a.rs")).expect("remove");
+
+        // Act
+        f.run();
+
+        // Assert
+        let b = db::open_query(&f.index, "other").expect("other");
+        assert_eq!(symbol_names(&b, "b.rs"), vec!["shared_name"]);
+        assert_eq!(count(&b, "SELECT COUNT(*) FROM chunks"), 1);
     }
 
     #[test]
