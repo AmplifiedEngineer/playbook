@@ -10,12 +10,12 @@ Every database a playbook tool creates lives in `~/.config/playbook/data`, share
 | `memory.db` | The memory graph: one row per fact and per link, built from the fact files | Yes: `playbook memory rebuild` makes it again |
 | `usage.db` | Token and cost events from the usage view | No: events outlive Claude Code's own history |
 | `gate/<owner>/<repo>/<worktree-id>.db` | Gate records of one worktree (`gate record`, `gate check`) | Only when the worktree is gone |
-| `code/<owner>/<repo>/<worktree-id>.db` | The code index of one worktree | Yes: `playbook code index` rebuilds it |
 | `watch.db` | Watch mode: polling cursors, events already seen, and the work queue | No: deleting it forgets what was seen and what is queued |
 | `watch/audit.jsonl` | Watch mode: one line per decision, rotated at 10 MiB, five files kept | Yes: it is a record, nothing reads it back |
 | `watch.lock` | The one-instance lock of watch mode, held by the OS while a watch process runs | Yes |
+| `code/<owner>/<repo>/store-v<N>.sqlite3` | The code index of a repo: one store for all its worktrees, with a `<worktree-id>.lock` run lock beside it | Yes: `playbook code index` rebuilds it |
 
-Per-worktree files keep worktrees of one repo apart, as the old `repos/<owner>/<repo>/<worktree-id>/` folders did. Memory facts stay Markdown files under `~/.config/playbook/memory` and are the source of truth for `memory.db`. Plans, implement notes and worktree folders stay under `repos/`.
+Per-worktree gate files keep worktrees of one repo apart, as the old `repos/<owner>/<repo>/<worktree-id>/` folders did. The code store holds one manifest per worktree and one copy of each distinct file content, so worktrees share the parsing work and the disk, and a query still sees only its own worktree's paths. Memory facts stay Markdown files under `~/.config/playbook/memory` and are the source of truth for `memory.db`. Plans, implement notes and worktree folders stay under `repos/`.
 
 ## How databases got here
 
@@ -26,7 +26,7 @@ Earlier versions kept these files elsewhere:
 | `data/config.db` | `~/.config/playbook/playbook.db` |
 | `data/memory.db` | `~/.config/playbook/memory/memory.graph.json` |
 | `data/gate/<owner>/<repo>/<worktree-id>.db` | `~/.config/playbook/repos/<owner>/<repo>/<worktree-id>/state.db` |
-| `data/code/<owner>/<repo>/<worktree-id>.db` | `~/.config/playbook/repos/<owner>/<repo>/<worktree-id>/code/index.sqlite3` |
+| `data/code/<owner>/<repo>/store-v<N>.sqlite3` | `data/code/<owner>/<repo>/<worktree-id>.db`, and before that `~/.config/playbook/repos/<owner>/<repo>/<worktree-id>/code/index.sqlite3` |
 
 The first command that needs a database moves the old file. The move never deletes data found nowhere else:
 
@@ -56,7 +56,7 @@ A file that is not a database is left where it is, or renamed to `.migrated` for
 
 `playbook doctor` has a row for the folder: path, file count, kilobytes, any `*.migrated` leftovers or `.tmp-` copies, and per-worktree databases that match no worktree of this clone. Those belong to removed worktrees or another clone of the repo. Check before deleting.
 
-`playbook worktree sweep` and `playbook worktree remove` delete the gate and code databases of the worktree they remove, unless another registered worktree still maps to the same id.
+`playbook worktree sweep` and `playbook worktree remove` delete the gate database of the worktree they remove, and drop its rows and run lock from the code store, unless another registered worktree still maps to the same id. `playbook code index` also removes content that no worktree lists and worktree rows whose folder has been gone for over a week. It deletes store files of older schema versions once nothing has touched them for thirty days. The first `playbook setup` after an upgrade deletes the old per-worktree code files.
 
 ## Uninstall
 

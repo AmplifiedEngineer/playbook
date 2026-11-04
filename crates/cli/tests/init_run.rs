@@ -200,6 +200,7 @@ fn base_paths(home: &Path) -> InitPaths {
         only: false,
         short_name: playbook::init::pb_link::Choice::Skip,
         policy_guard: false,
+        codex_hooks: false,
         pb_target: None,
         completions: None,
         attribution: playbook::init::attribution::Choice::Off { replace: false },
@@ -253,6 +254,7 @@ fn fresh_config_gets_fully_wired() {
             "short-name",
             "completions",
             "policy-guard",
+            "codex-hooks",
             "plugin update mode",
             "policy guard",
             "rm guard",
@@ -784,6 +786,7 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
             "short-name",
             "completions",
             "policy-guard",
+            "codex-hooks",
             "plugin update mode",
             "policy guard",
             "rm guard",
@@ -948,6 +951,7 @@ fn missing_self_root_skips_template_dependent_steps() {
         only: false,
         short_name: playbook::init::pb_link::Choice::Skip,
         policy_guard: false,
+        codex_hooks: false,
         pb_target: None,
         completions: None,
         attribution: playbook::init::attribution::Choice::Skip,
@@ -1496,4 +1500,48 @@ fn init_with_the_hooks_left_off_keeps_a_dead_hook_entry() {
     let root = playbook::common::paths::playbook_root_from(&home);
     let record = playbook::heal::Record::read(&root).unwrap();
     assert!(record.pending.iter().any(|id| id == "dead-hook-scripts"));
+}
+
+#[test]
+fn the_codex_hooks_part_writes_nothing_unless_chosen() {
+    // Arrange
+    let home = scratch_home("codex-hooks-off");
+    fs::create_dir_all(home.join(".codex")).unwrap();
+    // Act
+    let outcome = run(&base_paths(&home));
+    // Assert
+    assert_eq!(
+        find_step(&outcome, "codex-hooks").status,
+        StepStatus::Skipped
+    );
+    assert!(!home.join(".codex/hooks.json").exists());
+}
+
+#[test]
+fn the_codex_hooks_part_registers_the_guards_once_and_keeps_user_entries() {
+    // Arrange
+    let home = scratch_home("codex-hooks-on");
+    fs::create_dir_all(home.join(".codex")).unwrap();
+    let file = home.join(".codex/hooks.json");
+    write_json(
+        &file,
+        &json!({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "mine"}]}]}}),
+    );
+    let chosen = || InitPaths {
+        codex_hooks: true,
+        ..base_paths(&home)
+    };
+    // Act
+    let first = run(&chosen());
+    let second = run(&chosen());
+    // Assert
+    assert_eq!(find_step(&first, "codex-hooks").status, StepStatus::Wired);
+    assert_eq!(
+        find_step(&second, "codex-hooks").status,
+        StepStatus::AlreadyCorrect
+    );
+    let commands = all_hook_commands(&read_json(&file));
+    assert!(commands.contains(&"mine".to_string()));
+    assert!(commands.contains(&"playbook hook rm-workspace-guard".to_string()));
+    assert!(commands.contains(&"playbook hook precommit-check".to_string()));
 }

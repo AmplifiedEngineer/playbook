@@ -148,33 +148,41 @@ pub struct Status {
     pub interrupted: bool,
 }
 
-fn meta_i64(conn: &Connection, key: &str) -> Option<i64> {
-    conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| {
-        r.get::<_, String>(0)
-    })
-    .ok()
-    .and_then(|v| v.parse().ok())
+/// When this worktree's last run started and completed, from its row.
+fn run_times(conn: &Connection, worktree: &str) -> (Option<i64>, Option<i64>) {
+    conn.query_row(
+        "SELECT last_run_started, last_run_completed FROM worktrees WHERE key = ?1",
+        [worktree],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .unwrap_or((None, None))
 }
 
 fn group_counts(conn: &Connection, column: &str) -> Result<BTreeMap<String, usize>, String> {
     let sql = format!("SELECT COALESCE({column}, 'unknown'), COUNT(*) FROM files GROUP BY 1");
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| super::db::map_sql_error("status failed", &e))?;
     let rows = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| super::db::map_sql_error("status failed", &e))?;
     let mut out = BTreeMap::new();
     for row in rows {
-        let (key, n) = row.map_err(|e| e.to_string())?;
+        let (key, n) = row.map_err(|e| super::db::map_sql_error("status failed", &e))?;
         out.insert(key, usize::try_from(n).unwrap_or(0));
     }
     Ok(out)
 }
 
 /// The full status report: a hashing freshness check plus index facts.
-pub fn status(conn: &Connection, index_path: &Path, root: &Path) -> Result<Status, String> {
+pub fn status(
+    conn: &Connection,
+    index_path: &Path,
+    root: &Path,
+    worktree: &str,
+) -> Result<Status, String> {
     let drift = full_check(conn, root)?;
-    let started = meta_i64(conn, "last_run_started");
-    let completed = meta_i64(conn, "last_run_completed");
+    let (started, completed) = run_times(conn, worktree);
     let interrupted = match (started, completed) {
         (Some(_), None) => true,
         (Some(s), Some(c)) => s > c,
@@ -373,15 +381,16 @@ mod tests {
             hooks: crate::index::Hooks {
                 after_batch_commit: Some(Box::new(|_| Err("stop".to_string()))),
                 before_file_insert: None,
+                ..Default::default()
             },
             ..crate::index::Options::default()
         };
-        let _ = crate::index::run(&f.root, &f.index, false, &stop);
+        let _ = crate::index::run(&f.root, &f.index, &f.worktree, false, &stop);
 
         // Act
-        let stopped = status(&f.conn(), &f.index, &f.root).expect("status");
+        let stopped = status(&f.conn(), &f.index, &f.root, &f.worktree).expect("status");
         f.run();
-        let done = status(&f.conn(), &f.index, &f.root).expect("status");
+        let done = status(&f.conn(), &f.index, &f.root, &f.worktree).expect("status");
 
         // Assert
         assert!(stopped.interrupted);
@@ -401,13 +410,13 @@ mod tests {
         for i in 0..50 {
             f.write(&format!("f{i:02}.rs"), "fn b() {}\nfn c() {}\n");
         }
-        let fifty = status(&f.conn(), &f.index, &f.root)
+        let fifty = status(&f.conn(), &f.index, &f.root, &f.worktree)
             .expect("status")
             .to_json();
         f.write("f50.rs", "fn b() {}\nfn c() {}\n");
 
         // Act
-        let fifty_one = status(&f.conn(), &f.index, &f.root)
+        let fifty_one = status(&f.conn(), &f.index, &f.root, &f.worktree)
             .expect("status")
             .to_json();
 
@@ -430,11 +439,11 @@ mod tests {
         f.run();
 
         // Act
-        let one = status(&f.conn(), &f.index, &f.root)
+        let one = status(&f.conn(), &f.index, &f.root, &f.worktree)
             .expect("status")
             .to_json()
             .to_string();
-        let two = status(&f.conn(), &f.index, &f.root)
+        let two = status(&f.conn(), &f.index, &f.root, &f.worktree)
             .expect("status")
             .to_json()
             .to_string();
@@ -442,5 +451,52 @@ mod tests {
         // Assert
         assert!(!one.is_empty());
         assert_eq!(one, two);
+    }
+
+    #[test]
+    fn a_damaged_manifest_names_rebuild() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("status-damaged");
+        f.write("a.rs", "fn needle() {}\n");
+        f.run();
+        let conn = f.conn();
+        crate::testkit::damage_pages(&f);
+
+        // Act
+        let got = status(&conn, &f.index, &f.root, &f.worktree);
+
+        // Assert
+        let Err(message) = got else {
+            panic!("the query must fail")
+        };
+        assert!(message.contains("--rebuild"), "{message}");
+    }
+
+    #[test]
+    fn an_interrupted_run_is_reported_only_for_its_own_worktree() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("st-interrupted-own");
+        f.write("a.rs", "fn a() {}\n");
+        f.run();
+        let elsewhere = crate::walker::test_repo::init("st-interrupted-other");
+        crate::walker::test_repo::write(&elsewhere, "b.rs", b"fn b() {}\n");
+        let stop = crate::index::Options {
+            hooks: crate::index::Hooks {
+                after_batch_commit: Some(Box::new(|_| Err("stop".to_string()))),
+                before_file_insert: None,
+                ..crate::index::Hooks::default()
+            },
+            ..crate::index::Options::default()
+        };
+        let _ = crate::index::run(&elsewhere, &f.index, "other", false, &stop);
+
+        // Act
+        let own = status(&f.conn(), &f.index, &f.root, &f.worktree).expect("status");
+
+        // Assert
+        assert!(!own.interrupted);
+        assert_eq!(own.state, IndexState::Fresh);
     }
 }

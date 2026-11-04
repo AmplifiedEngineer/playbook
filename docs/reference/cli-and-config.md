@@ -285,12 +285,12 @@ Example: `playbook code context "add retry support to payment processing"`
 
 Build or refresh the code index for this repo
 
-Hashes every file git lists, and reads only the ones that changed. Only one run at a time is allowed.
+Hashes every file git lists, and reads only the ones that changed. Worktrees of one repo share one store, so content that is already stored is not parsed again. Each worktree runs once at a time.
 
 Example: `playbook code index --json`
 
 - `--json`: Print one JSON document
-- `--rebuild`: Delete the cache first and index everything again
+- `--rebuild`: Index everything again; a damaged store is replaced for every worktree
 
 ### `playbook code outline`
 
@@ -1289,11 +1289,14 @@ Example: `playbook review size --base main`
 
 Recommend a quick or a deep review from the diff
 
-Reads the changed files from git (the branch against the default branch, no network) or from `gh` when a PR number is given, and applies a fixed rule list: size, files, packages touched, risky paths (auth, crypto, secrets, CI, release, hooks, guards, migrations, dependencies, the command surface, plugin commands, skills and agents over the small cut), a security label, the test ratio, and changes that cannot alter behavior (docs, lock files, renames, tests). Prints `recommendation=quick|deep`, `confidence=high|low`, up to four `reason:` lines and a `signals:` line. Low confidence means no rule was decisive; the answer then leans quick for your own change (a local branch always is) and deep otherwise. Docs and lock file lines do not count toward size, and files outside crates, packages, apps, services, libs and plugins count together as one `root` package. The cuts are the `review.suggest.*` config keys.
+Reads the changed files from git (the branch against the default branch, no network) or from `gh` when a PR number is given, and applies a fixed rule list: size, files, packages touched, risky paths (auth, crypto, secrets, CI, release, hooks, guards, migrations, dependencies, the command surface, plugin commands, skills and agents over the small cut), a security label, the test ratio, and changes that cannot alter behavior (docs, lock files, renames, tests). Prints `recommendation=quick|deep`, `confidence=high|low`, up to four `reason:` lines, a `signals:` line, a `scope=` line and, with `--scope stack`, a `stack:` line. Low confidence means no rule was decisive; the answer then leans quick for your own change (a local branch always is) and deep otherwise. Docs and lock file lines do not count toward size, and files outside crates, packages, apps, services, libs and plugins count together as one `root` package. The cuts are the `review.suggest.*` config keys.
+
+`--scope stack` measures every open PR in the PR's stack together: merged PRs are left out, closed PRs are skipped, and a PR outside a stack is measured alone. A stack with more open PRs than `review.stackMaxPrs` is answered deep without reading their files.
 
 Example: `playbook review suggest 4265 --json`
 
 - `<PR>`: PR number (default: the current branch against the default branch)
+- `--scope <SCOPE>`: What to measure: this PR alone, or every open PR in its stack (one of `this-pr`, `stack`)
 - `--base <BASE>`: Base branch when no PR number is given. Defaults to the repo's default branch; pass the parent branch for a stacked change
 - `--dir <DIR>`: Work in this directory instead of the current one
 - `--json`: Print JSON instead of text lines
@@ -1501,7 +1504,9 @@ Example: `playbook setup --no-hooks --system-prompt`
 - `--no-policy-guard`: Do not turn the policy guard on; it is off by default and a stored choice is not changed
 - `--attribution`: Attribution ON: Claude Code adds its Co-Authored-By trailer, generated-by line and session link. Removes each `attribution` key in settings.json that holds exactly the off value playbook writes, and stores `attribution.enabled` true
 - `--no-attribution`: Attribution OFF. Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values. Setup applies this when you choose nothing and have not chosen ON before
-- `--only <PART>`: Run only these parts and ask nothing. Parts, comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution. Everything else stays untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON
+- `--codex-hooks`: Register the playbook Bash guards in the hooks.json of Codex (off unless asked)
+- `--no-codex-hooks`: Do not register guards in Codex
+- `--only <PART>`: Run only these parts and ask nothing. Parts, comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution, codex-hooks. Everything else stays untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing

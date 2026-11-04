@@ -45,7 +45,7 @@ pub struct Row {
 }
 
 impl Row {
-    fn new(layer: &'static str, level: Level, message: impl Into<String>) -> Row {
+    pub(super) fn new(layer: &'static str, level: Level, message: impl Into<String>) -> Row {
         Row {
             layer,
             level,
@@ -54,7 +54,7 @@ impl Row {
         }
     }
 
-    fn hint(mut self, hint: impl Into<String>) -> Row {
+    pub(super) fn hint(mut self, hint: impl Into<String>) -> Row {
         self.hint = Some(hint.into());
         self
     }
@@ -126,7 +126,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 22] = [
+const PROBES: [Probe; 24] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -152,9 +152,11 @@ const PROBES: [Probe; 22] = [
     |env| vec![attribution_row(env)],
     update_rows,
     |env| vec![policy_guard_row(env)],
+    |env| vec![codex_row(env)],
     doc_rows,
     |env| gc_rows(env, &crate::gc::space::RealProbe),
     completion_rows,
+    super::build::rows,
 ];
 
 /// Run every check. The probes only read, and several wait on child processes
@@ -861,6 +863,44 @@ fn policy_guard_row(env: &Env) -> Row {
             "to turn it on, run: playbook config set --global {ENABLED_KEY} true"
         ))
     }
+}
+
+/// Whether the playbook guards are registered in the hooks.json of Codex. The
+/// row cannot tell whether the user trusted them, because where Codex keeps
+/// that is not documented, so it points at `/hooks`.
+fn codex_row(env: &Env) -> Row {
+    let path = env.path_var.to_string_lossy();
+    let found = !crate::skills_sync::detect(&env.home, &path).is_empty();
+    let audit = crate::init::codex_hooks::audit(&crate::init::codex_hooks::hooks_path(&env.home));
+    codex_row_from(found, &audit)
+}
+
+fn codex_row_from(found: bool, audit: &crate::init::wire::HookAudit) -> Row {
+    if !found {
+        return Row::new("-", Level::Info, "Codex not found (optional)");
+    }
+    if audit.missing.is_empty() {
+        return Row::new(
+            "-",
+            Level::Pass,
+            "Codex found, the playbook guards are in ~/.codex/hooks.json",
+        )
+        .hint("Codex skips a hook until you trust it: check /hooks in Codex");
+    }
+    // The part is off by default, so none registered is a choice. Only a
+    // partial set is a problem.
+    let (level, message) = if audit.present == 0 {
+        (
+            Level::Info,
+            "Codex found, the optional playbook guards are not in ~/.codex/hooks.json",
+        )
+    } else {
+        (
+            Level::Warn,
+            "Codex found, only some playbook guards are in ~/.codex/hooks.json",
+        )
+    };
+    Row::new("-", level, message).hint("to add them, run: playbook setup --only codex-hooks")
 }
 
 /// The `attribution` key in the user's settings.json (ADR 0042). With
@@ -1602,8 +1642,8 @@ pub fn failed(rows: &[Row]) -> bool {
 mod tests {
     use super::*;
 
-    const PROBE_COUNT: usize = 22;
-    const COMPLETION_PROBE_AT: usize = PROBE_COUNT - 1;
+    const PROBE_COUNT: usize = 24;
+    const COMPLETION_PROBE_AT: usize = PROBE_COUNT - 2;
 
     fn env_for(home: &Path) -> Env {
         Env {
@@ -1618,7 +1658,45 @@ mod tests {
     }
 
     #[test]
-    fn the_probes_table_has_21_entries_in_order() {
+    fn the_codex_row_follows_whether_codex_is_found_and_the_guards_are_registered() {
+        use crate::init::wire::HookAudit;
+        let missing = HookAudit {
+            missing: vec!["rm-workspace-guard"],
+            ..HookAudit::default()
+        };
+        let present = HookAudit {
+            present: 2,
+            ..HookAudit::default()
+        };
+        let partial = HookAudit {
+            missing: vec!["precommit-check"],
+            present: 1,
+            ..HookAudit::default()
+        };
+
+        let absent = codex_row_from(false, &missing);
+        let unregistered = codex_row_from(true, &missing);
+        let partly = codex_row_from(true, &partial);
+        let registered = codex_row_from(true, &present);
+
+        assert_eq!(absent.level, Level::Info);
+        assert_eq!(absent.message, "Codex not found (optional)");
+        assert_eq!(unregistered.level, Level::Info);
+        assert_eq!(partly.level, Level::Warn);
+        assert_eq!(
+            unregistered.hint.as_deref(),
+            Some("to add them, run: playbook setup --only codex-hooks")
+        );
+        assert_eq!(registered.level, Level::Pass);
+        assert_eq!(
+            registered.message,
+            "Codex found, the playbook guards are in ~/.codex/hooks.json"
+        );
+        assert!(registered.hint.unwrap().contains("/hooks"));
+    }
+
+    #[test]
+    fn the_probes_table_has_24_entries_in_order() {
         // Arrange
         let home = crate::common::test_support::scratch_dir("doctor-probes");
         std::fs::create_dir_all(&home).unwrap();

@@ -115,6 +115,28 @@ A fix at the same version raises `pkgrel`. A real rollback to an older `pkgver` 
 
 A run with `version=` of an older release does not apply, because the job only publishes the latest release. Orphaning or deleting the package goes through the AUR web page.
 
+### apt and dnf repository
+
+After `verify`, two leaf jobs publish a signed repository to GitHub Pages ([ADR 0052](../adr/0052-signed-apt-and-dnf-repository.md)). A failure turns the run red and blocks no other channel. Run `gh workflow run release.yml -f version=X.Y.Z` to try again.
+
+- `package-repo-sign` runs `scripts/package-repo-fetch.sh`, which takes the newest five releases that list packages and checks the attestation of `SHA256SUMS` and of every package. `scripts/package-repo.sh` rebuilds both indexes from them and signs them. `scripts/package-repo-verify.sh` then installs from the built folder in Debian, Ubuntu and Fedora containers, checks that a tampered index is refused and, when two versions exist, that an upgrade keeps a seeded file under `~/.config/playbook`. This job holds the key and has `contents: read` only.
+- `package-repo-deploy` holds the Pages permissions and no key. After the deploy it reads the public URL, retries for up to five minutes, and checks both signatures with the published key.
+- A missing key fails the run on purpose. A dry run signs with a throwaway key and deploys nothing.
+- The signing subkey is RSA 4096 and lasts three years. The build warns under 90 days and fails under 30.
+- To yank a version, add it to `packaging/apt/yanked.txt` in a pull request and run the release workflow again. A rerun alone does not remove a bad release. Pages also keeps the earlier deployment for a manual redeploy.
+- If the key leaks, revoke the subkey, publish a new key and an advisory, replace both secrets and rebuild. Clients fetch the new `playbook.gpg`.
+
+One time setup for the maintainer. The jobs cannot do these:
+
+1. Generate an RSA 4096 primary key offline, with a signing subkey that expires in three years. Keep the primary on an offline token or encrypted media, with a second copy.
+2. Export the subkey only: `gpg --armor --export-secret-subkeys <fingerprint>!`.
+3. Create environment `package-repo` limited to `main`, with secrets `PACKAGE_SIGNING_KEY` (the exported subkey) and `PACKAGE_SIGNING_PASSPHRASE`.
+4. In Settings, Pages, set the source to GitHub Actions, and create environment `github-pages`.
+5. Publish the fingerprint in the release notes and this guide. If you own a custom domain, point it at Pages and change the URL in the install guide before the first release.
+6. Run `gh workflow run release.yml -f version=<latest> -f dry_run=true` to prove the build, then without `dry_run` to publish.
+
+The first real run decides the Pages egress hosts and whether block mode covers container traffic, which is why both jobs use audit mode for now.
+
 ### Scoop
 
 After `verify`, the `scoop` job moves the Windows scoop bucket, the repository `pragmatic-engineer/scoop-bucket` (ADR 0053, Windows is experimental).
@@ -126,11 +148,25 @@ After `verify`, the `scoop` job moves the Windows scoop bucket, the repository `
 - Without the app secrets, or when the app is not installed on the bucket repository, it warns and passes.
 - Token custody is the same as for the tap: `BOT_APP_CLIENT_ID` and `BOT_APP_PRIVATE_KEY`, with the app installed on the bucket repository.
 - A dry run renders from a stand-in `SHA256SUMS` into the run summary and opens nothing.
-- There is no winget channel yet.
 
 Then `verify-scoop` installs scoop on a clean Windows runner from a pinned installer script, installs the rendered manifest from a file, checks `playbook --version`, removes it, and installs again from the bucket (with retries) once the pull request has merged. It is a leaf job with no secret, skipped in a dry run.
 
 To roll back, revert the bucket pull request. Users who already installed keep their version until `scoop update`, and scoop treats a lower version as older, so ship a higher patch release to replace a bad one.
+
+### winget
+
+After `verify`, the `winget` job on a Windows runner opens a pull request to `microsoft/winget-pkgs` for the `.exe` (ADR 0053, Windows is experimental). The package identifier is `PragmaticEngineer.Playbook`.
+
+- It checks `SHA256SUMS` and the `.exe` against their attestation.
+- `wingetcreate update` writes the manifest. The job then compares the installer hash in it with the attested hash and only then submits. It never passes the token on the command line: the token reaches the tool as `WINGET_CREATE_GITHUB_TOKEN`.
+- `wingetcreate` is a pinned release with its SHA256 kept in the workflow.
+- It skips when the release is not the latest or the version already has a pull request, so a rerun opens no second one.
+- It warns and passes while `WINGET_PAT` is not set in environment `winget`.
+- Token custody: a classic `public_repo` token of a dedicated bot account that owns the fork of `winget-pkgs`, stored only as `WINGET_PAT` of environment `winget`, limited to `main`.
+- The first manifest is made with `wingetcreate new` and landed by hand, because `update` needs an accepted package. Until then the job fails at `wingetcreate update`.
+- A dry run prints the command and opens nothing.
+
+Microsoft moderators decide the pull request, and validation can take days. Closing the pull request before it merges undoes it. After the merge, a bad version leaves through a pull request to `winget-pkgs`, so treat winget as best effort. The binary has no Authenticode signature, so validation may flag it.
 
 ### Dry run
 

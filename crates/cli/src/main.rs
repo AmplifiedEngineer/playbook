@@ -754,6 +754,7 @@ fn real_main() {
                 ),
                 attribution: choices.attribution.resolve(&common::home_dir()),
                 policy_guard: choices.policy_guard,
+                codex_hooks: choices.codex_hooks,
             };
             if flags.dry_run {
                 print!("{}", init::preview::dry_run(&paths, &choices));
@@ -2046,12 +2047,13 @@ fn real_main() {
             }
             ReviewCommand::Suggest {
                 pr,
+                scope,
                 base,
                 dir,
                 json,
             } => {
                 enter_dir("review suggest", dir.as_deref());
-                match review::suggest::run(pr.as_deref(), base.as_deref()) {
+                match review::suggest::run(pr.as_deref(), base.as_deref(), scope) {
                     Ok(sug) if json => println!(
                         "{}",
                         serde_json::to_string_pretty(&sug).unwrap_or_else(|_| "{}".to_string())

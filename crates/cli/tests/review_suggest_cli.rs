@@ -122,3 +122,24 @@ fn no_changes_and_a_bad_base_fail_with_a_message() {
     let (code, _, err) = suggest(&dir, &["--base=-x"]);
     assert_eq!((code, err.contains("as an option")), (1, true), "{err}");
 }
+
+#[test]
+fn the_text_answer_ends_with_the_scope() {
+    let dir = repo("scope-line", &[("src/a.py", 10)]);
+    let (code, out, _) = suggest(&dir, &[]);
+    assert_eq!(code, 0);
+    assert_eq!(out.lines().last(), Some("scope=this-pr"), "{out}");
+}
+
+#[test]
+fn a_stack_scope_without_a_pr_number_fails_and_a_bad_scope_is_a_usage_error() {
+    let dir = repo("scope-pr", &[("src/a.py", 10)]);
+    let (code, _, err) = suggest(&dir, &["--scope", "stack"]);
+    assert_eq!(
+        (code, err.contains("--scope stack needs a PR number")),
+        (1, true),
+        "{err}"
+    );
+    let (code, _, err) = suggest(&dir, &["--scope", "bogus"]);
+    assert_eq!((code, err.contains("bogus")), (2, true), "{err}");
+}

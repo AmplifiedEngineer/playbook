@@ -19,7 +19,7 @@ description: Lists /playbook:* commands and when to use each, and points to the 
 
 | Command | Use when |
 |---|---|
-| `/playbook:review` | Reviewing a PR or your own branch. Start here. It recommends a quick or a deep review from the diff, asks you to pick, then runs it. `--quick` and `--deep` skip the question. |
+| `/playbook:review` | Reviewing a PR or your own branch. Start here. For a PR in a stack it asks the scope first (this PR only or the whole stack), then recommends a quick or a deep review for that scope, asks you to pick, then runs it. `--quick` and `--deep` skip the depth question; `--this-pr` and `--whole-stack` skip the scope question. |
 | `/playbook:quick-review` | A routine PR review, or a quick check of your own branch. Single pass, asks which findings to post as a pending GitHub review, or only reports with `--self` or `--no-post`. |
 | `/playbook:deep-review` | Direct entry for the deep review. A substantial, risky or cross-cutting PR. A parallel swarm of specialist reviewers, fact-checked into one pending review. |
 | `/playbook:address-pr-comments` | Working through open review feedback on a PR, one comment at a time. |

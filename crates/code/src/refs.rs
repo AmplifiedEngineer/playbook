@@ -85,18 +85,18 @@ fn candidate_files(conn: &Connection, name: &str, limit: usize) -> Result<Vec<St
     let mut stmt = conn
         .prepare(
             "SELECT DISTINCT f.path FROM chunks_fts
-             JOIN chunks c ON c.id = chunks_fts.rowid
-             JOIN files f ON f.id = c.file_id
+             JOIN main.chunks c ON c.id = chunks_fts.rowid
+             JOIN files f ON f.id = c.content
              WHERE chunks_fts MATCH ?1 AND f.lang IS NOT NULL
              ORDER BY f.path LIMIT ?2",
         )
-        .map_err(|e| format!("refs failed: {e}"))?;
+        .map_err(|e| super::db::map_sql_error("refs failed", &e))?;
     let limit = i64::try_from(limit).unwrap_or(i64::MAX);
     let rows = stmt
         .query_map(rusqlite::params![query, limit], |r| r.get::<_, String>(0))
-        .map_err(|e| format!("refs failed: {e}"))?;
+        .map_err(|e| super::db::map_sql_error("refs failed", &e))?;
     rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("refs failed: {e}"))
+        .map_err(|e| super::db::map_sql_error("refs failed", &e))
 }
 
 /// Finds identifier uses of `opts.target` in candidate files.
@@ -432,5 +432,63 @@ mod tests {
 
         // Assert
         assert_eq!(got.refs[0].column, 14);
+    }
+
+    #[test]
+    fn a_damaged_text_index_names_rebuild() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("refs-damaged");
+        f.write("a.rs", "fn needle() {}\nfn b() { needle(); }\n");
+        f.run();
+        let conn = f.conn();
+        crate::testkit::damage_pages(&f);
+
+        // Act
+        let got = find_refs(&conn, &f.root, &RefsOptions::new("needle"));
+
+        // Assert
+        let Err(message) = got else {
+            panic!("the query must fail")
+        };
+        assert!(message.contains("--rebuild"), "{message}");
+    }
+
+    /// This worktree lists the same bytes as `shared.rs` and `again.rs`, and
+    /// another worktree lists them as `sibling.rs` next to a file only it has.
+    fn two_worktrees_sharing(tag: &str) -> (Fx, crate::db::Store) {
+        let f = fx(tag);
+        f.write("shared.rs", "fn widget() { widget(); }\n");
+        f.write("again.rs", "fn widget() { widget(); }\n");
+        f.run();
+        let other = crate::walker::test_repo::init(&format!("{tag}-b"));
+        crate::walker::test_repo::write(&other, "sibling.rs", b"fn widget() { widget(); }\n");
+        crate::walker::test_repo::write(&other, "only_there.rs", b"fn widgetonly() {}\n");
+        crate::index::run(
+            &other,
+            &f.index,
+            "other",
+            false,
+            &crate::index::Options::default(),
+        )
+        .expect("second worktree");
+        let conn = f.conn();
+        (f, conn)
+    }
+
+    #[test]
+    fn references_come_from_this_worktree_only() {
+        let _g = pinned();
+        // Arrange
+        let (f, conn) = two_worktrees_sharing("rf-scope");
+
+        // Act
+        let got = find_refs(&conn, &f.root, &RefsOptions::new("widget")).expect("refs");
+
+        // Assert
+        let mut found: Vec<&str> = got.refs.iter().map(|r| r.path.as_str()).collect();
+        found.sort_unstable();
+        found.dedup();
+        assert_eq!(found, vec!["again.rs", "shared.rs"]);
     }
 }

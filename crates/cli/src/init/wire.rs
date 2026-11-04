@@ -351,7 +351,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         matcher: None,
         name: "worktree-create",
         group: Group::Worktree,
-        purpose: "Creates worktrees under `<repo-parent>/.worktrees/<repo>/<name>`, copies files named in `.worktreeinclude` and keeps `origin/HEAD` at most a day old.",
+        purpose: "Creates worktrees under `<repo-parent>/.worktrees/<repo>/<name>`, copies files named in `.worktreeinclude`, clones the main checkout's ignored `target` folder on macOS and keeps `origin/HEAD` at most a day old.",
         if_cond: None,
         timeout: Some(180),
         also_replaces: None,
@@ -532,6 +532,17 @@ pub fn wire(settings_path: &Path) -> Result<WireOutcome, WireError> {
 /// `wire` with the backup stamped `epoch`, so a caller that already took a
 /// backup in the same run lands on the same name and keeps its earlier copy.
 pub fn wire_at(settings_path: &Path, epoch: u64) -> Result<WireOutcome, WireError> {
+    let specs: Vec<&HookSpec> = wired_hooks().collect();
+    upsert_specs(settings_path, epoch, &specs)
+}
+
+/// Upserts every spec in `specs` into the hooks of `settings_path` and writes
+/// the file only when the result differs from what is on disk.
+pub(super) fn upsert_specs(
+    settings_path: &Path,
+    epoch: u64,
+    specs: &[&HookSpec],
+) -> Result<WireOutcome, WireError> {
     let (mut root, original) = load_settings(settings_path)?;
 
     {
@@ -544,10 +555,7 @@ pub fn wire_at(settings_path: &Path, epoch: u64) -> Result<WireOutcome, WireErro
                 settings_path.display()
             ))
         })?;
-        for spec in PORTED_HOOK_SPECS {
-            upsert_hook(hooks, spec, settings_path)?;
-        }
-        for spec in GUARD_SPECS {
+        for spec in specs {
             upsert_hook(hooks, spec, settings_path)?;
         }
     }
@@ -579,6 +587,55 @@ pub fn wire_at(settings_path: &Path, epoch: u64) -> Result<WireOutcome, WireErro
     })
 }
 
+/// Removes every hook entry whose command is one of `managed`, then any group
+/// or event that leaves empty, and the `hooks` key itself when nothing is left.
+/// Returns how many entries went.
+pub(super) fn remove_managed_entries(root: &mut Map<String, Value>, managed: &[String]) -> usize {
+    let mut removed_total = 0;
+    let mut drop_hooks_key = false;
+    if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) {
+        let mut touched_events = Vec::new();
+        for (event, groups) in hooks.iter_mut() {
+            let Some(groups) = groups.as_array_mut() else {
+                continue;
+            };
+            let mut touched = false;
+            groups.retain_mut(|group| {
+                let Some(entries) = group
+                    .as_object_mut()
+                    .and_then(|g| g.get_mut("hooks"))
+                    .and_then(Value::as_array_mut)
+                else {
+                    return true;
+                };
+                let before = entries.len();
+                entries.retain(|e| !is_managed_entry(e, managed));
+                let removed = before - entries.len();
+                removed_total += removed;
+                touched |= removed > 0;
+                removed == 0 || !entries.is_empty()
+            });
+            if touched {
+                touched_events.push(event.clone());
+            }
+        }
+        for event in touched_events {
+            if hooks
+                .get(&event)
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty)
+            {
+                hooks.remove(&event);
+            }
+        }
+        drop_hooks_key = hooks.is_empty() && removed_total > 0;
+    }
+    if drop_hooks_key {
+        root.remove("hooks");
+    }
+    removed_total
+}
+
 /// What `unwire_at` found, and did unless it ran dry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnwireOutcome {
@@ -608,48 +665,7 @@ pub fn unwire_at(
         backup_path: None,
     };
 
-    let mut drop_hooks_key = false;
-    if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) {
-        let managed = managed_commands();
-        let mut touched_events = Vec::new();
-        for (event, groups) in hooks.iter_mut() {
-            let Some(groups) = groups.as_array_mut() else {
-                continue;
-            };
-            let mut touched = false;
-            groups.retain_mut(|group| {
-                let Some(entries) = group
-                    .as_object_mut()
-                    .and_then(|g| g.get_mut("hooks"))
-                    .and_then(Value::as_array_mut)
-                else {
-                    return true;
-                };
-                let before = entries.len();
-                entries.retain(|e| !is_managed_entry(e, &managed));
-                let removed = before - entries.len();
-                outcome.hooks_removed += removed;
-                touched |= removed > 0;
-                removed == 0 || !entries.is_empty()
-            });
-            if touched {
-                touched_events.push(event.clone());
-            }
-        }
-        for event in touched_events {
-            if hooks
-                .get(&event)
-                .and_then(Value::as_array)
-                .is_some_and(Vec::is_empty)
-            {
-                hooks.remove(&event);
-            }
-        }
-        drop_hooks_key = hooks.is_empty() && outcome.hooks_removed > 0;
-    }
-    if drop_hooks_key {
-        root.remove("hooks");
-    }
+    outcome.hooks_removed = remove_managed_entries(&mut root, &managed_commands());
 
     let placed_statusline = root
         .get("statusLine")
@@ -674,17 +690,26 @@ pub fn unwire_at(
     if rendered == original {
         return Ok(outcome);
     }
-    // Never reuse a name: an earlier backup holds an older state worth keeping.
+    outcome.backup_path = Some(write_with_fresh_backup(settings_path, &rendered, epoch)?);
+    Ok(outcome)
+}
+
+/// Backs `path` up under a name no earlier backup used, then writes `rendered`.
+/// An earlier backup holds an older state worth keeping.
+pub(super) fn write_with_fresh_backup(
+    path: &Path,
+    rendered: &str,
+    epoch: u64,
+) -> std::io::Result<PathBuf> {
     let mut stamp = epoch;
-    let mut backup = timestamped_backup_path(settings_path, stamp);
+    let mut backup = timestamped_backup_path(path, stamp);
     while backup.exists() {
         stamp += 1;
-        backup = timestamped_backup_path(settings_path, stamp);
+        backup = timestamped_backup_path(path, stamp);
     }
-    fs::copy(settings_path, &backup)?;
-    outcome.backup_path = Some(backup);
-    atomic_write(settings_path, &rendered)?;
-    Ok(outcome)
+    fs::copy(path, &backup)?;
+    atomic_write(path, rendered)?;
+    Ok(backup)
 }
 
 /// What a read-only look at `settings.json` found about the hooks `wire` owns.
@@ -703,12 +728,18 @@ pub struct HookAudit {
 /// Compare `settings_path` with what `wire` would write, without changing it.
 /// A missing, unreadable or malformed file reports every hook as missing.
 pub fn audit(settings_path: &Path) -> HookAudit {
+    let specs: Vec<&HookSpec> = wired_hooks().collect();
+    audit_specs(settings_path, &specs)
+}
+
+/// [`audit`] against an explicit spec list.
+pub(super) fn audit_specs(settings_path: &Path, specs: &[&HookSpec]) -> HookAudit {
     let root = fs::read_to_string(settings_path)
         .ok()
         .and_then(|t| serde_json::from_str::<Value>(&t).ok());
     let hooks = root.as_ref().and_then(|r| r.get("hooks"));
     let mut out = HookAudit::default();
-    for spec in wired_hooks() {
+    for spec in specs.iter().copied() {
         let want = bare_command(spec.name);
         let found = hooks
             .and_then(|h| h.get(spec.event))
@@ -729,7 +760,7 @@ pub fn audit(settings_path: &Path) -> HookAudit {
             out.missing.push(spec.name);
         }
     }
-    let known = managed_commands();
+    let known: Vec<String> = specs.iter().map(|s| bare_command(s.name)).collect();
     if let Some(events) = hooks.and_then(Value::as_object) {
         for groups in events.values().filter_map(Value::as_array) {
             for entry in groups
@@ -767,7 +798,7 @@ fn is_managed_entry(entry: &Value, managed: &[String]) -> bool {
 /// decide whether anything actually changed. A missing file starts from an
 /// empty object and an empty baseline, matching a fresh `playbook setup` run
 /// before any `settings.json` exists yet.
-fn load_settings(path: &Path) -> Result<(Map<String, Value>, String), WireError> {
+pub(super) fn load_settings(path: &Path) -> Result<(Map<String, Value>, String), WireError> {
     if !path.is_file() {
         return Ok((Map::new(), String::new()));
     }
