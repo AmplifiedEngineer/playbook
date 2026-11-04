@@ -1130,6 +1130,160 @@ jobs:
           ../scripts/package-smoke.sh . "$VERSION" "$t"
           echo "Installed ${names[*]} in Debian, Ubuntu and Fedora containers." >> "$GITHUB_STEP_SUMMARY"
 
+  # Builds the signed apt and dnf repository from the newest attested releases
+  # that carry packages, tests it in clean containers, and hands the folder to
+  # package-repo-deploy (ADR 0052). This job holds the signing key and has no
+  # other permission. A missing key fails the run on purpose: a silent skip
+  # would leave a stale repository with no signal. A dry run signs with a
+  # throwaway key and deploys nothing. Audit mode for harden-runner, as in
+  # shell-ci: apt mirrors rotate per runner, and whether block mode covers
+  # container traffic is decided by the first real run.
+  package-repo-sign:
+    needs: [plan, verify]
+    if: >-
+      ${{ !cancelled()
+      && github.event_name == 'workflow_dispatch'
+      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      && (needs.plan.outputs.dry_run == 'true' || needs.verify.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: package-repo
+    concurrency:
+      # A dry run deploys nothing, so it must not queue behind or replace a real release.
+      group: ${{ needs.plan.outputs.dry_run == 'true' && 'package-repo-dry-run' || 'package-repo' }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      attestations: read
+    outputs:
+      # true when a signed site was uploaded for package-repo-deploy.
+      built: ${{ steps.build.outputs.built }}
+      # The hashes the public URL must serve once the deployment is live.
+      inrelease_sha: ${{ steps.build.outputs.inrelease_sha }}
+      repomd_sha: ${{ steps.build.outputs.repomd_sha }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_REF: refs/heads/${{ github.event.repository.default_branch }}
+      DRY_RUN: ${{ needs.plan.outputs.dry_run }}
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Install the repository tools
+        run: sudo apt-get update && sudo apt-get install -y apt-utils createrepo-c
+
+      - name: Fetch and verify the packaged releases
+        id: fetch
+        run: |
+          set -euo pipefail
+          epoch="$(scripts/package-repo-fetch.sh "$RUNNER_TEMP/assets" 5 | tail -n 1)"
+          echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
+
+      - name: Build and sign the repository
+        id: build
+        env:
+          # A dry run signs with a throwaway key, so it never receives the real one.
+          SECRET_KEY: ${{ needs.plan.outputs.dry_run != 'true' && secrets.PACKAGE_SIGNING_KEY || '' }}
+          SECRET_PASSPHRASE: ${{ needs.plan.outputs.dry_run != 'true' && secrets.PACKAGE_SIGNING_PASSPHRASE || '' }}
+          SOURCE_DATE_EPOCH: ${{ steps.fetch.outputs.epoch }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = true ]; then
+            # A throwaway key: a dry run proves the build, not the real key.
+            home="$(mktemp -d)"
+            PACKAGE_SIGNING_PASSPHRASE="$(openssl rand -hex 16)"
+            GNUPGHOME="$home" gpg --batch --quiet --pinentry-mode loopback --passphrase "$PACKAGE_SIGNING_PASSPHRASE" \
+              --quick-generate-key "playbook dry run <dry-run@example.invalid>" rsa4096 sign 1y
+            PACKAGE_SIGNING_KEY="$(GNUPGHOME="$home" gpg --batch --pinentry-mode loopback --passphrase "$PACKAGE_SIGNING_PASSPHRASE" --armor --export-secret-keys)"
+          else
+            if [ -z "$SECRET_KEY" ] || [ -z "$SECRET_PASSPHRASE" ]; then
+              echo "::error::PACKAGE_SIGNING_KEY or PACKAGE_SIGNING_PASSPHRASE is not set in environment package-repo, so the repository is not updated. See the maintainer steps in docs/internals/06-release-channels.md." >&2
+              exit 1
+            fi
+            echo "::add-mask::$SECRET_PASSPHRASE"
+            PACKAGE_SIGNING_KEY="$SECRET_KEY"
+            PACKAGE_SIGNING_PASSPHRASE="$SECRET_PASSPHRASE"
+          fi
+          export PACKAGE_SIGNING_KEY PACKAGE_SIGNING_PASSPHRASE
+          scripts/package-repo.sh build "$RUNNER_TEMP/site" "$RUNNER_TEMP/assets" packaging/apt/yanked.txt
+          mapfile -t versions < <(find "$RUNNER_TEMP/site/rpm/x86_64" -name '*.rpm' -printf '%f\n' | sed -n 's/^playbook-\(.*\)\.x86_64\.rpm$/\1/p' | sort -V)
+          {
+            echo "version=${versions[-1]}"
+            echo "previous=${versions[-2]:-}"
+            echo "built=true"
+            echo "inrelease_sha=$(sha256sum "$RUNNER_TEMP/site/apt/dists/stable/InRelease" | cut -d' ' -f1)"
+            echo "repomd_sha=$(sha256sum "$RUNNER_TEMP/site/rpm/x86_64/repodata/repomd.xml" | cut -d' ' -f1)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install from the built repository in containers
+        env:
+          VERSION: ${{ steps.build.outputs.version }}
+          PREVIOUS: ${{ steps.build.outputs.previous }}
+        run: scripts/package-repo-verify.sh "$RUNNER_TEMP/site" "$VERSION" "$PREVIOUS"
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        if: ${{ needs.plan.outputs.dry_run != 'true' }}
+        with:
+          path: ${{ runner.temp }}/site
+
+  # Publishes the folder that package-repo-sign built and tested. It has Pages
+  # permissions and no key. The check after the deploy reads the public URL
+  # with the published key and retries while Pages catches up.
+  package-repo-deploy:
+    needs: [plan, package-repo-sign]
+    if: ${{ !cancelled() && needs.plan.outputs.dry_run != 'true' && needs.package-repo-sign.outputs.built == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: github-pages
+    concurrency:
+      group: package-repo
+      cancel-in-progress: false
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        id: deployment
+
+      - name: Check the public URL
+        env:
+          URL: ${{ steps.deployment.outputs.page_url }}
+          INRELEASE_SHA: ${{ needs.package-repo-sign.outputs.inrelease_sha }}
+          REPOMD_SHA: ${{ needs.package-repo-sign.outputs.repomd_sha }}
+        run: |
+          set -euo pipefail
+          home="$(mktemp -d)"
+          export GNUPGHOME="$home"
+          for _ in $(seq 1 30); do
+            # The served files must be the ones this run built, not an earlier release.
+            if curl -fsSL -o key.asc "${URL}playbook.asc" \
+              && curl -fsSL -o InRelease "${URL}apt/dists/stable/InRelease" \
+              && curl -fsSL -o repomd.xml "${URL}rpm/x86_64/repodata/repomd.xml" \
+              && curl -fsSL -o repomd.xml.asc "${URL}rpm/x86_64/repodata/repomd.xml.asc" \
+              && [ "$(sha256sum InRelease | cut -d' ' -f1)" = "$INRELEASE_SHA" ] \
+              && [ "$(sha256sum repomd.xml | cut -d' ' -f1)" = "$REPOMD_SHA" ]; then
+              gpg --batch --quiet --import key.asc
+              gpg --batch --verify InRelease
+              gpg --batch --verify repomd.xml.asc repomd.xml
+              echo "The repository at $URL verifies with its published key." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$URL did not serve a verifiable repository within 5 minutes." >&2
+          exit 1
+
   # Writes the tap formulas with the tap's own bump script (ADR 0039 decision
   # 9). This job has no secrets, so code from the tap never runs next to an
   # app token. The formulas go to `downstream` as job outputs.
