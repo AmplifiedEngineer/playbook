@@ -6,5 +6,8 @@
 //! through its public API; the `playbook watch` subcommand that calls them
 //! lands in a later change.
 
+pub mod audit;
+pub mod clock;
+pub mod lock;
 pub mod rule;
 pub mod settings;
