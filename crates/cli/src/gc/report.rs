@@ -125,6 +125,7 @@ mod tests {
                     path: entry.path(),
                     bytes: meta.len(),
                     newest_mtime: NOW - 2 * SECS_PER_DAY,
+                    due: None,
                 });
             }
         }

@@ -7,6 +7,7 @@
 
 pub mod build_output;
 pub mod guard;
+pub mod index;
 pub mod lock;
 pub mod report;
 pub mod space;
@@ -91,6 +92,15 @@ pub struct Item {
     pub bytes: u64,
     /// Newest modification time found, as epoch seconds.
     pub newest_mtime: i64,
+    /// Set when the store's rule says this item should go now.
+    pub due: Option<Due>,
+}
+
+/// Why an item is due and how long its tombstone is kept.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Due {
+    pub reason: String,
+    pub retain_days: u32,
 }
 
 /// Lists the items under a store's roots. Takes `now` so a rule can be tested
