@@ -1,0 +1,7 @@
+HTTP/2.0 304 Not Modified
+Cache-Control: private, max-age=60, s-maxage=60
+Etag: "b9b252f2233e6b2ba3bbf39faf4eda49d9727e52bafaa59dbacc6880afb47030"
+X-Ratelimit-Limit: 5000
+X-Ratelimit-Remaining: 4989
+X-Ratelimit-Reset: 1793805222
+X-Ratelimit-Resource: core
