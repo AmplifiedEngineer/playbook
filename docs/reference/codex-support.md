@@ -2,14 +2,14 @@
 
 What works in Codex today, what does not, and why. Read from the Codex docs (learn.chatgpt.com and developers.openai.com) on 2026-10-20 and from this repo's code. Nothing here was run in a live Codex, so `[unverified]` marks every claim that needs one. Codex moves fast: check a row against the current Codex docs before you rely on it.
 
-Playbook runs best in Claude Code. Codex gets the skills and, if you wire them by hand, some of the guards.
+Playbook runs best in Claude Code. Codex gets the skills and, if you register them, some of the guards.
 
 ## Matrix
 
 | Piece | Status | Why |
 |---|---|---|
 | Skills and commands | Works | `playbook skills sync` copies skills, and commands rendered as skills, to `~/.agents/skills/playbook-*`. See [Codex skills](../internals/15-codex-skills.md). Whether Codex follows the one-line pointer in a split stub to `references/playbook-body.md` is `[unverified]`. |
-| Bash guards as hooks | Tested, not registered | `rm-workspace-guard`, `precommit-check` and `commit-message-sanitizer` read `tool_input.command` and print JSON shapes that Codex documents. Tests feed them Codex-shaped payloads (`crates/cli/tests/hooks_codex_payloads.rs`). Nothing registers them in Codex for you. |
+| Bash guards as hooks | Registered by `setup --only codex-hooks`, except the sanitizer | `rm-workspace-guard`, `precommit-check` and `commit-message-sanitizer` read `tool_input.command` and print JSON shapes that Codex documents. Tests feed them Codex-shaped payloads (`crates/cli/tests/hooks_codex_payloads.rs`). `playbook setup --only codex-hooks` registers the first two. The sanitizer is not registered. |
 | Edit and read hooks | Not supported | Codex has no `Read` tool, and `apply_patch` carries patch text in `tool_input.command` with no `file_path`. These hooks would need a patch parser. |
 | `policy-guard` | Not supported | Its rules guard Claude paths such as `~/.claude/projects/*/memory` and `.claude/settings*.json`. Registering it would look like protection and do nothing. |
 | `session-init`, `usage-warm` | Not supported | `session-init` reads `~/.claude`, runs the Claude plugin update and writes Claude restart hints. Not safe to register as is. |

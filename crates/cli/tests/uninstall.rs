@@ -428,6 +428,28 @@ fn nothing_installed_is_a_clean_no_op() {
 }
 
 #[test]
+fn uninstall_removes_the_codex_guards_and_keeps_the_users_own_hook() {
+    // Arrange: a hooks.json with the guards setup wrote and one of the user's
+    let sb = Sandbox::new("codex-hooks");
+    let file = playbook::init::codex_hooks::hooks_path(&sb.home);
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let mine = r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"my-own-hook"}]}]}}"#;
+    fs::write(&file, mine).unwrap();
+    playbook::init::codex_hooks::wire(&file, 100).expect("wire");
+    assert!(fs::read_to_string(&file).unwrap().contains("playbook hook"));
+
+    // Act
+    let out = sb.run(&["uninstall", "--yes", "--remove-binary"]);
+
+    // Assert
+    assert!(out.status.success(), "{}", text(&out));
+    let after = fs::read_to_string(&file).unwrap();
+    assert!(!after.contains("playbook hook"), "{after}");
+    assert!(after.contains("my-own-hook"), "{after}");
+    assert!(text(&out).contains("hook entries"), "{}", text(&out));
+}
+
+#[test]
 fn the_installer_scripts_in_the_claude_dir_are_removed_and_nothing_else() {
     let sb = Sandbox::new("claude-dir");
     sb.write(".claude/install.sh", "#!/bin/bash\n");
