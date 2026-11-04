@@ -169,7 +169,7 @@ Clear caches that would freeze old settings into a session
 
 Clean up and resume a session
 
-A mode of the `playbook cc` launcher. The launcher handles it, so running this command directly does nothing and exits 0.
+Clones the session named for this directory with its settings overrides stripped, then resumes the clone in `claude`, so settings, plugins and hooks reload from the current config. Starts a fresh session when none matches. The same as `playbook cc --clean`.
 
 - `<ARGS>`: Arguments passed through to claude
 
@@ -177,7 +177,7 @@ A mode of the `playbook cc` launcher. The launcher handles it, so running this c
 
 Start a fresh session
 
-A mode of the `playbook cc` launcher. The launcher handles it, so running this command directly does nothing and exits 0.
+Starts a new `claude` session without resuming an earlier one, with the current settings applied. The same as `playbook cc --fresh`.
 
 - `<ARGS>`: Arguments passed through to claude
 
@@ -200,7 +200,7 @@ Remove stale runtime state
 
 Resume a session as it was
 
-A mode of the `playbook cc` launcher. The launcher handles it, so running this command directly does nothing and exits 0.
+Resumes a session in `claude` as it was, with no fork and its settings overrides kept. Starts a fresh session when none matches. The same as `playbook cc --raw`.
 
 - `<ARGS>`: Session id to resume (default: the most recent), then arguments for claude
 

@@ -714,9 +714,9 @@ pub enum Command {
     /// List recent agent sessions and their state
     ///
     /// Shows the repo, branch, worktree, linked PR, state, context size and
-    /// cost of each session. Read only. A session is done when the pull request of its branch is
-    /// merged or closed, and stale after `sessions.staleAfterDays` without
-    /// activity. Suggestions are printed, never acted on, and a worktree with
+    /// cost of each session. Read only. A session is done when the pull request
+    /// of its branch is merged or closed, and stale after
+    /// `sessions.staleAfterDays` without activity. Suggestions are printed, never acted on, and a worktree with
     /// uncommitted changes is flagged, never removed.
     ///
     /// Example: `playbook sessions --json`
@@ -2350,8 +2350,10 @@ pub enum HooksCommand {
 pub enum CcCommand {
     /// Clean up and resume a session
     ///
-    /// A mode of the `playbook cc` launcher. The launcher handles it, so
-    /// running this command directly does nothing and exits 0.
+    /// Clones the session named for this directory with its settings overrides
+    /// stripped, then resumes the clone in `claude`, so settings, plugins and
+    /// hooks reload from the current config. Starts a fresh session when none
+    /// matches. The same as `playbook cc --clean`.
     Clean {
         /// Arguments passed through to claude
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -2359,8 +2361,8 @@ pub enum CcCommand {
     },
     /// Start a fresh session
     ///
-    /// A mode of the `playbook cc` launcher. The launcher handles it, so
-    /// running this command directly does nothing and exits 0.
+    /// Starts a new `claude` session without resuming an earlier one, with the
+    /// current settings applied. The same as `playbook cc --fresh`.
     Fresh {
         /// Arguments passed through to claude
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -2368,8 +2370,9 @@ pub enum CcCommand {
     },
     /// Resume a session as it was
     ///
-    /// A mode of the `playbook cc` launcher. The launcher handles it, so
-    /// running this command directly does nothing and exits 0.
+    /// Resumes a session in `claude` as it was, with no fork and its settings
+    /// overrides kept. Starts a fresh session when none matches. The same as
+    /// `playbook cc --raw`.
     Raw {
         /// Session id to resume (default: the most recent), then arguments for claude
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
