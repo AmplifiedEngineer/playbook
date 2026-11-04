@@ -139,11 +139,20 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
 /// FTS5 behave as one that has not.
 pub fn init_with(conn: &Connection, fts5: Fts5Support) -> rusqlite::Result<()> {
     conn.busy_timeout(BUSY)?;
+    let conn_was_autocommit = conn.is_autocommit();
     conn.execute_batch(SCHEMA_SQL)?;
     if fts5 == Fts5Support::Available {
         // The index is derived and readers fall back without it, so a table
         // that cannot be made must not stop the graph from being written.
         let _ = conn.execute_batch(FACTS_FTS_SQL);
+        // A failed create can make SQLite roll the open transaction back by
+        // itself; going on would then write the graph outside any transaction.
+        if conn.is_autocommit() && !conn_was_autocommit {
+            return Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ABORT),
+                Some("creating the fact index rolled the transaction back".into()),
+            ));
+        }
     }
     conn.execute(
         "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?1)",
@@ -195,8 +204,8 @@ pub fn write_graph(db: &Path, nodes: &[NodeRow], edges: &[EdgeRow]) -> Result<()
 }
 
 /// Like [`write_graph`], then fills the body column of the fact index in a
-/// second short transaction, so a rebuild reads each fact file once and never
-/// holds all the bodies, and the writer lock is not held while it reads them.
+/// second transaction, so a rebuild reads each fact file once and never holds
+/// all the bodies. The writer lock is held while the files are read.
 /// `body_of` gets a fact's file (relative to the memory folder) and returns its
 /// body, or `None` to leave the body empty.
 ///

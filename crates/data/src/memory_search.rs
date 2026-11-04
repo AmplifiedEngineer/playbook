@@ -5,7 +5,11 @@
 //! the recall scorer, not final matches: the scorer decides strength, caps and
 //! what to show.
 
-use crate::memory::{self, BUSY};
+use crate::memory::{self};
+
+/// A recall hook runs on every prompt, so it waits only briefly for a busy
+/// database and then falls back to the scan.
+const READ_BUSY: std::time::Duration = std::time::Duration::from_millis(200);
 use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
 
@@ -67,7 +71,7 @@ pub fn search_facts(
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(failed)?;
-    conn.busy_timeout(BUSY).map_err(failed)?;
+    conn.busy_timeout(READ_BUSY).map_err(failed)?;
     // One read snapshot for the freshness check and the query.
     let tx = conn.unchecked_transaction().map_err(failed)?;
     if !memory::facts_index_exists(&tx).map_err(failed)? {

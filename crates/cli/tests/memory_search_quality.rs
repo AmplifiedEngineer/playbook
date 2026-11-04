@@ -543,8 +543,8 @@ fn the_index_path_has_no_net_loss_against_the_scan_on_the_score_queries() {
         );
         if split == Split::Score {
             assert!(
-                won.len() >= lost.len(),
-                "net loss on score: won {won:?}, lost {lost:?}"
+                lost.is_empty(),
+                "the index path lost score queries the scan found: {lost:?}"
             );
         }
     }
