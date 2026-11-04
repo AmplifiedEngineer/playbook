@@ -87,7 +87,8 @@ run_build() {
   [ ! -f "$CASE/yanked.in" ] || cp "$CASE/yanked.in" "$CASE/yanked.txt"
   RC=0
   (
-    export PACKAGE_SIGNING_KEY="$KEY" PACKAGE_SIGNING_PASSPHRASE="$PASS" SOURCE_DATE_EPOCH="$(date +%s)"
+    SOURCE_DATE_EPOCH="$(date +%s)"
+    export PACKAGE_SIGNING_KEY="$KEY" PACKAGE_SIGNING_PASSPHRASE="$PASS" SOURCE_DATE_EPOCH
     bash "$SCRIPT" build "${SITE:-$CASE/site}" "$CASE/assets" "$CASE/yanked.txt" > "$CASE/out" 2> "$CASE/err"
   ) || RC=$?
 }
