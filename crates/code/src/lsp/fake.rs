@@ -30,6 +30,10 @@ pub(crate) enum Step {
     },
     /// Waits for any message named `method` (a request or a notification).
     Expect(&'static str),
+    /// Reads the next `n` client messages without answering.
+    Read(usize),
+    /// Answers request `id` with `result` without reading anything first.
+    ReplyId { id: i64, result: Value },
     /// Sends a notification to the client.
     Notify { method: &'static str, params: Value },
     /// Sends a request to the client and does not wait for the answer.
@@ -98,6 +102,11 @@ fn run(mut transport: Transport, script: Vec<Step>, log: &Mutex<Vec<Value>>) {
                 json!({"jsonrpc": "2.0", "id": id, "result": result})
             }),
             Step::Expect(method) => receive(&mut transport, log, method).is_some(),
+            Step::Read(n) => (0..n).all(|_| next(&mut transport, log).is_some()),
+            Step::ReplyId { id, result } => send(
+                &mut transport,
+                &json!({"jsonrpc": "2.0", "id": id, "result": result}),
+            ),
             Step::Notify { method, params } => send(
                 &mut transport,
                 &json!({"jsonrpc": "2.0", "method": method, "params": params}),
@@ -126,13 +135,18 @@ fn send(transport: &mut Transport, message: &Value) -> bool {
 /// Logs messages until one is named `method`; `None` when the client hangs up.
 fn receive(transport: &mut Transport, log: &Mutex<Vec<Value>>, method: &str) -> Option<Value> {
     loop {
-        let body = transport.read(Limits::default()).ok()?;
-        let message: Value = serde_json::from_slice(&body).ok()?;
-        log.lock().ok()?.push(message.clone());
+        let message = next(transport, log)?;
         if message["method"] == method {
             return Some(message);
         }
     }
+}
+
+fn next(transport: &mut Transport, log: &Mutex<Vec<Value>>) -> Option<Value> {
+    let body = transport.read(Limits::default()).ok()?;
+    let message: Value = serde_json::from_slice(&body).ok()?;
+    log.lock().ok()?.push(message.clone());
+    Some(message)
 }
 
 fn answer(
