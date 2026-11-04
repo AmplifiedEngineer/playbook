@@ -130,6 +130,23 @@ pub fn scoped_db(kind: &str) -> Option<PathBuf> {
     Some(scoped_db_in(&data_dir(), kind, owner, repo, &id))
 }
 
+/// The folder that holds the code store and the run locks of `slug`
+/// (`owner/repo`), checked as [`remove_worktree_dbs`] checks its paths. `None`
+/// when a segment is unsafe or the owner or repo folder is a symlink, so a
+/// caller cannot be sent outside the data folder.
+pub fn code_dir_in(data: &Path, slug: &str, worktree: &str) -> Option<PathBuf> {
+    let (owner, repo) = slug.split_once('/')?;
+    if !slug.split('/').all(safe_segment) || !safe_segment(worktree) {
+        return None;
+    }
+    let dir = data.join("code").join(owner).join(repo);
+    let linked = |p: &Path| std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink());
+    if linked(&data.join("code").join(owner)) || linked(&dir) {
+        return None;
+    }
+    Some(dir)
+}
+
 /// [`code_store_in`] for the current repo under [`data_dir`]. `None` when the
 /// repo has no `origin` remote or its name has no safe folder path.
 pub fn code_store(version: i64) -> Option<PathBuf> {

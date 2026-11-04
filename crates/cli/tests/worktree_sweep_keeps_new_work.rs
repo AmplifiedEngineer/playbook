@@ -367,3 +367,62 @@ fn many_worktrees_are_judged_side_by_side_but_reported_in_list_order() {
     }
     cleanup(&f);
 }
+
+fn run_playbook(f: &Fixture, cwd: &Path, args: &[&str]) {
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(args)
+        .current_dir(cwd)
+        .env("HOME", &f.home)
+        .output()
+        .expect("playbook should spawn");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn store_rows(f: &Fixture) -> Vec<String> {
+    let store = f
+        .home
+        .join(".config/playbook/data/code/acme/widgets/store-v4.sqlite3");
+    let conn = rusqlite::Connection::open(store).expect("store");
+    let mut stmt = conn
+        .prepare("SELECT key FROM worktrees ORDER BY key")
+        .expect("prepare");
+    stmt.query_map([], |r| r.get(0))
+        .expect("rows")
+        .map(|r| r.expect("key"))
+        .collect()
+}
+
+#[test]
+fn removing_a_worktree_drops_its_store_row_and_lock_and_keeps_the_sibling() {
+    let f = fixture("store-row");
+    let wt = agent_worktree(&f, "agent-store");
+    commit_in(&wt, "feature.txt");
+    git_ok(&f.repo, &["merge", "-q", "--ff-only", "agent-store"]);
+    let head = String::from_utf8_lossy(&git(&f.repo, &["rev-parse", "HEAD"]).stdout)
+        .trim()
+        .to_string();
+    git_ok(&f.repo, &["update-ref", "refs/remotes/origin/main", &head]);
+    run_playbook(&f, &wt, &["code", "index"]);
+    run_playbook(&f, &f.repo, &["code", "index"]);
+    assert_eq!(store_rows(&f).len(), 2);
+    age(&wt, 1);
+
+    let out = sweep(&f);
+
+    assert!(!wt.exists(), "{out}");
+    let left = store_rows(&f);
+    assert_eq!(left.len(), 1, "{left:?}");
+    let dir = f.home.join(".config/playbook/data/code/acme/widgets");
+    let locks: Vec<String> = fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".lock") && n != "store-v4.lock")
+        .collect();
+    assert_eq!(locks, vec![format!("{}.lock", left[0])]);
+    cleanup(&f);
+}

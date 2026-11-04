@@ -593,6 +593,31 @@ fn create_schema(conn: &mut Connection, path: &Path, hooks: &DbHooks) -> Result<
     Ok(true)
 }
 
+/// How long a maintenance open waits for a busy store, in milliseconds.
+pub const FORGET_BUSY_MS: u64 = 500;
+
+/// Opens an existing store to delete rows: never creates or deletes a file,
+/// takes the shared store lock and turns `foreign_keys` on. A missing store is
+/// [`DbError::Missing`].
+pub fn open_maintenance(path: &Path) -> Result<Store, DbError> {
+    if !path.exists() {
+        return Err(DbError::Missing);
+    }
+    let lock = StoreLock::open(path)?;
+    lock.share(path, &DbHooks::default())?;
+    let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+        .map_err(|e| step(path, "open the database", &e))?;
+    conn.busy_timeout(Duration::from_millis(FORGET_BUSY_MS))
+        .map_err(|e| step(path, "set busy_timeout", &e))?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(|e| step(path, "set foreign_keys", &e))?;
+    Ok(Store {
+        conn,
+        _lock: lock,
+        recovered: false,
+    })
+}
+
 /// Whether the store passes SQLite's quick check and the FTS5 integrity check.
 pub fn is_healthy(conn: &Connection) -> bool {
     let quick: rusqlite::Result<String> =

@@ -60,6 +60,40 @@ pub enum StatusOutcome {
     },
 }
 
+/// Drops the rows of a removed worktree from the repo's store and deletes its
+/// run lock file. The store is not created when it is missing. A busy store or
+/// a lock that cannot be taken is not an error: the dead-root rule of the next
+/// index run drops the row later.
+pub fn forget_worktree(data: &Path, slug: &str, worktree: &str) -> Result<(), String> {
+    let Some(dir) = playbook_data::code_dir_in(data, slug, worktree) else {
+        return Ok(());
+    };
+    let store = dir.join(format!("store-v{}.sqlite3", db::SCHEMA_VERSION));
+    match db::open_maintenance(&store) {
+        Ok(mut conn) => {
+            let hooks = db::TxHooks::default();
+            let deleted = db::write_tx(&mut conn, &hooks).and_then(|tx| {
+                tx.execute("DELETE FROM worktrees WHERE key = ?1", [worktree])?;
+                db::commit_tx(tx, &hooks)
+            });
+            match deleted {
+                Ok(()) => {}
+                Err(e) if is_busy(&e) => return Ok(()),
+                Err(e) => return Err(db::map_sql_error("failed to forget the worktree", &e)),
+            }
+        }
+        Err(db::DbError::Missing) => {}
+        Err(db::DbError::Failed(_)) => return Ok(()),
+        Err(e) => return Err(e.to_string()),
+    }
+    let _ = std::fs::remove_file(dir.join(format!("{worktree}.lock")));
+    Ok(())
+}
+
+fn is_busy(err: &rusqlite::Error) -> bool {
+    err.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy)
+}
+
 /// The full freshness report for the repository containing `cwd`.
 pub fn status(cwd: &Path) -> Result<StatusOutcome, String> {
     let root = location::repo_root(cwd)?;
@@ -168,4 +202,147 @@ pub fn build_context(cwd: &Path, opts: &context::ContextOptions) -> Result<Conte
         drift,
         result,
     })
+}
+
+#[cfg(test)]
+mod forget_tests {
+    use super::*;
+    use crate::index::{self, Options};
+    use crate::testkit::{fx, pinned};
+    use rusqlite::Connection;
+
+    fn store_in(data: &Path) -> PathBuf {
+        data.join("code/o/r")
+            .join(format!("store-v{}.sqlite3", db::SCHEMA_VERSION))
+    }
+
+    /// A data folder whose store holds the worktrees `a` and `b`.
+    fn two_worktrees(tag: &str) -> PathBuf {
+        let a = fx(tag);
+        a.write("a.rs", "fn a() {}\n");
+        let data = a.index.parent().expect("dir").join("data");
+        let store = store_in(&data);
+        index::run(&a.root, &store, "a", false, &Options::default()).expect("a");
+        index::run(&a.root, &store, "b", false, &Options::default()).expect("b");
+        data
+    }
+
+    fn rows(store: &Path, sql: &str) -> i64 {
+        Connection::open(store)
+            .expect("open")
+            .query_row(sql, [], |r| r.get(0))
+            .expect("count")
+    }
+
+    #[test]
+    fn forgetting_a_worktree_drops_its_rows_and_its_lock_and_keeps_the_sibling() {
+        let _g = pinned();
+        // Arrange
+        let data = two_worktrees("forget-rows");
+        let store = store_in(&data);
+        let lock = data.join("code/o/r/a.lock");
+        assert!(lock.exists());
+
+        // Act
+        forget_worktree(&data, "o/r", "a").expect("forget");
+
+        // Assert
+        assert_eq!(rows(&store, "SELECT COUNT(*) FROM worktrees"), 1);
+        assert_eq!(
+            rows(&store, "SELECT COUNT(*) FROM worktrees WHERE key = 'b'"),
+            1
+        );
+        assert!(!lock.exists());
+        assert!(data.join("code/o/r/b.lock").exists());
+    }
+
+    #[test]
+    fn the_manifest_goes_with_the_worktree_through_the_cascade() {
+        let _g = pinned();
+        // Arrange
+        let data = two_worktrees("forget-cascade");
+        let store = store_in(&data);
+
+        // Act
+        forget_worktree(&data, "o/r", "a").expect("forget");
+
+        // Assert
+        assert_eq!(rows(&store, "SELECT COUNT(*) FROM manifest"), 1);
+    }
+
+    #[test]
+    fn a_missing_store_is_not_created_and_its_lock_file_goes() {
+        // Arrange
+        let data = playbook_common::test_support::scratch_dir("forget-no-store");
+        let dir = data.join("code/o/r");
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(dir.join("a.lock"), b"").expect("lock");
+
+        // Act
+        forget_worktree(&data, "o/r", "a").expect("forget");
+
+        // Assert
+        assert!(!dir.join("a.lock").exists());
+        assert!(!store_in(&data).exists());
+    }
+
+    #[test]
+    fn an_unsafe_name_changes_nothing() {
+        let _g = pinned();
+        // Arrange
+        let data = two_worktrees("forget-unsafe");
+        let store = store_in(&data);
+        let keep = data.join("code/o/r/a.lock");
+
+        // Act
+        for (slug, worktree) in [
+            ("o/r", ".."),
+            ("o/r", "a/b"),
+            ("o/r", "a\\b"),
+            ("o/..", "a"),
+            ("/o/r", "a"),
+            ("o", "a"),
+        ] {
+            forget_worktree(&data, slug, worktree).expect("ignored");
+        }
+
+        // Assert
+        assert_eq!(rows(&store, "SELECT COUNT(*) FROM worktrees"), 2);
+        assert!(keep.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_owner_folder_changes_nothing() {
+        let _g = pinned();
+        // Arrange
+        let data = two_worktrees("forget-symlink");
+        let store = store_in(&data);
+        let link = data.join("code/linked");
+        std::os::unix::fs::symlink(data.join("code/o"), &link).expect("symlink");
+
+        // Act
+        forget_worktree(&data, "linked/r", "a").expect("ignored");
+
+        // Assert
+        assert_eq!(rows(&store, "SELECT COUNT(*) FROM worktrees"), 2);
+    }
+
+    #[test]
+    fn a_store_held_busy_keeps_the_row_and_returns_ok() {
+        let _g = pinned();
+        // Arrange
+        let data = two_worktrees("forget-busy");
+        let store = store_in(&data);
+        let holder = Connection::open(&store).expect("holder");
+        holder.execute_batch("BEGIN IMMEDIATE").expect("hold");
+
+        // Act
+        let got = forget_worktree(&data, "o/r", "a");
+
+        // Assert
+        assert!(got.is_ok());
+        holder.execute_batch("ROLLBACK").expect("release");
+        assert_eq!(rows(&store, "SELECT COUNT(*) FROM worktrees"), 2);
+    }
 }

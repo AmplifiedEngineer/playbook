@@ -292,7 +292,11 @@ fn remove_data_of(repo_root: &Path, home: &Path, repo_slug: Option<&str>, path: 
     if live.contains(&id) {
         return;
     }
-    crate::common::data::remove_worktree_dbs(&crate::common::data::data_dir_from(home), slug, &id);
+    let data = crate::common::data::data_dir_from(home);
+    crate::common::data::remove_worktree_dbs(&data, slug, &id);
+    // Best effort: a store that is busy or damaged keeps its row, and the
+    // dead-root rule of the next index run drops it.
+    let _ = playbook_code::forget_worktree(&data, slug, &id);
 }
 
 /// The worktree ids of every worktree registered against `repo_root`, or
