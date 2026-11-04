@@ -91,10 +91,11 @@ pub fn render(report: &Report) -> String {
             .map_or_else(|| "-".to_string(), |s| format!("{}d", s / SECS_PER_DAY));
         let _ = writeln!(
             out,
-            "{:<width$}  {:>10}  {:>6} items  oldest {:>5}  {}",
+            "{:<width$}  {:>10}  {:>6} {}  oldest {:>5}  {}",
             store.name,
             human_bytes(store.bytes),
             store.items,
+            if store.items == 1 { "item " } else { "items" },
             age,
             store.action.label(),
         );
@@ -169,6 +170,8 @@ mod tests {
         assert!(a.join("one").exists() && a.join("two").exists() && b.join("three").exists());
         let text = render(&result);
         assert!(text.contains("alpha") && text.contains("2.0 KiB") && text.contains("tombstone"));
+        assert!(text.contains("2 items") && text.contains("1 item "));
+        assert!(!text.contains("1 items"));
     }
 
     #[test]
