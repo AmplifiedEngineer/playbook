@@ -180,6 +180,9 @@ pub enum Effect {
     SaveLayout(String),
 }
 
+/// What `v` says on a panel pinned to one view.
+const PINNED_NOTE: &str = "This panel shows one view. Use the unpinned panel to switch";
+
 impl App {
     pub fn new(range: Range) -> App {
         App {
@@ -267,10 +270,18 @@ impl App {
         let Some(d) = &self.data else { return 0 };
         match panel {
             Panel::Models => pair_groups(&d.models, &d.models_before).len(),
-            Panel::Projects if self.projects_view == ProjectsView::Agents => d.agents.rows.len(),
-            Panel::Projects if self.projects_view == ProjectsView::Skills => d.skills.rows.len(),
-            Panel::Projects if self.projects_view == ProjectsView::Tools => d.health.tools.len(),
-            Panel::Projects if self.projects_view == ProjectsView::Health => panels::HEALTH_ROWS,
+            Panel::Projects if self.projects_slot_view() == ProjectsView::Agents => {
+                d.agents.rows.len()
+            }
+            Panel::Projects if self.projects_slot_view() == ProjectsView::Skills => {
+                d.skills.rows.len()
+            }
+            Panel::Projects if self.projects_slot_view() == ProjectsView::Tools => {
+                d.health.tools.len()
+            }
+            Panel::Projects if self.projects_slot_view() == ProjectsView::Health => {
+                panels::HEALTH_ROWS
+            }
             Panel::Projects => d.repos.len(),
             Panel::Live => d.live.active.len(),
             Panel::Sessions => d.sessions.len(),
@@ -280,6 +291,21 @@ impl App {
             }
             Panel::Spend | Panel::Tokens => 0,
         }
+    }
+
+    /// The Breakdown view the keys act on: the focused slot's, or the first
+    /// Breakdown slot of the tab while another panel has the focus.
+    fn projects_slot_view(&self) -> ProjectsView {
+        let slot = if self.focus == Panel::Projects {
+            self.focus_slot()
+        } else {
+            self.tab_ids()
+                .iter()
+                .copied()
+                .find(|id| id.panel() == Some(Panel::Projects))
+        };
+        slot.and_then(PanelId::projects_view)
+            .unwrap_or(self.projects_view)
     }
 
     /// The Spend view of the slot `id`: its pinned view, else the switcher's.
@@ -337,7 +363,7 @@ impl App {
                 .map(|p| p.key)
                 .collect(),
             Panel::Projects => {
-                let groups = match self.projects_view {
+                let groups = match self.projects_slot_view() {
                     ProjectsView::Agents => &d.agents.rows,
                     ProjectsView::Skills => &d.skills.rows,
                     ProjectsView::Projects => &d.repos,
@@ -384,7 +410,7 @@ impl App {
                 .nth(at)
                 .map(|p| p.key),
             // An agent, skill, tool or figure is not a field of a usage event, so it cannot filter.
-            Panel::Projects if self.projects_view != ProjectsView::Projects => None,
+            Panel::Projects if self.projects_slot_view() != ProjectsView::Projects => None,
             Panel::Projects => group_rows(&d.repos, sort).get(at).map(|g| g.key.clone()),
             Panel::Live => session_rows(&d.live.active, sort)
                 .get(at)
@@ -760,15 +786,20 @@ impl App {
             Cmd::PageDown => self.step(focus, 5),
             Cmd::PageUp => self.step(focus, -5),
             Cmd::NextView => match focus {
+                Panel::Projects
+                    if self
+                        .focus_slot()
+                        .is_some_and(|id| id.projects_view().is_some()) =>
+                {
+                    self.note = Some(PINNED_NOTE.to_string());
+                }
                 Panel::Projects => self.projects_view = self.projects_view.next(),
                 Panel::Spend
                     if self
                         .focus_slot()
                         .is_some_and(|id| id.spend_view().is_some()) =>
                 {
-                    self.note = Some(
-                        "This panel shows one view. Use the spend panel to switch".to_string(),
-                    );
+                    self.note = Some(PINNED_NOTE.to_string());
                 }
                 Panel::Spend => self.spend_view = self.spend_view.next(),
                 _ => {}
@@ -1250,6 +1281,28 @@ mod tests {
         // Assert
         assert!(on_table);
         assert!(!app.is_table(Panel::Spend));
+    }
+
+    #[test]
+    fn row_counts_and_the_v_key_follow_the_focused_pinned_breakdown_view() {
+        // Arrange
+        let mut app = charted(Range::LastDays(30), 30);
+        app.layout =
+            crate::tui::layout::Layout::parse("A=breakdown.projects,breakdown.health").unwrap();
+        app.go_tab(0);
+        app.focus = Panel::Projects;
+        let projects_rows = app.rows(Panel::Projects);
+
+        // Act
+        app.key(press(KeyCode::Tab));
+        let health_rows = app.rows(Panel::Projects);
+        app.key(press(KeyCode::Char('v')));
+
+        // Assert
+        assert_eq!(health_rows, panels::HEALTH_ROWS);
+        assert_ne!(projects_rows, health_rows);
+        assert_eq!(app.projects_view, ProjectsView::default());
+        assert!(app.note.as_deref().is_some_and(|n| n.contains("one view")));
     }
 
     #[test]

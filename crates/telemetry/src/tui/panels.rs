@@ -125,6 +125,7 @@ fn view_block(
         // A pinned panel always shows one view, so it has no tag to switch.
         Panel::Spend if slot.is_some_and(|id| id.spend_view().is_some()) => return block,
         Panel::Spend => app.spend_view.name(),
+        Panel::Projects if slot.is_some_and(|id| id.projects_view().is_some()) => return block,
         Panel::Projects => app.projects_view.name(),
         _ => return block,
     };
@@ -670,12 +671,19 @@ pub fn models(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palet
 }
 
 /// Projects of the period: messages, tokens, cost and share of the total cost.
-pub fn projects(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    match app.projects_view {
-        ProjectsView::Agents => return agents(frame, area, app, data, pal),
-        ProjectsView::Skills => return skills(frame, area, app, data, pal),
-        ProjectsView::Tools => return tools(frame, area, app, data, pal),
-        ProjectsView::Health => return health(frame, area, app, data, pal),
+pub fn projects(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    data: &Data,
+    pal: &Palette,
+    slot: PanelId,
+) {
+    match slot.projects_view().unwrap_or(app.projects_view) {
+        ProjectsView::Agents => return agents(frame, area, app, data, pal, slot),
+        ProjectsView::Skills => return skills(frame, area, app, data, pal, slot),
+        ProjectsView::Tools => return tools(frame, area, app, data, pal, slot),
+        ProjectsView::Health => return health(frame, area, app, data, pal, slot),
         ProjectsView::Projects => {}
     }
     let block = view_block(
@@ -683,7 +691,7 @@ pub fn projects(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pal
         app,
         area,
         Panel::Projects,
-        None,
+        Some(slot),
         "Projects",
         pal.box_mem,
     );
@@ -705,7 +713,7 @@ pub fn projects(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pal
         app,
         pal,
         Panel::Projects,
-        app.focus == Panel::Projects,
+        app.focus_slot() == Some(slot),
         block,
         &cols,
         true,
@@ -733,13 +741,14 @@ pub fn projects(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pal
 
 /// Cost per agent, from telemetry. The transcript totals stay the totals; the
 /// note says how much of the spend telemetry covers.
-fn agents(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
+fn agents(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, slot: PanelId) {
     telemetry_split(
         frame,
         area,
         app,
         data,
         pal,
+        slot,
         ("Agents", "agent"),
         &data.agents,
     );
@@ -747,13 +756,14 @@ fn agents(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) 
 
 /// Cost per skill, from telemetry. Only requests made while a skill was
 /// active carry its name, so the rows are a share of the telemetry cost.
-fn skills(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
+fn skills(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, slot: PanelId) {
     telemetry_split(
         frame,
         area,
         app,
         data,
         pal,
+        slot,
         ("Skills", "skill"),
         &data.skills,
     );
@@ -772,10 +782,19 @@ fn telemetry_split(
     app: &App,
     data: &Data,
     pal: &Palette,
+    slot: PanelId,
     (title, label): (&str, &'static str),
     view: &crate::query::AgentView,
 ) {
-    let mut block = view_block(pal, app, area, Panel::Projects, None, title, pal.box_mem);
+    let mut block = view_block(
+        pal,
+        app,
+        area,
+        Panel::Projects,
+        Some(slot),
+        title,
+        pal.box_mem,
+    );
     if !data.telemetry_rows && view.is_empty() {
         return empty(frame, area, pal, block, &telemetry_off(app));
     }
@@ -815,7 +834,7 @@ fn telemetry_split(
         app,
         pal,
         Panel::Projects,
-        app.focus == Panel::Projects,
+        app.focus_slot() == Some(slot),
         block,
         &cols,
         true,
@@ -865,8 +884,16 @@ fn telemetry_note(pal: &Palette, data: &Data) -> Line<'static> {
 
 /// Latency and error rate per tool, from telemetry. For a period each tool
 /// also shows its average latency in the previous span and the change.
-fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    let mut block = view_block(pal, app, area, Panel::Projects, None, "Tools", pal.box_mem);
+fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, slot: PanelId) {
+    let mut block = view_block(
+        pal,
+        app,
+        area,
+        Panel::Projects,
+        Some(slot),
+        "Tools",
+        pal.box_mem,
+    );
     if !data.telemetry_rows {
         return empty(frame, area, pal, block, &telemetry_off(app));
     }
@@ -904,7 +931,7 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
         app,
         pal,
         Panel::Projects,
-        app.focus == Panel::Projects,
+        app.focus_slot() == Some(slot),
         block,
         &cols,
         false,
@@ -1034,8 +1061,16 @@ fn figures(data: &Data) -> Vec<Figure> {
 /// API errors, retries, tool errors, busy time and cache hit rate for the
 /// range against the previous span, from telemetry. The cache hit rate comes
 /// from transcripts, so it stays available without telemetry.
-fn health(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    let mut block = view_block(pal, app, area, Panel::Projects, None, "Health", pal.box_mem);
+fn health(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, slot: PanelId) {
+    let mut block = view_block(
+        pal,
+        app,
+        area,
+        Panel::Projects,
+        Some(slot),
+        "Health",
+        pal.box_mem,
+    );
     if !data.telemetry_rows {
         return empty(frame, area, pal, block, &telemetry_off(app));
     }
@@ -1059,7 +1094,7 @@ fn health(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) 
         app,
         pal,
         Panel::Projects,
-        app.focus == Panel::Projects,
+        app.focus_slot() == Some(slot),
         block,
         &cols,
         false,

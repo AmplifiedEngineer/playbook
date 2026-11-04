@@ -284,7 +284,9 @@ pub fn render(frame: &mut Frame, app: &App) {
                     | PanelId::BreakdownAgents
                     | PanelId::BreakdownSkills
                     | PanelId::BreakdownTools
-                    | PanelId::BreakdownHealth => panels::projects(frame, *rect, app, data, &pal),
+                    | PanelId::BreakdownHealth => {
+                        panels::projects(frame, *rect, app, data, &pal, *id)
+                    }
                     PanelId::Live => panels::live(frame, *rect, app, data, &pal),
                     PanelId::Sessions => panels::sessions(frame, *rect, app, data, &pal),
                     PanelId::Projection => projection::render(frame, *rect, data, &pal),

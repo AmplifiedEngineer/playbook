@@ -1006,6 +1006,27 @@ fn two_pinned_spend_views_draw_side_by_side_and_only_the_focused_one_is_bold() {
 }
 
 #[test]
+fn two_pinned_breakdown_views_each_draw_their_own_table() {
+    // Arrange
+    let mut a = app(Theme::Standard);
+    a.layout =
+        crate::tui::layout::Layout::parse("A=breakdown.agents,breakdown.skills|tokens").unwrap();
+    a.go_tab(0);
+
+    // Act
+    let text = draw(&a, 100, 30);
+
+    // Assert
+    let title = text
+        .lines()
+        .find(|l| l.contains("Agents"))
+        .unwrap_or_default();
+    assert!(title.contains("Skills"), "{text}");
+    assert!(!text.contains("view:"), "{text}");
+    check("split_breakdown_100x30", &text);
+}
+
+#[test]
 fn the_numbers_tab_shows_the_tables_and_the_budget_at_100x30() {
     check("tab_numbers_100x30", &draw(&tabbed(1), 100, 30));
 }
