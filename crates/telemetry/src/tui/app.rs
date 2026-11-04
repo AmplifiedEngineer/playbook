@@ -399,6 +399,16 @@ impl App {
             .map_or(&[][..], |t| t.panels.as_slice())
     }
 
+    /// The panel count of each row of the selected tab, `None` for an
+    /// automatic tab.
+    pub fn tab_rows(&self) -> Option<&[u8]> {
+        self.layout
+            .tabs
+            .get(self.tab)
+            .or_else(|| self.layout.tabs.first())
+            .and_then(|t| t.rows.as_deref())
+    }
+
     /// The focusable panels of the selected tab, in the order they are drawn.
     /// A panel drawn twice, like `spend` beside `spend.total`, counts once.
     fn tab_panels(&self) -> Vec<Panel> {
@@ -450,7 +460,13 @@ impl App {
         // The chart sits in the first id of the tab that draws this panel, which
         // can be a pinned word like `spend.model`.
         let id = *self.tab_ids().iter().find(|id| id.panel() == Some(panel))?;
-        let area = view::panel_rect(self.area, self.tab_ids(), self.layout.tabs.len() > 1, id)?;
+        let area = view::panel_rect(
+            self.area,
+            self.tab_ids(),
+            self.tab_rows(),
+            self.layout.tabs.len() > 1,
+            id,
+        )?;
         Some(panels::chart_plot(area, data, panel))
     }
 
