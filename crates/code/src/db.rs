@@ -496,7 +496,7 @@ fn ensure_parent(path: &Path, mode: OpenMode) -> Result<(), DbError> {
     })
 }
 
-fn is_corrupt(err: &rusqlite::Error) -> bool {
+pub(crate) fn is_corrupt(err: &rusqlite::Error) -> bool {
     matches!(
         err.sqlite_error_code(),
         Some(ErrorCode::NotADatabase | ErrorCode::DatabaseCorrupt)

@@ -89,7 +89,6 @@ pub struct Hooks {
 const BATCH_RETRIES: usize = 3;
 
 #[cfg(not(test))]
-#[cfg(not(test))]
 static NO_TX_HOOKS: TxHooks = TxHooks {
     on_write_tx: None,
     fail_begin: None,
@@ -631,34 +630,44 @@ fn insert_syntax(conn: &Connection, content: i64, p: &Prepared) -> rusqlite::Res
     Ok(())
 }
 
+/// Why one file of a batch failed. A SQL error is kept as is, so a busy or a
+/// corrupt store can end the batch instead of marking one file failed.
+enum ApplyError {
+    Sql(rusqlite::Error),
+    Msg(String),
+}
+
+impl From<rusqlite::Error> for ApplyError {
+    fn from(e: rusqlite::Error) -> Self {
+        ApplyError::Sql(e)
+    }
+}
+
 fn apply(
     conn: &Connection,
     outcome: &Outcome,
     opts: &Options,
     wt: i64,
     replace: bool,
-) -> Result<(), String> {
-    let sql = |e: rusqlite::Error| e.to_string();
+) -> Result<(), ApplyError> {
     match outcome {
         Outcome::Write(p) => {
-            opts.before_file(&p.path)?;
-            let (content, inserted) = ensure_content(conn, p, &opts.parser).map_err(sql)?;
+            opts.before_file(&p.path).map_err(ApplyError::Msg)?;
+            let (content, inserted) = ensure_content(conn, p, &opts.parser)?;
             if replace && !inserted {
-                clear_children(conn, content).map_err(sql)?;
+                clear_children(conn, content)?;
             }
             if inserted || replace {
-                insert_syntax(conn, content, p).map_err(sql)?;
+                insert_syntax(conn, content, p)?;
                 for chunk in &p.chunks {
                     conn.execute(
                         "INSERT INTO chunks(content, start_line, end_line) VALUES (?1, ?2, ?3)",
                         params![content, chunk.start_line as i64, chunk.end_line as i64],
-                    )
-                    .map_err(sql)?;
+                    )?;
                     conn.execute(
                         "INSERT INTO chunks_fts(rowid, body) VALUES (?1, ?2)",
                         params![conn.last_insert_rowid(), chunk.body],
-                    )
-                    .map_err(sql)?;
+                    )?;
                 }
             }
             upsert_manifest(
@@ -674,11 +683,10 @@ fn apply(
                     status: p.status,
                     error: None,
                 },
-            )
-            .map_err(sql)?;
+            )?;
         }
         Outcome::Skip(s) => {
-            opts.before_file(&s.path)?;
+            opts.before_file(&s.path).map_err(ApplyError::Msg)?;
             upsert_manifest(
                 conn,
                 wt,
@@ -692,8 +700,7 @@ fn apply(
                     status: "skipped",
                     error: Some(s.reason.as_str()),
                 },
-            )
-            .map_err(sql)?;
+            )?;
         }
         Outcome::Touch {
             path,
@@ -703,8 +710,7 @@ fn apply(
             conn.execute(
                 "UPDATE manifest SET size = ?3, mtime_ns = ?4 WHERE worktree = ?1 AND path = ?2",
                 params![wt, path, i64::try_from(*size).unwrap_or(i64::MAX), mtime_ns],
-            )
-            .map_err(sql)?;
+            )?;
         }
         Outcome::Unchanged | Outcome::Adopt(_) | Outcome::Missing(_) | Outcome::Failed { .. } => {}
     }
@@ -783,13 +789,21 @@ fn write_batch_once(
     for outcome in batch {
         if let Outcome::Adopt(a) = outcome {
             let sp = tx.savepoint()?;
-            if adopt(&sp, a, &opts.parser, wt)? {
-                sp.commit()?;
-                report.changed += 1;
-                report.reused += 1;
-            } else {
-                drop(sp);
-                redo.push(a.path.clone());
+            match adopt(&sp, a, &opts.parser, wt) {
+                Ok(true) => {
+                    sp.commit()?;
+                    report.changed += 1;
+                    report.reused += 1;
+                }
+                Ok(false) => {
+                    drop(sp);
+                    redo.push(a.path.clone());
+                }
+                Err(e) if is_busy(&e) || db::is_corrupt(&e) => return Err(e),
+                Err(e) => {
+                    drop(sp);
+                    failures.push((a.path.clone(), e.to_string()));
+                }
             }
             continue;
         }
@@ -814,7 +828,12 @@ fn write_batch_once(
                     }
                 }
             }
-            Err(error) => {
+            Err(ApplyError::Sql(e)) if is_busy(&e) || db::is_corrupt(&e) => return Err(e),
+            Err(ApplyError::Sql(e)) => {
+                drop(sp);
+                failures.push((path, e.to_string()));
+            }
+            Err(ApplyError::Msg(error)) => {
                 drop(sp);
                 failures.push((path, error));
             }
@@ -1127,14 +1146,14 @@ pub fn run(
             [],
             |r| r.get::<_, i64>(0),
         )
-        .map_err(|e| e.to_string())
+        .map_err(|e| db::map_sql_error("failed to read the index", &e))
         .map(|n| usize::try_from(n).unwrap_or(0))?;
     let completed = opts.now().max(started);
     conn.execute(
         "UPDATE worktrees SET last_run_completed = ?2 WHERE id = ?1",
         params![wt, completed],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| db::map_sql_error("failed to write the index", &e))?;
     let env = cleanup::Env {
         now_ms: completed,
         tx: opts.tx_hooks(),
@@ -1153,24 +1172,26 @@ fn remove_unlisted(
     let paths: Vec<String> = {
         let mut stmt = conn
             .prepare("SELECT path FROM manifest WHERE worktree = ?1")
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| db::map_sql_error("failed to write the index", &e))?;
         let mapped = stmt
             .query_map([wt], |r| r.get(0))
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| db::map_sql_error("failed to write the index", &e))?;
         mapped
             .collect::<Result<_, _>>()
-            .map_err(|e| e.to_string())?
+            .map_err(|e| db::map_sql_error("failed to write the index", &e))?
     };
     let gone: Vec<String> = paths
         .into_iter()
         .filter(|path| !listed.contains(path))
         .collect();
     let hooks = TxHooks::default();
-    let tx = db::write_tx(conn, &hooks).map_err(|e| e.to_string())?;
+    let tx = db::write_tx(conn, &hooks)
+        .map_err(|e| db::map_sql_error("failed to write the index", &e))?;
     for path in &gone {
-        delete_manifest(&tx, wt, path).map_err(|e| e.to_string())?;
+        delete_manifest(&tx, wt, path)
+            .map_err(|e| db::map_sql_error("failed to write the index", &e))?;
     }
-    db::commit_tx(tx, &hooks).map_err(|e| e.to_string())?;
+    db::commit_tx(tx, &hooks).map_err(|e| db::map_sql_error("failed to write the index", &e))?;
     Ok(gone.len())
 }
 
@@ -2573,10 +2594,12 @@ impl P { fn go(&self) {} }
     }
 
     /// Hooks whose `kind` step fails with SQLITE_BUSY for the first `n` calls.
-    fn busy_for(n: usize, at_commit: bool) -> Hooks {
+    /// The second value counts the calls of that step.
+    fn busy_for(n: usize, at_commit: bool) -> (Hooks, std::sync::Arc<AtomicUsize>) {
         let calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let seen = calls.clone();
         let fail: Box<dyn Fn() -> rusqlite::Result<()> + Send + Sync> = Box::new(move || {
-            if calls.fetch_add(1, Ordering::SeqCst) < n {
+            if seen.fetch_add(1, Ordering::SeqCst) < n {
                 Err(busy())
             } else {
                 Ok(())
@@ -2588,7 +2611,7 @@ impl P { fn go(&self) {} }
         } else {
             hooks.tx.fail_begin = Some(fail);
         }
-        hooks
+        (hooks, calls)
     }
 
     #[test]
@@ -2603,8 +2626,9 @@ impl P { fn go(&self) {} }
             });
             write(&f.root, "a.rs", b"fn a() {}\n");
             write(&f.root, "b.rs", b"fn b() {}\n");
+            let (hooks, calls) = busy_for(BATCH_RETRIES, at_commit);
             let opts = Options {
-                hooks: busy_for(2, at_commit),
+                hooks,
                 ..Options::default()
             };
 
@@ -2615,6 +2639,7 @@ impl P { fn go(&self) {} }
             assert_eq!(report.failed, 0, "at_commit {at_commit}");
             assert_eq!(report.changed, 2);
             assert_eq!(report.parsed, 2);
+            assert_eq!(calls.load(Ordering::SeqCst), BATCH_RETRIES + 1);
         }
     }
 
@@ -2625,8 +2650,9 @@ impl P { fn go(&self) {} }
             // Arrange
             let f = fx("idx-busy-forever");
             write(&f.root, "a.rs", b"fn a() {}\n");
+            let (hooks, calls) = busy_for(BATCH_RETRIES + 1, at_commit);
             let opts = Options {
-                hooks: busy_for(BATCH_RETRIES + 1, at_commit),
+                hooks,
                 ..Options::default()
             };
 
@@ -2639,6 +2665,7 @@ impl P { fn go(&self) {} }
                 message.contains("busy") || message.contains("locked"),
                 "{message}"
             );
+            assert_eq!(calls.load(Ordering::SeqCst), BATCH_RETRIES + 1);
         }
     }
 
@@ -2919,6 +2946,81 @@ impl P { fn go(&self) {} }
         assert_eq!(symbol_names(&f.conn(), "a.rs"), vec!["a"]);
         let conn = db::open_query(&f.index, "other").expect("b");
         assert_eq!(symbol_names(&conn, "a.rs"), vec!["a"]);
+    }
+
+    #[test]
+    fn a_rebuild_replaces_the_children_of_stored_content_instead_of_doubling_them() {
+        let _g = pinned();
+        // Arrange
+        let f = seeded("reuse-rebuild-twice");
+        let b = sibling(&f, "reuse-rebuild-twice-b", &THREE);
+        run_in(&f, &b, "other", &Options::default());
+        let counts = || {
+            let raw = Connection::open(&f.index).expect("raw");
+            ["symbols", "imports", "chunks"]
+                .map(|t| count(&raw, &format!("SELECT COUNT(*) FROM {t}")))
+        };
+        let fts = || {
+            let raw = Connection::open(&f.index).expect("raw");
+            count(&raw, "SELECT COUNT(*) FROM chunks_fts_docsize")
+        };
+        let (before, before_fts) = (counts(), fts());
+        assert!(before[0] > 0 && before[2] > 0);
+
+        // Act
+        run(&f.root, &f.index, &f.worktree, true, &Options::default()).expect("rebuild");
+
+        // Assert
+        assert_eq!(counts(), before);
+        assert_eq!(fts(), before_fts);
+    }
+
+    #[test]
+    fn content_removed_after_the_hint_and_its_file_deleted_is_dropped_quietly() {
+        let _g = pinned();
+        // Arrange
+        let f = seeded("reuse-race-gone");
+        let b = sibling(&f, "reuse-race-gone-b", &THREE);
+        let index = f.index.clone();
+        let checkout = b.clone();
+        let hook = move || {
+            let raw = Connection::open(&index).expect("raw");
+            raw.pragma_update(None, "foreign_keys", "ON").expect("fk");
+            let id: i64 = raw
+                .query_row(
+                    "SELECT content FROM manifest WHERE path = 'c.ts'",
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("content id");
+            raw.execute("DELETE FROM manifest WHERE path = 'c.ts'", [])
+                .expect("manifest");
+            raw.execute(
+                "DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE content = ?1)",
+                [id],
+            )
+            .expect("fts");
+            raw.execute("DELETE FROM content WHERE id = ?1", [id])
+                .expect("content");
+            std::fs::remove_file(checkout.join("c.ts")).expect("remove");
+        };
+        let opts = Options {
+            hooks: Hooks {
+                after_hint: Some(Box::new(hook)),
+                ..Hooks::default()
+            },
+            ..Options::default()
+        };
+
+        // Act
+        let report = run_in(&f, &b, "other", &opts);
+
+        // Assert
+        assert_eq!(report.failed, 0);
+        assert_eq!(report.reused, 2);
+        assert_eq!(report.parsed, 0);
+        let conn = db::open_query(&f.index, "other").expect("b");
+        assert_eq!(paths(&conn), vec!["a.rs", "b.py"]);
     }
 
     #[test]
