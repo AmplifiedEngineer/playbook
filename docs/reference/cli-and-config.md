@@ -556,11 +556,9 @@ Subcommands: `check`, `hook-commands`, `hook-commands-for-event`, `hook-commands
 
 Check the seven playbook layers and print a status table
 
-Reads your settings, shell files and PATH, and lists a PASS, INFO, WARN or FAIL row for each layer, then the review config, stale worktrees and pending migration notices. A Rust repo also gets INFO rows for the cargo dev profile in `~/.cargo/config.toml` and, on macOS, for the warm target clone. Always exits 0 when it could run the checks.
+Reads your settings, shell files and PATH, and lists a PASS, INFO, WARN or FAIL row for each layer, then the review config, stale worktrees and pending migration notices. Always exits 0 when it could run the checks.
 
 - `--json`: Print the rows as JSON
-
-In a Rust repo (a `Cargo.toml` at the repo root) the table also has two INFO rows. One reports whether `~/.cargo/config.toml` sets `debug = 0` and `incremental = false` under `[profile.dev]`, the settings that keep each `target` folder small, and hints at the fix when it does not. On macOS the other reports whether the main checkout has a `target` folder for new worktrees to clone. The clone saves the most when main was last built with a plain `cargo build` under the same dev profile, because artifacts built with other settings are not reused. Neither row writes anything.
 
 ### `playbook doctor hook-commands`
 
