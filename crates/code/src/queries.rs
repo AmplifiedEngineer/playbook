@@ -957,8 +957,6 @@ mod tests {
             launcher: &launcher,
         };
         let got = definition(&ctx, &target(s, 1, 14)).unwrap();
-        drop(ctx);
-        drop(launcher);
         fake.finish();
         got
     }
