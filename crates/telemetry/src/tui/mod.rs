@@ -10,6 +10,7 @@ pub mod budget;
 pub mod burnup;
 pub mod chart;
 pub mod data;
+pub mod dots;
 pub mod editor;
 pub mod fmt;
 pub mod icon;
