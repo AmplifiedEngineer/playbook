@@ -95,6 +95,12 @@ test *args:
 stress-collector:
     cargo nextest run -p playbook --config-file .github/nextest.toml --test collector_daemon --run-ignored only -E 'test(d2_stress)'
 
+# Time `playbook code` against rg on generated repos and write a JSON report with a verdict.
+#
+# Needs rg on PATH. Set BENCH_CODE_SIZES (default 100,5000,50000) and BENCH_CODE_REPORT to change the run.
+bench-code:
+    cargo test --release -p playbook --test code_bench -- --ignored --nocapture
+
 # Run every `*.test.sh` suite the way shell-ci does.
 test-shell:
     #!/usr/bin/env bash

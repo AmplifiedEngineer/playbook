@@ -1,0 +1,299 @@
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: Apache-2.0
+
+//! Timing and size benchmark for `playbook code`, run by `just bench-code`.
+//! It compares the index against `rg` with whole-file reads (arm a) and `rg`
+//! with 30 lines of context (arm b), and writes a JSON report with a verdict
+//! per fixture size. Bytes stand in for tokens. CI never runs the ignored test.
+
+mod code_fixture;
+
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
+use std::time::Instant;
+
+use code_fixture::{
+    correctness, generate, stale_without_flag, verdict, which, Harness, Kind, Numbers, Repo, Task,
+};
+use serde_json::{json, Value};
+
+const RUNS: usize = 20;
+const READ_LINE_CAP: usize = 2_000;
+const DEFAULT_SIZES: &str = "100,5000,50000";
+
+fn median(values: &mut [f64]) -> f64 {
+    values.sort_by(f64::total_cmp);
+    values.get(values.len() / 2).copied().unwrap_or(0.0)
+}
+
+fn percentile(sorted: &[f64], p: f64) -> f64 {
+    let index = ((sorted.len() as f64 * p).ceil() as usize).saturating_sub(1);
+    sorted.get(index).copied().unwrap_or(0.0)
+}
+
+/// Milliseconds for each of `RUNS` runs of the command, sorted.
+fn timings(h: &Harness, args: &[&str]) -> Vec<f64> {
+    let mut times: Vec<f64> = (0..RUNS)
+        .map(|_| {
+            let start = Instant::now();
+            h.playbook(args);
+            start.elapsed().as_secs_f64() * 1000.0
+        })
+        .collect();
+    times.sort_by(f64::total_cmp);
+    times
+}
+
+fn latency_json(times: &[f64]) -> Value {
+    json!({"p50_ms": percentile(times, 0.5), "p95_ms": percentile(times, 0.95)})
+}
+
+fn rg(h: &Harness, args: &[&str]) -> String {
+    let out = Command::new(h.bin.join("rg"))
+        .args(args)
+        .current_dir(&h.repo)
+        .output()
+        .expect("rg runs");
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// Arm a: the `rg` hits plus every matched file read up to the line cap.
+fn arm_a_bytes(h: &Harness, task: &Task) -> f64 {
+    let flag = if task.kind == Kind::References {
+        "-w"
+    } else {
+        "-F"
+    };
+    let hits = rg(h, &["-n", flag, &task.query]);
+    let mut files: Vec<&str> = hits.lines().filter_map(|l| l.split(':').next()).collect();
+    files.dedup();
+    let read: usize = files
+        .iter()
+        .filter_map(|f| fs::read_to_string(h.repo.join(f)).ok())
+        .map(|text| {
+            text.lines()
+                .take(READ_LINE_CAP)
+                .map(|l| l.len() + 1)
+                .sum::<usize>()
+        })
+        .sum();
+    (hits.len() + read) as f64
+}
+
+fn arm_b_bytes(h: &Harness, task: &Task) -> f64 {
+    let flag = if task.kind == Kind::References {
+        "-w"
+    } else {
+        "-F"
+    };
+    rg(h, &["-n", flag, "-C", "30", &task.query]).len() as f64
+}
+
+fn arm_c_args(task: &Task) -> Vec<&str> {
+    match task.kind {
+        Kind::Declaration => vec!["code", "symbol", &task.query, "--json"],
+        Kind::References => vec!["code", "refs", &task.query, "--limit", "200", "--json"],
+        Kind::Phrase => vec!["code", "search", &task.query, "--text", "--json"],
+    }
+}
+
+fn arm_c_bytes(h: &Harness, task: &Task) -> f64 {
+    h.playbook(&arm_c_args(task)).stdout.len() as f64
+}
+
+fn savings(tool: &mut [f64], baseline: &mut [f64]) -> f64 {
+    100.0 * (1.0 - median(tool) / median(baseline).max(1.0))
+}
+
+fn db_bytes(h: &Harness) -> u64 {
+    let doc = h.json(&["code", "status", "--json"]);
+    let path = doc["index"]["path"].as_str().map(PathBuf::from);
+    path.and_then(|p| fs::metadata(p).ok())
+        .map_or(0, |m| m.len())
+}
+
+struct Bars {
+    latency: bool,
+    db_size: bool,
+    large: bool,
+}
+
+/// `p50s` holds the warm medians of `symbol`, `search --text` and `context`.
+fn bars(files: usize, p50s: [f64; 3], index_s: (f64, f64), sizes: (f64, f64)) -> Bars {
+    let [symbol, search, context] = p50s;
+    let (cold_s, warm_s) = index_s;
+    let (db, source) = sizes;
+    Bars {
+        latency: symbol <= 50.0
+            && search <= 100.0
+            && context <= 500.0
+            && (files >= 50_000 || (cold_s <= 15.0 && warm_s <= 2.0)),
+        db_size: db <= 1.5 * source,
+        large: files < 50_000 || (cold_s < 180.0 && warm_s < 20.0),
+    }
+}
+
+fn measure(files: usize) -> Value {
+    let h = Harness::new(&format!("bench-{files}"), true);
+    let repo = generate(&h.repo, files, 7);
+    h.init_and_commit();
+
+    let start = Instant::now();
+    h.json(&["code", "index", "--json"]);
+    let cold_s = start.elapsed().as_secs_f64();
+    let warm = timings(&h, &["code", "index", "--json"]);
+    let warm_s = percentile(&warm, 0.5) / 1000.0;
+    let db = db_bytes(&h) as f64;
+
+    let (mut a, mut b, mut c): (Vec<f64>, Vec<f64>, Vec<f64>) = (vec![], vec![], vec![]);
+    for task in &repo.tasks {
+        a.push(arm_a_bytes(&h, task));
+        b.push(arm_b_bytes(&h, task));
+        c.push(arm_c_bytes(&h, task));
+    }
+    let (r_a, r_b) = (savings(&mut c.clone(), &mut a), savings(&mut c, &mut b));
+
+    let symbol = timings(&h, &["code", "symbol", &repo.declarations[0].1, "--json"]);
+    let search = timings(
+        &h,
+        &["code", "search", &repo.tasks[2].query, "--text", "--json"],
+    );
+    let task_words = format!("add support for {}", repo.declarations[1].1);
+    let context = timings(&h, &["code", "context", &task_words, "--json"]);
+
+    let (top3, recall) = correctness(&h, &repo);
+    let unflagged = stale_without_flag(&h, &repo);
+    let ok = bars(
+        files,
+        [&symbol, &search, &context].map(|t| percentile(t, 0.5)),
+        (cold_s, warm_s),
+        (db, repo.source_bytes as f64),
+    );
+    let numbers = Numbers {
+        files,
+        r_a,
+        r_b,
+        symbol_top3: top3,
+        refs_recall: recall,
+        stale_without_flag: unflagged,
+        latency_bars_met: ok.latency,
+        db_size_bar_met: ok.db_size,
+        large_bars_met: ok.large,
+    };
+    report_entry(
+        &numbers,
+        &repo,
+        &[
+            ("symbol", &symbol),
+            ("search_text", &search),
+            ("context", &context),
+        ],
+        cold_s,
+        warm_s,
+        db,
+    )
+}
+
+fn report_entry(
+    n: &Numbers,
+    repo: &Repo,
+    latencies: &[(&str, &Vec<f64>)],
+    cold_s: f64,
+    warm_s: f64,
+    db: f64,
+) -> Value {
+    let latency: serde_json::Map<String, Value> = latencies
+        .iter()
+        .map(|(name, times)| ((*name).to_string(), latency_json(times)))
+        .collect();
+    json!({
+        "files": n.files,
+        "tasks": repo.tasks.len(),
+        "source_bytes": repo.source_bytes,
+        "db_bytes": db,
+        "cold_index_s": cold_s,
+        "warm_index_s": warm_s,
+        "latency": latency,
+        "savings_vs_rg_and_reads_pct": n.r_a,
+        "savings_vs_rg_context_pct": n.r_b,
+        "symbol_top3_pct": n.symbol_top3,
+        "refs_recall_pct": n.refs_recall,
+        "stale_without_flag": n.stale_without_flag,
+        "bars": {
+            "latency": n.latency_bars_met,
+            "db_size": n.db_size_bar_met,
+            "large_repo": n.large_bars_met,
+        },
+        "verdict": verdict(n).as_str(),
+    })
+}
+
+#[test]
+#[ignore = "timing benchmark, run with `just bench-code`"]
+fn bench_code() {
+    assert!(which("rg").is_some(), "the benchmark needs rg installed");
+    let sizes = std::env::var("BENCH_CODE_SIZES").unwrap_or_else(|_| DEFAULT_SIZES.to_string());
+    let runs: Vec<Value> = sizes
+        .split(',')
+        .map(|s| {
+            measure(
+                s.trim()
+                    .parse()
+                    .expect("BENCH_CODE_SIZES holds file counts"),
+            )
+        })
+        .collect();
+    let report = json!({"runs": runs, "limits": "bytes stand in for tokens; no server arm"});
+    let path = std::env::var("BENCH_CODE_REPORT").map_or_else(
+        |_| std::env::temp_dir().join("playbook-code-bench.json"),
+        PathBuf::from,
+    );
+    fs::write(&path, serde_json::to_string_pretty(&report).expect("json")).expect("report");
+    println!("{}", serde_json::to_string_pretty(&report).expect("json"));
+    println!("report written to {}", path.display());
+}
+
+#[test]
+fn a_report_entry_carries_every_bar_and_a_verdict() {
+    // Arrange
+    let h = Harness::new("schema", false);
+    let repo = generate(&h.repo, 20, 1);
+    let n = Numbers {
+        files: 20,
+        r_a: 10.0,
+        r_b: 5.0,
+        symbol_top3: 100.0,
+        refs_recall: 100.0,
+        stale_without_flag: 0,
+        latency_bars_met: true,
+        db_size_bar_met: true,
+        large_bars_met: true,
+    };
+    let times = vec![1.0, 2.0, 3.0];
+
+    // Act
+    let entry = report_entry(&n, &repo, &[("symbol", &times)], 1.5, 0.1, 1000.0);
+
+    // Assert
+    for key in [
+        "files",
+        "tasks",
+        "source_bytes",
+        "db_bytes",
+        "cold_index_s",
+        "warm_index_s",
+        "latency",
+        "savings_vs_rg_and_reads_pct",
+        "savings_vs_rg_context_pct",
+        "symbol_top3_pct",
+        "refs_recall_pct",
+        "stale_without_flag",
+        "bars",
+        "verdict",
+    ] {
+        assert!(entry.get(key).is_some(), "{key} is missing");
+    }
+    assert_eq!(entry["verdict"], "partial");
+    assert_eq!(entry["latency"]["symbol"]["p50_ms"], 2.0);
+}
