@@ -13,6 +13,7 @@ use std::time::Duration;
 use super::guard::RealFs;
 use super::index::{self, Record, State};
 use super::lock::{with_run_lock, NoHook, RunOutcome};
+use super::logs::{append_confirmed, rotate, RealLogFs, Rotation};
 use super::tombstone::{
     anomalies, move_locked, reconcile, Env, Findings, MoveOutcome, MoveRequest,
 };
@@ -32,6 +33,7 @@ pub struct ApplyOutcome {
     pub next_store: usize,
     pub findings: Findings,
     pub tombstoned: usize,
+    pub rotated: usize,
     pub expired: usize,
     pub compacted: usize,
     /// Items that could not be moved, and a lost lock if there was one.
@@ -57,7 +59,7 @@ fn run_stores(
         if index > cursor && budget.is_some_and(|limit| env.now() - start >= limit) {
             return Some(index);
         }
-        if store.action != Action::Tombstone {
+        if !matches!(store.action, Action::Tombstone | Action::Rotate) {
             continue;
         }
         for item in store.items(env.now()) {
@@ -67,8 +69,20 @@ fn run_stores(
                     .push("the gc lock was lost, so the run stopped".into());
                 return None;
             }
+            if store.action == Action::Rotate {
+                match rotate(&item.path, &RealLogFs, append_confirmed(&item.path)) {
+                    Ok(Rotation::Rotated) => out.rotated += 1,
+                    Ok(_) => {}
+                    Err(err) => out
+                        .failures
+                        .push(format!("{}: could not rotate: {err}", item.path.display())),
+                }
+                continue;
+            }
             let req = MoveRequest {
-                paths: vec![item.path.clone()],
+                paths: std::iter::once(item.path.clone())
+                    .chain(item.also.iter().cloned())
+                    .collect(),
                 reason: due.reason,
                 retain_days: due.retain_days,
             };
@@ -314,8 +328,8 @@ pub fn apply_command(registry: &Registry, clock: &dyn Clock) -> (String, i32) {
     match ran {
         Ok(RunOutcome::Ran(out)) => {
             let mut text = format!(
-                "gc: {} tombstoned, {} expired, {} index records dropped\n",
-                out.tombstoned, out.expired, out.compacted
+                "gc: {} tombstoned, {} rotated, {} expired, {} index records dropped\n",
+                out.tombstoned, out.rotated, out.expired, out.compacted
             );
             for line in out.findings.fixes.iter().map(|l| format!("repaired {l}")) {
                 text.push_str(&format!("{line}\n"));
@@ -370,6 +384,7 @@ mod tests {
                 path: e.path(),
                 bytes: 1,
                 newest_mtime: 0,
+                also: Vec::new(),
                 due: Some(Due {
                     reason: "idle".into(),
                     retain_days: 7,

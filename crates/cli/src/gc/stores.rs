@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::{Action, Due, Item, Limits, Store};
+use crate::common::data::data_dir_from;
 use crate::common::paths::playbook_root_from;
 use crate::config::keys;
 
@@ -28,7 +29,7 @@ struct Walked {
     capped: bool,
 }
 
-fn mtime_secs(meta: &fs::Metadata) -> i64 {
+pub(super) fn mtime_secs(meta: &fs::Metadata) -> i64 {
     meta.modified()
         .ok()
         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
@@ -94,6 +95,7 @@ fn aged_item(store: &Store, path: PathBuf, now: i64) -> Option<Item> {
         path,
         bytes: walked.bytes,
         newest_mtime,
+        also: Vec::new(),
         due,
     })
 }
@@ -187,7 +189,7 @@ fn scan_leftovers(store: &Store, now: i64) -> Vec<Item> {
 }
 
 /// The configured number for `key`, or its default when it cannot be read.
-fn configured_days(home: &Path, key: &'static str) -> u32 {
+pub(super) fn configured_days(home: &Path, key: &'static str) -> u32 {
     let from_config = crate::config::resolve_valid(key, home, None)
         .ok()
         .and_then(|(value, _, _)| keys::gc_number_or_default(key, &value));
@@ -234,7 +236,31 @@ pub fn small_stores(home: &Path) -> Vec<Store> {
             "gc.leftoverDays",
             home,
         ),
+        store(
+            "gate databases",
+            data_dir_from(home).join("gate"),
+            super::gate::scan,
+            "gc.gateDbIdleDays",
+            home,
+        ),
+        log_store(home),
     ]
+}
+
+/// The logs the playbook writes under its data folder. The size limit is in
+/// MiB in config, and the age limit counts days since the last write.
+fn log_store(home: &Path) -> Store {
+    const MIB: u64 = 1024 * 1024;
+    let mut store = store(
+        "logs",
+        data_dir_from(home),
+        super::logs::scan,
+        "gc.logMaxDays",
+        home,
+    );
+    store.action = Action::Rotate;
+    store.limits.max_bytes = u64::from(configured_days(home, "gc.logMaxMiB")) * MIB;
+    store
 }
 
 #[cfg(test)]
@@ -493,5 +519,8 @@ mod tests {
         assert_eq!(stores[0].limits.idle_days, 14);
         assert_eq!(stores[0].limits.retain_days, 7);
         assert_eq!(stores[1].limits.idle_days, 90);
+        assert_eq!(stores[2].limits.idle_days, 30);
+        assert_eq!(stores[3].limits.max_bytes, 5 * 1024 * 1024);
+        assert_eq!(stores[3].action, Action::Rotate);
     }
 }

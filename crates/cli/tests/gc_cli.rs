@@ -144,3 +144,47 @@ fn report_only_data_survives_yes() {
     assert!(out.status.success(), "{out:?}");
     assert!(kept.iter().all(|path| path.exists()));
 }
+
+#[test]
+fn yes_rotates_an_old_collector_log() {
+    // Arrange
+    let home = scratch_home("rotate-log");
+    let data = home.join(".config/playbook/data");
+    fs::create_dir_all(&data).unwrap();
+    let log = data.join("collector.log");
+    fs::write(&log, "old lines").unwrap();
+    backdate(&log, 31);
+
+    // Act
+    let out = gc_at_fixed_now(&home, &["--yes"]);
+
+    // Assert
+    assert!(out.status.success(), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("1 rotated"));
+    assert_eq!(
+        fs::read_to_string(data.join("collector.log.1")).unwrap(),
+        "old lines"
+    );
+    assert_eq!(fs::metadata(&log).unwrap().len(), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn sweep_never_follows_symlink_out_of_root() {
+    // Arrange
+    let home = scratch_home("symlink-escape");
+    let runtime = home.join(".config/playbook/runtime");
+    let outside = home.join("outside");
+    fs::create_dir_all(&runtime).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("keep"), "x").unwrap();
+    backdate(&outside.join("keep"), 400);
+    std::os::unix::fs::symlink(&outside, runtime.join("link")).unwrap();
+
+    // Act
+    let out = gc_at_fixed_now(&home, &["--yes"]);
+
+    // Assert
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(fs::read_to_string(outside.join("keep")).unwrap(), "x");
+}
