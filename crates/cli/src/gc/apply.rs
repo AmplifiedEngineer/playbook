@@ -39,7 +39,8 @@ pub struct ApplyOutcome {
 }
 
 fn grace_secs(rec: &Record) -> i64 {
-    i64::from(rec.retain_days) * SECS_PER_DAY
+    // At least one day, so an item is never expired in the run that moved it.
+    i64::from(rec.retain_days.max(1)) * SECS_PER_DAY
 }
 
 /// Tombstones every due item of the stores from `cursor` on. Returns the index
@@ -111,6 +112,9 @@ pub fn expire(env: &Env) -> usize {
         if env.append(&rec.with_state(State::Expiring, now)).is_err() {
             break;
         }
+        if !rec.dest.starts_with(env.registry.tombstones_dir()) {
+            continue;
+        }
         // On a failed delete the `expiring` record stays and reconcile retries.
         if env.fs.remove(env.guard, &rec.dest).is_err() {
             continue;
@@ -160,8 +164,15 @@ pub fn run_apply(env: &Env, cursor: usize, budget: Option<i64>) -> ApplyOutcome 
 }
 
 /// Whether `path` or its nearest existing parent sits inside a registered
-/// root once symlinks are resolved.
+/// store root once symlinks are resolved. A path with a `..` part is refused,
+/// because the nearest existing parent would not be where the path ends up.
 fn restorable_location(roots: &[std::path::PathBuf], path: &Path) -> bool {
+    if path
+        .components()
+        .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return false;
+    }
     let Some(parent) = path.ancestors().skip(1).find(|dir| dir.exists()) else {
         return false;
     };
@@ -177,7 +188,7 @@ fn restorable_location(roots: &[std::path::PathBuf], path: &Path) -> bool {
 /// Moves `from` back to `to`, copying when the two are on different
 /// filesystems. The tombstone copy is removed only after the copy is in place.
 fn put_back(env: &Env, from: &Path, to: &Path) -> Result<(), String> {
-    match env.fs.rename(from, to) {
+    match env.fs.rename(env.guard, from, to) {
         Ok(()) => return Ok(()),
         Err(err) if err.kind() != io::ErrorKind::CrossesDevices => {
             return Err(format!("could not move {} back: {err}", to.display()));
@@ -187,10 +198,17 @@ fn put_back(env: &Env, from: &Path, to: &Path) -> Result<(), String> {
     let mut staged = to.as_os_str().to_owned();
     staged.push(".gc-restore");
     let staged = std::path::PathBuf::from(staged);
+    if fs::symlink_metadata(&staged).is_ok() {
+        // Left by a restore that a crash cut short; copying over it would
+        // merge two trees.
+        env.fs
+            .remove(env.guard, &staged)
+            .map_err(|e| format!("cannot clear {}: {e}", staged.display()))?;
+    }
     let copied = env
         .fs
         .copy(env.guard, from, &staged)
-        .and_then(|()| env.fs.rename(&staged, to));
+        .and_then(|()| env.fs.rename(env.guard, &staged, to));
     if let Err(err) = copied {
         let _ = env.fs.remove(env.guard, &staged);
         return Err(format!("could not copy {} back: {err}", to.display()));
@@ -216,7 +234,12 @@ pub fn restore(env: &Env, id: &str) -> Result<String, String> {
         )
         .to_lowercase());
     }
-    let roots = env.registry.roots();
+    let roots = env.registry.store_roots();
+    if !rec.dest.starts_with(env.registry.tombstones_dir()) {
+        return Err(format!(
+            "tombstone {id} points outside the tombstone folder"
+        ));
+    }
     let members: Vec<_> = rec
         .paths
         .iter()
@@ -239,6 +262,7 @@ pub fn restore(env: &Env, id: &str) -> Result<String, String> {
     env.append(&rec.with_state(State::Restoring, env.now()))
         .map_err(|e| format!("cannot write the tombstone index: {e}"))?;
     for path in &members {
+        env.guard.verify().map_err(|e| e.to_string())?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
@@ -550,6 +574,43 @@ mod tests {
         let result = fx.run(NOW, |env| restore(env, "out"));
 
         assert!(result.is_err() && !outside.exists());
+    }
+
+    #[test]
+    fn restore_refuses_a_path_with_a_parent_part() {
+        let fx = fx("apply-restore-dotdot");
+        let sneaky = fx
+            .root
+            .join("nope")
+            .join("..")
+            .join("..")
+            .join("escaped.txt");
+        let rec = fx.plant("dd", State::Done, Mode::Rename, &[&sneaky], NOW);
+        fs::create_dir_all(&rec.dest).unwrap();
+        fs::write(rec.member_dest(&sneaky), "x").unwrap();
+
+        let result = fx.run(NOW, |env| restore(env, "dd"));
+
+        assert!(result.is_err());
+        assert!(!fx.root.parent().unwrap().join("escaped.txt").exists());
+    }
+
+    #[test]
+    fn a_zero_day_retention_still_waits_a_day() {
+        let fx = fx("apply-zero-retain");
+        let rec = fx.plant(
+            "zr",
+            State::Done,
+            Mode::Rename,
+            &[&fx.root.join("z.txt")],
+            NOW,
+        );
+        let zero = Record {
+            retain_days: 0,
+            ..rec
+        };
+
+        assert_eq!(grace_secs(&zero), SECS_PER_DAY);
     }
 
     #[test]
