@@ -1795,17 +1795,26 @@ pub enum ReviewCommand {
     /// cut), a security label, the test ratio, and changes
     /// that cannot alter behavior (docs, lock files, renames, tests). Prints
     /// `recommendation=quick|deep`, `confidence=high|low`, up to four
-    /// `reason:` lines and a `signals:` line. Low confidence means no rule
+    /// `reason:` lines, a `signals:` line, a `scope=` line and, with
+    /// `--scope stack`, a `stack:` line. Low confidence means no rule
     /// was decisive; the answer then leans quick for your own change (a local
     /// branch always is) and deep otherwise. Docs and lock file lines do not
     /// count toward size, and files outside crates, packages, apps, services,
     /// libs and plugins count together as one `root` package. The cuts are
     /// the `review.suggest.*` config keys.
     ///
+    /// `--scope stack` measures every open PR in the PR's stack together:
+    /// merged PRs are left out, closed PRs are skipped, and a PR outside a
+    /// stack is measured alone. A stack with more open PRs than
+    /// `review.stackMaxPrs` is answered deep without reading their files.
+    ///
     /// Example: `playbook review suggest 4265 --json`
     Suggest {
         /// PR number (default: the current branch against the default branch)
         pr: Option<String>,
+        /// What to measure: this PR alone, or every open PR in its stack
+        #[arg(long, value_enum, default_value = "this-pr")]
+        scope: review::suggest::Scope,
         /// Base branch when no PR number is given (default: the repo's default
         /// branch; pass the parent branch for a stacked change)
         #[arg(long)]

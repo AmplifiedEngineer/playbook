@@ -19,6 +19,18 @@ use serde::Serialize;
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
+/// A positive count from the config tiers, or `default` when unset or invalid.
+fn config_count(key: &str, default: u64) -> u64 {
+    let home = crate::common::home_dir();
+    let slug = crate::common::repo_slug();
+    let slug = (!slug.is_empty()).then_some(slug.as_str());
+    crate::config::resolve(key, &home, slug)
+        .ok()
+        .and_then(|(v, _)| v.as_u64())
+        .filter(|n| *n >= 1)
+        .unwrap_or(default)
+}
+
 /// The cuts the rules compare against. Each one is a `review.suggest.*`
 /// config key, so a team can move them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,16 +58,7 @@ impl Cfg {
 
     /// The defaults, with any `review.suggest.*` key a config tier sets.
     pub fn load() -> Cfg {
-        let home = crate::common::home_dir();
-        let slug = crate::common::repo_slug();
-        let slug = (!slug.is_empty()).then_some(slug.as_str());
-        let read = |key: &str, default: u64| {
-            crate::config::resolve(key, &home, slug)
-                .ok()
-                .and_then(|(v, _)| v.as_u64())
-                .filter(|n| *n >= 1)
-                .unwrap_or(default)
-        };
+        let read = config_count;
         let d = Cfg::DEFAULT;
         Cfg {
             deep_lines: read("review.suggest.deepLines", d.deep_lines),
@@ -410,6 +413,10 @@ pub struct Suggestion {
     /// The ids of the rules that decided.
     pub rules: Vec<&'static str>,
     pub signals: Signals,
+    pub scope: Scope,
+    /// The stack that was measured; `None` outside a stack run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stack: Option<StackScope>,
 }
 
 const MAX_REASONS: usize = 4;
@@ -463,11 +470,13 @@ pub fn decide(s: Signals, cfg: &Cfg) -> Suggestion {
         reasons,
         rules: picked.iter().map(|r| r.id).collect(),
         signals: s,
+        scope: Scope::ThisPr,
+        stack: None,
     }
 }
 
-/// `recommendation=`, `confidence=`, one `reason:` line each, then the
-/// signals on one line.
+/// `recommendation=`, `confidence=`, one `reason:` line each, the signals on
+/// one line, then `scope=` and, for a stack run, a `stack:` line.
 pub fn render(sug: &Suggestion) -> String {
     let mut out = vec![
         format!("recommendation={}", sug.recommendation.as_str()),
@@ -487,6 +496,21 @@ pub fn render(sug: &Suggestion) -> String {
             s.areas.join(",")
         }
     ));
+    out.push(format!("scope={}", sug.scope.as_str()));
+    if let Some(st) = &sug.stack {
+        let list = |ns: &[u64]| {
+            ns.iter()
+                .map(|n| format!("#{n}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        out.push(format!(
+            "stack: open={} merged={} skipped={}",
+            list(&st.open),
+            list(&st.merged),
+            list(&st.skipped)
+        ));
+    }
     out.join("\n")
 }
 
@@ -583,6 +607,15 @@ pub enum Scope {
     ThisPr,
     /// Every open PR in the stack around the PR given.
     Stack,
+}
+
+impl Scope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Scope::ThisPr => "this-pr",
+            Scope::Stack => "stack",
+        }
+    }
 }
 
 /// The PRs of a stack by role: `open` are measured, `merged` are context
@@ -750,20 +783,65 @@ fn parse_part(files: &str, meta: &str) -> Result<PrPart, String> {
     Ok((files, labels, meta.author.login))
 }
 
-/// Collect the facts for PR `pr`, or for the branch against its base when
-/// `pr` is `None`, and decide.
-pub fn run(pr: Option<&str>, base: Option<&str>) -> Result<Suggestion, String> {
-    let facts = match pr.map(|p| p.trim_start_matches('#')) {
-        Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => {
-            pr_facts(&|a| gh(a), n)?
-        }
-        Some(other) => return Err(format!("`{other}` is not a PR number")),
-        None => local_facts(base)?,
-    };
+/// The default answer for a stack with more open PRs than `max_prs`: deep,
+/// without fetching their files.
+fn over_budget(stack: StackScope, signals: Signals, max_prs: u64) -> Suggestion {
+    Suggestion {
+        recommendation: Review::Deep,
+        confidence: Confidence::High,
+        reasons: vec![format!(
+            "{} open PRs in the stack, over review.stackMaxPrs ({max_prs}).",
+            stack.open.len()
+        )],
+        rules: vec!["stack-over-budget"],
+        signals,
+        scope: Scope::Stack,
+        stack: Some(stack),
+    }
+}
+
+/// Decide on `facts`, tagging the answer with the scope that was measured.
+fn decided(
+    facts: Facts,
+    cfg: &Cfg,
+    scope: Scope,
+    stack: Option<StackScope>,
+) -> Result<Suggestion, String> {
     if facts.files.is_empty() {
         return Err("no changed files found; nothing to review".to_string());
     }
-    Ok(decide(measure(&facts), &Cfg::load()))
+    Ok(Suggestion {
+        scope,
+        stack,
+        ..decide(measure(&facts), cfg)
+    })
+}
+
+fn from_stack(found: StackFacts, cfg: &Cfg, max_prs: u64) -> Result<Suggestion, String> {
+    match found {
+        StackFacts::Alone(facts) => decided(facts, cfg, Scope::ThisPr, None),
+        StackFacts::Scored(facts, stack) => decided(facts, cfg, Scope::Stack, Some(stack)),
+        StackFacts::OverBudget(stack, signals) => Ok(over_budget(stack, signals, max_prs)),
+    }
+}
+
+/// Collect the facts for PR `pr`, or for the branch against its base when
+/// `pr` is `None`, and decide. With `Scope::Stack` the facts are those of
+/// every open PR in the PR's stack.
+pub fn run(pr: Option<&str>, base: Option<&str>, scope: Scope) -> Result<Suggestion, String> {
+    let cfg = Cfg::load();
+    match (pr.map(|p| p.trim_start_matches('#')), scope) {
+        (Some(n), _) if n.is_empty() || !n.chars().all(|c| c.is_ascii_digit()) => {
+            Err(format!("`{n}` is not a PR number"))
+        }
+        (Some(n), Scope::Stack) => {
+            let max_prs = config_count("review.stackMaxPrs", 6);
+            from_stack(stack_facts(&|a| gh(a), n, max_prs)?, &cfg, max_prs)
+        }
+        (Some(n), Scope::ThisPr) => decided(pr_facts(&|a| gh(a), n)?, &cfg, Scope::ThisPr, None),
+        (None, Scope::Stack) => Err("--scope stack needs a PR number".to_string()),
+        (None, Scope::ThisPr) => decided(local_facts(base)?, &cfg, Scope::ThisPr, None),
+    }
 }
 
 #[cfg(test)]
@@ -1213,6 +1291,78 @@ mod tests {
 
     #[test]
     fn a_branch_name_is_refused_as_a_pr_number() {
-        assert!(run(Some("feat/x"), None).unwrap_err().contains("not a PR number"));
+        assert!(run(Some("feat/x"), None, Scope::ThisPr).unwrap_err().contains("not a PR number"));
+    }
+
+    #[test]
+    fn a_stack_scope_needs_a_pr_number() {
+        assert_eq!(run(None, None, Scope::Stack).unwrap_err(), "--scope stack needs a PR number");
+    }
+
+    #[test]
+    fn render_adds_the_scope_line_after_the_signals_and_the_stack_line_last() {
+        // Arrange
+        let mut s = sug(vec![file("src/a.rs", 10)]);
+        let alone = render(&s);
+        s.scope = Scope::Stack;
+        s.stack = Some(StackScope { open: vec![2, 3], merged: vec![1], skipped: vec![] });
+        // Act
+        let stacked = render(&s);
+        // Assert
+        let lines: Vec<&str> = alone.lines().collect();
+        assert!(lines[lines.len() - 2].starts_with("signals: "));
+        assert_eq!(lines[lines.len() - 1], "scope=this-pr");
+        let lines: Vec<&str> = stacked.lines().collect();
+        assert_eq!(lines[lines.len() - 2], "scope=stack");
+        assert_eq!(lines[lines.len() - 1], "stack: open=#2,#3 merged=#1 skipped=");
+    }
+
+    #[test]
+    fn json_names_the_scope_and_drops_an_absent_stack() {
+        // Arrange
+        let mut s = sug(vec![file("src/a.rs", 10)]);
+        // Act
+        let alone = serde_json::to_value(&s).unwrap();
+        s.stack = Some(StackScope { open: vec![2], merged: vec![], skipped: vec![] });
+        let stacked = serde_json::to_value(&s).unwrap();
+        // Assert
+        assert_eq!(alone["scope"], "this-pr");
+        assert!(alone.get("stack").is_none());
+        assert_eq!(stacked["stack"]["open"][0], 2);
+    }
+
+    #[test]
+    fn over_budget_answers_deep_and_high_without_a_rule_from_the_table() {
+        // Arrange
+        let found = StackFacts::OverBudget(
+            StackScope { open: vec![1, 2, 3], merged: vec![], skipped: vec![] },
+            Signals { lines: 36, files: 3, ..Signals::default() },
+        );
+        // Act
+        let s = from_stack(found, &C, 2).unwrap();
+        // Assert
+        assert_eq!((s.recommendation, s.confidence, s.scope), (Review::Deep, Confidence::High, Scope::Stack));
+        assert_eq!(s.rules, vec!["stack-over-budget"]);
+        assert_eq!(s.reasons, vec!["3 open PRs in the stack, over review.stackMaxPrs (2)."]);
+        assert_eq!(s.signals.lines, 36);
+    }
+
+    #[test]
+    fn a_scored_stack_reports_its_scope_and_an_alone_pr_reports_this_pr() {
+        // Arrange
+        let facts = || part(vec![file("src/a.rs", 10)], &[], Some(true));
+        let stack = StackScope { open: vec![2, 3], merged: vec![1], skipped: vec![] };
+        // Act
+        let scored = from_stack(StackFacts::Scored(facts(), stack.clone()), &C, 6).unwrap();
+        let alone = from_stack(StackFacts::Alone(facts()), &C, 6).unwrap();
+        // Assert
+        assert_eq!((scored.scope, scored.stack), (Scope::Stack, Some(stack)));
+        assert_eq!((alone.scope, alone.stack), (Scope::ThisPr, None));
+    }
+
+    #[test]
+    fn a_stack_with_no_changed_files_is_an_error() {
+        let found = StackFacts::Alone(part(vec![], &[], None));
+        assert!(from_stack(found, &C, 6).unwrap_err().contains("no changed files"));
     }
 }
