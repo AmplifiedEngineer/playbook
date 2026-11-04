@@ -446,7 +446,7 @@ Spawn a `fact-checker` agent (`subagent_type: playbook:fact-checker`) with the f
 
 Returns a structured PASS / FAIL / WARN report. Phase 1 folds a Verification Summary into it (table shape in the quality-gate reference).
 
-Spawn it with a stable `name`. **Record the gate** for `fact-check` (Gate ledger above). Do this every time Phase 1 returns, including every retry (the recording rule is in the quality-gate reference). **After it returns**, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist any durable gotcha it found as a memory fact; otherwise skip. **If any FAILs:** revise the plan (refreshing both the shared file and this phase's own snapshot per the two-tier scheme above) and re-run Phase 1 under the gate loop (`playbook:delegating-subagents`, `references/gate-loop.md`: hard cap 5 rounds, stop at PASS, STUCK on no progress). Don't proceed until it passes.
+Spawn it with a stable `name`. **Record the gate** for `fact-check` (Gate ledger above). Do this every time Phase 1 returns, including every retry (the recording rule is in the quality-gate reference). **After it returns**, if a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist any durable gotcha it found as a memory fact; otherwise skip. **If any FAILs:** revise the plan (refreshing both the shared file and this phase's own snapshot per the two-tier scheme above) and re-run Phase 1 under the gate loop (`playbook:delegating-subagents`, `references/gate-loop.md`: hard cap `gate.maxRounds` rounds, stop at PASS, STUCK on no progress). Don't proceed until it passes.
 
 #### Phase 2: Adversarial Review
 

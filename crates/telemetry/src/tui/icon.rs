@@ -12,6 +12,20 @@ const TV: &str = "\u{1F4FA}";
 /// Cells the icon block takes: the emoji plus padding.
 const BLOCK_CELLS: usize = 3;
 
+/// What a state mark says. A mark is a second cue next to color, so the state
+/// reads the same in Mono and for color blind viewers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cue {
+    /// A limit is or will be exceeded, or something failed.
+    Alert,
+    /// A limit is on track to be reached.
+    Watch,
+    /// All is well.
+    Fine,
+    /// Not enough data to say.
+    Unknown,
+}
+
 /// How the header icon is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Icon {
@@ -40,6 +54,21 @@ impl Icon {
         match width.map(str::trim) {
             Some("1") => Self::Narrow,
             _ => Self::Wide,
+        }
+    }
+
+    /// The mark and a space for `cue`: a symbol on a UTF-8 terminal, an ASCII
+    /// character where the icon is off.
+    pub fn mark(self, cue: Cue) -> &'static str {
+        match (self, cue) {
+            (Self::Off, Cue::Alert) => "! ",
+            (Self::Off, Cue::Watch) => "~ ",
+            (Self::Off, Cue::Fine) => "+ ",
+            (Self::Off, Cue::Unknown) => "? ",
+            (_, Cue::Alert) => "\u{25b2} ",
+            (_, Cue::Watch) => "\u{25c6} ",
+            (_, Cue::Fine) => "\u{25cf} ",
+            (_, Cue::Unknown) => "\u{25cb} ",
         }
     }
 
@@ -74,6 +103,39 @@ mod tests {
     use super::*;
 
     const UTF8: [Option<&str>; 3] = [None, None, Some("en_US.UTF-8")];
+
+    #[test]
+    fn every_cue_has_its_own_mark_in_both_alphabets() {
+        // Arrange
+        let cues = [Cue::Alert, Cue::Watch, Cue::Fine, Cue::Unknown];
+
+        for icon in [Icon::Off, Icon::Wide] {
+            // Act
+            let marks: std::collections::HashSet<&str> =
+                cues.iter().map(|c| icon.mark(*c)).collect();
+
+            // Assert
+            assert_eq!(marks.len(), cues.len(), "{icon:?}");
+        }
+    }
+
+    #[test]
+    fn the_off_marks_are_ascii_and_the_others_are_not() {
+        // Arrange
+        let cues = [Cue::Alert, Cue::Watch, Cue::Fine, Cue::Unknown];
+
+        for cue in cues {
+            // Act
+            let off = Icon::Off.mark(cue);
+            let wide = Icon::Wide.mark(cue);
+
+            // Assert
+            assert!(off.is_ascii(), "{cue:?}");
+            assert!(!wide.is_ascii(), "{cue:?}");
+            assert_eq!(wide, Icon::Narrow.mark(cue), "{cue:?}");
+            assert!(off.ends_with(' ') && wide.ends_with(' '), "{cue:?}");
+        }
+    }
 
     #[test]
     fn wide_mode_pads_one_cell() {

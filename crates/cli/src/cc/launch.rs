@@ -290,7 +290,7 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
     if let Some(dir) = variants_dir {
         let _ = std::fs::remove_dir_all(dir);
     }
-    retention::prune(&cwd.to_string_lossy());
+    retention::prune(&cwd.to_string_lossy(), crate::common::time::now_secs());
     rc
 }
 
@@ -373,7 +373,7 @@ fn dispatch(cwd: &mut PathBuf, args: &[String]) -> i32 {
             0
         }
         "prune" | "--prune" => {
-            retention::prune(&cwd_str);
+            retention::prune(&cwd_str, crate::common::time::now_secs());
             0
         }
         "worktree" | "--worktree" | "new" | "--new" => worktree(cwd, &flags, tail),
