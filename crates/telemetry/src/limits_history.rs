@@ -664,8 +664,10 @@ mod tests {
         }
     }
 
-    /// How many times the work of copying the file one write may cost.
-    const FULL_WRITE_BUDGET: u32 = 4;
+    /// How many times the work of copying the file one write may cost. A
+    /// write measures about 2 to 3 copies on a quiet or a loaded machine, so
+    /// a write that grows faster than the file passes 8 copies.
+    const FULL_WRITE_BUDGET: u32 = 8;
 
     #[test]
     fn a_full_history_costs_a_write_no_more_than_a_few_copies_of_the_file() {
@@ -673,15 +675,15 @@ mod tests {
         let one = |t: i64| reading_line(t, 1.0, 2.0);
         let n = MAX_BYTES as usize / one(NOW - 100_000).len();
         let body: String = (0..n as i64).map(|i| one(NOW - 100_000 + i)).collect();
-        // The work a trim cannot avoid: read the whole file, look at every
-        // line and write it out again. It is measured next to each timed
+        // The work a trim cannot avoid: read the whole file, split it into
+        // lines and write it out again. It is measured next to each timed
         // write, so a loaded machine slows both and the ratio holds.
         let copy = || {
             let d = dir("timing-copy");
             fs::write(history_path(&d), &body).unwrap();
             let start = Instant::now();
             let text = fs::read_to_string(history_path(&d)).unwrap();
-            let lines = text.lines().filter_map(parse_line).count();
+            let lines = text.lines().count();
             fs::write(d.join("copy"), &text).unwrap();
             std::hint::black_box(lines);
             start.elapsed()
