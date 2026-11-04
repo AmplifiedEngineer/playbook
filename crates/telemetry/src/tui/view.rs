@@ -1944,7 +1944,7 @@ mod tests {
         app.key(press(KeyCode::Char('e')));
 
         // Act
-        let effect = app.reset_done(Ok(true));
+        let effect = app.reset_done(Ok(()));
 
         // Assert
         assert_eq!(effect, crate::tui::app::Effect::Requery);
@@ -1985,7 +1985,31 @@ mod tests {
     }
 
     #[test]
-    fn a_reset_with_no_store_still_resets_the_run_and_needs_no_requery_when_the_query_is_default() {
+    fn a_reset_asks_for_a_requery_when_only_the_filter_or_only_the_range_changed() {
+        for (range, filter) in [
+            (Range::ThisWeek(crate::query::WeekStart::Monday), "alpha"),
+            (Range::All, ""),
+        ] {
+            // Arrange
+            let mut app = tabbed_app();
+            app.week_start = crate::query::WeekStart::Monday;
+            app.range = range;
+            app.filter = filter.into();
+
+            // Act
+            let effect = app.reset_done(Ok(()));
+
+            // Assert
+            assert_eq!(
+                effect,
+                crate::tui::app::Effect::Requery,
+                "{range:?} {filter}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_reset_needs_no_requery_when_the_query_is_already_the_default() {
         // Arrange
         let mut app = tabbed_app();
         app.range = Range::ThisWeek(app.week_start);
@@ -1993,7 +2017,7 @@ mod tests {
         app.key(press(KeyCode::Char('e')));
 
         // Act
-        let effect = app.reset_done(Ok(false));
+        let effect = app.reset_done(Ok(()));
 
         // Assert
         assert_eq!(effect, crate::tui::app::Effect::None);

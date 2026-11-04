@@ -753,6 +753,23 @@ mod tests {
     }
 
     #[test]
+    fn undo_is_ignored_while_the_reset_question_is_showing() {
+        // Arrange
+        let mut e = editor();
+        e.key(KeyCode::Char('d'));
+        let edited = e.layout.clone();
+        e.key(KeyCode::Char('R'));
+
+        // Act
+        let outcome = e.key(KeyCode::Char('u'));
+
+        // Assert
+        assert_eq!(outcome, Outcome::Stay);
+        assert!(!e.confirm_reset);
+        assert_eq!(e.layout, edited);
+    }
+
+    #[test]
     fn escape_answers_the_reset_question_with_no_and_does_not_close_the_editor() {
         // Arrange
         let mut e = editor();

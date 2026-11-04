@@ -85,6 +85,34 @@ fn state_to_save(app: &App, flag: Option<Range>, saved: &ui_state::UiState) -> u
     state
 }
 
+/// What the loop keeps beside the app, so a finished reset can bring it back
+/// in step with the cleared store.
+struct Reset<'a> {
+    app: &'a mut App,
+    autosave: &'a mut Autosave,
+    flag: &'a mut Option<Range>,
+    saved: &'a mut ui_state::UiState,
+    last_saved: &'a mut ui_state::UiState,
+}
+
+impl Reset<'_> {
+    /// Applies the result of clearing the store. On success the pending layout
+    /// text is dropped and the defaults are not written back, and a `--range`
+    /// flag cannot bring the old range back. On a failure nothing here changes
+    /// except the footer note.
+    fn finish(self, cleared: Result<(), String>) -> Effect {
+        let ok = cleared.is_ok();
+        let effect = self.app.reset_done(cleared);
+        if ok {
+            self.autosave.discard();
+            *self.flag = None;
+            *self.saved = ui_state::UiState::default();
+            *self.last_saved = state_to_save(self.app, *self.flag, self.saved);
+        }
+        effect
+    }
+}
+
 /// Runs the view until the user quits. Restores the terminal on every exit,
 /// including a panic (ratatui installs the hook).
 pub fn run(paths: &Paths, range: Option<Range>) -> Result<(), String> {
@@ -166,20 +194,16 @@ fn event_loop(
                     Effect::Sessions => sessions.open(),
                     Effect::SaveLayout(text) => autosave.push(text),
                     Effect::ResetPrefs => {
-                        let cleared = ui_state::reset(&home);
-                        let cleared_ok = cleared.is_ok();
-                        if cleared_ok {
-                            autosave.discard();
-                        }
-                        if let Effect::Requery = app.reset_done(cleared) {
+                        let cleared = ui_state::reset(&home).map(|_| ());
+                        let reset = Reset {
+                            app: &mut app,
+                            autosave: &mut autosave,
+                            flag: &mut flag,
+                            saved: &mut saved,
+                            last_saved: &mut last_saved,
+                        };
+                        if let Effect::Requery = reset.finish(cleared) {
                             worker.ask(app.range, &app.filter);
-                        }
-                        if cleared_ok {
-                            // The defaults are not written back, and a `--range`
-                            // flag cannot bring the old range back.
-                            flag = None;
-                            saved = ui_state::UiState::default();
-                            last_saved = state_to_save(&app, flag, &saved);
                         }
                     }
                     Effect::None => {}
@@ -348,5 +372,67 @@ mod tests {
 
         assert_eq!(untouched.range.as_deref(), Some("30d"));
         assert_eq!(changed.range.as_deref(), Some("all"));
+    }
+
+    fn finish_reset(
+        app: &mut App,
+        flag: Option<Range>,
+        cleared: Result<(), String>,
+    ) -> (
+        Effect,
+        Autosave,
+        Option<Range>,
+        ui_state::UiState,
+        ui_state::UiState,
+    ) {
+        let mut autosave = Autosave::default();
+        autosave.push("Old=spend".into());
+        let mut flag = flag;
+        let mut stored = saved(Some("30d"));
+        let mut last_saved = saved(Some("30d"));
+        let effect = Reset {
+            app,
+            autosave: &mut autosave,
+            flag: &mut flag,
+            saved: &mut stored,
+            last_saved: &mut last_saved,
+        }
+        .finish(cleared);
+        (effect, autosave, flag, stored, last_saved)
+    }
+
+    #[test]
+    fn a_cleared_store_drops_the_pending_layout_the_flag_and_the_stored_state() {
+        // Arrange
+        let mut app = App::new(Range::Today);
+
+        // Act
+        let (_, mut autosave, flag, stored, last_saved) =
+            finish_reset(&mut app, Some(Range::Today), Ok(()));
+
+        // Assert
+        let flushed = autosave.flush(Instant::now(), true, |_| Err("unused".into()));
+        assert_eq!(flushed, Flushed::Idle);
+        assert_eq!(flag, None);
+        assert_eq!(stored, ui_state::UiState::default());
+        assert_eq!(last_saved, state_to_save(&app, None, &stored));
+    }
+
+    #[test]
+    fn a_failed_clear_keeps_the_pending_layout_the_flag_and_the_stored_state() {
+        // Arrange
+        let mut app = App::new(Range::Today);
+
+        // Act
+        let (effect, mut autosave, flag, stored, last_saved) =
+            finish_reset(&mut app, Some(Range::Today), Err("locked".into()));
+
+        // Assert
+        let flushed = autosave.flush(Instant::now(), true, |_| Ok(true));
+        assert_eq!(flushed, Flushed::Saved);
+        assert_eq!(effect, Effect::None);
+        assert_eq!(flag, Some(Range::Today));
+        assert_eq!(stored, saved(Some("30d")));
+        assert_eq!(last_saved, saved(Some("30d")));
     }
 }

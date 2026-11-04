@@ -148,8 +148,9 @@ pub fn save_layout(home: &Path, text: &str) -> Result<bool, String> {
 }
 
 /// Puts the layout and the screen setup back to the defaults by storing the
-/// empty value, which already means the default. The layout goes first. Only
-/// these two keys are written. `Ok(false)` means there is no config store.
+/// empty value, which already means the default. The screen setup goes first,
+/// so a failure never leaves the screen showing a layout that is no longer
+/// stored. Only these two keys are written. `Ok(false)` means there is no config store.
 pub fn reset(home: &Path) -> Result<bool, String> {
     reset_with(
         || save_layout(home, ""),
@@ -161,9 +162,9 @@ fn reset_with(
     clear_layout: impl FnOnce() -> Result<bool, String>,
     clear_state: impl FnOnce() -> Result<bool, String>,
 ) -> Result<bool, String> {
-    let layout = clear_layout().map_err(|e| format!("{e}, nothing changed"))?;
-    let state =
-        clear_state().map_err(|e| format!("{e}; the layout setting was already cleared"))?;
+    let state = clear_state().map_err(|e| format!("{e}, nothing changed"))?;
+    let layout =
+        clear_layout().map_err(|e| format!("{e}; the screen setting was already cleared"))?;
     Ok(layout && state)
 }
 
@@ -642,35 +643,35 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_layout_write_stops_the_reset_before_the_state_is_touched() {
+    fn a_failed_state_write_stops_the_reset_before_the_layout_is_touched() {
         // Arrange
-        let mut state_calls = 0;
+        let mut layout_calls = 0;
 
         // Act
         let result = reset_with(
-            || Err("locked".to_string()),
             || {
-                state_calls += 1;
+                layout_calls += 1;
                 Ok(true)
             },
+            || Err("locked".to_string()),
         );
 
         // Assert
         assert_eq!(result, Err("locked, nothing changed".to_string()));
-        assert_eq!(state_calls, 0);
+        assert_eq!(layout_calls, 0);
     }
 
     #[test]
-    fn a_failed_state_write_names_the_layout_that_was_already_cleared() {
+    fn a_failed_layout_write_names_the_setting_that_was_already_cleared() {
         // Arrange
-        let layout = || Ok(true);
+        let state = || Ok(true);
 
         // Act
-        let result = reset_with(layout, || Err("locked".to_string()));
+        let result = reset_with(|| Err("locked".to_string()), state);
 
         // Assert
         let why = result.unwrap_err();
-        assert!(why.contains("locked") && why.contains("layout setting was already cleared"));
+        assert!(why.contains("locked") && why.contains("screen setting was already cleared"));
     }
 
     #[test]
