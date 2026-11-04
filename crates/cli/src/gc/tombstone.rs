@@ -16,10 +16,10 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
-use super::guard::{self, FsOps};
+use super::guard::{self, checked_remove_lock, FsOps};
 use super::index::{self, Fingerprint, Mode, Record, State};
-use super::lock::{with_run_lock, LockHook, RunGuard, RunOutcome};
-use super::{Clock, Registry};
+use super::lock::{with_run_lock, LockHook, RunGuard, RunOutcome, STALE_CLAIM_PREFIX};
+use super::{Clock, Registry, RUN_LOCK_STALE};
 use crate::common::time::epoch_secs_of;
 
 /// A copy touches the run lock after this many copied entries.
@@ -416,6 +416,262 @@ pub fn move_to_tombstone(
     }
 }
 
+/// What reconcile found: repairs made (or, in a dry run, repairs it would
+/// make) and items a person has to look at.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Findings {
+    pub fixes: Vec<String>,
+    pub attention: Vec<String>,
+}
+
+/// The repair for one record.
+enum Fix {
+    Nothing,
+    Mark(State),
+    /// Remove these paths, then record `then`.
+    Cleanup {
+        remove: Vec<PathBuf>,
+        then: State,
+    },
+    FinishRenames,
+    Attention(String),
+}
+
+fn diagnose(rec: &Record, now: i64) -> Fix {
+    let src_any = rec.paths.iter().any(|p| exists(p));
+    let dst_any = rec.paths.iter().any(|p| exists(&rec.member_dest(p)));
+    let present_dest = || {
+        if exists(&rec.dest) {
+            vec![rec.dest.clone()]
+        } else {
+            Vec::new()
+        }
+    };
+    match (rec.state, rec.mode) {
+        (State::Pending, _) if now - rec.at < RUN_LOCK_STALE.as_secs().cast_signed() => {
+            Fix::Nothing
+        }
+        (State::Pending, Mode::Rename) if dst_any => Fix::FinishRenames,
+        (State::Pending, Mode::Rename) => Fix::Mark(State::Dropped),
+        (State::Pending, Mode::Copy) => match (src_any, dst_any) {
+            (false, true) => Fix::Mark(State::Done),
+            (true, true) => Fix::Cleanup {
+                remove: vec![rec.dest.clone(), rec.tmp_dest()],
+                then: State::Dropped,
+            },
+            (_, false) => Fix::Cleanup {
+                remove: vec![rec.tmp_dest()],
+                then: State::Dropped,
+            },
+        },
+        (State::Copied, _) => match (src_any, dst_any) {
+            (false, true) => Fix::Mark(State::Done),
+            (true, true) => finish_copied(rec),
+            (true, false) => Fix::Attention("copied, but the tombstone copy is gone".into()),
+            (false, false) => Fix::Mark(State::Lost),
+        },
+        (State::Done, _) if !dst_any => Fix::Mark(State::Lost),
+        (State::Expiring, _) => Fix::Cleanup {
+            remove: present_dest(),
+            then: State::Expired,
+        },
+        (State::Restoring, _) => match (src_any, dst_any) {
+            (true, true) => {
+                Fix::Attention("restoring, and both the original and the tombstone exist".into())
+            }
+            (true, false) => Fix::Cleanup {
+                remove: present_dest(),
+                then: State::Restored,
+            },
+            (false, true) => Fix::Mark(State::Done),
+            (false, false) => Fix::Mark(State::Lost),
+        },
+        _ => Fix::Nothing,
+    }
+}
+
+/// A `copied` record with both sides present: remove the source unless it
+/// holds data that was not in the copy.
+fn finish_copied(rec: &Record) -> Fix {
+    let sources: Vec<PathBuf> = rec.paths.iter().filter(|p| exists(p)).cloned().collect();
+    let changed = match &rec.fingerprint {
+        Some(recorded) => measure(&sources).grew_since(recorded),
+        None => true,
+    };
+    if changed {
+        Fix::Attention("the source changed after it was copied, so it was kept".into())
+    } else {
+        Fix::Cleanup {
+            remove: sources,
+            then: State::Done,
+        }
+    }
+}
+
+/// Everything reconcile can see, decided before anything is changed.
+struct Survey {
+    fixes: Vec<(Record, Fix)>,
+    orphans: Vec<PathBuf>,
+    stale_claims: Vec<PathBuf>,
+}
+
+fn entries(dir: &Path) -> Vec<fs::DirEntry> {
+    fs::read_dir(dir)
+        .map(|rd| rd.flatten().collect())
+        .unwrap_or_default()
+}
+
+fn survey(registry: &Registry, now: i64) -> Survey {
+    let all = index::read(&index::index_path(registry.gc_dir()));
+    let known: Vec<String> = all.iter().map(|r| r.id.clone()).collect();
+    let fixes = index::latest(all)
+        .into_iter()
+        .map(|rec| {
+            let fix = diagnose(&rec, now);
+            (rec, fix)
+        })
+        .filter(|(_, fix)| !matches!(fix, Fix::Nothing))
+        .collect();
+    let orphans = entries(&registry.tombstones_dir())
+        .into_iter()
+        .filter(|date| date.path().is_dir())
+        .flat_map(|date| entries(&date.path()))
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let id = name.strip_suffix(".tmp").unwrap_or(&name);
+            !known.iter().any(|known| known == id)
+        })
+        .map(|entry| entry.path())
+        .collect();
+    let stale_claims = entries(registry.gc_dir())
+        .into_iter()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(STALE_CLAIM_PREFIX)
+                && entry.metadata().is_ok_and(|meta| {
+                    now - mtime_of(&meta) >= RUN_LOCK_STALE.as_secs().cast_signed()
+                })
+        })
+        .map(|entry| entry.path())
+        .collect();
+    Survey {
+        fixes,
+        orphans,
+        stale_claims,
+    }
+}
+
+fn describe(rec: &Record, fix: &Fix) -> String {
+    match fix {
+        Fix::Mark(state) | Fix::Cleanup { then: state, .. } => {
+            format!("{}: mark {state:?}", rec.id).to_lowercase()
+        }
+        Fix::FinishRenames => format!("{}: finish the move", rec.id),
+        Fix::Attention(why) => format!("{}: {why}", rec.id),
+        Fix::Nothing => String::new(),
+    }
+}
+
+fn orphan_message(path: &Path) -> String {
+    format!(
+        "{} is in the tombstone folder but has no index record",
+        path.display()
+    )
+}
+
+/// What a reconcile would do, without taking the lock or changing anything.
+pub fn anomalies(registry: &Registry, now: i64) -> Findings {
+    let survey = survey(registry, now);
+    let mut out = Findings::default();
+    for (rec, fix) in &survey.fixes {
+        let line = describe(rec, fix);
+        if matches!(fix, Fix::Attention(_)) {
+            out.attention.push(line);
+        } else {
+            out.fixes.push(line);
+        }
+    }
+    out.attention
+        .extend(survey.orphans.iter().map(|p| orphan_message(p)));
+    out.fixes.extend(
+        survey
+            .stale_claims
+            .iter()
+            .map(|p| format!("remove the stale lock claim {}", p.display())),
+    );
+    out
+}
+
+fn apply_fix(env: &Env, rec: &Record, fix: Fix, out: &mut Findings) {
+    let now = env.now();
+    let note = |out: &mut Findings, text: String| out.attention.push(format!("{}: {text}", rec.id));
+    match fix {
+        Fix::Nothing => {}
+        Fix::Attention(why) => note(out, why),
+        Fix::Mark(state) => record_state(env, rec, state, out),
+        Fix::Cleanup { remove, then } => {
+            for path in remove.iter().filter(|p| exists(p)) {
+                if let Err(err) = env.fs.remove(env.guard, path) {
+                    return note(out, format!("could not remove {}: {err}", path.display()));
+                }
+            }
+            record_state(env, rec, then, out);
+        }
+        Fix::FinishRenames => match rename_members(env, rec) {
+            Ok(()) => {
+                let missing = rec
+                    .paths
+                    .iter()
+                    .filter(|p| !exists(p) && !exists(&rec.member_dest(p)))
+                    .cloned()
+                    .collect();
+                let done = Record {
+                    missing,
+                    ..rec.with_state(State::Done, now)
+                };
+                record(env, rec, &done, out);
+            }
+            Err(_) => note(out, "could not finish the move".into()),
+        },
+    }
+}
+
+fn record_state(env: &Env, rec: &Record, state: State, out: &mut Findings) {
+    record(env, rec, &rec.with_state(state, env.now()), out);
+}
+
+fn record(env: &Env, old: &Record, new: &Record, out: &mut Findings) {
+    match env.append(new) {
+        Ok(()) => out.fixes.push(describe(old, &Fix::Mark(new.state))),
+        Err(err) => out
+            .attention
+            .push(format!("{}: cannot write the index: {err}", old.id)),
+    }
+}
+
+/// Repairs what a crashed run left behind. Runs at the start of every apply
+/// run. Never deletes an unknown entry in the tombstone folder.
+pub fn reconcile(env: &Env) -> Findings {
+    let survey = survey(env.registry, env.now());
+    let mut out = Findings::default();
+    for (rec, fix) in survey.fixes {
+        apply_fix(env, &rec, fix, &mut out);
+    }
+    for claim in survey.stale_claims {
+        match checked_remove_lock(env.registry.gc_dir(), &claim) {
+            Ok(()) => out
+                .fixes
+                .push(format!("removed the stale lock claim {}", claim.display())),
+            Err(err) => out.attention.push(err.to_string()),
+        }
+    }
+    out.attention
+        .extend(survey.orphans.iter().map(|p| orphan_message(p)));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,6 +682,7 @@ mod tests {
     use std::time::{Duration, UNIX_EPOCH};
 
     const NOW: i64 = 1_800_000_000;
+    const STALE: i64 = 3600;
 
     struct Fx {
         root: PathBuf,
@@ -546,6 +803,40 @@ mod tests {
 
         fn records(&self) -> Vec<Record> {
             index::latest(index::read(&index::index_path(&self.gc)))
+        }
+
+        fn state_of(&self, id: &str) -> State {
+            self.records()
+                .into_iter()
+                .find(|r| r.id == id)
+                .unwrap()
+                .state
+        }
+
+        /// Writes a record by hand, as a crashed run would have left it.
+        fn plant(&self, id: &str, state: State, mode: Mode, paths: &[&Path], at: i64) -> Record {
+            let dest = self.registry.tombstones_dir().join("2027-01-01").join(id);
+            let rec = Record {
+                id: id.into(),
+                state,
+                at,
+                paths: paths.iter().map(|p| p.to_path_buf()).collect(),
+                dest,
+                size: 1,
+                reason: "idle".into(),
+                tombstoned_at: at,
+                retain_days: 7,
+                mode,
+                source_mtime: 1,
+                fingerprint: None,
+                missing: Vec::new(),
+            };
+            index::append_line(&index::index_path(&self.gc), &index::encode(&rec)).unwrap();
+            rec
+        }
+
+        fn reconcile(&self, now: i64) -> Findings {
+            self.run(now, reconcile)
         }
     }
 
@@ -768,5 +1059,276 @@ mod tests {
 
         assert_eq!(outcome, MoveOutcome::Busy);
         assert!(file.exists());
+    }
+
+    #[test]
+    fn crash_after_pending_keeps_source() {
+        let fx = fx("rec-pending");
+        let file = fx.file("a.txt", "x");
+        let rec = fx.plant("p1", State::Pending, Mode::Rename, &[&file], NOW - STALE);
+
+        fx.reconcile(NOW);
+
+        assert_eq!(fx.state_of("p1"), State::Dropped);
+        assert!(file.exists() && !rec.dest.exists());
+    }
+
+    #[test]
+    fn crash_before_done_is_reconciled() {
+        let fx = fx("rec-before-done");
+        let file = fx.file("a.txt", "x");
+        let rec = fx.plant("p1", State::Pending, Mode::Rename, &[&file], NOW - STALE);
+        fs::create_dir_all(&rec.dest).unwrap();
+        fs::rename(&file, rec.member_dest(&file)).unwrap();
+
+        fx.reconcile(NOW);
+
+        assert_eq!(fx.state_of("p1"), State::Done);
+    }
+
+    #[test]
+    fn rename_mode_keeps_destination_when_source_recreated() {
+        let fx = fx("rec-recreated");
+        let file = fx.file("a.txt", "old");
+        let rec = fx.plant("p1", State::Pending, Mode::Rename, &[&file], NOW - STALE);
+        fs::create_dir_all(&rec.dest).unwrap();
+        fs::rename(&file, rec.member_dest(&file)).unwrap();
+        fx.file("a.txt", "new");
+
+        fx.reconcile(NOW);
+
+        assert_eq!(fx.state_of("p1"), State::Done);
+        assert_eq!(fs::read_to_string(&file).unwrap(), "new");
+        assert_eq!(fs::read_to_string(rec.member_dest(&file)).unwrap(), "old");
+    }
+
+    #[test]
+    fn reconcile_skips_young_pending() {
+        let fx = fx("rec-young");
+        let file = fx.file("a.txt", "x");
+        fx.plant(
+            "p1",
+            State::Pending,
+            Mode::Rename,
+            &[&file],
+            NOW - STALE + 1,
+        );
+
+        fx.reconcile(NOW);
+
+        assert_eq!(fx.state_of("p1"), State::Pending);
+    }
+
+    #[test]
+    fn copy_pending_both_present_drops_destination() {
+        let fx = fx("rec-copy-both");
+        let file = fx.file("a.txt", "x");
+        let rec = fx.plant("p1", State::Pending, Mode::Copy, &[&file], NOW - STALE);
+        fs::create_dir_all(&rec.dest).unwrap();
+        fs::write(rec.member_dest(&file), "x").unwrap();
+
+        fx.reconcile(NOW);
+
+        assert_eq!(fx.state_of("p1"), State::Dropped);
+        assert!(file.exists() && !rec.dest.exists());
+    }
+
+    #[test]
+    fn copy_pending_source_only_drops_tmp() {
+        let fx = fx("rec-copy-src");
+        let file = fx.file("a.txt", "x");
+        let rec = fx.plant("p1", State::Pending, Mode::Copy, &[&file], NOW - STALE);
+
+        fx.reconcile(NOW);
+
+        assert_eq!(fx.state_of("p1"), State::Dropped);
+        assert!(file.exists() && !rec.tmp_dest().exists());
+    }
+
+    #[test]
+    fn orphan_tmp_is_removed() {
+        let fx = fx("rec-orphan-tmp");
+        let file = fx.file("a.txt", "x");
+        let rec = fx.plant("p1", State::Pending, Mode::Copy, &[&file], NOW - STALE);
+        fs::create_dir_all(rec.tmp_dest()).unwrap();
+        fs::write(rec.tmp_dest().join("a.txt"), "partial").unwrap();
+
+        fx.reconcile(NOW);
+
+        assert!(!rec.tmp_dest().exists() && file.exists());
+    }
+
+    #[test]
+    fn copy_pending_destination_only_is_done() {
+        let fx = fx("rec-copy-dst");
+        let file = fx.file("a.txt", "x");
+        let rec = fx.plant("p1", State::Pending, Mode::Copy, &[&file], NOW - STALE);
+        fs::create_dir_all(&rec.dest).unwrap();
+        fs::rename(&file, rec.member_dest(&file)).unwrap();
+
+        fx.reconcile(NOW);
+
+        assert_eq!(fx.state_of("p1"), State::Done);
+    }
+
+    #[test]
+    fn copied_with_partial_source_finishes_the_move() {
+        let fx = fx("rec-copied-partial");
+        let one = fx.file("d/one.txt", "1");
+        let folder = one.parent().unwrap().to_path_buf();
+        fx.file("d/two.txt", "2");
+        let mut rec = fx.plant("p1", State::Copied, Mode::Copy, &[&folder], NOW - 10);
+        rec.fingerprint = Some(measure([&folder]));
+        index::append_line(&index::index_path(&fx.gc), &index::encode(&rec)).unwrap();
+        fs::create_dir_all(&rec.dest).unwrap();
+        fx.run(NOW, |env| {
+            copy_tree(env.guard, &folder, &rec.member_dest(&folder))
+        })
+        .unwrap();
+        fs::rename(&one, fx.gc.join("moved-away")).unwrap();
+
+        fx.reconcile(NOW);
+
+        assert_eq!(fx.state_of("p1"), State::Done);
+        assert!(!folder.exists());
+        assert!(rec.member_dest(&folder).join("two.txt").exists());
+    }
+
+    #[test]
+    fn copied_source_changed_is_kept() {
+        let fx = fx("rec-copied-changed");
+        let file = fx.file("a.txt", "x");
+        let mut rec = fx.plant("p1", State::Copied, Mode::Copy, &[&file], NOW - 10);
+        rec.fingerprint = Some(Fingerprint {
+            bytes: 1,
+            mtime: NOW - 100,
+        });
+        index::append_line(&index::index_path(&fx.gc), &index::encode(&rec)).unwrap();
+        fs::create_dir_all(&rec.dest).unwrap();
+        fs::write(rec.member_dest(&file), "x").unwrap();
+        set_mtime(&file, NOW - 5);
+
+        let found = fx.reconcile(NOW);
+
+        assert!(file.exists() && fx.state_of("p1") == State::Copied);
+        assert_eq!(found.attention.len(), 1);
+    }
+
+    #[test]
+    fn missing_destination_is_marked_lost() {
+        let fx = fx("rec-lost");
+        let file = fx.file("a.txt", "x");
+        fx.plant("p1", State::Done, Mode::Rename, &[&file], NOW - 10);
+
+        fx.reconcile(NOW);
+
+        assert_eq!(fx.state_of("p1"), State::Lost);
+    }
+
+    #[test]
+    fn crash_between_expiring_and_expired_is_not_lost() {
+        let fx = fx("rec-expiring-gone");
+        let file = fx.file("a.txt", "x");
+        fx.plant("p1", State::Expiring, Mode::Rename, &[&file], NOW - 10);
+
+        fx.reconcile(NOW);
+
+        assert_eq!(fx.state_of("p1"), State::Expired);
+    }
+
+    #[test]
+    fn expiring_with_data_retries_delete() {
+        let fx = fx("rec-expiring-data");
+        let file = fx.file("a.txt", "x");
+        let rec = fx.plant("p1", State::Expiring, Mode::Rename, &[&file], NOW - 10);
+        fs::create_dir_all(&rec.dest).unwrap();
+        fs::write(rec.member_dest(&file), "x").unwrap();
+
+        fx.reconcile(NOW);
+
+        assert_eq!(fx.state_of("p1"), State::Expired);
+        assert!(!rec.dest.exists());
+    }
+
+    #[test]
+    fn group_partial_crash_finishes_all_members() {
+        let fx = fx("rec-group");
+        let paths = [
+            fx.file("x.db", "1"),
+            fx.file("x.db-wal", "2"),
+            fx.file("x.db-shm", "3"),
+        ];
+        let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
+        let rec = fx.plant("g1", State::Pending, Mode::Rename, &refs, NOW - STALE);
+        fs::create_dir_all(&rec.dest).unwrap();
+        fs::rename(&paths[0], rec.member_dest(&paths[0])).unwrap();
+
+        fx.reconcile(NOW);
+
+        assert_eq!(fx.state_of("g1"), State::Done);
+        assert!(paths
+            .iter()
+            .all(|p| !p.exists() && rec.member_dest(p).exists()));
+    }
+
+    #[test]
+    fn group_member_missing_finishes() {
+        let fx = fx("rec-group-missing");
+        let here = fx.file("x.db", "1");
+        let gone = fx.root.join("x.db-wal");
+        let rec = fx.plant(
+            "g1",
+            State::Pending,
+            Mode::Rename,
+            &[&here, &gone],
+            NOW - STALE,
+        );
+        fs::create_dir_all(&rec.dest).unwrap();
+        fs::rename(&here, rec.member_dest(&here)).unwrap();
+
+        fx.reconcile(NOW);
+
+        let done = fx.records().remove(0);
+        assert_eq!((done.state, done.missing), (State::Done, vec![gone]));
+    }
+
+    #[test]
+    fn orphan_destination_without_record_is_reported() {
+        let fx = fx("rec-orphan");
+        let orphan = fx.registry.tombstones_dir().join("2027-01-01/unknown-id");
+        fs::create_dir_all(&orphan).unwrap();
+
+        let found = fx.reconcile(NOW);
+
+        assert!(orphan.exists());
+        assert_eq!(found.attention.len(), 1);
+    }
+
+    #[test]
+    fn stale_claim_folder_is_cleaned() {
+        let fx = fx("rec-stale-claim");
+        let old = fx.gc.join(".lock.stale-old");
+        let young = fx.gc.join(".lock.stale-young");
+        for (dir, age) in [(&old, STALE), (&young, STALE - 1)] {
+            fs::create_dir_all(dir).unwrap();
+            set_mtime(dir, NOW - age);
+        }
+
+        fx.reconcile(NOW);
+
+        assert!(!old.exists() && young.exists());
+    }
+
+    #[test]
+    fn dry_run_reconcile_changes_nothing() {
+        let fx = fx("rec-dry");
+        let file = fx.file("a.txt", "x");
+        fx.plant("p1", State::Done, Mode::Rename, &[&file], NOW - 10);
+        let before = fs::read(index::index_path(&fx.gc)).unwrap();
+
+        let found = anomalies(&fx.registry, NOW);
+
+        assert_eq!(found.fixes.len(), 1);
+        assert_eq!(fs::read(index::index_path(&fx.gc)).unwrap(), before);
     }
 }
