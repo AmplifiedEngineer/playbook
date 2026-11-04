@@ -4,24 +4,24 @@
 │tokens        618.8K                                                                              │
 │messages          26                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- F1 Charts  F2 Numbers  F3 Sessions
-╭─┤¹Spend p╭┤ Layout: tabs and panels ├─────────────────────────────────────────────────╮──────────╮
-│total $20.│  Charts  Numbers  Sessions                                                 │ 20.6K/day│
-│Thu 2026-0│                                                                            │  2 msgs  │
-│ $8┤┄┄┄┄┄┄│ > [1] spend      cost per day as a chart or a daily table                  │┄┄┄┄┄▆┄┄▆┄│
-│   │      │   [2] tokens     tokens per day as a chart                                 │     █  █ │
-│   │      │   [ ] models     cost and tokens per model                                 │     █  █ │
-│ $4┤┄┄┄┄┄┄│   [ ] breakdown  projects, agents, skills, tools or health (v switches)    │┄▇▇┄┄█┄┄█┄│
-│   │      │   [ ] live       sessions with a message in the last 15 minutes            │ ██  █  █ │
-│ $0┤▁█▁  ▅│   [ ] sessions   every session of the period, grouped by day               │ ██  █  █ │
-│    5 7  9│   [ ] budget     limits and how fast you are using them                    │ 29  1  3 │
-╰──────────│   [ ] projection when each limit is reached at the current pace            │■■■ high├─╯
-╭─┤Burn-up├│   [3] burnup     how much of a limit is used over its period, with a projec│iod, UTC├─╮
-│no burn-up│                                                                            │          │
-│          │ Left/Right tab   j/k line   space add or remove   J/K move panel           │          │
-│          │ < > move tab   n new   x delete   r rename   w save   R reset   esc cancel │          │
-│          ╰────────────────────────────────────────────────────────────────────────────╯          │
-│                                                                                                  │
+ F1 Charts ╭┤ Layout: tabs and panels ├─────────────────────────────────────────────────╮
+╭─┤¹Spend p│  Charts  Numbers  Sessions                                                 │──────────╮
+│Thu 2026-0│                                                                            │7.6K tok  │
+│ $8┤┄┄┄┄┄┄│ [> spend.total                      ][  spend.model                      ] │┄┄┄┄┄┄┄┄┄┄│
+│ $4┤┄┄┄┄┄┄│ [  tokens                                                                ] │┄┄┄┄┄┄┄┄┄┄│
+│ $0┤▁▄▁  ▂│ [  burnup                                                                ] │ ▃▂  ▅  ▄ │
+│    5 7  9│                                                                            │ 29 31  3 │
+╰┤peak $6.0│                                                                            │ haiku-5├─╯
+╭─┤²Tokens │                                                                            │──────────╮
+│total 618.│                                                                            │          │
+│Thu 2026-0│                                                                            │          │
+│ 50K┤┄┄┄┄┄│                                                                            │▇▇┄┄┄┄▇▇▇┄│
+│ 25K┤▃▃┄▃▃│ spend.total: total cost per day as a chart, always this view               │██┄┄┄┄███┄│
+│   0┤██ ██│                                                                            │██    ███ │
+│     5  6 │ Left/Right tab   h/l j/k move cursor   H/J/K/L move panel   f width        │1  2  3   │
+╰──────────│ a add   d remove   u undo   < > move tab   n new   x delete   r rename     │■■■ high├─╯
+╭─┤Burn-up├│ R reset   esc or q close   changes are saved as you make them              │iod, UTC├─╮
+│no burn-up╰────────────────────────────────────────────────────────────────────────────╯          │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │

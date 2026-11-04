@@ -712,3 +712,50 @@ fn a_later_phase_row_in_the_old_file_wins_the_merge() {
     let row = db::query_phase(&conn, "shared", "spec").unwrap().unwrap();
     assert_eq!(row.verdict, "FAIL");
 }
+
+fn stdout_of(out: &std::process::Output) -> String {
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+#[test]
+fn the_round_shows_the_default_cap_of_five() {
+    // Arrange
+    let f = Fixture::new("round-default-cap");
+    let input = f.write_input("report.md", "VERDICT: FAIL");
+
+    // Act
+    let out = f.run("plan-a", "plan", "adversarial", &input);
+
+    // Assert
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    assert!(
+        stdout_of(&out).contains("(round 1 of 5)"),
+        "{}",
+        stdout_of(&out)
+    );
+}
+
+#[test]
+fn the_round_shows_a_configured_cap() {
+    // Arrange
+    let f = Fixture::new("round-set-cap");
+    let input = f.write_input("report.md", "VERDICT: FAIL");
+    let set = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["config", "set", "--global", "gate.maxRounds", "8"])
+        .current_dir(&f.repo)
+        .env("HOME", &f.home)
+        .output()
+        .expect("playbook binary should spawn");
+    assert!(set.status.success(), "{}", stderr_of(&set));
+
+    // Act
+    let out = f.run("plan-a", "plan", "adversarial", &input);
+
+    // Assert
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    assert!(
+        stdout_of(&out).contains("(round 1 of 8)"),
+        "{}",
+        stdout_of(&out)
+    );
+}

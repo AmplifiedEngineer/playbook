@@ -1270,3 +1270,39 @@ fn remove_refuses_an_unlanded_worktree_and_exits_nonzero() {
 
     let _ = fs::remove_dir_all(&container);
 }
+
+#[test]
+fn worktree_sweep_alias_reports_busy() {
+    // Arrange: a landed Wu-convention worktree and a gc run in progress.
+    let container = scratch("busy").canonicalize().expect("container resolves");
+    let repo_root = container.join("repo");
+    init_repo_at_epoch(
+        &repo_root,
+        "https://github.com/acme/widgets.git",
+        1_700_000_000,
+    );
+    let repo_root = repo_root.canonicalize().expect("repo root resolves");
+    let head = git_stdout(&repo_root, &["rev-parse", "HEAD"]);
+    git_ok(
+        &repo_root,
+        &["update-ref", "refs/remotes/origin/main", &head],
+    );
+    let home = container.join("home");
+    fs::create_dir_all(&home).expect("create home dir");
+    let home = home.canonicalize().expect("home resolves");
+    let wu_path = add_detached_worktree(
+        &repo_root,
+        &home.join(".config/playbook/repos/acme/widgets/wt-abc123/worktrees/plan-slug/wu-1"),
+    );
+    fs::create_dir_all(home.join(".config/playbook/gc/.lock")).expect("hand made lock");
+
+    // Act
+    let out = run_playbook(&repo_root, &home, &["worktree", "sweep"]);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("gc is running"));
+    assert!(wu_path.exists(), "a busy gc run leaves the worktree alone");
+
+    let _ = fs::remove_dir_all(&container);
+}

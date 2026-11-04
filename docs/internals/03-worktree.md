@@ -23,13 +23,15 @@ A detached, silent process (`playbook cc housekeep`) runs these best-effort step
 3. `git worktree prune`.
 4. Set upstream: track the remote branch if it exists, else `git push -u <remote> <branch>`, which starts CI without a manual push. Skip the push with `--no-push` or `WORKTREE_NO_PUSH=1`.
 5. Reuse `node_modules` (below).
-6. `playbook worktree sweep`: remove worktrees of any creation convention that have landed and are not locked or in use. It is gated by `worktreeCleanup.enabled`, and a new worktree is protected from it. For a branch worktree, a merged pull request (read with `gh`, and only when its head is the local branch tip) counts as landed, so a squash merge is caught; an open pull request keeps the worktree. Without `gh`, it falls back to local history and the idle age.
+6. `playbook worktree sweep`: remove worktrees of any creation convention that have landed and are not locked or in use. It is gated by `worktreeCleanup.enabled`, and a new worktree is protected from it. For a branch worktree, a merged pull request (read with `gh`, and only when it targeted the default branch and its head is the local branch tip) counts as landed, so a squash merge is caught; an open pull request keeps the worktree. Without `gh`, it falls back to local history and the idle age.
 
 ### node_modules
 
 When `package-lock.json` hashes match between the base repo and the worktree, `node_modules` is cloned copy-on-write (`cp -cR` on APFS, `cp -R --reflink=auto` on GNU filesystems, plain `cp -R` as the last fallback). Each worktree gets an independent tree. Then a bounded `npm install --prefer-offline --no-audit --no-fund` reconciles extra packages. When the hashes differ, nothing is cloned.
 
 ## The daily sweep
+
+Every removal in the sweep goes through the gc guard and takes the gc run lock, so a sweep and `playbook gc` never run at once. See [cleanup and tombstones](17-gc-and-tombstones.md). Review worktrees follow one rule in the sweep and in `worktree review setup`: unlocked after 60 seconds, locked after a dead owner pid and 24 hours.
 
 `maybe_sweep_worktrees` (`crates/cli/src/hooks/session_init.rs`) also runs the sweep on every Claude Code `SessionStart`, at most once per 24 hours per repo (a row under `worktree-sweep/<repo slug>` in the [state store](08-state-store.md)). So a repo is swept when you create a worktree and again the first time a session opens each day. Both triggers call the same function. The overlap is deliberate.
 
