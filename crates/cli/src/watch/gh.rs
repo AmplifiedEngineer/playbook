@@ -83,6 +83,19 @@ impl GithubWrite for GhWrite {
         }
         self.gh(&args).map(|_| ())
     }
+
+    fn has_comment(&self, repo: &str, number: u64, marker: &str) -> Result<bool, String> {
+        let path = format!("repos/{repo}/issues/{number}/comments");
+        let bodies = self.gh(&["api", "--paginate", &path, "--jq", ".[].body"])?;
+        Ok(bodies.contains(marker))
+    }
+
+    fn add_comment(&self, repo: &str, number: u64, body: &str) -> Result<(), String> {
+        let path = format!("repos/{repo}/issues/{number}/comments");
+        let field = format!("body={body}");
+        self.gh(&["api", "--method", "POST", &path, "-f", &field])
+            .map(|_| ())
+    }
 }
 
 #[cfg(test)]

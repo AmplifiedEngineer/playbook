@@ -15,12 +15,14 @@ use crate::config::{self, store as config_store};
 use crate::WatchCommand;
 
 pub mod audit;
+pub mod backoff;
 pub mod clock;
 pub mod engine;
 pub mod event;
 pub mod gh;
 pub mod github;
 pub mod http;
+pub mod limits;
 pub mod lock;
 pub mod rule;
 pub mod settings;
@@ -28,9 +30,11 @@ pub mod source;
 pub mod store;
 
 use audit::AuditLog;
+use backoff::StdJitter;
 use clock::{Clock, SystemClock};
 use engine::{matches, ApproveOutcome, Engine, GithubWrite, NamedRule};
 use github::{Endpoint, GithubPoller, Http};
+use limits::GlobalCaps;
 use lock::{acquire, Acquire};
 use rule::Autonomy;
 use settings::{ceiling, effective, resolve_rule};
@@ -60,6 +64,7 @@ pub struct Settings {
     pub poll_seconds: i64,
     pub max_catchup_seconds: i64,
     pub token_env: String,
+    pub caps: GlobalCaps,
 }
 
 impl Settings {
@@ -88,6 +93,10 @@ impl Settings {
                 .filter(|s| !s.is_empty())
                 .unwrap_or(DEFAULT_TOKEN_ENV)
                 .to_string(),
+            caps: GlobalCaps {
+                actions_per_day: get("watch.limits.actionsPerDay")?.as_i64().unwrap_or(50),
+                usd_per_day: get("watch.limits.usdPerDay")?.as_f64().unwrap_or(5.0),
+            },
         })
     }
 }
@@ -207,6 +216,8 @@ pub fn once<W: GithubWrite, C: Clock, H: Http>(
                         write: ctx.write,
                         clock: ctx.clock,
                         audit: &audit,
+                        jitter: &StdJitter,
+                        caps: settings.caps,
                         me: ctx.me,
                     };
                     let ids = engine
@@ -237,6 +248,8 @@ pub fn once<W: GithubWrite, C: Clock, H: Http>(
             write: ctx.write,
             clock: ctx.clock,
             audit: &audit,
+            jitter: &StdJitter,
+            caps: settings.caps,
             me: ctx.me,
         };
         let ran = engine
@@ -324,6 +337,7 @@ pub fn approve<W: GithubWrite, C: Clock>(ctx: &Ctx<'_, W, C>, id: i64) -> Result
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("item {id} does not exist"))?;
     let (rules, _) = repo_rules(ctx.home, &row.repo)?;
+    let settings = Settings::load(ctx.home)?;
     let lock = acquire(&ctx.data.join("watch.lock")).map_err(|e| e.to_string())?;
     let audit = AuditLog::new(&ctx.data.join("watch"));
     let mut engine = Engine {
@@ -331,6 +345,8 @@ pub fn approve<W: GithubWrite, C: Clock>(ctx: &Ctx<'_, W, C>, id: i64) -> Result
         write: ctx.write,
         clock: ctx.clock,
         audit: &audit,
+        jitter: &StdJitter,
+        caps: settings.caps,
         me: ctx.me,
     };
     let outcome = engine
@@ -343,11 +359,17 @@ pub fn approve<W: GithubWrite, C: Clock>(ctx: &Ctx<'_, W, C>, id: i64) -> Result
         ApproveOutcome::Done => format!("item {id} done\n"),
         ApproveOutcome::AlreadyDone => format!("item {id} already done\n"),
         ApproveOutcome::Skipped(why) => format!("item {id} skipped: {why}\n"),
+        ApproveOutcome::Retry => format!("item {id} failed and will be tried again\n"),
+        ApproveOutcome::Dead => {
+            format!("item {id} failed too many times and is on the dead list\n")
+        }
+        ApproveOutcome::Demoted(why) => format!("item {id} stays a proposal: {why}\n"),
     })
 }
 
 /// `playbook watch reject <id>`.
 pub fn reject<W: GithubWrite, C: Clock>(ctx: &Ctx<'_, W, C>, id: i64) -> Result<String, String> {
+    let settings = Settings::load(ctx.home)?;
     let mut store = Store::open(&ctx.data.join("watch.db")).map_err(|e| e.to_string())?;
     let audit = AuditLog::new(&ctx.data.join("watch"));
     let mut engine = Engine {
@@ -355,6 +377,8 @@ pub fn reject<W: GithubWrite, C: Clock>(ctx: &Ctx<'_, W, C>, id: i64) -> Result<
         write: ctx.write,
         clock: ctx.clock,
         audit: &audit,
+        jitter: &StdJitter,
+        caps: settings.caps,
         me: ctx.me,
     };
     engine.reject(id).map_err(|e| e.to_string())?;

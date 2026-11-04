@@ -35,6 +35,12 @@ impl GithubWrite for Spy {
             body_hash: sha2::Sha256::digest(b"hello").into(),
         })
     }
+    fn has_comment(&self, _: &str, _: u64, _: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn add_comment(&self, _: &str, _: u64, _: &str) -> Result<(), String> {
+        Ok(())
+    }
     fn add_labels(&self, _: &str, number: u64, labels: &[String]) -> Result<(), String> {
         self.calls.borrow_mut().push((number, labels.to_vec()));
         Ok(())
@@ -148,6 +154,26 @@ fn since_replays_the_backlog_as_proposals_and_writes_nothing() {
     assert!(out.contains("proposal 1: rule triage on o/r#7"), "{out}");
     assert!(e.spy.calls.borrow().is_empty());
     assert!(!out.contains(TOKEN));
+}
+
+#[test]
+fn a_rule_at_auto_under_an_auto_ceiling_labels_in_the_same_run() {
+    // Arrange
+    let e = env("watch-cmd-auto", true);
+    let root = crate::common::paths::playbook_root_from(&e.home);
+    let auto = RULE.replace(r#""do":"label""#, r#""do":"label","autonomy":"auto""#);
+    config_store::put(&root, Tier::Global, None, "watch.rule.triage", &json!(auto)).unwrap();
+    config_store::put(&root, Tier::Global, None, "watch.autonomy", &json!("auto")).unwrap();
+
+    // Act
+    let out = e.once(Some(EARLIER)).unwrap();
+
+    // Assert
+    assert!(out.contains("o/r: ran 1 approved"), "{out}");
+    assert_eq!(e.spy.calls.borrow().len(), 1);
+    // The next run sees the same event again and adds no call.
+    e.once(None).unwrap();
+    assert_eq!(e.spy.calls.borrow().len(), 1);
 }
 
 #[test]

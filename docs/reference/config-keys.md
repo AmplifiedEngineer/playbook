@@ -103,7 +103,9 @@ Older versions kept `config.json` files. The first run imports them and renames 
 | `watch.maxCatchupHours` | `72` | whole number, 1 to 720 | After a gap, events older than this are skipped and audited as stale. A per-user setting. |
 | `watch.allowedAuthors` | empty list | list of logins | Extra logins whose text may reach a tool-using model. |
 | `watch.tokenEnv` | empty | the name of an environment variable | An environment variable that holds a narrower GitHub token. The token itself is never stored. A per-user setting. |
-| `watch.rule.<id>` | empty | one rule as JSON text | One watch rule, for example `watch.rule.label-new-issues`. The id is lowercase letters, digits and hyphens. The nearest tier that sets it wins, whole. `{"autonomy":"off"}` alone switches an inherited rule off at this tier. Unknown fields are refused, and `auto` is refused until the action runner exists. |
+| `watch.limits.actionsPerDay` | `50` | a whole number, 0 or more | The most automatic actions watch mode takes in one UTC day, across all rules. Past it, an automatic item waits as a proposal. A per-user setting. |
+| `watch.limits.usdPerDay` | `5` | a number of dollars, 0 or more | The most model spend in one UTC day, across all rules. A per-user setting. |
+| `watch.rule.<id>` | empty | one rule as JSON text | One watch rule, for example `watch.rule.label-new-issues`. The id is lowercase letters, digits and hyphens. The nearest tier that sets it wins, whole. `{"autonomy":"off"}` alone switches an inherited rule off at this tier. Unknown fields are refused. `limits` sets `actions_per_day` (default 20) and `usd_per_day` (default 0) for the rule. |
 
 The key `launcher.systemPromptMode` was removed. The launcher replaces Claude Code's system prompt with the playbook one and never appends to it. A plain `claude` keeps Claude Code's built-in prompt.
 

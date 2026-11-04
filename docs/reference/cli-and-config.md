@@ -93,6 +93,8 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `watch.maxCatchupHours` | `72` | a number, see the config keys page for the range |
 | `watch.allowedAuthors` | `[]` | see the config keys page |
 | `watch.tokenEnv` | empty | see the config keys page |
+| `watch.limits.actionsPerDay` | `50` | a number, see the config keys page for the range |
+| `watch.limits.usdPerDay` | `5` | a number, see the config keys page for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 | `watch.rule.<id>` | empty | one rule as JSON text |
 

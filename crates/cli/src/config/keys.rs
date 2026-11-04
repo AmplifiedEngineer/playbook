@@ -114,6 +114,8 @@ pub const KNOWN_KEYS: &[&str] = &[
     "watch.maxCatchupHours",
     "watch.allowedAuthors",
     "watch.tokenEnv",
+    "watch.limits.actionsPerDay",
+    "watch.limits.usdPerDay",
 ];
 
 /// Known keys that no code reads. `launcher.claudeOverride` was written by
@@ -139,6 +141,8 @@ pub const USER_KEYS: &[&str] = &[
     "watch.pollSeconds",
     "watch.maxCatchupHours",
     "watch.tokenEnv",
+    "watch.limits.actionsPerDay",
+    "watch.limits.usdPerDay",
 ];
 
 /// Whether `key` is a per-user setting. `config set` writes it to the global
@@ -260,6 +264,8 @@ pub fn default_value(key: &str) -> Option<Value> {
         "watch.pollSeconds" => Some(Value::Number(60.into())),
         "watch.maxCatchupHours" => Some(Value::Number(72.into())),
         "watch.tokenEnv" => Some(Value::String(String::new())),
+        "watch.limits.actionsPerDay" => Some(Value::Number(50.into())),
+        "watch.limits.usdPerDay" => Some(Value::Number(5.into())),
         _ => None,
     }
 }

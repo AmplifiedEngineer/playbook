@@ -13,7 +13,7 @@ use std::path::Path;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 /// The schema this code writes and understands.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 /// Items waiting for an action. A full queue sends new items to the dead list.
 pub const QUEUE_LIMIT: i64 = 500;
 
@@ -69,6 +69,8 @@ pub struct NewWork<'a> {
     /// `<source>:<object id>:<kind>[:<sha>]`, unique per event and rule.
     pub key: &'a str,
     pub rule: &'a str,
+    /// The action name, such as `label`. The trust ladder counts per class.
+    pub class: &'a str,
     /// `owner/name` and the issue or pull request number the action touches.
     pub repo: &'a str,
     pub object: u64,
@@ -95,6 +97,17 @@ pub struct WorkRow {
     pub body_hash: Vec<u8>,
     pub state: String,
     pub reason: Option<String>,
+    /// Failed tries so far.
+    pub attempts: u32,
+    pub not_before: i64,
+}
+
+/// A proposal a person approved, for the trust ladder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Approval {
+    pub at: i64,
+    /// It ended in the dead list.
+    pub failed: bool,
 }
 
 pub struct Store {
@@ -136,8 +149,30 @@ impl Store {
                  state TEXT NOT NULL,
                  reason TEXT,
                  created_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS counter (
+                 day INTEGER NOT NULL,
+                 scope TEXT NOT NULL,
+                 actions INTEGER NOT NULL,
+                 usd REAL NOT NULL,
+                 PRIMARY KEY (day, scope)
+             );
+             CREATE TABLE IF NOT EXISTS acted (
+                 rule TEXT NOT NULL,
+                 repo TEXT NOT NULL,
+                 object INTEGER NOT NULL,
+                 at INTEGER NOT NULL,
+                 PRIMARY KEY (rule, repo, object)
              );",
         )?;
+        if found < 2 {
+            conn.execute_batch(
+                "ALTER TABLE work ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE work ADD COLUMN not_before INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE work ADD COLUMN class TEXT NOT NULL DEFAULT '';
+                 ALTER TABLE work ADD COLUMN approved_at INTEGER;",
+            )?;
+        }
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;
         Ok(Self { conn })
     }
@@ -162,18 +197,69 @@ impl Store {
 
     /// The ids of work rows in `state`, oldest first.
     pub fn ids_in_state(&self, state: &str) -> Result<Vec<i64>, StoreError> {
+        self.ids_due(state, i64::MAX)
+    }
+
+    /// The ids of work rows in `state` whose `not_before` has passed.
+    pub fn ids_due(&self, state: &str, now: i64) -> Result<Vec<i64>, StoreError> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id FROM work WHERE state = ?1 ORDER BY id")?;
-        let ids = stmt.query_map([state], |r| r.get(0))?;
+            .prepare("SELECT id FROM work WHERE state = ?1 AND not_before <= ?2 ORDER BY id")?;
+        let ids = stmt.query_map(params![state, now], |r| r.get(0))?;
         Ok(ids.collect::<Result<_, _>>()?)
+    }
+
+    /// Actions taken and dollars spent under `scope` (`*` or a rule id) on `day`.
+    pub fn counter(&self, day: i64, scope: &str) -> Result<(i64, f64), StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT actions, usd FROM counter WHERE day = ?1 AND scope = ?2",
+                params![day, scope],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?
+            .unwrap_or((0, 0.0)))
+    }
+
+    /// When `rule` last acted on the object, if it did.
+    pub fn last_acted(
+        &self,
+        rule: &str,
+        repo: &str,
+        object: u64,
+    ) -> Result<Option<i64>, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT at FROM acted WHERE rule = ?1 AND repo = ?2 AND object = ?3",
+                params![rule, repo, i64::try_from(object).unwrap_or(i64::MAX)],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
+    /// The finished proposals of `class` that a person approved.
+    pub fn approvals(&self, class: &str) -> Result<Vec<Approval>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT approved_at, state = 'dead' FROM work
+             WHERE class = ?1 AND approved_at IS NOT NULL AND state IN ('done', 'dead')",
+        )?;
+        let rows = stmt.query_map([class], |r| {
+            Ok(Approval {
+                at: r.get(0)?,
+                failed: r.get(1)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     pub fn work(&self, id: i64) -> Result<Option<WorkRow>, StoreError> {
         Ok(self
             .conn
             .query_row(
-                "SELECT key, rule, repo, object, body_hash, state, reason FROM work WHERE id = ?1",
+                "SELECT key, rule, repo, object, body_hash, state, reason, attempts, not_before
+                 FROM work WHERE id = ?1",
                 [id],
                 |r| {
                     Ok(WorkRow {
@@ -184,6 +270,8 @@ impl Store {
                         body_hash: r.get(4)?,
                         state: r.get(5)?,
                         reason: r.get(6)?,
+                        attempts: r.get(7)?,
+                        not_before: r.get(8)?,
                     })
                 },
             )
@@ -228,6 +316,60 @@ impl Tx<'_> {
         Ok(())
     }
 
+    /// Notes that a person approved the item at `now`.
+    pub fn stamp_approved(&self, id: i64, now: i64) -> Result<(), StoreError> {
+        self.tx.execute(
+            "UPDATE work SET approved_at = ?2 WHERE id = ?1",
+            params![id, now],
+        )?;
+        Ok(())
+    }
+
+    /// Puts the item in `state` after a failed try, to run again at `not_before`.
+    pub fn set_retry(
+        &self,
+        id: i64,
+        state: &str,
+        reason: Option<&str>,
+        attempts: u32,
+        not_before: i64,
+    ) -> Result<(), StoreError> {
+        self.tx.execute(
+            "UPDATE work SET state = ?2, reason = ?3, attempts = ?4, not_before = ?5 WHERE id = ?1",
+            params![id, state, reason, attempts, not_before],
+        )?;
+        Ok(())
+    }
+
+    /// Counts one action by the item's rule, for the day limits and the per
+    /// object cap.
+    pub fn count_action(
+        &self,
+        day: i64,
+        item: &WorkRow,
+        usd: f64,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        for scope in ["*", item.rule.as_str()] {
+            self.tx.execute(
+                "INSERT INTO counter (day, scope, actions, usd) VALUES (?1, ?2, 1, ?3)
+                 ON CONFLICT(day, scope) DO UPDATE SET actions = actions + 1, usd = usd + ?3",
+                params![day, scope, usd],
+            )?;
+        }
+        self.tx.execute(
+            "INSERT INTO acted (rule, repo, object, at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(rule, repo, object) DO UPDATE SET at = ?4",
+            params![
+                item.rule,
+                item.repo,
+                i64::try_from(item.object).unwrap_or(i64::MAX),
+                now
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Records the event as seen and queues its work, unless the key is known.
     pub fn insert_work(&self, item: &NewWork<'_>, now: i64) -> Result<Insert, StoreError> {
         let fresh = self.tx.execute(
@@ -248,8 +390,8 @@ impl Tx<'_> {
             ("queued", None)
         };
         self.tx.execute(
-            "INSERT INTO work (key, rule, repo, object, body_hash, state, reason, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO work (key, rule, class, repo, object, body_hash, state, reason, created_at)
+             VALUES (?1, ?2, ?9, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 item.key,
                 item.rule,
@@ -258,7 +400,8 @@ impl Tx<'_> {
                 item.body_hash.as_slice(),
                 state,
                 reason,
-                now
+                now,
+                item.class
             ],
         )?;
         let id = self.tx.last_insert_rowid();
@@ -295,6 +438,7 @@ mod tests {
         NewWork {
             key,
             rule: "label-new-issues",
+            class: "label",
             repo: "o/r",
             object: 1,
             body_hash: [7; 32],
@@ -371,6 +515,68 @@ mod tests {
         let err = Store::open(&path).err().expect("must refuse");
         assert!(matches!(err, StoreError::TooNew { found: 99 }));
         assert!(err.to_string().contains("update playbook"));
+    }
+
+    #[test]
+    fn a_version_1_database_gains_the_new_columns_and_keeps_its_rows() {
+        // Arrange: the version 1 shape with one queued item.
+        let path = db("watch-store-migrate");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE work (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL UNIQUE,
+                     rule TEXT NOT NULL, repo TEXT NOT NULL, object INTEGER NOT NULL,
+                     body_hash BLOB NOT NULL, state TEXT NOT NULL, reason TEXT,
+                     created_at INTEGER NOT NULL);
+                 INSERT INTO work VALUES (1, 'k', 'r', 'o/r', 4, x'00', 'proposed', NULL, 5);
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+
+        // Act
+        let store = Store::open(&path).unwrap();
+
+        // Assert
+        let row = store.work(1).unwrap().unwrap();
+        assert_eq!(
+            (row.state.as_str(), row.attempts, row.not_before),
+            ("proposed", 0, 0)
+        );
+    }
+
+    #[test]
+    fn counters_are_kept_per_day_and_scope() {
+        // Arrange
+        let mut store = Store::open(&db("watch-store-counter")).unwrap();
+        let row = |rule: &str| WorkRow {
+            key: String::new(),
+            rule: rule.into(),
+            repo: "o/r".into(),
+            object: 3,
+            body_hash: vec![],
+            state: String::new(),
+            reason: None,
+            attempts: 0,
+            not_before: 0,
+        };
+
+        // Act
+        store
+            .transaction(|tx| {
+                tx.count_action(10, &row("a"), 0.5, 900)?;
+                tx.count_action(10, &row("b"), 0.25, 950)?;
+                tx.count_action(11, &row("a"), 0.0, 90_000)
+            })
+            .unwrap();
+
+        // Assert
+        assert_eq!(store.counter(10, "*").unwrap(), (2, 0.75));
+        assert_eq!(store.counter(10, "a").unwrap(), (1, 0.5));
+        assert_eq!(store.counter(11, "*").unwrap().0, 1);
+        assert_eq!(store.counter(12, "*").unwrap().0, 0);
+        assert_eq!(store.last_acted("a", "o/r", 3).unwrap(), Some(90_000));
     }
 
     #[cfg(unix)]

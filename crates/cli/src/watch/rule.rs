@@ -39,6 +39,23 @@ pub enum On {
 #[serde(rename_all = "snake_case")]
 pub enum Do {
     Label,
+    Comment,
+}
+
+impl Do {
+    /// The name the rule file and the audit log use.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Label => "label",
+            Self::Comment => "comment",
+        }
+    }
+
+    /// Whether the action may run on its own with no track record: it is
+    /// reversible or fixed text, and carries nothing a model wrote.
+    pub fn runs_free(self) -> bool {
+        matches!(self, Self::Label | Self::Comment)
+    }
 }
 
 /// Who decides: only fixed rules for now.
@@ -70,10 +87,37 @@ pub struct Where {
 pub struct With {
     #[serde(default)]
     pub labels: Vec<String>,
+    /// Fixed text for the `comment` action.
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
+/// Per day caps for one rule.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Limits {
+    #[serde(default = "default_actions_per_day")]
+    pub actions_per_day: i64,
+    /// Model spend. Zero means a rule that calls a model needs a number set.
+    #[serde(default)]
+    pub usd_per_day: f64,
+}
+
+fn default_actions_per_day() -> i64 {
+    20
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            actions_per_day: default_actions_per_day(),
+            usd_per_day: 0.0,
+        }
+    }
 }
 
 /// A complete rule.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rule {
     pub on: On,
@@ -87,6 +131,8 @@ pub struct Rule {
     pub decide: Decide,
     #[serde(default = "propose")]
     pub autonomy: Autonomy,
+    #[serde(default)]
+    pub limits: Limits,
 }
 
 fn propose() -> Autonomy {
@@ -94,7 +140,7 @@ fn propose() -> Autonomy {
 }
 
 /// What a stored rule value means at one tier.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Stored {
     /// `{"autonomy":"off"}` alone: switches an inherited rule off at this tier.
     Tombstone,
@@ -114,8 +160,7 @@ impl fmt::Display for RuleError {
 impl std::error::Error for RuleError {}
 
 impl Stored {
-    /// Parses the JSON text of one rule. `auto` is refused until the runner
-    /// that enforces limits exists.
+    /// Parses the JSON text of one rule.
     pub fn parse(text: &str) -> Result<Self, RuleError> {
         let value: Value = serde_json::from_str(text)
             .map_err(|e| RuleError(format!("the rule is not valid JSON: {e}")))?;
@@ -124,13 +169,24 @@ impl Stored {
         }
         let rule: Rule =
             serde_json::from_value(value).map_err(|e| RuleError(format!("invalid rule: {e}")))?;
-        if rule.autonomy == Autonomy::Auto {
-            return Err(RuleError("auto is not available yet".to_string()));
-        }
-        if rule.action == Do::Label && rule.with.labels.is_empty() {
-            return Err(RuleError(
-                "the label action needs at least one entry in with.labels".to_string(),
-            ));
+        match rule.action {
+            Do::Label if rule.with.labels.is_empty() => {
+                return Err(RuleError(
+                    "the label action needs at least one entry in with.labels".to_string(),
+                ));
+            }
+            Do::Comment
+                if rule
+                    .with
+                    .text
+                    .as_deref()
+                    .is_none_or(|t| t.trim().is_empty()) =>
+            {
+                return Err(RuleError(
+                    "the comment action needs the text to post in with.text".to_string(),
+                ));
+            }
+            _ => {}
         }
         Ok(Self::Rule(Box::new(rule)))
     }
@@ -199,11 +255,45 @@ mod tests {
     }
 
     #[test]
-    fn auto_is_refused_for_now() {
+    fn auto_is_accepted_and_the_limits_default() {
+        // Arrange
         let text =
             r#"{"on":"issue.opened","do":"label","with":{"labels":["a"]},"autonomy":"auto"}"#;
-        let err = Stored::parse(text).unwrap_err();
-        assert_eq!(err.to_string(), "auto is not available yet");
+
+        // Act
+        let Stored::Rule(rule) = Stored::parse(text).unwrap() else {
+            panic!("expected a rule");
+        };
+
+        // Assert
+        assert_eq!(rule.autonomy, Autonomy::Auto);
+        assert_eq!(rule.limits, Limits::default());
+        assert_eq!(rule.limits.actions_per_day, 20);
+    }
+
+    #[test]
+    fn limits_can_be_set_and_unknown_limit_fields_are_refused() {
+        let ok = r#"{"on":"issue.opened","do":"label","with":{"labels":["a"]},"limits":{"actions_per_day":3,"usd_per_day":1.5}}"#;
+        let Stored::Rule(rule) = Stored::parse(ok).unwrap() else {
+            panic!("expected a rule");
+        };
+        assert_eq!(
+            (rule.limits.actions_per_day, rule.limits.usd_per_day),
+            (3, 1.5)
+        );
+        let bad =
+            r#"{"on":"issue.opened","do":"label","with":{"labels":["a"]},"limits":{"files":3}}"#;
+        assert!(Stored::parse(bad).is_err());
+    }
+
+    #[test]
+    fn a_comment_rule_needs_text() {
+        let ok = r#"{"on":"issue.opened","do":"comment","with":{"text":"Thanks"}}"#;
+        assert!(Stored::parse(ok).is_ok());
+        assert!(Stored::parse(r#"{"on":"issue.opened","do":"comment"}"#).is_err());
+        assert!(
+            Stored::parse(r#"{"on":"issue.opened","do":"comment","with":{"text":" "}}"#).is_err()
+        );
     }
 
     #[test]
