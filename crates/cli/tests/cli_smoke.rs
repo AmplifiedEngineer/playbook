@@ -577,6 +577,7 @@ fn table() -> Vec<Case> {
         case("sessions", &["sessions"]).writes().out("No recent sessions"),
         case("sessions list", &["sessions", "list"]).out("No recent sessions").writes(),
         // watch mode: nothing is enabled and no token is set on a fresh home
+        case("watch", &["watch"]).out("watch is off"),
         case("watch once", &["watch", "once"]).out("watch is off"),
         case("watch dry-run", &["watch", "dry-run"]).code(1).err("GITHUB_TOKEN"),
         case("watch approve", &["watch", "approve", "1"]).code(1).err("GITHUB_TOKEN"),

@@ -21,6 +21,7 @@ pub mod child;
 pub mod claude;
 pub mod clock;
 pub mod control;
+pub mod cycle;
 pub mod engine;
 pub mod event;
 pub mod gh;
@@ -44,7 +45,7 @@ use limits::GlobalCaps;
 use lock::{acquire, Acquire};
 use rule::Autonomy;
 use settings::{ceiling, effective, resolve_rule};
-use source::{EventSource, Poll, SourceError};
+use source::{EventSource, SourceError};
 use store::{Cursor, Store};
 
 const ENDPOINTS: [Endpoint; 3] = [
@@ -166,7 +167,9 @@ fn start_cursor(stored: Option<Cursor>, since: Option<i64>, now: i64) -> (Cursor
     }
 }
 
-fn poll_error(source: &str, err: SourceError, out: &mut String) -> Result<(), String> {
+/// Notes a failed poll in `out`. A refused token is an error: nothing a
+/// later try could fix.
+fn poll_error(source: &str, err: &SourceError, out: &mut String) -> Result<(), String> {
     match err {
         SourceError::Unauthorized => Err(err.to_string()),
         other => {
@@ -193,83 +196,8 @@ pub fn once<W: GithubWrite, C: Clock, H: Http>(
     };
     let mut store = Store::open(&ctx.data.join("watch.db")).map_err(|e| e.to_string())?;
     let audit = AuditLog::new(&ctx.data.join("watch"));
-    let mut out = String::new();
-    let mut events = Vec::new();
-    for repo in &settings.repos {
-        let (rules, level) = repo_rules(ctx.home, repo)?;
-        for endpoint in ENDPOINTS {
-            let mut poller = GithubPoller::new(
-                make_http(),
-                ctx.clock,
-                repo,
-                endpoint,
-                settings.poll_seconds,
-            );
-            let source = format!("{repo}/{}", poller.name());
-            let now = ctx.clock.now();
-            let stored = store.cursor(&source).map_err(|e| e.to_string())?;
-            let (cursor, started) = start_cursor(stored, since, now);
-            if !started {
-                store
-                    .transaction(|tx| tx.set_cursor(&source, &cursor))
-                    .map_err(|e| e.to_string())?;
-                out.push_str(&format!("{source}: watching from now\n"));
-                continue;
-            }
-            match poller.poll(&cursor, &mut events) {
-                Ok(Poll::Events { next, .. }) => {
-                    let mut engine = Engine {
-                        store: &mut store,
-                        write: ctx.write,
-                        clock: ctx.clock,
-                        audit: &audit,
-                        jitter: &StdJitter,
-                        caps: settings.caps,
-                        me: ctx.me,
-                    };
-                    let ids = engine
-                        .ingest(
-                            &source,
-                            &next,
-                            &events,
-                            &rules,
-                            level,
-                            settings.max_catchup_seconds,
-                        )
-                        .map_err(|e| e.to_string())?;
-                    for id in ids {
-                        if let Some(row) = store.work(id).map_err(|e| e.to_string())? {
-                            out.push_str(&format!(
-                                "proposal {id}: rule {} on {}#{}\n",
-                                row.rule, row.repo, row.object
-                            ));
-                        }
-                    }
-                }
-                Ok(Poll::Unchanged { .. }) => {}
-                Err(err) => poll_error(&source, err, &mut out)?,
-            }
-        }
-        let mut engine = Engine {
-            store: &mut store,
-            write: ctx.write,
-            clock: ctx.clock,
-            audit: &audit,
-            jitter: &StdJitter,
-            caps: settings.caps,
-            me: ctx.me,
-        };
-        engine
-            .redecide(repo, &rules, level)
-            .map_err(|e| e.to_string())?;
-        let ran = engine
-            .run_approved(repo, &rules)
-            .map_err(|e| e.to_string())?;
-        if ran > 0 {
-            out.push_str(&format!("{repo}: ran {ran} approved\n"));
-        }
-    }
-    Ok(out)
+    let pass = cycle::cycle(ctx, &settings, since, &mut store, &audit, &mut make_http)?;
+    Ok(pass.out)
 }
 
 /// `playbook watch dry-run`: what would be proposed. Reads GitHub and the
@@ -331,7 +259,7 @@ pub fn dry_run<W: GithubWrite, C: Clock, H: Http>(
                         }
                     }
                 }
-                Err(err) => poll_error(&source, err, &mut out)?,
+                Err(err) => poll_error(&source, &err, &mut out)?,
             }
         }
     }
@@ -395,17 +323,20 @@ pub fn reject<W: GithubWrite, C: Clock>(ctx: &Ctx<'_, W, C>, id: i64) -> Result<
     Ok(format!("item {id} rejected\n"))
 }
 
-/// Builds the real GitHub clients and runs `cmd`.
-pub fn run(cmd: &WatchCommand) -> Result<String, String> {
+/// Builds the real GitHub clients and runs `cmd`, or the foreground loop when
+/// there is none.
+pub fn run(cmd: Option<&WatchCommand>) -> Result<String, String> {
     let home = crate::common::session::home_dir();
     let data = playbook_data::data_dir_from(&home);
     let settings = Settings::load(&home)?;
-    if matches!(cmd, WatchCommand::Once { .. }) && !settings.enabled {
+    if matches!(cmd, None | Some(WatchCommand::Once { .. })) && !settings.enabled {
         return Ok(OFF_MESSAGE.to_string());
     }
     let needs_token = matches!(
         cmd,
-        WatchCommand::Once { .. } | WatchCommand::DryRun { .. } | WatchCommand::Approve { .. }
+        None | Some(
+            WatchCommand::Once { .. } | WatchCommand::DryRun { .. } | WatchCommand::Approve { .. }
+        )
     );
     let token = if !needs_token {
         String::new()
@@ -420,7 +351,7 @@ pub fn run(cmd: &WatchCommand) -> Result<String, String> {
     let write = gh::GhWrite::new(token.clone());
     let clock = SystemClock;
     let me = match cmd {
-        WatchCommand::Once { .. } | WatchCommand::DryRun { .. } => write.login()?,
+        None | Some(WatchCommand::Once { .. } | WatchCommand::DryRun { .. }) => write.login()?,
         _ => String::new(),
     };
     let ctx = Ctx {
@@ -429,6 +360,20 @@ pub fn run(cmd: &WatchCommand) -> Result<String, String> {
         write: &write,
         clock: &clock,
         me: &me,
+    };
+    let Some(cmd) = cmd else {
+        let mut env = cycle::LoopEnv {
+            sleep: &mut |seconds| {
+                std::thread::sleep(std::time::Duration::from_secs(
+                    seconds.max(0).unsigned_abs(),
+                ));
+            },
+            stop: &|| false,
+            print: &mut |text| print!("{text}"),
+            jitter: &StdJitter,
+        };
+        cycle::run_loop(&ctx, || http::UreqHttp::new(&token), &mut env)?;
+        return Ok(String::new());
     };
     match cmd {
         WatchCommand::Once { since } => {

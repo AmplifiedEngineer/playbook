@@ -976,7 +976,7 @@ fn real_main() {
                 }
             }
         }
-        Command::Watch { sub } => match playbook::watch::run(&sub) {
+        Command::Watch { sub } => match playbook::watch::run(sub.as_ref()) {
             Ok(output) => print!("{output}"),
             Err(err) => {
                 eprintln!("watch: {err}");

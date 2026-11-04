@@ -389,6 +389,155 @@ fn log_filters_by_rule_and_outcome_and_prints_no_control_characters() {
         .all(|l| serde_json::from_str::<serde_json::Value>(l).is_ok()));
 }
 
+/// Serves the issue only after `ready` is set, and counts requests.
+struct Gated {
+    ready: Rc<Cell<bool>>,
+}
+
+impl Http for Gated {
+    fn get(
+        &mut self,
+        url: &str,
+        _: Option<&str>,
+        body: &mut Vec<u8>,
+    ) -> Result<github::Reply, SourceError> {
+        let issue = ISSUE.replace("2026-11-05T10:00:00Z", "2026-11-05T13:00:00Z");
+        let json = if self.ready.get() && url.contains("/issues?") {
+            issue.as_str()
+        } else {
+            "[]"
+        };
+        body.extend_from_slice(json.as_bytes());
+        Ok(github::Reply {
+            status: 200,
+            ..github::Reply::default()
+        })
+    }
+}
+
+/// Fails every request.
+struct Broken(SourceError);
+
+impl Http for Broken {
+    fn get(
+        &mut self,
+        _: &str,
+        _: Option<&str>,
+        _: &mut Vec<u8>,
+    ) -> Result<github::Reply, SourceError> {
+        Err(self.0.clone())
+    }
+}
+
+struct Longest;
+
+impl backoff::Jitter for Longest {
+    fn pick(&self, ceiling: i64) -> i64 {
+        ceiling
+    }
+}
+
+/// Runs the loop for `passes` passes. `on_sleep` sees each wait.
+fn run_passes<H: Http>(
+    e: &Env,
+    passes: usize,
+    make_http: impl FnMut() -> H,
+    mut on_sleep: impl FnMut(i64),
+) -> (Result<(), String>, String, Vec<i64>) {
+    let printed = RefCell::new(String::new());
+    let waits = RefCell::new(Vec::new());
+    let result = {
+        let mut env = cycle::LoopEnv {
+            sleep: &mut |seconds| {
+                waits.borrow_mut().push(seconds);
+                on_sleep(seconds);
+            },
+            stop: &|| waits.borrow().len() >= passes,
+            print: &mut |text| printed.borrow_mut().push_str(text),
+            jitter: &Longest,
+        };
+        cycle::run_loop(&e.ctx(), make_http, &mut env)
+    };
+    (result, printed.into_inner(), waits.into_inner())
+}
+
+#[test]
+fn the_loop_polls_each_pass_and_resumes_from_the_cursor_after_an_eight_hour_gap() {
+    // Arrange: the first pass starts the sources from now.
+    let e = env("watch-loop-gap", true);
+    let ready = Rc::new(Cell::new(false));
+
+    // Act: the machine sleeps 8 hours, and an issue arrives meanwhile.
+    let (result, printed, waits) = run_passes(
+        &e,
+        2,
+        || Gated {
+            ready: ready.clone(),
+        },
+        |_| {
+            ready.set(true);
+            e.clock.advance(8 * 3600);
+        },
+    );
+
+    // Assert
+    result.unwrap();
+    assert!(printed.contains("watching from now"), "{printed}");
+    assert!(
+        printed.contains("proposal 1: rule triage on o/r#7"),
+        "{printed}"
+    );
+    assert_eq!(waits, vec![60, 60]);
+}
+
+#[test]
+fn a_transient_error_backs_off_with_growing_waits_and_the_loop_goes_on() {
+    // Arrange: cursors exist, so every pass makes requests.
+    let e = env("watch-loop-transient", true);
+    e.once(Some(EARLIER)).unwrap();
+
+    // Act
+    let (result, printed, waits) = run_passes(
+        &e,
+        4,
+        || Broken(SourceError::Transient("HTTP 502".into())),
+        |_| {},
+    );
+
+    // Assert: the poll setting is 60, so the backoff shows once it passes 60.
+    result.unwrap();
+    assert!(printed.contains("HTTP 502"), "{printed}");
+    assert_eq!(waits, vec![60, 60, 120, 240]);
+}
+
+#[test]
+fn a_refused_token_stops_the_loop_with_a_clear_message() {
+    let e = env("watch-loop-unauthorized", true);
+    e.once(Some(EARLIER)).unwrap();
+    let (result, _, waits) = run_passes(&e, 5, || Broken(SourceError::Unauthorized), |_| {});
+    assert!(result.unwrap_err().contains("refused the token"));
+    assert!(waits.is_empty());
+}
+
+#[test]
+fn a_second_foreground_watch_says_so_and_fails() {
+    let e = env("watch-loop-busy", true);
+    let _held = hold(&e.data);
+    let (result, _, waits) = run_passes(&e, 1, || Canned(e.requests.clone()), |_| {});
+    assert_eq!(result.unwrap_err(), "watch already running");
+    assert!(waits.is_empty());
+}
+
+#[test]
+fn a_watch_switched_off_while_the_loop_runs_says_so_once_and_polls_nothing() {
+    let e = env("watch-loop-off", false);
+    let (result, printed, waits) = run_passes(&e, 3, || Canned(e.requests.clone()), |_| {});
+    result.unwrap();
+    assert_eq!(printed.matches("watch is off").count(), 1, "{printed}");
+    assert_eq!(e.requests.get(), 0);
+    assert_eq!(waits.len(), 3);
+}
+
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();

@@ -733,10 +733,15 @@ pub enum Command {
     /// environment variable named by `watch.tokenEnv` (`GITHUB_TOKEN` when
     /// unset).
     ///
+    /// With no verb it runs in the foreground until you stop it, polling every
+    /// `watch.pollSeconds` and picking up after a laptop sleep from where it
+    /// stopped. A second foreground run prints `watch already running` and
+    /// exits 1.
+    ///
     /// Example: `playbook watch once`
     Watch {
         #[command(subcommand)]
-        sub: WatchCommand,
+        sub: Option<WatchCommand>,
     },
     /// Check how well the review triage classifier sorts real pull requests
     ///

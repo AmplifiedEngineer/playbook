@@ -1599,6 +1599,8 @@ Poll GitHub issues and comments and act on them by rules
 
 Rules live in `watch.rule.<id>` and `watch.repos` lists the repos. At the default level a matching event becomes a proposal that nothing acts on until you approve it. The GitHub token is read from the environment variable named by `watch.tokenEnv` (`GITHUB_TOKEN` when unset).
 
+With no verb it runs in the foreground until you stop it, polling every `watch.pollSeconds` and picking up after a laptop sleep from where it stopped. A second foreground run prints `watch already running` and exits 1.
+
 Example: `playbook watch once`
 
 Subcommands: `approve`, `dry-run`, `log`, `once`, `pause`, `reject`, `resume`, `retry`, `status`
