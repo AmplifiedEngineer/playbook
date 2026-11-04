@@ -43,6 +43,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `auto.agentBudgetUsd` | `50` | a number, see the config keys page for the range |
 | `auto.sessionCeilingUsd` | `0` | a number, see the config keys page for the range |
 | `auto.warnPct` | `70` | a number, see the config keys page for the range |
+| `gate.maxRounds` | `5` | a number, see the config keys page for the range |
 | `fix.maxFiles` | `3` | a number, see the config keys page for the range |
 | `fix.maxLines` | `500` | a number, see the config keys page for the range |
 | `review.stackMaxPrs` | `6` | a number, see the config keys page for the range |

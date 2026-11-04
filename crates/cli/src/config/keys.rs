@@ -26,6 +26,11 @@ const _: () = assert!(
         && AUTO_BUDGET_USD * AUTO_CEILING_FACTOR > AUTO_AGENT_BUDGET_USD
 );
 
+/// The default `gate.maxRounds`, the most rounds one quality-gate phase runs.
+pub const GATE_MAX_ROUNDS_DEFAULT: i64 = 5;
+/// The most `gate.maxRounds` may be.
+pub const GATE_MAX_ROUNDS_CEILING: i64 = 20;
+
 /// The largest input a document converter opens, whatever `docs.maxBytes`
 /// says. The bundled `pbdoc` keeps its own copy because it must not depend on
 /// this crate; a test in `doc::converter` keeps the two equal.
@@ -64,6 +69,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "auto.agentBudgetUsd",
     "auto.sessionCeilingUsd",
     "auto.warnPct",
+    "gate.maxRounds",
     "fix.maxFiles",
     "fix.maxLines",
     "review.stackMaxPrs",
@@ -192,6 +198,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "auto.agentBudgetUsd" => Some(Value::Number(AUTO_AGENT_BUDGET_USD.into())),
         "auto.sessionCeilingUsd" => Some(Value::Number(0.into())),
         "auto.warnPct" => Some(Value::Number(70.into())),
+        "gate.maxRounds" => Some(Value::Number(GATE_MAX_ROUNDS_DEFAULT.into())),
         "fix.maxFiles" => Some(Value::Number(3.into())),
         "fix.maxLines" => Some(Value::Number(500.into())),
         "review.stackMaxPrs" => Some(Value::Number(6.into())),

@@ -245,6 +245,10 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
             whole.is_some_and(|n| (1..=3600).contains(&n)),
             "a whole number between 1 and 3600",
         ),
+        "gate.maxRounds" => (
+            whole.is_some_and(|n| (1..=keys::GATE_MAX_ROUNDS_CEILING).contains(&n)),
+            "a whole number from 1 to 20",
+        ),
         "sessions.staleAfterDays" | "sessions.recentDays" => {
             (whole.is_some_and(|n| n >= 1), "a positive integer")
         }
