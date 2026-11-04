@@ -12,6 +12,7 @@ Every database a playbook tool creates lives in `~/.config/playbook/data`, share
 | `gate/<owner>/<repo>/<worktree-id>.db` | Gate records of one worktree (`gate record`, `gate check`) | Only when the worktree is gone |
 | `code/<owner>/<repo>/<worktree-id>.db` | The code index of one worktree | Yes: `playbook code index` rebuilds it |
 | `watch.db` | Watch mode: polling cursors, events already seen, and the work queue | No: deleting it forgets what was seen and what is queued |
+| `watch/audit.jsonl` | Watch mode: one line per decision, rotated at 10 MiB, five files kept | Yes: it is a record, nothing reads it back |
 | `watch.lock` | The one-instance lock of watch mode, held by the OS while a watch process runs | Yes |
 
 Per-worktree files keep worktrees of one repo apart, as the old `repos/<owner>/<repo>/<worktree-id>/` folders did. Memory facts stay Markdown files under `~/.config/playbook/memory` and are the source of truth for `memory.db`. Plans, implement notes and worktree folders stay under `repos/`.

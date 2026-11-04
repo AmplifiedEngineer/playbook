@@ -104,7 +104,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows the Agent Budget Dashboard, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `completions`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `completions`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `watch`, `worktree`
 
 ### `playbook adr`
 
@@ -1590,6 +1590,52 @@ Example: `playbook usage stop`
 ### `playbook version`
 
 Print the installed version, same as `--version`
+
+### `playbook watch`
+
+Poll GitHub issues and comments and act on them by rules
+
+Rules live in `watch.rule.<id>` and `watch.repos` lists the repos. At the default level a matching event becomes a proposal that nothing acts on until you approve it. The GitHub token is read from the environment variable named by `watch.tokenEnv` (`GITHUB_TOKEN` when unset).
+
+Example: `playbook watch once`
+
+Subcommands: `approve`, `dry-run`, `once`, `reject`
+
+### `playbook watch approve`
+
+Carry out a proposal
+
+Runs the action now. When another watch process is running it only marks the item and that process carries it out.
+
+Example: `playbook watch approve 3`
+
+- `<ID>`: Proposal number printed by `watch once`
+
+### `playbook watch dry-run`
+
+Show the rules and what a poll would propose, and change nothing
+
+Example: `playbook watch dry-run`
+
+- `--since <SINCE>`: Look at events from this UTC time, for example 2026-11-01T00:00:00Z
+
+### `playbook watch once`
+
+Poll every repo once and run the items you approved
+
+A repo watched for the first time starts from now, so turning watch mode on never replays old issues. Prints `watch already running` and exits when another watch process holds the lock.
+
+Example: `playbook watch once --since 2026-11-01T00:00:00Z`
+
+- `--since <SINCE>`: Replay events from this UTC time, for example 2026-11-01T00:00:00Z
+
+### `playbook watch reject`
+
+Drop a proposal without acting on it
+
+Example: `playbook watch reject 3`
+
+- `<ID>`: Proposal number printed by `watch once`
 
 ### `playbook worktree`
 

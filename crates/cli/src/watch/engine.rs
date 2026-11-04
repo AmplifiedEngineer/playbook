@@ -10,17 +10,25 @@ use serde_json::json;
 use super::audit::AuditLog;
 use super::clock::Clock;
 use super::event::Event;
-use super::rule::{Autonomy, Rule};
+use super::rule::{Autonomy, On, Rule};
 use super::settings::effective;
 use super::store::{Cursor, Insert, NewWork, Store, StoreError, Tx, WorkRow};
 
 /// The marker an automated comment carries so watch mode ignores its own text.
 pub const HIDDEN_MARKER: &str = "<!-- playbook-watch -->";
 
+/// What the label action reads about an issue or pull request before it acts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IssueView {
+    pub open: bool,
+    pub labels: Vec<String>,
+    /// SHA-256 of the body, the same hash an event carries.
+    pub body_hash: [u8; 32],
+}
+
 /// The GitHub calls the label action makes.
 pub trait GithubWrite {
-    fn is_open(&self, repo: &str, number: u64) -> Result<bool, String>;
-    fn labels(&self, repo: &str, number: u64) -> Result<Vec<String>, String>;
+    fn issue(&self, repo: &str, number: u64) -> Result<IssueView, String>;
     fn add_labels(&self, repo: &str, number: u64, labels: &[String]) -> Result<(), String>;
 }
 
@@ -183,15 +191,17 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
         self.run(id, &row, rules)
     }
 
-    /// Runs every approved item. The lock holder calls this on each cycle.
-    pub fn run_approved(&mut self, rules: &[NamedRule]) -> Result<usize, EngineError> {
-        let ids = self.store.ids_in_state("approved")?;
-        for id in &ids {
-            if let Some(row) = self.store.work(*id)? {
-                self.run(*id, &row, rules)?;
+    /// Runs every approved item of `repo`, with that repo's rules. The lock
+    /// holder calls this on each cycle.
+    pub fn run_approved(&mut self, repo: &str, rules: &[NamedRule]) -> Result<usize, EngineError> {
+        let mut ran = 0;
+        for id in self.store.ids_in_state("approved")? {
+            if let Some(row) = self.store.work(id)?.filter(|r| r.repo == repo) {
+                self.run(id, &row, rules)?;
+                ran += 1;
             }
         }
-        Ok(ids.len())
+        Ok(ran)
     }
 
     pub fn reject(&mut self, id: i64) -> Result<(), EngineError> {
@@ -221,15 +231,20 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
         };
         let github = |e: String| EngineError::Github(e);
         // The world may have changed since the proposal: check before acting.
-        if !self.write.is_open(&row.repo, row.object).map_err(github)? {
+        let view = self.write.issue(&row.repo, row.object).map_err(github)?;
+        if !view.open {
             return self.finish(id, row, ApproveOutcome::Skipped("closed"));
         }
-        let have = self.write.labels(&row.repo, row.object).map_err(github)?;
+        // Only these events carry the hash of the body that `issue` returns.
+        let opened = matches!(rule.on, On::IssueOpened | On::PrOpened);
+        if opened && view.body_hash[..] != row.body_hash[..] {
+            return self.finish(id, row, ApproveOutcome::Skipped("body_changed"));
+        }
         let missing: Vec<String> = rule
             .with
             .labels
             .iter()
-            .filter(|l| !have.contains(l))
+            .filter(|l| !view.labels.contains(l))
             .cloned()
             .collect();
         if missing.is_empty() {
@@ -305,14 +320,17 @@ mod tests {
         calls: RefCell<Vec<(String, u64, Vec<String>)>>,
         closed: bool,
         have: Vec<String>,
+        /// The hash the issue body has now. Events in these tests carry [1; 32].
+        hash: Option<[u8; 32]>,
     }
 
     impl GithubWrite for Spy {
-        fn is_open(&self, _: &str, _: u64) -> Result<bool, String> {
-            Ok(!self.closed)
-        }
-        fn labels(&self, _: &str, _: u64) -> Result<Vec<String>, String> {
-            Ok(self.have.clone())
+        fn issue(&self, _: &str, _: u64) -> Result<IssueView, String> {
+            Ok(IssueView {
+                open: !self.closed,
+                labels: self.have.clone(),
+                body_hash: self.hash.unwrap_or([1; 32]),
+            })
         }
         fn add_labels(&self, repo: &str, number: u64, labels: &[String]) -> Result<(), String> {
             self.calls
@@ -478,7 +496,9 @@ mod tests {
         assert_eq!(f.store.work(id).unwrap().unwrap().state, "approved");
         assert!(spy.calls.borrow().is_empty());
 
-        let ran = engine(&mut f, &spy).run_approved(&rules(LABEL)).unwrap();
+        let ran = engine(&mut f, &spy)
+            .run_approved("o/r", &rules(LABEL))
+            .unwrap();
         assert_eq!(ran, 1);
         assert_eq!(spy.calls.borrow().len(), 1);
         assert_eq!(f.store.work(id).unwrap().unwrap().state, "done");
@@ -511,6 +531,28 @@ mod tests {
             .unwrap();
         assert_eq!(out, ApproveOutcome::Skipped("closed"));
         assert!(spy.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_body_edited_after_the_proposal_is_skipped_and_nothing_is_written() {
+        // Arrange
+        let mut f = fixture("watch-engine-edited");
+        let spy = Spy {
+            hash: Some([2; 32]),
+            ..Spy::default()
+        };
+        let id = ingest(&mut f, &spy, &[issue(7, "a")], &rules(LABEL))[0];
+
+        // Act
+        let out = engine(&mut f, &spy)
+            .approve(id, &rules(LABEL), true)
+            .unwrap();
+
+        // Assert
+        assert_eq!(out, ApproveOutcome::Skipped("body_changed"));
+        assert!(spy.calls.borrow().is_empty());
+        let row = f.store.work(id).unwrap().unwrap();
+        assert_eq!(row.reason.as_deref(), Some("skipped"));
     }
 
     #[test]

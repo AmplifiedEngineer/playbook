@@ -353,6 +353,13 @@ pub(crate) const META: &[Meta] = &[
     ro("usage status"),
     user("usage stop"),
     ro("version").for_users(),
+    user("watch")
+        .purpose("Poll GitHub and propose or run actions by your rules")
+        .for_users(),
+    user("watch approve"),
+    ro("watch dry-run"),
+    user("watch once"),
+    user("watch reject"),
     free("worktree").for_agents(),
     free("worktree remove"),
     free("worktree review").purpose("Create or remove the locked worktrees a review runs in"),
@@ -906,6 +913,7 @@ mod tests {
         "ccd",
         "usage",
         "sessions",
+        "watch",
         "trust",
         "commands",
         "completions",

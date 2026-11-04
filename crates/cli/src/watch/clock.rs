@@ -12,6 +12,12 @@ pub trait Clock {
 }
 
 /// The real clock.
+impl<T: Clock + ?Sized> Clock for &T {
+    fn now(&self) -> i64 {
+        (**self).now()
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SystemClock;
 

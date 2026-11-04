@@ -620,6 +620,24 @@ pub fn global_keys(root: &Path) -> Result<Vec<String>, ConfigError> {
     rows.collect::<Result<Vec<_>, _>>().map_err(broken(root))
 }
 
+/// The distinct keys of every tier that start with `prefix`, sorted. Empty
+/// when there is no database.
+pub fn keys_with_prefix(root: &Path, prefix: &str) -> Result<Vec<String>, ConfigError> {
+    if !has_data(root) {
+        return Ok(Vec::new());
+    }
+    let conn = open(root)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT key FROM config WHERE substr(key, 1, length(?1)) = ?1 ORDER BY key",
+        )
+        .map_err(broken(root))?;
+    let rows = stmt
+        .query_map([prefix], |r| r.get::<_, String>(0))
+        .map_err(broken(root))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(broken(root))
+}
+
 /// What `adopt_late_files` did with `config.json` files that appeared after
 /// the one-time import (an older binary, or an old doc, wrote them).
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -916,6 +934,22 @@ mod tests {
             global_keys(&r).unwrap(),
             vec!["effort.agents.reviewer", "effort.skills.x"]
         );
+    }
+
+    #[test]
+    fn keys_with_a_prefix_are_listed_from_every_tier_once() {
+        // Arrange
+        let r = root("store-prefix-keys");
+        put(&r, Tier::Global, None, "watch.rule.a", &json!("{}")).unwrap();
+        put(&r, Tier::Repo, Some("o/r"), "watch.rule.a", &json!("{}")).unwrap();
+        put(&r, Tier::Repo, Some("o/r"), "watch.rule.b", &json!("{}")).unwrap();
+        put(&r, Tier::Global, None, "mode", &json!("ask")).unwrap();
+
+        // Act
+        let keys = keys_with_prefix(&r, "watch.rule.").unwrap();
+
+        // Assert
+        assert_eq!(keys, vec!["watch.rule.a", "watch.rule.b"]);
     }
 
     #[test]

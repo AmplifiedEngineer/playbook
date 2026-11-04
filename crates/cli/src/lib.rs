@@ -725,6 +725,19 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Poll GitHub issues and comments and act on them by rules
+    ///
+    /// Rules live in `watch.rule.<id>` and `watch.repos` lists the repos. At
+    /// the default level a matching event becomes a proposal that nothing
+    /// acts on until you approve it. The GitHub token is read from the
+    /// environment variable named by `watch.tokenEnv` (`GITHUB_TOKEN` when
+    /// unset).
+    ///
+    /// Example: `playbook watch once`
+    Watch {
+        #[command(subcommand)]
+        sub: WatchCommand,
+    },
     /// Check how well the review triage classifier sorts real pull requests
     ///
     /// Each case is a pull request with a known answer per review lens. Costs
@@ -2132,6 +2145,48 @@ pub enum SessionsCommand {
         /// Report only and change nothing (required)
         #[arg(long, required = true)]
         dry_run: bool,
+    },
+}
+
+/// `playbook watch` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum WatchCommand {
+    /// Poll every repo once and run the items you approved
+    ///
+    /// A repo watched for the first time starts from now, so turning watch
+    /// mode on never replays old issues. Prints `watch already running` and
+    /// exits when another watch process holds the lock.
+    ///
+    /// Example: `playbook watch once --since 2026-11-01T00:00:00Z`
+    Once {
+        /// Replay events from this UTC time, for example 2026-11-01T00:00:00Z
+        #[arg(long)]
+        since: Option<String>,
+    },
+    /// Show the rules and what a poll would propose, and change nothing
+    ///
+    /// Example: `playbook watch dry-run`
+    DryRun {
+        /// Look at events from this UTC time, for example 2026-11-01T00:00:00Z
+        #[arg(long)]
+        since: Option<String>,
+    },
+    /// Carry out a proposal
+    ///
+    /// Runs the action now. When another watch process is running it only
+    /// marks the item and that process carries it out.
+    ///
+    /// Example: `playbook watch approve 3`
+    Approve {
+        /// Proposal number printed by `watch once`
+        id: i64,
+    },
+    /// Drop a proposal without acting on it
+    ///
+    /// Example: `playbook watch reject 3`
+    Reject {
+        /// Proposal number printed by `watch once`
+        id: i64,
     },
 }
 

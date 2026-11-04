@@ -976,6 +976,13 @@ fn real_main() {
                 }
             }
         }
+        Command::Watch { sub } => match playbook::watch::run(&sub) {
+            Ok(output) => print!("{output}"),
+            Err(err) => {
+                eprintln!("watch: {err}");
+                std::process::exit(1);
+            }
+        },
         Command::Gate { sub } => match sub {
             GateCommand::Snapshot { plan_slug, phases } => {
                 let result = gate_plans_dir()
