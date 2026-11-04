@@ -55,7 +55,7 @@ A **session record** is computed on read. It is not a new store.
 | `cwd`, `worktree` | The first transcript line that carries `cwd` (found by session id under the agent's session directory), then `git worktree list --porcelain` from that directory. The `classify` convention is reported (launcher, agent, review, other). |
 | `context_size` | Input plus cache read plus cache write tokens of the newest event of the session, which is the prompt size of the latest request. |
 | `linked_issue` | A number in the branch name (`536-foo`, `feat/536-foo`, `issue-536`), shown as inferred. |
-| `linked_pr`, `pr_state` | `gh pr list --head <branch> --state all` with the existing timeout helpers, cached for the life of one refresh. `None` when `gh` is missing or offline. |
+| `linked_pr`, `pr_state` | `gh pr list --head <branch> --state all` with the existing timeout helpers, cached for the life of one refresh. An open PR wins over any other. A merged PR counts only when it targeted the default branch and its head is the local branch tip. `None` when `gh` is missing or offline. |
 | `task` | A short hash of the first user prompt, never the text. It tells two sessions on one branch apart and detects a resume. |
 | `pane` (optional) | `TMUX_PANE` recorded by a hook (stage 3), matched to `tmux list-panes -a`. |
 
@@ -77,7 +77,7 @@ Waiting and working are timing guesses in stage 1 (a message in the last 2 minut
 
 | Signal | Meaning | Confidence | What it may trigger |
 | --- | --- | --- | --- |
-| PR for the branch is merged | The work landed | High | Suggest close. Safe cleanup via the existing sweep. |
+| PR for the branch is merged into the default branch, at the branch tip | The work landed | High | Suggest close. Safe cleanup via the existing sweep. |
 | PR closed unmerged | The work was dropped | Medium (may be re opened) | Suggest close and handoff. No cleanup. |
 | Branch merged into the default branch locally (`merged_branches`) | The work landed without a PR | Medium | Suggest close. |
 | Linked issue closed | The ask is done | Medium (can be a different PR) | Suggest only. |
@@ -98,7 +98,7 @@ Linking uses the branch first. A session whose branch is the default branch (`ma
 | --- | --- | --- |
 | Show "close this tab" or "archive" suggestion | yes | yes |
 | Save a handoff for the session | suggest | no. The agent writes a handoff, a hook cannot. It stays a suggestion. |
-| Remove the worktree and delete the branch | suggest | yes, only through the existing `worktree::remove` and `sweep` rules: landed, clean, not locked, not in use. |
+| Remove the worktree | suggest | yes, only through the existing `worktree::remove` and `sweep` rules: landed, clean, not locked by a live process, not in use. Deleting the branch is a later stage. |
 | Mark the record closed | suggest | yes |
 | Stop the process or close a tmux pane | never | never without a confirmation in the view |
 | Anything on a tree with uncommitted or untracked changes, or unpushed commits | never | never. The session goes to a needs attention list. |
