@@ -164,7 +164,7 @@ fn quote(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::memory::{db_in, write_graph, NodeRow};
+    use crate::memory::{db_in, write_graph, write_graph_with_bodies, NodeRow};
     use playbook_common::test_support::scratch_dir;
     use std::path::PathBuf;
 
@@ -462,5 +462,57 @@ mod tests {
         // Act, Assert
         assert_eq!(failed(busy), SearchError::Busy);
         assert_eq!(failed(locked), SearchError::Busy);
+    }
+
+    #[test]
+    fn a_fact_is_found_by_a_word_only_its_body_holds() {
+        // Arrange
+        let db = db_in(&scratch_dir("ms-body"));
+        let nodes = [global("f1", "ferry-notes", "late departures")];
+        write_graph_with_bodies(&db, &nodes, &[], |_| {
+            Some("the quokka is not on board".into())
+        })
+        .unwrap();
+
+        // Act
+        let found = ids(&db, "quokka");
+
+        // Assert
+        assert_eq!(found, ["f1"]);
+    }
+
+    #[test]
+    fn a_name_hit_outranks_the_same_word_in_a_body() {
+        // Arrange
+        let db = db_in(&scratch_dir("ms-body-rank"));
+        let nodes = [
+            global("in-body", "zzz", "d"),
+            global("in-name", "quokka-notes", "d"),
+        ];
+        write_graph_with_bodies(&db, &nodes, &[], |file| {
+            (file == "in-body.md").then(|| "quokka quokka quokka".to_string())
+        })
+        .unwrap();
+
+        // Act
+        let found = ids(&db, "quokka");
+
+        // Assert
+        assert_eq!(found, ["in-name", "in-body"]);
+    }
+
+    #[test]
+    fn a_reader_in_the_window_before_the_body_pass_is_told_the_index_is_stale() {
+        // Arrange
+        let db = db_in(&scratch_dir("ms-window"));
+        memory::stop_before_bodies(true);
+        let _ = write_graph_with_bodies(&db, &[global("a", "alpha", "d")], &[], |_| None);
+        memory::stop_before_bodies(false);
+
+        // Act
+        let result = search_facts(&db, REPO, &words("alpha"), DEFAULT_LIMIT);
+
+        // Assert
+        assert_eq!(result, Err(SearchError::IndexStale));
     }
 }

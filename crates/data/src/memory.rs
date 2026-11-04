@@ -191,6 +191,45 @@ pub fn facts_index_exists(conn: &Connection) -> rusqlite::Result<bool> {
 /// reader sees the old graph or the new one, never a mix. Creates the file
 /// and its folder (owner only) when missing.
 pub fn write_graph(db: &Path, nodes: &[NodeRow], edges: &[EdgeRow]) -> Result<(), String> {
+    write_graph_in_one_pass(db, nodes, edges, IndexFill::Complete).map(|_| ())
+}
+
+/// Like [`write_graph`], then fills the body column of the fact index in a
+/// second short transaction, so a rebuild reads each fact file once and never
+/// holds all the bodies, and the writer lock is not held while it reads them.
+/// `body_of` gets a fact's file (relative to the memory folder) and returns its
+/// body, or `None` to leave the body empty.
+///
+/// Until the second transaction commits the index trails the graph, which
+/// readers see as stale and answer by scanning. A failure in the second step
+/// leaves it so until the next write; the graph itself is already stored.
+pub fn write_graph_with_bodies(
+    db: &Path,
+    nodes: &[NodeRow],
+    edges: &[EdgeRow],
+    mut body_of: impl FnMut(&str) -> Option<String>,
+) -> Result<(), String> {
+    let generation = write_graph_in_one_pass(db, nodes, edges, IndexFill::AwaitingBodies)?;
+    index_fill_fault_point()?;
+    let _ = fill_bodies(db, generation, &mut body_of);
+    Ok(())
+}
+
+/// Whether a graph write leaves the fact index trusted (its body column needs
+/// nothing more) or waits for [`fill_bodies`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IndexFill {
+    Complete,
+    AwaitingBodies,
+}
+
+/// The write behind [`write_graph`]; returns the graph generation it made.
+fn write_graph_in_one_pass(
+    db: &Path,
+    nodes: &[NodeRow],
+    edges: &[EdgeRow],
+    fill: IndexFill,
+) -> Result<i64, String> {
     if let Some(dir) = db.parent() {
         playbook_common::atomic::ensure_private_dir(dir)
             .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
@@ -249,9 +288,10 @@ pub fn write_graph(db: &Path, nodes: &[NodeRow], edges: &[EdgeRow]) -> Result<()
         [secs.to_string(), millis.to_string()],
     )
     .map_err(|e| e.to_string())?;
-    write_facts_index(&tx, nodes).map_err(|e| e.to_string())?;
+    let generation = write_facts_index(&tx, nodes, fill).map_err(|e| e.to_string())?;
     write_graph_fault_point()?;
-    tx.commit().map_err(|e| e.to_string())
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(generation)
 }
 
 /// Replaces the fact index with one row per fact of `nodes`, in fact id order
@@ -259,24 +299,34 @@ pub fn write_graph(db: &Path, nodes: &[NodeRow], edges: &[EdgeRow]) -> Result<()
 /// `graph_generation`. The index is whole-graph like `nodes` (a write replaces
 /// both), so a fact that left `nodes` leaves the index too. An index that
 /// cannot be written is rolled back and left behind the graph, which readers
-/// see as stale.
-fn write_facts_index(conn: &Connection, nodes: &[NodeRow]) -> rusqlite::Result<()> {
+/// see as stale. Returns the new generation.
+fn write_facts_index(
+    conn: &Connection,
+    nodes: &[NodeRow],
+    fill: IndexFill,
+) -> rusqlite::Result<i64> {
     conn.execute(
         "INSERT INTO meta (key, value) VALUES ('graph_generation', '1') \
          ON CONFLICT (key) DO UPDATE SET value = CAST(value AS INTEGER) + 1",
         [],
     )?;
+    let generation: i64 = conn.query_row(
+        "SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'graph_generation'",
+        [],
+        |r| r.get(0),
+    )?;
     if !facts_index_present(conn) {
-        return Ok(());
+        return Ok(generation);
     }
     conn.execute_batch("SAVEPOINT facts_index")?;
-    match fill_facts_index(conn, nodes) {
-        Ok(()) => conn.execute_batch("RELEASE facts_index"),
-        Err(_) => conn.execute_batch("ROLLBACK TO facts_index; RELEASE facts_index"),
+    match fill_facts_index(conn, nodes, fill) {
+        Ok(()) => conn.execute_batch("RELEASE facts_index")?,
+        Err(_) => conn.execute_batch("ROLLBACK TO facts_index; RELEASE facts_index")?,
     }
+    Ok(generation)
 }
 
-fn fill_facts_index(conn: &Connection, nodes: &[NodeRow]) -> rusqlite::Result<()> {
+fn fill_facts_index(conn: &Connection, nodes: &[NodeRow], fill: IndexFill) -> rusqlite::Result<()> {
     conn.execute_batch("DELETE FROM facts_fts; DELETE FROM facts_fts_map;")?;
     // A later row of the same id wins, as it does in `nodes`.
     let facts: std::collections::BTreeMap<&str, &NodeRow> = nodes
@@ -298,12 +348,77 @@ fn fill_facts_index(conn: &Connection, nodes: &[NodeRow]) -> rusqlite::Result<()
         ])?;
         map.execute(rusqlite::params![row, node.id, node.scope, node.project])?;
     }
+    if fill == IndexFill::Complete {
+        mark_facts_index_current(conn)?;
+    }
+    Ok(())
+}
+
+fn mark_facts_index_current(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO meta (key, value) \
          SELECT 'facts_index_generation', value FROM meta WHERE key = 'graph_generation'",
         [],
-    )?;
-    Ok(())
+    )
+    .map(|_| ())
+}
+
+/// The second transaction of [`write_graph_with_bodies`]. Does nothing when a
+/// newer write has since replaced the graph: that write owns the index.
+fn fill_bodies(
+    db: &Path,
+    generation: i64,
+    body_of: &mut impl FnMut(&str) -> Option<String>,
+) -> Result<(), String> {
+    let mut conn = Connection::open(db).map_err(|e| e.to_string())?;
+    conn.busy_timeout(BUSY).map_err(|e| e.to_string())?;
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let current: Option<i64> = tx
+        .query_row(
+            "SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'graph_generation'",
+            [],
+            |r| r.get(0),
+        )
+        .ok();
+    if current != Some(generation) || !facts_index_present(&tx) {
+        return Ok(());
+    }
+    {
+        let mut facts = tx
+            .prepare(
+                "SELECT m.rowid, n.file, COALESCE(n.name, ''), COALESCE(n.description, '') \
+                 FROM facts_fts_map m JOIN nodes n ON n.id = m.fact_id ORDER BY m.rowid",
+            )
+            .map_err(|e| e.to_string())?;
+        let mut drop_row = tx
+            .prepare("DELETE FROM facts_fts WHERE rowid = ?1")
+            .map_err(|e| e.to_string())?;
+        let mut put_row = tx
+            .prepare(
+                "INSERT INTO facts_fts (rowid, name, description, body) VALUES (?1, ?2, ?3, ?4)",
+            )
+            .map_err(|e| e.to_string())?;
+        let mut rows = facts.query([]).map_err(|e| e.to_string())?;
+        while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            let (rowid, file, name, description): (i64, String, String, String) = (
+                row.get(0).map_err(|e| e.to_string())?,
+                row.get(1).map_err(|e| e.to_string())?,
+                row.get(2).map_err(|e| e.to_string())?,
+                row.get(3).map_err(|e| e.to_string())?,
+            );
+            let Some(body) = body_of(&file) else {
+                continue;
+            };
+            drop_row.execute([rowid]).map_err(|e| e.to_string())?;
+            put_row
+                .execute(rusqlite::params![rowid, name, description, body])
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    mark_facts_index_current(&tx).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())
 }
 
 /// Whether the fact index was written by the latest graph write, so a reader
@@ -329,9 +444,35 @@ fn write_graph_fault_point() -> Result<(), String> {
     Ok(())
 }
 
+/// A seam between the two commits of [`write_graph_with_bodies`], where a
+/// test stops the write to look at a reader in the window between them.
+#[cfg(not(test))]
+fn index_fill_fault_point() -> Result<(), String> {
+    Ok(())
+}
+
 #[cfg(test)]
 thread_local! {
     static FAIL_BEFORE_COMMIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+thread_local! {
+    static STOP_BEFORE_BODIES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Makes [`write_graph_with_bodies`] stop on this thread before the body pass.
+#[cfg(test)]
+pub(crate) fn stop_before_bodies(on: bool) {
+    STOP_BEFORE_BODIES.with(|f| f.set(on));
+}
+
+#[cfg(test)]
+fn index_fill_fault_point() -> Result<(), String> {
+    if STOP_BEFORE_BODIES.with(std::cell::Cell::get) {
+        return Err("injected stop before the body pass".to_string());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -933,5 +1074,51 @@ mod tests {
         // Assert
         assert!(result.is_ok());
         assert!(!facts_index_is_fresh(&open(&db)));
+    }
+
+    #[test]
+    fn bodies_are_indexed_in_a_second_pass_and_the_index_is_then_current() {
+        // Arrange
+        let db = db_in(&scratch_dir("mem-bodies"));
+        let nodes = [
+            fact("a", "global", None, "alpha-name", "d"),
+            fact("b", "global", None, "beta-name", "d"),
+        ];
+
+        // Act
+        write_graph_with_bodies(&db, &nodes, &[], |file| match file {
+            "a.md" => Some("mentions the quokka habitat".to_string()),
+            _ => None,
+        })
+        .unwrap();
+
+        // Assert
+        let conn = open(&db);
+        assert_eq!(ids_matching(&conn, "quokka"), ["a"]);
+        assert_eq!(ids_matching(&conn, "alpha"), ["a"]);
+        assert!(facts_index_is_fresh(&conn));
+    }
+
+    #[test]
+    fn the_index_reads_as_stale_between_the_node_commit_and_the_body_pass() {
+        // Arrange
+        let db = db_in(&scratch_dir("mem-window"));
+        stop_before_bodies(true);
+
+        // Act
+        let result =
+            write_graph_with_bodies(&db, &[fact("a", "global", None, "alpha", "d")], &[], |_| {
+                Some("never read".to_string())
+            });
+        stop_before_bodies(false);
+
+        // Assert
+        assert!(result.is_err());
+        let conn = open(&db);
+        let nodes: i64 = conn
+            .query_row("SELECT count(*) FROM nodes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(nodes, 1, "the graph itself is stored");
+        assert!(!facts_index_is_fresh(&conn));
     }
 }

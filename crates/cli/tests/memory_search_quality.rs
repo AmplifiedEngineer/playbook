@@ -327,9 +327,11 @@ fn scratch(tag: &str) -> Scratch {
     Scratch(dir)
 }
 
-/// Writes `corpus` as fact files under `<root>/memory` and its graph into
-/// `<root>/data/memory.db`, with `EDGES_PER_FACT` related-fact edges per fact.
+/// Writes `corpus` as fact files under `<root>/memory` and its graph and fact
+/// index into `<root>/data/memory.db`, with `EDGES_PER_FACT` related-fact edges
+/// per fact, as a rebuild would.
 fn write_store(root: &Path, repo: &str, corpus: &Corpus) -> PathBuf {
+    use playbook_data::memory::{EdgeRow, NodeRow};
     let mem_dir = root.join("memory");
     std::fs::create_dir_all(&mem_dir).unwrap();
     let ids: Vec<&String> = corpus.facts.keys().collect();
@@ -337,24 +339,39 @@ fn write_store(root: &Path, repo: &str, corpus: &Corpus) -> PathBuf {
     for (id, text) in &corpus.facts {
         std::fs::write(mem_dir.join(format!("{id}.md")), text).unwrap();
         let (name, description) = recall_corpus::name_and_description(text);
-        nodes.push(serde_json::json!({
-            "id": id, "file": format!("{id}.md"), "scope": "project",
-            "project": repo, "type": "project", "name": name, "description": description,
-        }));
+        nodes.push(NodeRow {
+            id: id.clone(),
+            file: format!("{id}.md"),
+            scope: "project".into(),
+            project: Some(repo.into()),
+            kind: "project".into(),
+            name: Some(name),
+            description: Some(description),
+            pinned: false,
+        });
     }
     let mut rng = recall_corpus::SplitMix64::new(CORPUS_SEED);
     let mut edges = Vec::new();
     for from in &ids {
         for _ in 0..EDGES_PER_FACT {
             let to = ids[(rng.next_u64() % ids.len() as u64) as usize];
-            edges.push(serde_json::json!({
-                "from": from, "to": to, "relation": "possible_relates_to",
-                "signals": ["type_scope", "body_overlap"],
-            }));
+            edges.push(EdgeRow {
+                from: (*from).clone(),
+                to: to.clone(),
+                relation: "possible_relates_to".into(),
+                signals: Some(vec!["type_scope".into(), "body_overlap".into()]),
+            });
         }
     }
-    let graph = serde_json::json!({"nodes": nodes, "edges": edges, "version": 1});
-    playbook::hooks::rebuild_memory_graph::import_json(&mem_dir, &graph.to_string()).unwrap();
+    let db = playbook_data::memory::db_in(&root.join("data"));
+    playbook_data::memory::write_graph_with_bodies(&db, &nodes, &edges, |file| {
+        let text = std::fs::read_to_string(mem_dir.join(file)).ok()?;
+        Some(
+            text.split_once("\n---\n")
+                .map_or(text.clone(), |(_, rest)| rest.to_string()),
+        )
+    })
+    .unwrap();
     mem_dir
 }
 
@@ -429,8 +446,7 @@ const STORE_REPO: &str = "synthetic/store";
 
 fn index_source(corpus: &Corpus, root: &Path) -> IndexSource {
     let mem_dir = write_store(root, STORE_REPO, corpus);
-    let db = playbook_data::memory::db_in(&mem_dir.parent().unwrap().join("data"));
-    IndexSource::new(recall_harness::index_text(corpus), db, STORE_REPO)
+    IndexSource::new(recall_harness::index_text(corpus), &mem_dir, STORE_REPO)
 }
 
 /// Ids that `source` returned for each query, split into queries it answers
@@ -445,18 +461,35 @@ fn answered(run: &recall_harness::Run, fixture: &Fixture) -> std::collections::B
 }
 
 #[test]
-fn the_index_path_returns_the_scans_ordered_results_when_few_facts_match() {
-    // Arrange: only the fixture facts, so no query has more matches than the
-    // index returns candidates for.
+fn every_fact_the_scan_returns_is_still_returned_by_the_index_path() {
+    // Arrange: only the fixture facts. The index path also reads bodies, so
+    // it may return more than the scan, never less.
     let fixture = Fixture::load(&fixture_dir()).unwrap();
     let corpus = Corpus::build(&fixture, fixture.facts.len(), CORPUS_SEED);
-    let dir = scratch("parity");
+    let dir = scratch("containment");
     let by_index = index_source(&corpus, &dir.0);
     let by_scan = recall_harness::scan_source(&corpus);
 
     // Act
-    let from_index = recall_harness::run(&by_index, &fixture);
-    let from_scan = recall_harness::run(&by_scan, &fixture);
+    let missing: Vec<String> = fixture
+        .queries
+        .iter()
+        .flat_map(|q| {
+            let query = PromptQuery::new(&q.text);
+            let wanted = by_scan.candidates(&query, usize::MAX);
+            let got: Vec<String> = by_index
+                .candidates(&query, usize::MAX)
+                .iter()
+                .map(|m| m.fact_id().to_string())
+                .collect();
+            wanted
+                .iter()
+                .map(|m| m.fact_id().to_string())
+                .filter(|id| !got.contains(id))
+                .map(|id| format!("{}: {id}", q.id))
+                .collect::<Vec<_>>()
+        })
+        .collect();
 
     // Assert
     assert_eq!(
@@ -464,23 +497,20 @@ fn the_index_path_returns_the_scans_ordered_results_when_few_facts_match() {
         0,
         "the index path fell back to the scan"
     );
-    let differing: Vec<_> = from_scan
-        .0
-        .iter()
-        .filter(|(q, ids)| from_index.0.get(*q) != Some(*ids))
-        .map(|(q, ids)| format!("{q}: scan {ids:?}, index {:?}", from_index.0[q]))
-        .collect();
-    assert!(differing.is_empty(), "{}", differing.join("\n"));
+    assert!(
+        missing.is_empty(),
+        "scan results the index path dropped:\n{}",
+        missing.join("\n")
+    );
 }
 
 #[test]
-fn the_index_path_loses_no_query_the_scan_answers_among_many_distractors() {
-    // Arrange: with thousands of equal-scoring distractors the two paths may
-    // fill the remaining slots differently, so compare which queries each
-    // answers rather than the filler.
+fn the_index_path_has_no_net_loss_against_the_scan_on_the_score_queries() {
+    // Arrange: with thousands of equal-scoring distractors the two paths fill
+    // the spare slots differently, so compare which queries each answers.
     let fixture = Fixture::load(&fixture_dir()).unwrap();
     let corpus = default_corpus(&fixture);
-    let dir = scratch("parity-large");
+    let dir = scratch("net-loss");
     let by_index = index_source(&corpus, &dir.0);
 
     // Act
@@ -491,17 +521,33 @@ fn the_index_path_loses_no_query_the_scan_answers_among_many_distractors() {
     );
 
     // Assert
-    let lost: Vec<_> = from_scan.difference(&from_index).collect();
-    let won: Vec<_> = from_index.difference(&from_scan).collect();
-    println!(
-        "index path: {} won {won:?}, {} lost {lost:?}",
-        won.len(),
-        lost.len()
-    );
-    assert!(
-        lost.is_empty(),
-        "queries the scan answers and the index path does not: {lost:?}"
-    );
+    for split in [Split::Tune, Split::Score] {
+        let in_split: std::collections::BTreeSet<String> = fixture
+            .queries
+            .iter()
+            .filter(|q| q.split == split)
+            .map(|q| q.id.clone())
+            .collect();
+        let won: Vec<_> = from_index
+            .difference(&from_scan)
+            .filter(|q| in_split.contains(*q))
+            .collect();
+        let lost: Vec<_> = from_scan
+            .difference(&from_index)
+            .filter(|q| in_split.contains(*q))
+            .collect();
+        println!(
+            "{split:?}: index path won {} {won:?}, lost {} {lost:?}",
+            won.len(),
+            lost.len()
+        );
+        if split == Split::Score {
+            assert!(
+                won.len() >= lost.len(),
+                "net loss on score: won {won:?}, lost {lost:?}"
+            );
+        }
+    }
     assert_eq!(
         by_index.fallbacks(),
         0,

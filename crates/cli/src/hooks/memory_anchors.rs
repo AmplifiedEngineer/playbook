@@ -96,6 +96,10 @@ const NAME_HIT_SCORE: usize = 2;
 /// Score of a fact alias found in the prompt.
 const ALIAS_HIT_SCORE: usize = 2;
 
+/// Score for a prompt word found in a fact's body but not its name or
+/// description.
+const BODY_HIT_SCORE: usize = 1;
+
 /// Index column that holds the fact file, relative to the memory root.
 const FACT_FILE_COLUMN: usize = 5;
 
@@ -289,14 +293,7 @@ fn run_prompt(payload: &Payload, dir: &str) {
     let query = PromptQuery::new(&prompt);
     let tokens = &query.tokens;
     let index = AnchorIndex::parse(&contents);
-    let mut matches = matches_for_prompt(
-        dir,
-        &contents,
-        &index,
-        &query,
-        &fact_index_db(),
-        &repo_slug(),
-    );
+    let mut matches = matches_for_prompt(dir, &contents, &index, &query, &FactStore::own());
     for touched_abs in touched_paths(dir) {
         let relpath = repo_relative_path(&root, &touched_abs);
         if relpath.is_empty() {
@@ -446,7 +443,7 @@ fn format_recalled_fact(name: &str, desc: &str, note: &str, body: &str, file: &s
 
 /// `text` without a leading `---` frontmatter block, which the graph already
 /// carries as the name and description.
-fn strip_frontmatter(text: &str) -> &str {
+pub(crate) fn strip_frontmatter(text: &str) -> &str {
     let Some(rest) = text.strip_prefix("---\n") else {
         return text;
     };
@@ -622,6 +619,11 @@ impl RecallMatch {
     pub fn fact_id(&self) -> &str {
         self.row.get(1).map_or("", String::as_str)
     }
+
+    /// Whether the match is specific enough to trust, as opposed to weak.
+    pub fn is_strong(&self) -> bool {
+        self.strong
+    }
 }
 
 /// Rows whose name or description matches a prompt token, best first: each
@@ -631,11 +633,17 @@ impl RecallMatch {
 /// per from_id; a later anchor row of the same fact can add the crate-folder
 /// bonus to it.
 fn prompt_token_matches(idx_contents: &str, query: &PromptQuery) -> Vec<RecallMatch> {
-    score_rows(idx_contents.lines(), query)
+    score_rows(idx_contents.lines(), query, |_| None)
 }
 
-/// [`prompt_token_matches`] over the given index rows.
-fn score_rows<'a>(lines: impl Iterator<Item = &'a str>, query: &PromptQuery) -> Vec<RecallMatch> {
+/// [`prompt_token_matches`] over the given index rows. `body_of` gives the
+/// body of a row's fact when a token misses its name and description; a token
+/// found only there adds `BODY_HIT_SCORE` and never makes the match strong.
+fn score_rows<'a>(
+    lines: impl Iterator<Item = &'a str>,
+    query: &PromptQuery,
+    body_of: impl Fn(&[&str]) -> Option<String>,
+) -> Vec<RecallMatch> {
     let tokens = &query.tokens;
     let mut scored: Vec<RecallMatch> = Vec::new();
     let mut seen_from: HashMap<String, usize> = HashMap::new();
@@ -649,6 +657,7 @@ fn score_rows<'a>(lines: impl Iterator<Item = &'a str>, query: &PromptQuery) -> 
         let mut score = 0;
         let mut name_hit_tokens: Vec<&str> = Vec::new();
         let mut hyphenated_name_hit = false;
+        let mut body: Option<Option<String>> = None;
         for token in tokens {
             if token_matches(token, &name) {
                 score += NAME_HIT_SCORE;
@@ -663,6 +672,11 @@ fn score_rows<'a>(lines: impl Iterator<Item = &'a str>, query: &PromptQuery) -> 
                 hyphenated_name_hit |= token.contains('-') && contains_at_boundary(&name, token);
             } else if token_matches(token, &desc) {
                 score += 1;
+            } else {
+                let body = body.get_or_insert_with(|| body_of(&cols).map(|b| b.to_lowercase()));
+                if body.as_deref().is_some_and(|b| token_matches(token, b)) {
+                    score += BODY_HIT_SCORE;
+                }
             }
         }
         let path_hit = cols
@@ -888,11 +902,34 @@ impl<'a> AnchorIndex<'a> {
     }
 }
 
-/// `memory.db`, where the fact index lives, beside the memory folder.
-fn fact_index_db() -> PathBuf {
-    let root = mem_dir();
-    let data = root.parent().unwrap_or(&root).join("data");
-    playbook_data::memory::db_in(&data)
+/// Where the facts and their search index live, and which repo asks.
+struct FactStore {
+    mem_dir: PathBuf,
+    db: PathBuf,
+    repo: String,
+}
+
+impl FactStore {
+    /// The current user's store for the current repo.
+    fn own() -> Self {
+        let mem_dir = mem_dir();
+        let data = mem_dir.parent().unwrap_or(&mem_dir).join("data");
+        Self {
+            db: playbook_data::memory::db_in(&data),
+            mem_dir,
+            repo: repo_slug(),
+        }
+    }
+
+    /// The body of the fact an index row names, without its frontmatter.
+    fn body_of(&self, cols: &[&str]) -> Option<String> {
+        let file = cols
+            .get(FACT_FILE_COLUMN)
+            .copied()
+            .filter(|f| !f.is_empty())?;
+        let text = fs::read_to_string(self.mem_dir.join(file)).ok()?;
+        Some(strip_frontmatter(&text).to_string())
+    }
 }
 
 /// Why the fact index could not answer, as one word for the fallback log.
@@ -921,10 +958,9 @@ fn matches_for_prompt(
     contents: &str,
     index: &AnchorIndex,
     query: &PromptQuery,
-    db: &Path,
-    repo: &str,
+    store: &FactStore,
 ) -> Vec<RecallMatch> {
-    match recall_candidates(index, query, db, repo) {
+    match recall_candidates(index, query, store) {
         Ok(matches) => matches,
         Err(reason) => {
             record_fallback(dir, reason);
@@ -944,11 +980,10 @@ fn matches_for_prompt(
 fn recall_candidates(
     index: &AnchorIndex,
     query: &PromptQuery,
-    db: &Path,
-    repo: &str,
+    store: &FactStore,
 ) -> Result<Vec<RecallMatch>, &'static str> {
-    let hits =
-        search_facts(db, repo, &query.tokens, DEFAULT_LIMIT).map_err(|e| fallback_reason(&e))?;
+    let hits = search_facts(&store.db, &store.repo, &query.tokens, DEFAULT_LIMIT)
+        .map_err(|e| fallback_reason(&e))?;
     let ranked: HashSet<&str> = hits.iter().map(|h| h.fact_id.as_str()).collect();
     let mut lines: Vec<&str> = Vec::new();
     let mut indexed: HashSet<&str> = HashSet::new();
@@ -970,6 +1005,7 @@ fn recall_candidates(
     Ok(score_rows(
         lines.into_iter().chain(live.iter().map(String::as_str)),
         query,
+        |cols| store.body_of(cols),
     ))
 }
 
@@ -1052,7 +1088,7 @@ fn git_last_commit_epoch(path: &Path) -> Option<staleness::DateTime> {
 pub mod recall_harness {
     use super::{PromptQuery, RecallMatch};
     use std::cell::Cell;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     /// A way to pick the facts a prompt could recall, best first.
     pub trait CandidateSource {
@@ -1084,17 +1120,22 @@ pub mod recall_harness {
     /// prompts that had to fall back.
     pub struct IndexSource {
         index: String,
-        db: PathBuf,
-        repo: String,
+        store: super::FactStore,
         fallbacks: Cell<usize>,
     }
 
     impl IndexSource {
-        pub fn new(index: String, db: PathBuf, repo: &str) -> Self {
+        /// `mem_dir` holds the fact files; `memory.db` is in the `data` folder
+        /// beside it.
+        pub fn new(index: String, mem_dir: &Path, repo: &str) -> Self {
+            let data = mem_dir.parent().unwrap_or(mem_dir).join("data");
             Self {
                 index,
-                db,
-                repo: repo.to_string(),
+                store: super::FactStore {
+                    mem_dir: mem_dir.to_path_buf(),
+                    db: playbook_data::memory::db_in(&data),
+                    repo: repo.to_string(),
+                },
                 fallbacks: Cell::new(0),
             }
         }
@@ -1108,8 +1149,8 @@ pub mod recall_harness {
     impl CandidateSource for IndexSource {
         fn candidates(&self, query: &PromptQuery, limit: usize) -> Vec<RecallMatch> {
             let parsed = super::AnchorIndex::parse(&self.index);
-            let mut matches = super::recall_candidates(&parsed, query, &self.db, &self.repo)
-                .unwrap_or_else(|_| {
+            let mut matches =
+                super::recall_candidates(&parsed, query, &self.store).unwrap_or_else(|_| {
                     self.fallbacks.set(self.fallbacks.get() + 1);
                     super::prompt_token_matches(&self.index, query)
                 });
@@ -1949,7 +1990,16 @@ mod tests {
             prompt: &str,
         ) -> Result<Vec<RecallMatch>, &'static str> {
             let index = AnchorIndex::parse(session);
-            recall_candidates(&index, &PromptQuery::new(prompt), db, REPO)
+            recall_candidates(&index, &PromptQuery::new(prompt), &store_at(db))
+        }
+
+        /// A store whose fact files live beside `db` in `memory`.
+        fn store_at(db: &Path) -> FactStore {
+            FactStore {
+                mem_dir: db.parent().unwrap().parent().unwrap().join("memory"),
+                db: db.to_path_buf(),
+                repo: REPO.to_string(),
+            }
         }
 
         fn nodes() -> Vec<NodeRow> {
@@ -2126,14 +2176,92 @@ mod tests {
             let missing = db_in(&session_dir.join("none"));
 
             // Act
-            let served = matches_for_prompt(dir, &session, &index, &query, &db, REPO);
+            let served = matches_for_prompt(dir, &session, &index, &query, &store_at(&db));
             let counted_after_served = counter.exists();
-            let scanned = matches_for_prompt(dir, &session, &index, &query, &missing, REPO);
+            let scanned = matches_for_prompt(dir, &session, &index, &query, &store_at(&missing));
 
             // Assert
             assert!(!counted_after_served);
             assert_eq!(fs::read_to_string(&counter).unwrap(), "no-database\n");
             assert_eq!(ids(&served), ids(&scanned));
+        }
+
+        /// A store on disk: fact files under `memory`, the graph and its
+        /// search index (bodies included) in `data/memory.db`.
+        fn store_with_bodies(tag: &str, facts: &[(&str, &str, &str, &str)]) -> (String, PathBuf) {
+            let root = crate::common::test_support::scratch_dir(tag);
+            let mem = root.join("memory");
+            fs::create_dir_all(&mem).unwrap();
+            let mut nodes = Vec::new();
+            for (id, name, desc, body) in facts {
+                let text = format!("---\nname: {name}\ndescription: {desc}\n---\n\n{body}\n");
+                fs::write(mem.join(format!("{id}.md")), text).unwrap();
+                nodes.push(node(id, name, desc));
+            }
+            let db = db_in(&root.join("data"));
+            playbook_data::memory::write_graph_with_bodies(&db, &nodes, &[], |file| {
+                let text = fs::read_to_string(mem.join(file)).ok()?;
+                Some(strip_frontmatter(&text).to_string())
+            })
+            .unwrap();
+            (session_index(&nodes), db)
+        }
+
+        #[test]
+        fn a_fact_matched_only_in_its_body_is_returned_scored_one_and_marked_weak() {
+            // Arrange
+            let (session, db) = store_with_bodies(
+                "fi-body",
+                &[(
+                    "habitat",
+                    "habitat-notes",
+                    "unrelated",
+                    "the quokka lives here",
+                )],
+            );
+
+            // Act
+            let found = via_index(&session, &db, "quokka").unwrap();
+
+            // Assert
+            assert_eq!(ids(&found), ["habitat"]);
+            assert_eq!(found[0].score, BODY_HIT_SCORE);
+            assert!(!found[0].is_strong());
+        }
+
+        #[test]
+        fn the_scan_fallback_does_not_read_bodies() {
+            // Arrange
+            let (session, _) = store_with_bodies(
+                "fi-body-scan",
+                &[(
+                    "habitat",
+                    "habitat-notes",
+                    "unrelated",
+                    "the quokka lives here",
+                )],
+            );
+
+            // Act
+            let found = prompt_token_matches(&session, &PromptQuery::new("quokka"));
+
+            // Assert
+            assert!(found.is_empty());
+        }
+
+        #[test]
+        fn a_body_word_adds_one_point_for_each_prompt_word_it_holds() {
+            // Arrange
+            let (session, db) = store_with_bodies(
+                "fi-body-two",
+                &[("habitat", "habitat-notes", "unrelated", "quokka and wombat")],
+            );
+
+            // Act
+            let found = via_index(&session, &db, "quokka wombat").unwrap();
+
+            // Assert
+            assert_eq!(found[0].score, 2 * BODY_HIT_SCORE);
         }
     }
 }
