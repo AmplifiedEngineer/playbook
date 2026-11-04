@@ -590,7 +590,11 @@ pub(crate) mod tests {
         pub(crate) fn start(p: &Paths) -> Self {
             let stop = Arc::new(AtomicBool::new(false));
             let (paths, flag) = (p.clone(), Arc::clone(&stop));
-            let thread = std::thread::spawn(move || run_collect(&paths, Some(0), 0, &flag));
+            // A port from `free_port`, not 0: a port the system picks is free again
+            // the moment this collector lets go, and a sibling test that binds
+            // port 0 can be handed it before the successor test binds it.
+            let port = free_port();
+            let thread = std::thread::spawn(move || run_collect(&paths, Some(port), 0, &flag));
             let mut me = Self {
                 stop,
                 port: 0,
@@ -898,7 +902,7 @@ pub(crate) mod tests {
     /// `bind(0)`, so a sibling test that binds port 0 cannot be given it
     /// between this probe and the bind it is picked for. Each call tries a
     /// new candidate, and the process id spreads separate test processes.
-    fn free_port() -> u16 {
+    pub(crate) fn free_port() -> u16 {
         use std::sync::atomic::AtomicU32;
         const FIRST: u32 = 20_000;
         const SPAN: u32 = 10_000;
