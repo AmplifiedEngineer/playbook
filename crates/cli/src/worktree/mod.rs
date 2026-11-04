@@ -6,6 +6,7 @@
 //! review worktrees), then decides whether an already-classified worktree is
 //! safe to reap.
 
+mod pr_state;
 pub mod review;
 
 use crate::common::git;
@@ -152,6 +153,10 @@ pub enum PrState {
     Merged,
     Open,
 }
+
+/// Reads the pull request state of a branch in a repo, for the sweep. Called
+/// from the parallel judging step, so it must be `Sync`.
+pub type PrLookup<'a> = &'a (dyn Fn(&Path, &str) -> Option<PrState> + Sync);
 
 /// Seconds in a day, for converting `stale_after_days` into the age
 /// comparison [`named_branch_landed`] runs against a commit timestamp.
@@ -457,6 +462,7 @@ fn default_branch(repo_root: &Path) -> Option<String> {
 struct RepoRef<'a> {
     root: &'a Path,
     default: Option<&'a str>,
+    pr_lookup: Option<PrLookup<'a>>,
 }
 
 /// Whether judging a worktree of this kind compares against the default
@@ -590,7 +596,7 @@ fn is_landed(
                     policy.stale_after_days,
                     repo_root,
                     now_epoch,
-                    None,
+                    repo.pr_lookup.and_then(|lookup| lookup(repo_root, branch)),
                 ),
                 None => false,
             },
@@ -817,6 +823,7 @@ fn decide_target(
     let repo = RepoRef {
         root: repo_root,
         default: default.as_deref(),
+        pr_lookup: None,
     };
     let landed = is_landed(&entry, convention, &lock, &policy, &repo, now_epoch, 0);
     let report = decide_and_report(&entry, landed, &lock, repo_root, dry_run);
@@ -845,12 +852,34 @@ fn log_removal(home: &Path, now_epoch: i64, line: &str) {
 /// applies the matching landed-signal check, and removes what has landed
 /// and is not locked by a live process, per the sequence: list, classify,
 /// check landed (conflict marker first for `Wu`), check lock, decide, act.
+/// A named branch counts as landed when its pull request is merged (read with
+/// `gh`), which catches squash merges that git history cannot see.
 pub fn sweep(
     repo_root: &Path,
     home: &Path,
     repo_slug: Option<&str>,
     dry_run: bool,
     now_epoch: i64,
+) -> Result<Vec<String>, String> {
+    sweep_with(
+        repo_root,
+        home,
+        repo_slug,
+        dry_run,
+        now_epoch,
+        Some(&pr_state::gh_pr_state),
+    )
+}
+
+/// [`sweep`] with the pull request lookup injected; `None` judges by local
+/// git history alone.
+pub fn sweep_with(
+    repo_root: &Path,
+    home: &Path,
+    repo_slug: Option<&str>,
+    dry_run: bool,
+    now_epoch: i64,
+    pr_lookup: Option<PrLookup<'_>>,
 ) -> Result<Vec<String>, String> {
     let policy = resolve_policy(home, repo_slug).map_err(|err| err.to_string())?;
     if !policy.enabled {
@@ -891,6 +920,7 @@ pub fn sweep(
     let repo = RepoRef {
         root: repo_root,
         default: default.as_deref(),
+        pr_lookup,
     };
     let judged = crate::common::par::map(
         &candidates,
