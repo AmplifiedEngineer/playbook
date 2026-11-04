@@ -14,7 +14,7 @@
 | `playbook usage status [--json]` | Shows whether the receiver runs, the telemetry row counts and the retention limits. Starts nothing. |
 | `playbook usage prune [--dry-run]` | Deletes telemetry rows past the retention limits. See [Checking and running the collector](#checking-and-running-the-collector). |
 | `playbook usage stop` | Stops the running collector through its authenticated shutdown route. It waits up to 3 seconds before it kills one that does not answer (only after checking the pid is the playbook collector). Prints `stopped` or `not running`. |
-| `playbook usage doctor [--raw]` | Lists where `pbtop` can read your limits on this machine: plan fields and cached usage numbers in the Claude Code config file, the statusline reading and the manual budgets. It prints field names, ages, the plan label, window percentages and manual budget amounts, never an email, name, id, organization or token. `--raw` adds the values of six plan fields and the cached spend limit and amount used, in dollars. Run it on another machine and share the output when the limits look wrong. |
+| `playbook usage doctor [--raw]` | Lists where `pbtop` can read your limits on this machine: plan fields and cached usage numbers in the Claude Code config file, the statusline reading and the manual budgets. It prints field names, ages, the plan label, window percentages and manual budget amounts, never an email, name, id, organization or token. It also says what the statusline budget line will show and which source decided it. `--raw` adds the plan field values and the raw numbers the readers saw. Run it on another machine and share the output when the limits look wrong. |
 
 Every command that shows data reads new history first. You never ingest by hand.
 
