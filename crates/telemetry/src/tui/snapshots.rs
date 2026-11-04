@@ -380,7 +380,7 @@ fn the_budget_panel_shows_a_manual_limit_and_says_so() {
         Range::CurrentMonth,
     );
     let text = draw(&a, 160, 50);
-    assert!(text.contains("[manual]"));
+    assert!(text.contains("[manual, this machine only]"));
     assert!(text.contains("[local history]"));
     check("budget_manual_160x50", &text);
 }
@@ -1179,6 +1179,39 @@ fn a_stale_cached_limit_is_labeled_with_its_age_and_says_used_is_this_machine_on
         text.contains("[limit cached 1d 22h ago, used is this machine only]"),
         "{text}"
     );
+}
+
+fn with_reported(mut s: Sources, used: f64) -> Sources {
+    use crate::spend::SpendFigure;
+    let fetched_at = s.account.cache.as_ref().map_or(0, |c| c.fetched_at);
+    if let Some(c) = s.account.cache.as_mut() {
+        c.billed = SpendFigure::from_usd(Some(500.0), Some(used), fetched_at);
+    }
+    s
+}
+
+#[test]
+fn a_stale_reported_figure_is_shown_with_its_age_beside_this_machines_estimate() {
+    let s = with_reported(enterprise_sources(46 * 3600), 120.0);
+    let a = with_sources(tabbed(1), &s, Range::LastDays(30));
+
+    let text = draw(&a, 140, 40);
+
+    assert!(
+        text.contains("Claude reported $120.00 used this month, read 1d 22h ago (stale)"),
+        "{text}"
+    );
+    assert!(text.contains("/usage"), "{text}");
+}
+
+#[test]
+fn a_fresh_reported_figure_is_the_bar_itself_and_adds_no_line() {
+    let s = with_reported(enterprise_sources(600), 120.0);
+    let a = with_sources(tabbed(1), &s, Range::LastDays(30));
+
+    let text = draw(&a, 140, 40);
+
+    assert!(!text.contains("Claude reported"), "{text}");
 }
 
 #[test]

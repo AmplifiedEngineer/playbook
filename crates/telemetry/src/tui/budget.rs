@@ -146,7 +146,8 @@ fn tag(origin: Origin, stale: bool, cache_age: Option<i64>) -> String {
     match (origin, stale) {
         (Origin::Measured, true) => "measured, stale".to_string(),
         (Origin::Measured, _) => "measured".to_string(),
-        (Origin::Manual, _) => "manual".to_string(),
+        // A manual budget is counted against the transcripts of this machine.
+        (Origin::Manual, _) => "manual, this machine only".to_string(),
         (Origin::Cached, _) => match cache_age {
             // Past the freshness limit the cache's used amount is dropped and
             // the bar shows this machine's estimate, which misses other
@@ -250,6 +251,28 @@ fn limit_line(
     join(segs, width)
 }
 
+/// What Claude Code reported as used, with its age, when no bar above shows
+/// that figure: a bar from a manual budget or a stale cache counts only this
+/// machine. A fresh cache replaces the estimate, so it needs no line.
+fn reported_line(v: &LimitsView, now: i64) -> Option<String> {
+    let (read_at, used) = v.reported?;
+    let monthly = v
+        .limits
+        .iter()
+        .find(|l| l.period == LimitPeriod::Monthly && l.unit == Unit::Dollars)?;
+    let age = (now - read_at).max(0);
+    let stale = age > STALE_SECONDS;
+    if monthly.origin == Origin::Measured || (monthly.origin == Origin::Cached && !stale) {
+        return None;
+    }
+    Some(format!(
+        "Claude reported {} used this month, read {} ago{}; run /usage in Claude Code to refresh it",
+        crate::limits_source::amount(Unit::Dollars, used),
+        elapsed_text(age),
+        if stale { " (stale)" } else { "" }
+    ))
+}
+
 fn burn_text(b: &Burn) -> String {
     match (b.per_hour, b.per_day) {
         (Some(h), Some(d)) => format!("{}/h {}/day", money(h), money(d)),
@@ -344,6 +367,9 @@ pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette, icon: I
             v.cache_age,
             width,
         ));
+    }
+    if let Some(line) = reported_line(v, data.now) {
+        lines.push(Line::styled(fit(&line, width), fg(pal, pal.fg)));
     }
     if let Some(note) = v.windows_note.filter(|_| !v.limits.is_empty()) {
         lines.push(Line::styled(fit(note, width), fg(pal, pal.inactive)));

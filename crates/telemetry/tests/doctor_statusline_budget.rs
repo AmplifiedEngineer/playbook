@@ -142,3 +142,17 @@ fn a_fresh_statusline_snapshot_with_dollars_is_named_as_the_source() {
     );
     assert!(!text.contains("5 hour window: absent"), "{text}");
 }
+
+#[test]
+fn doctor_says_pbtop_keeps_the_claude_limit_when_your_budget_is_lower_and_where_to_compare() {
+    let text = Home::new("pbtop", FIXTURE).report(&OWN, HOUR, false);
+    for line in [
+        "  your usage.budget.monthlyUsd is lower than that limit: pbtop keeps the Claude limit and the statusline budget line uses yours",
+        "  to compare with this machine's own cost for the month, run `playbook usage --summary`",
+    ] {
+        assert!(text.contains(line), "{line}\n{text}");
+    }
+    let higher =
+        Home::new("pbtop-higher", FIXTURE).report(&[(LimitPeriod::Monthly, 3000.0)], HOUR, false);
+    assert!(!higher.contains("is lower than that limit"), "{higher}");
+}
