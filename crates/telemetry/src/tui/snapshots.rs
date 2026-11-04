@@ -1045,6 +1045,16 @@ fn the_layout_editor_window_at_100x30() {
 }
 
 #[test]
+fn the_layout_editor_picker_at_100x30() {
+    let mut a = tabbed(0);
+    let mut editor = crate::tui::editor::Editor::new(&a.layout, 0);
+    editor.key(ratatui::crossterm::event::KeyCode::Char('a'));
+    a.editor = Some(editor);
+
+    check("layout_editor_picker_100x30", &draw(&a, 100, 30));
+}
+
+#[test]
 fn the_projection_panel_shows_both_paces_for_a_budget_and_the_window_average() {
     let mut a = with_limits(
         tabbed(1),

@@ -319,90 +319,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         render_help(frame, area, scroll, &pal);
     }
     if let Some(editor) = &app.editor {
-        render_editor(frame, area, editor, &pal);
+        super::editor_view::render(frame, area, editor, &pal);
     }
-}
-
-/// The layout editor window, centered over the panels.
-fn render_editor(frame: &mut Frame, area: Rect, ed: &super::editor::Editor, pal: &Palette) {
-    let width = area.width.saturating_sub(2).min(78);
-    // Tab line, rename line, one line per panel, a message line, two key lines and the border.
-    let wanted = super::layout::ALL.len() as u16 + 7;
-    let height = wanted.min(area.height.saturating_sub(2));
-    let rect = Rect::new(
-        area.x + (area.width - width) / 2,
-        area.y + (area.height - height) / 2,
-        width,
-        height,
-    );
-    let accent = Style::default()
-        .fg(pal.color(pal.hi))
-        .add_modifier(Modifier::BOLD);
-    let plain = Style::default().fg(pal.color(pal.fg));
-    let mut lines: Vec<Line> = Vec::new();
-    let mut tabs = vec![Span::raw(" ")];
-    let full: usize = ed
-        .layout
-        .tabs
-        .iter()
-        .map(|t| t.name.chars().count() + 2)
-        .sum();
-    let names = full < usize::from(width).saturating_sub(4);
-    for (i, tab) in ed.layout.tabs.iter().enumerate() {
-        let shown = if names || i == ed.tab {
-            format!(" {} ", tab.name)
-        } else {
-            format!(" {} ", i + 1)
-        };
-        tabs.push(if i == ed.tab {
-            Span::styled(shown, accent.add_modifier(Modifier::UNDERLINED))
-        } else {
-            Span::styled(shown, plain)
-        });
-    }
-    lines.push(Line::from(tabs));
-    lines.push(match &ed.rename {
-        Some(name) => Line::styled(
-            format!(" New name: {name}_   enter apply   esc cancel"),
-            accent,
-        ),
-        None => Line::raw(""),
-    });
-    for (i, id) in super::layout::ALL.iter().enumerate() {
-        let mark = match ed.position(*id) {
-            Some(at) => format!("[{}]", at + 1),
-            None => "[ ]".to_string(),
-        };
-        let pointer = if i == ed.row { ">" } else { " " };
-        let text = format!(" {pointer} {mark} {:<18} {}", id.word(), id.describe());
-        lines.push(if i == ed.row {
-            Line::styled(text, accent)
-        } else {
-            Line::styled(text, plain)
-        });
-    }
-    lines.push(match &ed.message {
-        Some(m) => Line::styled(format!(" {m}"), Style::default().fg(pal.color(pal.error))),
-        None => Line::raw(""),
-    });
-    lines.push(Line::styled(
-        " Left/Right tab   j/k line   space add or remove   J/K move panel",
-        plain,
-    ));
-    lines.push(Line::styled(
-        " < > move tab   n new   x delete   r rename   w save   R reset   esc cancel",
-        plain,
-    ));
-    let edge = Style::default().fg(pal.color(pal.hi));
-    let block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(edge)
-        .title(Line::styled(
-            "\u{2524} Layout: tabs and panels \u{251c}",
-            edge,
-        ));
-    frame.render_widget(ratatui::widgets::Clear, rect);
-    frame.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
 /// Height of the help window on a screen `rows` tall: all its lines, or what
@@ -1835,16 +1753,47 @@ mod tests {
     }
 
     #[test]
-    fn the_editor_window_lists_the_panels_and_the_keys() {
+    fn the_editor_window_draws_the_tab_as_rows_and_marks_the_cursor_cell() {
+        // Arrange
         let mut app = tabbed_app();
+        app.layout = Layout::parse("Charts=spend,tokens|burnup").unwrap();
+        app.go_tab(0);
         app.key(press(KeyCode::Char('e')));
 
+        // Act
         let text = screen(&app, 100, 30);
 
+        // Assert
+        let rows: Vec<&str> = text.lines().collect();
+        let first = rows
+            .iter()
+            .position(|l| l.contains("[> spend"))
+            .unwrap_or(0);
+        assert!(rows[first].contains("[  tokens"), "{text}");
+        assert!(rows[first + 1].contains("[  burnup"), "{text}");
+        assert_eq!(rows[first + 1].matches("[  burnup").count(), 1, "{text}");
         assert!(text.contains("Layout: tabs and panels"), "{text}");
-        assert!(text.contains("[1] spend"), "{text}");
-        assert!(text.contains("[ ] live"), "{text}");
+        assert!(text.contains("spend: cost per day"), "{text}");
         assert!(text.contains("w save"), "{text}");
+    }
+
+    #[test]
+    fn the_picker_lists_the_panels_the_tab_lacks_and_marks_the_chosen_one() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.layout = Layout::parse("Charts=spend,tokens").unwrap();
+        app.go_tab(0);
+        app.key(press(KeyCode::Char('e')));
+
+        // Act
+        app.key(press(KeyCode::Char('a')));
+        let text = screen(&app, 100, 30);
+
+        // Assert
+        assert!(text.contains("Add after spend"), "{text}");
+        assert!(text.contains("> models"), "{text}");
+        assert!(text.contains("live"), "{text}");
+        assert!(!text.contains("  tokens "), "{text}");
     }
 
     #[test]

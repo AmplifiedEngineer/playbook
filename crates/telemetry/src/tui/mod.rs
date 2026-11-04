@@ -12,6 +12,7 @@ pub mod burnup;
 pub mod chart;
 pub mod data;
 pub mod editor;
+pub mod editor_view;
 pub mod fmt;
 pub mod icon;
 pub mod keys;

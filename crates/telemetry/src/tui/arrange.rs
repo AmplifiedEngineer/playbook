@@ -50,16 +50,21 @@ pub fn move_sideways(tab: &mut Tab, slot: usize, by: isize) -> Result<usize, Str
     Ok(target)
 }
 
-/// Swaps the panel with the one above or below it, in the same column or the
-/// last one of a shorter row.
-pub fn move_vertically(tab: &mut Tab, slot: usize, by: isize) -> Result<usize, String> {
+/// The slot above or below `slot`, in the same column or the last one of a
+/// shorter row.
+pub fn vertical_neighbour(tab: &Tab, slot: usize, by: isize) -> Result<usize, String> {
     let rows = rows(tab);
     let (row, col) = locate(&rows, slot);
     let Some(next) = row.checked_add_signed(by).filter(|r| *r < rows.len()) else {
         let edge = if by < 0 { "top" } else { "bottom" };
         return Err(format!("The panel is at the {edge} of the tab"));
     };
-    let target = row_start(&rows, next) + col.min(usize::from(rows[next]) - 1);
+    Ok(row_start(&rows, next) + col.min(usize::from(rows[next]) - 1))
+}
+
+/// Swaps the panel with the one above or below it.
+pub fn move_vertically(tab: &mut Tab, slot: usize, by: isize) -> Result<usize, String> {
+    let target = vertical_neighbour(tab, slot, by)?;
     tab.panels.swap(slot, target);
     Ok(target)
 }

@@ -4,7 +4,8 @@
 //! The layout editor: a small window to add, remove, rename and reorder tabs
 //! and to arrange the panels each tab shows. It works on a copy of the
 //! layout; nothing changes until the user saves. The cursor sits on a panel
-//! slot, and the last changes can be undone.
+//! slot, a picker adds the panels the tab does not show, and the last changes
+//! can be undone.
 
 use super::arrange;
 use super::layout::{Layout, PanelId, Tab, ALL, MAX_NAME, MAX_TABS};
@@ -30,8 +31,8 @@ pub struct Editor {
     pub layout: Layout,
     /// The tab being edited.
     pub tab: usize,
-    /// The highlighted line of the panel list.
-    pub row: usize,
+    /// The line of the picker while it is open: the panels the tab does not show.
+    pub picker: Option<usize>,
     /// The panel slot the arranging keys act on, in screen order.
     pub slot: usize,
     /// The layouts before the latest changes, oldest first.
@@ -47,7 +48,7 @@ impl Editor {
         Editor {
             layout: layout.clone(),
             tab: tab.min(layout.tabs.len().saturating_sub(1)),
-            row: 0,
+            picker: None,
             slot: 0,
             undo: Vec::new(),
             rename: None,
@@ -61,7 +62,7 @@ impl Editor {
 
     /// Runs one key and remembers the layout before it when the key changed it.
     pub fn key(&mut self, code: KeyCode) -> Outcome {
-        if self.rename.is_none() && code == KeyCode::Char('u') {
+        if self.rename.is_none() && self.picker.is_none() && code == KeyCode::Char('u') {
             self.message = None;
             self.undo();
             return Outcome::Stay;
@@ -94,14 +95,17 @@ impl Editor {
             self.rename_key(code);
             return Outcome::Stay;
         }
+        if self.picker.is_some() {
+            self.picker_key(code);
+            return Outcome::Stay;
+        }
         self.message = None;
         match code {
             KeyCode::Esc | KeyCode::Char('q') => return Outcome::Cancel,
-            KeyCode::Down | KeyCode::Char('j') => self.row = (self.row + 1).min(ALL.len() - 1),
-            KeyCode::Up | KeyCode::Char('k') => self.row = self.row.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => self.look(1),
+            KeyCode::Up | KeyCode::Char('k') => self.look(-1),
             KeyCode::Right => self.go(1),
             KeyCode::Left => self.go(-1),
-            KeyCode::Char(' ') | KeyCode::Enter => self.toggle(),
             KeyCode::Char('h') => self.slot = self.slot.saturating_sub(1),
             KeyCode::Char('l') => self.slot += 1,
             KeyCode::Char('H') => self.arrange(|t, s| arrange::move_sideways(t, s, -1)),
@@ -110,10 +114,7 @@ impl Editor {
             KeyCode::Char('J') => self.arrange(|t, s| arrange::move_vertically(t, s, 1)),
             KeyCode::Char('f') => self.arrange(arrange::toggle_width),
             KeyCode::Char('d') => self.arrange(arrange::remove),
-            KeyCode::Char('a') => {
-                let panel = ALL[self.row];
-                self.arrange(|t, s| arrange::insert_after(t, s, panel));
-            }
+            KeyCode::Char('a') => self.open_picker(),
             KeyCode::Char('<') => self.move_tab(-1),
             KeyCode::Char('>') => self.move_tab(1),
             KeyCode::Char('n') => self.new_tab(),
@@ -154,21 +155,53 @@ impl Editor {
         }
     }
 
-    /// Adds the highlighted panel to the tab, or takes it off. A tab keeps at
-    /// least one panel.
-    fn toggle(&mut self) {
-        let panel = ALL[self.row];
-        let Some(tab) = self.current() else { return };
-        if let Some(at) = tab.panels.iter().position(|p| *p == panel) {
-            if tab.panels.len() == 1 {
-                self.message = Some("A tab needs at least one panel".to_string());
-            } else {
-                tab.panels.remove(at);
-                tab.rows = None;
-            }
+    /// Moves the cursor to the cell above or below it.
+    fn look(&mut self, by: isize) {
+        let Some(tab) = self.layout.tabs.get(self.tab) else {
+            return;
+        };
+        if let Ok(to) = arrange::vertical_neighbour(tab, self.slot, by) {
+            self.slot = to;
+        }
+    }
+
+    /// The panels the edited tab does not show, in the order of the list.
+    pub fn available(&self) -> Vec<PanelId> {
+        let shown = self
+            .layout
+            .tabs
+            .get(self.tab)
+            .map_or(&[][..], |t| &t.panels);
+        ALL.iter().copied().filter(|p| !shown.contains(p)).collect()
+    }
+
+    fn open_picker(&mut self) {
+        if self.available().is_empty() {
+            self.message = Some("Every panel is already on the tab".to_string());
         } else {
-            tab.panels.push(panel);
-            tab.rows = None;
+            self.picker = Some(0);
+        }
+    }
+
+    fn picker_key(&mut self, code: KeyCode) {
+        let choices = self.available();
+        let at = self
+            .picker
+            .unwrap_or(0)
+            .min(choices.len().saturating_sub(1));
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => self.picker = None,
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.picker = Some((at + 1).min(choices.len().saturating_sub(1)));
+            }
+            KeyCode::Up | KeyCode::Char('k') => self.picker = Some(at.saturating_sub(1)),
+            KeyCode::Enter => {
+                self.picker = None;
+                if let Some(panel) = choices.get(at).copied() {
+                    self.arrange(|t, s| arrange::insert_after(t, s, panel));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -196,9 +229,16 @@ impl Editor {
                     .any(|t| t.name.eq_ignore_ascii_case(n))
             })
             .unwrap_or_default();
+        let first = self
+            .layout
+            .tabs
+            .get(self.tab)
+            .and_then(|t| t.panels.get(self.slot))
+            .copied()
+            .unwrap_or(ALL[0]);
         self.layout.tabs.push(Tab {
             name,
-            panels: vec![ALL[self.row]],
+            panels: vec![first],
             rows: None,
         });
         self.tab = self.layout.tabs.len() - 1;
@@ -254,16 +294,6 @@ impl Editor {
             _ => {}
         }
     }
-
-    /// Whether the highlighted panel is on the tab being edited, and where.
-    pub fn position(&self, panel: PanelId) -> Option<usize> {
-        self.layout
-            .tabs
-            .get(self.tab)?
-            .panels
-            .iter()
-            .position(|p| *p == panel)
-    }
 }
 
 #[cfg(test)]
@@ -284,26 +314,109 @@ mod tests {
     }
 
     #[test]
-    fn space_adds_and_removes_the_highlighted_panel() {
+    fn the_picker_lists_only_the_panels_the_tab_does_not_show() {
+        // Arrange
         let mut e = editor();
-        e.row = 2;
 
-        e.key(KeyCode::Char(' '));
-        let added = e.position(PanelId::Models);
-        e.key(KeyCode::Char(' '));
+        // Act
+        e.key(KeyCode::Char('a'));
 
-        assert_eq!(added, Some(2));
-        assert_eq!(e.position(PanelId::Models), None);
+        // Assert
+        let choices = e.available();
+        assert_eq!(e.picker, Some(0));
+        assert!(!choices.contains(&PanelId::Spend) && !choices.contains(&PanelId::Tokens));
+        assert_eq!(choices.len(), ALL.len() - 2);
     }
 
     #[test]
-    fn the_last_panel_of_a_tab_cannot_be_removed() {
-        let mut e = Editor::new(&Layout::parse("Only=spend").unwrap(), 0);
+    fn enter_in_the_picker_adds_the_chosen_panel_after_the_cursor_and_closes_it() {
+        // Arrange
+        let mut e = editor();
+        let second = e.available()[1];
 
-        e.key(KeyCode::Char(' '));
+        // Act
+        e.key(KeyCode::Char('a'));
+        e.key(KeyCode::Char('j'));
+        e.key(KeyCode::Enter);
 
-        assert_eq!(e.layout.tabs[0].panels, [PanelId::Spend]);
-        assert!(e.message.is_some());
+        // Assert
+        assert_eq!(
+            e.layout.tabs[0].panels,
+            [PanelId::Spend, second, PanelId::Tokens]
+        );
+        assert_eq!(e.picker, None);
+        assert_eq!(e.slot, 1);
+    }
+
+    #[test]
+    fn escape_in_the_picker_goes_back_to_the_editor_without_a_change() {
+        // Arrange
+        let mut e = editor();
+        e.key(KeyCode::Char('a'));
+
+        // Act
+        let outcome = e.key(KeyCode::Esc);
+
+        // Assert
+        assert_eq!(outcome, Outcome::Stay);
+        assert_eq!(e.picker, None);
+        assert_eq!(e.layout.tabs[0].panels, [PanelId::Spend, PanelId::Tokens]);
+        assert!(e.undo.is_empty());
+    }
+
+    #[test]
+    fn the_picker_stops_at_its_first_and_last_line() {
+        // Arrange
+        let mut e = editor();
+        e.key(KeyCode::Char('a'));
+        let last = e.available().len() - 1;
+
+        // Act
+        for _ in 0..=ALL.len() {
+            e.key(KeyCode::Char('j'));
+        }
+        let bottom = e.picker;
+        for _ in 0..=ALL.len() {
+            e.key(KeyCode::Char('k'));
+        }
+
+        // Assert
+        assert_eq!(bottom, Some(last));
+        assert_eq!(e.picker, Some(0));
+    }
+
+    #[test]
+    fn a_panel_added_to_an_arranged_tab_gets_a_row_of_its_own() {
+        // Arrange
+        let mut e = editor();
+        e.layout = Layout::parse("A=spend,tokens|models").unwrap();
+        e.tab = 0;
+
+        // Act
+        e.key(KeyCode::Char('a'));
+        e.key(KeyCode::Enter);
+
+        // Assert
+        assert_eq!(e.layout.tabs[0].rows, Some(vec![2, 1, 1]));
+        assert_eq!(e.layout.tabs[0].panels.len(), 4);
+    }
+
+    #[test]
+    fn j_and_k_move_the_cursor_to_the_cell_below_and_above() {
+        // Arrange
+        let mut e = editor();
+        e.layout = Layout::parse("A=spend,tokens|models").unwrap();
+        e.tab = 0;
+        e.slot = 1;
+
+        // Act
+        e.key(KeyCode::Char('j'));
+        let below = e.slot;
+        e.key(KeyCode::Char('k'));
+
+        // Assert
+        assert_eq!(below, 2);
+        assert_eq!(e.slot, 0);
     }
 
     fn press_all(e: &mut Editor, keys: &str) {
@@ -381,19 +494,17 @@ mod tests {
     }
 
     #[test]
-    fn d_removes_the_slot_and_a_adds_the_listed_panel_after_it() {
+    fn d_removes_the_cursor_slot() {
         // Arrange
         let mut e = editor();
-        e.row = ALL.iter().position(|p| *p == PanelId::Live).unwrap();
+        e.slot = 1;
 
         // Act
-        press_all(&mut e, "a");
-        let added = e.layout.tabs[0].panels.clone();
         press_all(&mut e, "d");
 
         // Assert
-        assert_eq!(added, [PanelId::Spend, PanelId::Live, PanelId::Tokens]);
-        assert_eq!(e.layout.tabs[0].panels, [PanelId::Spend, PanelId::Tokens]);
+        assert_eq!(e.layout.tabs[0].panels, [PanelId::Spend]);
+        assert_eq!(e.slot, 0);
     }
 
     #[test]
@@ -440,19 +551,6 @@ mod tests {
 
         assert_eq!(e.layout.tabs.len(), 1);
         assert!(e.message.is_some());
-    }
-
-    #[test]
-    fn adding_a_panel_to_an_arranged_tab_makes_it_automatic() {
-        let mut e = editor();
-        e.layout = Layout::parse("A=spend,tokens|models").unwrap();
-        e.tab = 0;
-        e.row = ALL.iter().position(|p| *p == PanelId::Live).unwrap();
-
-        e.key(KeyCode::Enter);
-
-        assert_eq!(e.layout.tabs[0].rows, None);
-        assert_eq!(e.layout.tabs[0].panels.len(), 4);
     }
 
     #[test]
@@ -522,22 +620,6 @@ mod tests {
         let mut e = editor();
 
         assert_eq!(e.key(KeyCode::Char('R')), Outcome::Reset);
-    }
-
-    #[test]
-    fn the_line_keys_stop_at_the_first_and_last_panel() {
-        let mut e = editor();
-
-        for _ in 0..=ALL.len() {
-            e.key(KeyCode::Char('j'));
-        }
-        let bottom = e.row;
-        for _ in 0..=ALL.len() {
-            e.key(KeyCode::Char('k'));
-        }
-
-        assert_eq!(bottom, ALL.len() - 1);
-        assert_eq!(e.row, 0);
     }
 
     #[test]
