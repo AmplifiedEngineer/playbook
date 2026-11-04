@@ -379,7 +379,7 @@ Example: `playbook commit run --message-file /tmp/msg.txt`
 - `--auto`: Auto mode: never force a push
 - `--no-signoff`: Leave the sign-off trailer off
 - `--no-type-check`: Skip the check that the commit type fits the files. A docs-only change is not `feat`, and a lock-file bump is not `fix`
-- `--no-prose-check`: Skip the prose check (a dash, a curly quote, a banned word or a contrast phrase in the message)
+- `--no-prose-check`: Skip the prose check. It flags a dash, a curly quote, a banned word or a contrast phrase in the message
 
 ### `playbook completions`
 

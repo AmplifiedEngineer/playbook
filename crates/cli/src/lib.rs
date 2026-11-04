@@ -1780,8 +1780,8 @@ pub enum CommitCommand {
         /// change is not `feat`, and a lock-file bump is not `fix`
         #[arg(long)]
         no_type_check: bool,
-        /// Skip the prose check (a dash, a curly quote, a banned word or a
-        /// contrast phrase in the message)
+        /// Skip the prose check. It flags a dash, a curly quote, a banned word
+        /// or a contrast phrase in the message
         #[arg(long)]
         no_prose_check: bool,
     },
