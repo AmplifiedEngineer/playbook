@@ -2,14 +2,14 @@
 
 What works in Codex today, what does not, and why. Read from the Codex docs (learn.chatgpt.com and developers.openai.com) on 2026-10-20 and from this repo's code. Nothing here was run in a live Codex, so `[unverified]` marks every claim that needs one. Codex moves fast: check a row against the current Codex docs before you rely on it.
 
-Playbook runs best in Claude Code. Codex gets the skills and, if you wire them by hand, some of the guards.
+Playbook runs best in Claude Code. Codex gets the skills and, if you register them, some of the guards.
 
 ## Matrix
 
 | Piece | Status | Why |
 |---|---|---|
 | Skills and commands | Works | `playbook skills sync` copies skills, and commands rendered as skills, to `~/.agents/skills/playbook-*`. See [Codex skills](../internals/15-codex-skills.md). Whether Codex follows the one-line pointer in a split stub to `references/playbook-body.md` is `[unverified]`. |
-| Bash guards as hooks | Tested, not registered | `rm-workspace-guard`, `precommit-check` and `commit-message-sanitizer` read `tool_input.command` and print JSON shapes that Codex documents. Tests feed them Codex-shaped payloads (`crates/cli/tests/hooks_codex_payloads.rs`). Nothing registers them in Codex for you. |
+| Bash guards as hooks | Registered by `setup --only codex-hooks`, except the sanitizer | `rm-workspace-guard`, `precommit-check` and `commit-message-sanitizer` read `tool_input.command` and print JSON shapes that Codex documents. Tests feed them Codex-shaped payloads (`crates/cli/tests/hooks_codex_payloads.rs`). `playbook setup --only codex-hooks` registers the first two. The sanitizer is not registered. |
 | Edit and read hooks | Not supported | Codex has no `Read` tool, and `apply_patch` carries patch text in `tool_input.command` with no `file_path`. These hooks would need a patch parser. |
 | `policy-guard` | Not supported | Its rules guard Claude paths such as `~/.claude/projects/*/memory` and `.claude/settings*.json`. Registering it would look like protection and do nothing. |
 | `session-init`, `usage-warm` | Not supported | `session-init` reads `~/.claude`, runs the Claude plugin update and writes Claude restart hints. Not safe to register as is. |
@@ -18,10 +18,14 @@ Playbook runs best in Claude Code. Codex gets the skills and, if you wire them b
 | `WorktreeCreate`, `WorktreeRemove` | Not supported | Codex has no worktree event. |
 | Agents | Not rendered | Codex has subagents and custom agent TOML files, but no per-agent tool allowlist, and a subagent inherits the parent sandbox. Playbook agents such as the critic, fact-checker and reviewer rely on tool restriction to be read-only, which Codex cannot enforce. The command preamble tells the agent to do the step itself or ask in chat. |
 | System prompt | Not written | Codex reads `~/.codex/AGENTS.md`. Playbook does not write to it. Skills carry the rules. |
-| Doctor | No Codex row | `playbook doctor` checks the Claude layers only. |
+| Doctor | Codex row | `playbook doctor` reports whether Codex is found and whether the guards are in `~/.codex/hooks.json`. It cannot see whether you trusted them in `/hooks`. |
 | Usage | Works, unpriced | `CodexSource` reads `~/.codex/sessions/**/rollout-*.jsonl`. It has no OpenAI price table, so cost shows as unpriced. Compressed `.jsonl.zst` rollouts are skipped. Codex 0.163.0 still compresses older rollouts: on one machine, 17 of 21 rollouts were `.jsonl.zst` and only the recent ones were plain, so history Codex compressed before playbook read it is not counted. A rollout named `<parent>_<child>` carries the parent's session id in its `session_meta` line. Each event is keyed by session id, time and running total, so a line repeated in a child file is stored once. On one machine the child's totals continued from the parent's last total. Whether a rollout made by a user fork repeats the parent's events has not been recorded, so it is `[unverified]`. The `agent` split is in `playbook usage --json` (`groups.agent`) only, not in the text summary or the terminal view. |
 | Plugin distribution | Skills sync only | Codex reads Claude-compatible plugin manifests. Whether it loads the playbook plugin folder directly is `[unverified]`. |
 | MCP | Nothing to port | Playbook ships no MCP server. |
+
+## Registering the guards
+
+`playbook setup --only codex-hooks` adds two entries to `~/.codex/hooks.json`, after a backup, and keeps every other entry: `rm-workspace-guard` and `precommit-check`, both on `PreToolUse` for `Bash`. It runs only when Codex is found, and `--yes` leaves it off. Open `/hooks` in Codex afterwards and trust the entries. `playbook uninstall` removes them. The sanitizer is not registered until a live Codex confirms its rewrite is applied.
 
 ## How the guards behave in Codex
 
