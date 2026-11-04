@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Lines 2 and 3 of the status line: model and context on one, session
-//! economics on the other. Each segment is `None` when it has nothing to say.
+//! Lines 2 to 4 of the status line: model and context on one, session
+//! economics on the next, and the usage cap budget last. Each segment is `None`
+//! when it has nothing to say.
 
 use super::budget::Segment;
 use super::fmt::*;
