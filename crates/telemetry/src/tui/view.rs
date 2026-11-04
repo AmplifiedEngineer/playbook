@@ -222,6 +222,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     let top = p.tabbar.bottom();
     let body = Rect::new(0, top, area.width, p.footer.y.saturating_sub(top));
+    let dots = burnup::braille_ok(app.icon, pal.mono, app.dots_off);
     match (&app.data, notice::body(app)) {
         (Some(data), None) => {
             if p.budget.height > 0 {
@@ -236,7 +237,7 @@ pub fn render(frame: &mut Frame, app: &App) {
                     PanelId::Live => panels::live(frame, *rect, app, data, &pal),
                     PanelId::Sessions => panels::sessions(frame, *rect, app, data, &pal),
                     PanelId::Projection => projection::render(frame, *rect, data, &pal),
-                    PanelId::Burnup => burnup::render(frame, *rect, data, &pal),
+                    PanelId::Burnup => burnup::render(frame, *rect, data, &pal, dots),
                     PanelId::Budget => {}
                 }
             }

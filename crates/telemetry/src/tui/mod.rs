@@ -124,6 +124,7 @@ fn event_loop(
         ],
         env("PBTOP_ICON_WIDTH").as_deref(),
     );
+    app.dots_off = env("PBTOP_DOTS").is_some_and(|v| v.trim() == "0");
     app.depth = ColorDepth::detect(
         std::env::var("COLORTERM").ok().as_deref(),
         std::env::var("TERM").ok().as_deref(),

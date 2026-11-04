@@ -1176,11 +1176,20 @@ fn window_case() -> (crate::burnup::Burnup, Vec<crate::limits::Limit>) {
 }
 
 fn draw_burnup(kind: &str, theme: Theme, w: u16, h: u16) -> (String, Buffer) {
+    let dots = crate::tui::burnup::braille_ok(
+        crate::tui::icon::Icon::Wide,
+        theme.palette(ColorDepth::True).mono,
+        false,
+    );
+    draw_burnup_dots(kind, theme, w, h, dots)
+}
+
+fn draw_burnup_dots(kind: &str, theme: Theme, w: u16, h: u16, dots: bool) -> (String, Buffer) {
     crate::tz::set(crate::tz::Zone::Utc);
     let (b, limits) = burn_case(kind);
     let pal = theme.palette(ColorDepth::True);
     draw_with(w, h, |f| {
-        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal, dots);
     })
 }
 
@@ -1213,8 +1222,8 @@ fn the_burnup_panel_shows_the_windows_and_the_exceeded_limit() {
 }
 
 #[test]
-fn the_burnup_chart_names_every_line_and_marks_the_crossings() {
-    let (text, _) = draw_burnup("limit", Theme::Standard, 100, 30);
+fn the_solid_burnup_chart_names_every_line_and_marks_the_crossings() {
+    let (text, _) = draw_burnup_dots("limit", Theme::Standard, 100, 30, false);
 
     let legend = text
         .lines()
@@ -1252,10 +1261,114 @@ fn the_burnup_chart_names_every_line_and_marks_the_crossings() {
 #[test]
 fn mono_carries_every_burnup_line_without_color() {
     let (mono, buf) = draw_burnup("limit", Theme::Mono, 100, 30);
-    let (standard, _) = draw_burnup("limit", Theme::Standard, 100, 30);
+    let (standard, _) = draw_burnup_dots("limit", Theme::Standard, 100, 30, false);
 
     assert_eq!(mono, standard);
     assert!(buf.content().iter().all(|c| c.fg == Color::Reset));
+}
+
+fn braille_cells(text: &str) -> usize {
+    text.chars()
+        .filter(|c| ('\u{2800}'..='\u{28ff}').contains(c))
+        .count()
+}
+
+#[test]
+fn the_dot_chart_draws_braille_and_keeps_the_point_glyphs_whole() {
+    // Arrange
+    let kind = "limit";
+
+    // Act
+    let (text, _) = draw_burnup_dots(kind, Theme::Standard, 100, 30, true);
+
+    // Assert
+    assert!(braille_cells(&text) > 0, "{text}");
+    assert!(text.contains("\u{28ff} spent"), "{text}");
+    for glyph in ['\u{25b2}', '\u{25c6}'] {
+        assert!(text.contains(glyph), "{glyph} missing\n{text}");
+    }
+    assert!(!text.contains('\u{2588}'), "{text}");
+}
+
+#[test]
+fn the_used_area_is_denser_in_the_danger_zone_than_below_it() {
+    // Arrange
+    let (text, _) = draw_burnup_dots("exceeded", Theme::Standard, 100, 30, true);
+
+    // Act
+    let densities: Vec<u32> = text
+        .lines()
+        .flat_map(|l| l.chars())
+        .filter(|c| ('\u{2800}'..='\u{28ff}').contains(c))
+        .map(|c| (c as u32 - 0x2800).count_ones())
+        .collect();
+
+    // Assert
+    assert!(densities.contains(&8), "no full cell\n{text}");
+    assert!(densities.contains(&4), "no checker cell\n{text}");
+}
+
+#[test]
+fn the_dot_chart_colors_the_used_area_green_yellow_then_red_by_height() {
+    // Arrange
+    let pal = Theme::Standard.palette(ColorDepth::True);
+    let (b, limits) = burn_case("exceeded");
+    crate::tz::set(crate::tz::Zone::Utc);
+
+    // Act
+    let (_, buf) = draw_with(100, 30, |f| {
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal, true);
+    });
+    let colors: std::collections::HashSet<_> = buf
+        .content()
+        .iter()
+        .filter(|c| {
+            c.symbol()
+                .chars()
+                .any(|ch| ('\u{2800}'..='\u{28ff}').contains(&ch))
+        })
+        .map(|c| c.fg)
+        .collect();
+
+    // Assert
+    for ink in [pal.live, pal.series[4], pal.error, pal.hi] {
+        assert!(colors.contains(&pal.color(ink)), "{ink:?} not drawn");
+    }
+}
+
+#[test]
+fn no_braille_is_drawn_where_the_dots_are_off() {
+    // Arrange
+    let cases = [
+        ("mono theme", Theme::Mono, true),
+        ("symbols off", Theme::Standard, false),
+    ];
+    for (name, theme, symbols) in cases {
+        // Act
+        let icon = if symbols {
+            crate::tui::icon::Icon::Wide
+        } else {
+            crate::tui::icon::Icon::Off
+        };
+        let dots = crate::tui::burnup::braille_ok(icon, theme == Theme::Mono, false);
+        let (text, _) = draw_burnup_dots("limit", theme, 100, 30, dots);
+
+        // Assert
+        assert_eq!(braille_cells(&text), 0, "{name}\n{text}");
+        assert!(text.contains('\u{2588}'), "{name}\n{text}");
+    }
+}
+
+#[test]
+fn the_dots_switch_follows_symbols_color_and_the_env_override() {
+    use crate::tui::burnup::braille_ok;
+    use crate::tui::icon::Icon;
+
+    assert!(braille_ok(Icon::Wide, false, false));
+    assert!(braille_ok(Icon::Narrow, false, false));
+    assert!(!braille_ok(Icon::Off, false, false));
+    assert!(!braille_ok(Icon::Wide, true, false));
+    assert!(!braille_ok(Icon::Wide, false, true));
 }
 
 #[test]
@@ -1281,7 +1394,7 @@ fn before_the_period_starts_the_panel_says_so() {
     let pal = Theme::Mono.palette(ColorDepth::True);
 
     let (text, _) = draw_with(80, 12, |f| {
-        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &[], &pal);
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &[], &pal, false);
     });
 
     assert!(text.contains("the period has not started"), "{text}");
@@ -1328,7 +1441,7 @@ fn the_burnup_dates_follow_the_zone_of_its_days_not_the_global_zone() {
     let pal = Theme::Mono.palette(ColorDepth::True);
 
     let (text, _) = draw_with(100, 30, |f| {
-        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal, false);
     });
 
     assert!(text.contains("09-01"), "{text}");
@@ -1343,7 +1456,7 @@ fn a_percent_window_is_charted_from_its_readings_with_percent_labels() {
     let pal = Theme::Standard.palette(ColorDepth::True);
 
     let (text, _) = draw_with(100, 30, |f| {
-        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal, false);
     });
 
     assert!(text.contains("5 hour window used, UTC"), "{text}");
@@ -1366,7 +1479,7 @@ fn a_rate_limit_is_marked_on_the_chart_with_its_line_and_legend_entry() {
     let (b, limits) = window_case();
     let pal = Theme::Mono.palette(ColorDepth::True);
     let plain = draw_with(100, 30, |f| {
-        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal, false);
     })
     .0;
     let end = b.end;
@@ -1378,7 +1491,7 @@ fn a_rate_limit_is_marked_on_the_chart_with_its_line_and_legend_entry() {
     ]);
 
     let (text, _) = draw_with(100, 30, |f| {
-        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal, false);
     });
 
     assert!(!plain.contains('\u{00d7}'), "{plain}");

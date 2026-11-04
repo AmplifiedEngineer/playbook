@@ -6,13 +6,16 @@
 //! and 100 percent of the limit, and markers where those are crossed. A dollar
 //! limit follows the local cost per day. A percent window follows the
 //! readings, or a straight line when there are none. Every line has its own
-//! glyph, so the chart reads the same without color. Under `MIN_CHART_WIDTH`
-//! columns, or without room for a few rows, the panel shows the plain table
-//! instead.
+//! glyph, so the chart reads the same without color. Where the terminal can
+//! show Braille the plot is drawn as dots, four times as fine vertically; the
+//! solid glyphs stay as the fallback. Under `MIN_CHART_WIDTH` columns, or
+//! without room for a few rows, the panel shows the plain table instead.
 
 use super::budget;
 use super::data::Data;
+use super::dots::DotGrid;
 use super::fmt::{axis_money, fit};
+use super::icon::Icon;
 use super::theme::{Ink, Palette};
 use crate::burnup::Basis;
 use crate::burnup::Burnup;
@@ -34,6 +37,10 @@ const HEADROOM: f64 = 1.05;
 /// The thresholds drawn, in percent of the limit.
 const NEAR: f64 = 80.0;
 const PERCENT: f64 = 100.0;
+/// Percent of the limit where the used area turns from green to yellow.
+const RAMP_YELLOW: f64 = 60.0;
+/// The glyph in the legend for the used area drawn as dots.
+const DOT_ACTUAL: char = '\u{28ff}';
 
 const ACTUAL: char = '\u{2588}';
 const PROJECTION: char = '\u{00b7}';
@@ -142,6 +149,12 @@ impl Plot {
         (self.height - 1).saturating_sub(from_bottom.min(self.height - 1))
     }
 
+    /// The value at `row`, the inverse of `row`.
+    fn value(&self, row: usize) -> f64 {
+        self.top * (self.height - 1 - row.min(self.height - 1)) as f64
+            / (self.height - 1).max(1) as f64
+    }
+
     fn col(&self, b: &Burnup, at: i64) -> usize {
         let share = (at - b.start) as f64 / (b.end - b.start) as f64;
         ((share * (self.width - 1) as f64).round().max(0.0) as usize).min(self.width - 1)
@@ -243,13 +256,13 @@ fn crossing_line(b: &Burnup) -> String {
 }
 
 /// What each glyph draws.
-fn legend(b: &Burnup) -> String {
+fn legend(b: &Burnup, dots: bool) -> String {
     let used = match b.unit {
         Unit::Dollars => "spent",
         Unit::Percent => "used",
     };
     let mut parts = vec![
-        format!("{ACTUAL} {used}"),
+        format!("{} {used}", if dots { DOT_ACTUAL } else { ACTUAL }),
         format!("{PROJECTION} projected"),
     ];
     if b.limit.is_some() {
@@ -284,6 +297,110 @@ fn style(pal: &Palette, ink: Ink) -> Style {
     Style::default().fg(pal.color(ink))
 }
 
+/// The plot as spans of whole-cell glyphs, top row first.
+fn solid_rows(b: &Burnup, pal: &Palette, plot: &Plot) -> Vec<Vec<Span<'static>>> {
+    cells(b, plot)
+        .into_iter()
+        .map(|row| {
+            row.into_iter()
+                .map(|r| Span::styled(r.glyph().to_string(), style(pal, r.ink(pal))))
+                .collect()
+        })
+        .collect()
+}
+
+/// What a dot draws. The order is the priority on a shared cell: a limit
+/// outranks the projection, which outranks the used area.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Dot {
+    Green,
+    Yellow,
+    Red,
+    Half,
+    Near,
+    Projection,
+    Limit,
+}
+
+impl Dot {
+    fn ink(self, pal: &Palette) -> Ink {
+        match self {
+            Dot::Green => pal.live,
+            Dot::Yellow => pal.series[4],
+            Dot::Red | Dot::Limit => pal.error,
+            Dot::Half | Dot::Near => pal.inactive,
+            Dot::Projection => pal.hi,
+        }
+    }
+
+    /// The color stop of the used area at `percent` of the limit.
+    fn ramp(percent: f64) -> Dot {
+        if percent >= NEAR {
+            Dot::Red
+        } else if percent >= RAMP_YELLOW {
+            Dot::Yellow
+        } else {
+            Dot::Green
+        }
+    }
+}
+
+/// The plot as spans of Braille cells, top row first. The roles are placed
+/// on a grid of dots, then each cell takes the highest role it holds. Below
+/// `NEAR` the used area fills half the dots (a checker); from there up it
+/// fills them all, so the danger zone reads denser without color. Markers
+/// and the other point glyphs stay whole-cell glyphs over the dots.
+fn dot_rows(b: &Burnup, pal: &Palette, plot: &Plot) -> Vec<Vec<Span<'static>>> {
+    let fine = Plot {
+        width: plot.width * 2,
+        height: plot.height * 4,
+        top: plot.top,
+    };
+    let mut dots = DotGrid::new(plot.width, plot.height);
+    let mut glyphs = vec![vec![Role::Empty; plot.width]; plot.height];
+    for (y, row) in cells(b, &fine).into_iter().enumerate() {
+        for (x, role) in row.into_iter().enumerate() {
+            match role {
+                Role::Actual => {
+                    let percent = b.limit.map_or(0.0, |l| fine.value(y) / l * PERCENT);
+                    let dot = Dot::ramp(percent);
+                    if dot == Dot::Red || (x + y) % 2 == 0 {
+                        dots.set(x, y, dot);
+                    }
+                }
+                Role::Projection if x % 3 != 2 => dots.set(x, y, Dot::Projection),
+                Role::Near if x % 2 == 0 => dots.set(x, y, Dot::Near),
+                Role::Half if x % 4 == 0 => dots.set(x, y, Dot::Half),
+                Role::Limit => dots.set(x, y, Dot::Limit),
+                Role::Billed | Role::Marker | Role::RateLimited => {
+                    glyphs[y / 4][x / 2] = role;
+                }
+                Role::Empty | Role::Projection | Role::Near | Role::Half => {}
+            }
+        }
+    }
+    (0..plot.height)
+        .map(|row| {
+            (0..plot.width)
+                .map(|col| match (glyphs[row][col], dots.cell(col, row)) {
+                    (Role::Empty, Some((ch, dot))) => {
+                        Span::styled(ch.to_string(), style(pal, dot.ink(pal)))
+                    }
+                    (Role::Empty, None) => Span::raw(" "),
+                    (role, _) => Span::styled(role.glyph().to_string(), style(pal, role.ink(pal))),
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Whether the plot may use Braille dots: the terminal shows symbols (the
+/// icon is not off), the theme has color, and `PBTOP_DOTS=0` was not set for
+/// a font that draws Braille badly.
+pub fn braille_ok(icon: Icon, mono: bool, dots_off: bool) -> bool {
+    icon != Icon::Off && !mono && !dots_off
+}
+
 /// The chart lines for a plot area `width` columns wide and `rows` tall,
 /// including the date axis and the legend.
 fn chart_lines(
@@ -292,12 +409,17 @@ fn chart_lines(
     width: usize,
     rows: usize,
     windows: Option<String>,
+    dots: bool,
 ) -> Vec<Line<'static>> {
     let legend_rows = 2 + usize::from(windows.is_some());
     let plot = Plot::new(b, width - GUTTER, rows - 1 - legend_rows);
-    let grid = cells(b, &plot);
+    let plot_rows = if dots {
+        dot_rows(b, pal, &plot)
+    } else {
+        solid_rows(b, pal, &plot)
+    };
     let mut out = Vec::new();
-    for (i, row) in grid.iter().enumerate() {
+    for (i, row) in plot_rows.into_iter().enumerate() {
         let label = if i == 0 {
             axis(b, plot.top)
         } else if i == plot.height - 1 {
@@ -309,10 +431,7 @@ fn chart_lines(
             format!("{label:>w$} ", w = GUTTER - 1),
             style(pal, pal.inactive),
         )];
-        spans.extend(
-            row.iter()
-                .map(|r| Span::styled(r.glyph().to_string(), style(pal, r.ink(pal)))),
-        );
+        spans.extend(row);
         out.push(Line::from(spans));
     }
     let (first, last) = (short(b, b.start), short(b, b.end - 1));
@@ -326,7 +445,7 @@ fn chart_lines(
         style(pal, pal.fg),
     ));
     out.push(Line::styled(
-        fit(&legend(b), width),
+        fit(&legend(b, dots), width),
         style(pal, pal.inactive),
     ));
     if let Some(w) = windows {
@@ -342,6 +461,7 @@ pub(super) fn render_burnup(
     b: Option<&Burnup>,
     limits: &[Limit],
     pal: &Palette,
+    dots: bool,
 ) {
     if area.height == 0 {
         return;
@@ -388,7 +508,7 @@ pub(super) fn render_burnup(
             if inner.width >= MIN_CHART_WIDTH
                 && rows >= MIN_PLOT_ROWS + 4 + usize::from(windows.is_some()) =>
         {
-            chart_lines(b, pal, width, rows, windows)
+            chart_lines(b, pal, width, rows, windows, dots)
         }
         Some(b) => b
             .table(rows.saturating_sub(TABLE_CHROME).max(1))
@@ -400,6 +520,13 @@ pub(super) fn render_burnup(
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
-pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette) {
-    render_burnup(frame, area, data.limits.charted(), &data.limits.limits, pal);
+pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette, dots: bool) {
+    render_burnup(
+        frame,
+        area,
+        data.limits.charted(),
+        &data.limits.limits,
+        pal,
+        dots,
+    );
 }
