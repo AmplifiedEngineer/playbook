@@ -254,9 +254,7 @@ pub(crate) const META: &[Meta] = &[
         .purpose("Append one term to the repo's `GLOSSARY.md`")
         .for_agents(),
     free("glossary add"),
-    free("handoff")
-        .purpose("Save and show the notes that carry a session to the next")
-        .for_agents(),
+    free("handoff").for_agents(),
     ro("handoff check"),
     ro("handoff facts"),
     free("handoff save"),
@@ -355,9 +353,8 @@ pub(crate) const META: &[Meta] = &[
     ro("version").for_users(),
     free("worktree").for_agents(),
     free("worktree remove"),
-    free("worktree review").purpose("Create or remove the locked worktrees a review runs in"),
-    free("worktree review setup")
-        .purpose("Fetch a PR head into a locked worktree and print its path"),
+    free("worktree review"),
+    free("worktree review setup"),
     free("worktree review teardown"),
     free("worktree sweep"),
 ];
