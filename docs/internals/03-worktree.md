@@ -31,6 +31,8 @@ When `package-lock.json` hashes match between the base repo and the worktree, `n
 
 ## The daily sweep
 
+Every removal in the sweep goes through the gc guard and takes the gc run lock, so a sweep and `playbook gc` never run at once. See [cleanup and tombstones](16-gc-and-tombstones.md). Review worktrees follow one rule in the sweep and in `worktree review setup`: unlocked after 60 seconds, locked after a dead owner pid and 24 hours.
+
 `maybe_sweep_worktrees` (`crates/cli/src/hooks/session_init.rs`) also runs the sweep on every Claude Code `SessionStart`, at most once per 24 hours per repo (a row under `worktree-sweep/<repo slug>` in the [state store](08-state-store.md)). So a repo is swept when you create a worktree and again the first time a session opens each day. Both triggers call the same function. The overlap is deliberate.
 
 A repo nobody opens is swept by neither trigger. That is a known limit: fixing it needs an OS scheduler, which nothing here uses.
