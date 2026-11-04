@@ -250,9 +250,18 @@ pub mod git {
 pub(crate) fn scratch_dir(tag: &str) -> PathBuf {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
+    // A scratch folder is not removed after a run, and a process id comes
+    // back after enough forks, so the id alone could name a folder an
+    // earlier run left behind. The start time tells the two runs apart.
+    static STARTED: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    let started = STARTED.get_or_init(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    });
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
-        "playbook-telemetry-test-{}-{tag}-{n}",
+        "playbook-telemetry-test-{}-{started}-{tag}-{n}",
         std::process::id()
     ))
 }
