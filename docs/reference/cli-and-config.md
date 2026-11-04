@@ -387,7 +387,7 @@ Example: `playbook completions zsh`
 
 ### `playbook config`
 
-Read and change your playbook settings
+Read and change playbook settings in any tier
 
 Settings come from tiers, highest first: repo, org, global, then the built-in default. `get` and `list` show which tier supplied a value.
 
@@ -620,7 +620,7 @@ Example: `playbook effort apply --range 90d`
 
 Choose an effort for one dispatch from its diff
 
-Acts only when `effort.auto` allows it. Does nothing while `effort.auto` is `off` (the default). With `suggest` it logs what it would pick and the dispatch keeps the default. With `on` it names the `subagent_type` to spawn: an existing variant, picked strictly between the agent's quality floor and every ceiling, raised for risky or large diffs and lowered only for small clean ones. An agent marked costly to miss is never lowered. Any error gives the default. Every choice is appended to a local log (`playbook effort log`).
+Does nothing while `effort.auto` is `off` (the default). With `suggest` it logs what it would pick and the dispatch keeps the default. With `on` it names the `subagent_type` to spawn: an existing variant, picked strictly between the agent's quality floor and every ceiling, raised for risky or large diffs and lowered only for small clean ones. An agent marked costly to miss is never lowered. Any error gives the default. Every choice is appended to a local log (`playbook effort log`).
 
 Example: `playbook effort choose reviewer --base origin/main --json`
 
@@ -629,7 +629,7 @@ Example: `playbook effort choose reviewer --base origin/main --json`
 - `--lines <LINES>`: Changed lines, when not using --base
 - `--files <FILES>`: Changed files, when not using --base
 - `--bytes <BYTES>`: Diff size in bytes
-- `--path <PATHS>`: Touched path, repeated for several. Used when --base is not given
+- `--path <PATHS>`: Touched path, repeated for several, when not using --base
 - `--lens <LENS>`: Review lens, such as `security`
 - `--json`: Print JSON
 

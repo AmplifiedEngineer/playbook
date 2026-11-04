@@ -243,7 +243,7 @@ pub enum EffortCommand {
     },
     /// Choose an effort for one dispatch from its diff
     ///
-    /// Acts only when `effort.auto` allows it. Does nothing while `effort.auto` is `off` (the default). With `suggest`
+    /// Does nothing while `effort.auto` is `off` (the default). With `suggest`
     /// it logs what it would pick and the dispatch keeps the default. With
     /// `on` it names the `subagent_type` to spawn: an existing variant, picked
     /// strictly between the agent's quality floor and every ceiling, raised for
@@ -267,7 +267,7 @@ pub enum EffortCommand {
         /// Diff size in bytes
         #[arg(long)]
         bytes: Option<u64>,
-        /// Touched path, repeated for several. Used when --base is not given
+        /// Touched path, repeated for several, when not using --base
         #[arg(long = "path")]
         paths: Vec<String>,
         /// Review lens, such as `security`
@@ -554,7 +554,7 @@ pub enum Command {
         #[command(subcommand)]
         sub: ModeCommand,
     },
-    /// Read and change your playbook settings
+    /// Read and change playbook settings in any tier
     ///
     /// Settings come from tiers, highest first: repo, org, global, then the
     /// built-in default. `get` and `list` show which tier supplied a value.
