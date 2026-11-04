@@ -1238,7 +1238,7 @@ Example: `playbook route implement --tier medium --json`
 
 Read the run mode and effort ceiling
 
-Gives a command's Step 0 both in one call. Reads `--auto` and `--ask` from the command's arguments (exit 2 when both are present), and prints one JSON object: `mode`, `source`, `hook_mode`, `warning`, and `ceiling` when `--command` names the command. `ceiling` is the highest effort the user allows, or null.
+Gives a command's Step 0 the mode and the ceiling in one call. Reads `--auto` and `--ask` from the command's arguments (exit 2 when both are present), and prints one JSON object: `mode`, `source`, `hook_mode`, `warning`, and `ceiling` when `--command` names the command. `ceiling` is the highest effort the user allows, or null.
 
 Example: `playbook run-context --command implement --args "--auto"`
 

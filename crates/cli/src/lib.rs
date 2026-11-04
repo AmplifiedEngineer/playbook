@@ -530,10 +530,11 @@ pub enum Command {
     },
     /// Read the run mode and effort ceiling
     ///
-    /// Gives a command's Step 0 both in one call. Reads `--auto` and `--ask` from the command's arguments (exit 2 when
-    /// both are present), and prints one JSON object: `mode`, `source`,
-    /// `hook_mode`, `warning`, and `ceiling` when `--command` names the
-    /// command. `ceiling` is the highest effort the user allows, or null.
+    /// Gives a command's Step 0 the mode and the ceiling in one call. Reads
+    /// `--auto` and `--ask` from the command's arguments (exit 2 when both are
+    /// present), and prints one JSON object: `mode`, `source`, `hook_mode`,
+    /// `warning`, and `ceiling` when `--command` names the command. `ceiling`
+    /// is the highest effort the user allows, or null.
     ///
     /// Example: `playbook run-context --command implement --args "--auto"`
     RunContext {
@@ -845,8 +846,8 @@ pub enum Command {
     /// `plugin-root` prints the installed playbook plugin directory instead. It
     /// looks at `PLAYBOOK_PLUGIN_DIR`, then the `installPath` Claude Code
     /// recorded, then `CLAUDE_PLUGIN_ROOT`, then the newest plugin cache
-    /// directory. When none is usable it prints one line naming each place tried
-    /// and exits 1. `--create` does not apply to it.
+    /// directory. When none is usable it prints one line naming each place
+    /// tried and exits 1. `--create` does not apply to it.
     ///
     /// Example: `playbook path plans`
     Path {
@@ -1069,9 +1070,10 @@ impl Command {
 pub enum EvalCommand {
     /// Run the review triage classifier on each case
     ///
-    /// Compares each result with the known answer. Needs network access, a logged-in `gh`, and a working `claude` with a
-    /// live API key. Exits 0 when no lens was wrongly skipped and no case
-    /// errored, and 1 otherwise. Re-run it whenever the triage prompt changes.
+    /// Compares each result with the known answer. Needs network access, a
+    /// logged-in `gh`, and a working `claude` with a live API key. Exits 0 when
+    /// no lens was wrongly skipped and no case errored, and 1 otherwise. Re-run
+    /// it whenever the triage prompt changes.
     ///
     /// Example: `playbook eval review-triage`
     ReviewTriage {
