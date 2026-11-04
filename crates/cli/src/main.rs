@@ -2096,7 +2096,7 @@ fn real_main() {
                 }
                 None => {
                     eprintln!(
-                        "playbook path: could not resolve the storage folder; this repo needs \
+                        "playbook path: could not resolve the storage directory; this repo needs \
                      a git 'origin' remote, refusing to fall back to a repo-local path"
                     );
                     std::process::exit(1);

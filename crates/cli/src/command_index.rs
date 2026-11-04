@@ -284,7 +284,7 @@ pub(crate) const META: &[Meta] = &[
     user("mode auto"),
     ro("mode status"),
     free("path")
-        .purpose("Print a playbook storage folder of this repo, or the plugin folder")
+        .purpose("Print a playbook storage directory of this repo, or the plugin directory")
         .for_agents(),
     free("plan")
         .purpose("Plan helpers: checkpoints, Work Unit briefs and scratch cleanup")

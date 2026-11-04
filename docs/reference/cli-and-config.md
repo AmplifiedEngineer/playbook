@@ -512,7 +512,9 @@ Print a document as Markdown, framed as untrusted content
 
 Supports pdf, docx, doc, odt, rtf, epub, pptx, ppt, odp, xlsx, ods and csv. A scanned PDF with no text layer reports that it needs OCR.
 
-- `<FILE>`: The document to read
+Example: `playbook doc read report.pdf --section 2`
+
+- `<FILE>`: Document to read
 - `--json`: Print one JSON object instead of the framed text
 - `--offset <OFFSET>`: Character offset to start the slice at (default 0)
 - `--limit <LIMIT>`: Most characters to print, capped at docs.displayChars
@@ -713,9 +715,9 @@ Example: `playbook effort suggest --range 90d --json`
 
 ### `playbook eval`
 
-Check how well the review triage classifier sorts real pull requests
+Check how well the review triage classifier sorts real PRs
 
-Each case is a pull request with a known answer per review lens. Costs one `gh pr diff` fetch and one live `claude` call per case, so run it by hand or on a schedule.
+Each case is a PR with a known answer per review lens. Costs one `gh pr diff` fetch and one live `claude` call per case, so run it by hand or on a schedule.
 
 Example: `playbook eval review-triage`
 
@@ -741,13 +743,13 @@ Example: `playbook eval bench --role fact-checker --model haiku,sonnet --effort 
 - `--jobs <JOBS>`: Calls in flight at once
 - `--json`: Print JSON instead of a table
 - `--list`: List the cases and exit
-- `--strategy <STRATEGY>`: Run the `tdd_repo` implementer cases with tools in a scratch git repo, one dispatch per TDD step (`per-step`) or one per Work Unit (`per-wu`)
+- `--strategy <STRATEGY>`: Run the `tdd_repo` implementer cases with tools in a scratch git repo. Use one dispatch per TDD step (`per-step`) or one per Work Unit (`per-wu`)
 
 ### `playbook eval review-triage`
 
-Run the review triage classifier on each case and compare with the known answers
+Run the review triage classifier on each case
 
-Needs network access, a logged-in `gh`, and a working `claude` with a live API key. Exits 0 when no lens was wrongly skipped and no case errored, and 1 otherwise. Re-run it whenever the triage prompt changes.
+Compares each result with the known answer. Needs network access, a logged-in `gh`, and a working `claude` with a live API key. Exits 0 when no lens was wrongly skipped and no case errored, and 1 otherwise. Re-run it whenever the triage prompt changes.
 
 Example: `playbook eval review-triage`
 
@@ -998,12 +1000,14 @@ Show the current mode and where it came from
 
 ### `playbook path`
 
-Print the path of one of this repo's playbook storage folders, or of the plugin
+Print the path of a playbook storage directory
 
-First moves any legacy folders from the old repo-local location. `plugin-root` prints the installed playbook plugin folder instead. It looks at `PLAYBOOK_PLUGIN_DIR`, then the `installPath` Claude Code recorded, then `CLAUDE_PLUGIN_ROOT`, then the newest plugin cache folder. When none is usable it prints one line naming each place tried and exits 1. `--create` does not apply to it.
+Prints one of this repo's storage directories. For those kinds it first moves any legacy directories from the old repo-local location. `data` and `plugin-root` skip that move. `plugin-root` prints the installed playbook plugin directory instead. It looks at `PLAYBOOK_PLUGIN_DIR`, then the `installPath` Claude Code recorded, then `CLAUDE_PLUGIN_ROOT`, then the newest plugin cache directory. When none is usable it prints one line naming each place tried and exits 1. `--create` does not apply to it.
 
-- `<KIND>`: Which folder to print (one of `plans`, `implement`, `worktrees`, `handoff`, `data`, `plugin-root`)
-- `--create`: Create the folder when it does not exist
+Example: `playbook path plans`
+
+- `<KIND>`: Which directory to print (one of `plans`, `implement`, `worktrees`, `handoff`, `data`, `plugin-root`)
+- `--create`: Create the directory when it does not exist
 
 ### `playbook plan`
 
@@ -1279,21 +1283,21 @@ One routing table for every command that dispatches agents. Kinds: mechanical, c
 
 Example: `playbook route implement --tier medium --json`
 
-- `<KIND>`: mechanical, classify, check, review, implement or design
-- `--tier <TIER>`: low, medium or high (implement only)
+- `<KIND>`: One of mechanical, classify, check, review, implement or design
+- `--tier <TIER>`: One of low, medium or high. Only `implement` reads it
 - `--failures <FAILURES>`: How many times this task already failed
 - `--json`: Print the decision as JSON
 
 ### `playbook run-context`
 
-Read the run mode and effort ceiling a command's Step 0 needs, in one call
+Read the run mode and effort ceiling
 
-Reads `--auto` and `--ask` from the command's arguments (exit 2 when both are present), and prints one JSON object: `mode`, `source`, `hook_mode`, `warning`, and `ceiling` when `--command` names the command. `ceiling` is the highest effort the user allows, or null.
+Gives a command's Step 0 the mode and the ceiling in one call. Reads `--auto` and `--ask` from the command's arguments (exit 2 when both are present), and prints one JSON object: `mode`, `source`, `hook_mode`, `warning`, and `ceiling` when `--command` names the command. `ceiling` is the highest effort the user allows, or null.
 
 Example: `playbook run-context --command implement --args "--auto"`
 
-- `--command <COMMAND>`: The command's name, such as `implement`; adds the effort ceiling
-- `--args <ARGS>`: The command's raw arguments, as one string
+- `--command <COMMAND>`: Command name, such as `implement`. Adds the effort ceiling
+- `--args <ARGS>`: Raw arguments of the command, as one string
 
 ### `playbook sanitize`
 
