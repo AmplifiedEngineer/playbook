@@ -98,6 +98,8 @@ pub const KNOWN_KEYS: &[&str] = &[
     "docs.maxMemoryMb",
     "docs.displayChars",
     "docs.anydocPath",
+    "code.lsp.trustWorkspace",
+    "code.python.interpreter",
     "launcher.claudeOverride",
     "launcher.shortName",
     "systemPrompt.enabled",
@@ -129,6 +131,16 @@ pub const USER_KEYS: &[&str] = &[
     "hooks.policyGuard.enabled",
 ];
 
+/// Keys that name a decision about running code from the repo. Trust is set
+/// for one repo or for the user, never for a whole org: one org row would
+/// trust every repo in it.
+pub const NOT_ORG_KEYS: &[&str] = &["code.lsp.trustWorkspace"];
+
+/// Whether `key` may not be set at the org tier.
+pub fn is_not_org_key(key: &str) -> bool {
+    NOT_ORG_KEYS.contains(&key)
+}
+
 /// Whether `key` is a per-user setting. `config set` writes it to the global
 /// tier without `--global` and refuses `--org`, and `config import` refuses
 /// it outside the global section.
@@ -157,11 +169,21 @@ fn is_effort_component_key(key: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
+/// Whether `key` is `code.lsp.<id>.path` for a language server playbook knows.
+fn is_lsp_path_key(key: &str) -> bool {
+    key.strip_prefix("code.lsp.")
+        .and_then(|rest| rest.strip_suffix(".path"))
+        .is_some_and(|id| playbook_code::lsp::registry::by_id(id).is_some())
+}
+
 /// The default value for a known key, or `None` if `key` is not in
 /// `KNOWN_KEYS`.
 pub fn default_value(key: &str) -> Option<Value> {
     if is_effort_component_key(key) {
         return Some(Value::String("auto".to_string()));
+    }
+    if is_lsp_path_key(key) {
+        return Some(Value::String(String::new()));
     }
     match key {
         "autoReview.enabled" => Some(Value::Bool(true)),
@@ -223,7 +245,8 @@ pub fn default_value(key: &str) -> Option<Value> {
         "docs.maxOutputChars" => Some(Value::Number(200_000.into())),
         "docs.maxMemoryMb" => Some(Value::Number(1024.into())),
         "docs.displayChars" => Some(Value::Number(24_000.into())),
-        "docs.anydocPath" => Some(Value::String(String::new())),
+        "docs.anydocPath" | "code.python.interpreter" => Some(Value::String(String::new())),
+        "code.lsp.trustWorkspace" => Some(Value::Bool(false)),
         "launcher.claudeOverride" | "launcher.shortName" => Some(Value::Bool(false)),
         "systemPrompt.enabled" => Some(Value::Bool(true)),
         "attribution.enabled" => Some(Value::Bool(false)),
@@ -562,6 +585,98 @@ mod tests {
         assert_eq!(
             allowed_enum_values("sessions.autoClose"),
             Some(&["off", "propose"][..])
+        );
+    }
+
+    #[test]
+    fn the_code_lsp_keys_have_their_defaults() {
+        assert_eq!(
+            default_value("code.lsp.rust-analyzer.path"),
+            Some(Value::String(String::new()))
+        );
+        assert_eq!(
+            default_value("code.lsp.trustWorkspace"),
+            Some(Value::Bool(false))
+        );
+        assert_eq!(
+            default_value("code.python.interpreter"),
+            Some(Value::String(String::new()))
+        );
+        assert_eq!(default_value("code.lsp.nosuch.path"), None);
+        assert_eq!(default_value("code.lsp..path"), None);
+    }
+
+    #[test]
+    fn an_unknown_server_path_key_is_rejected_as_unknown() {
+        let home = crate::common::test_support::scratch_dir("lsp-unknown");
+        let err = super::super::write::set(
+            super::super::write::Tier::Global,
+            "code.lsp.nosuch.path",
+            &Value::String("/x".to_string()),
+            &home,
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, super::super::ConfigError::UnknownKey(_)));
+        assert!(err.to_string().contains("unknown"), "{err}");
+    }
+
+    #[test]
+    fn trust_must_be_a_boolean() {
+        let home = crate::common::test_support::scratch_dir("lsp-trust-type");
+        let err = super::super::write::set(
+            super::super::write::Tier::Global,
+            "code.lsp.trustWorkspace",
+            &Value::String("yes".to_string()),
+            &home,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("boolean"), "{err}");
+    }
+
+    #[test]
+    fn trust_is_refused_at_the_org_tier_and_accepted_at_repo_and_global() {
+        use super::super::write::{set, Tier};
+        for (tier, slug, allowed) in [
+            (Tier::Org, Some("acme"), false),
+            (Tier::Repo, Some("acme/app"), true),
+            (Tier::Global, None, true),
+        ] {
+            // Arrange
+            let home = crate::common::test_support::scratch_dir("lsp-trust-tier");
+
+            // Act
+            let got = set(
+                tier,
+                "code.lsp.trustWorkspace",
+                &Value::Bool(true),
+                &home,
+                slug,
+            );
+
+            // Assert
+            match (allowed, got) {
+                (true, Ok(())) => {}
+                (false, Err(e @ super::super::ConfigError::NotAtOrgTier(_))) => {
+                    let text = e.to_string();
+                    assert!(text.contains("code.lsp.trustWorkspace") && text.contains("org"));
+                }
+                (_, other) => panic!("{tier:?}: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn import_refuses_trust_in_an_org_section() {
+        let home = crate::common::test_support::scratch_dir("lsp-trust-import");
+        let root = crate::common::paths::playbook_root_from(&home);
+        std::fs::create_dir_all(&root).unwrap();
+        let doc = serde_json::json!({"orgs": {"acme": {"code.lsp.trustWorkspace": true}}});
+        let err = super::super::store::import(&root, &doc).unwrap_err();
+        assert!(
+            matches!(err, super::super::ConfigError::NotAtOrgTier(_)),
+            "{err}"
         );
     }
 }

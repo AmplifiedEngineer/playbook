@@ -205,6 +205,10 @@ fn every_known_key_is_explained_in_the_config_keys_page() {
         guide.contains("effort.agents.<name>"),
         "the effort component keys are not explained"
     );
+    assert!(
+        guide.contains("code.lsp.<server>.path"),
+        "the language server path keys are not explained"
+    );
 }
 
 #[test]

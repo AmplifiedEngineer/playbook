@@ -949,7 +949,7 @@ fn real_main() {
                 }
             }
         }
-        Command::Code { sub } => match playbook::code::run(sub, &playbook::code::Env::real()) {
+        Command::Code { sub } => match playbook::code::run(sub, &code_env()) {
             Ok(output) => print!("{output}"),
             Err(err) => {
                 eprintln!("code: {err}");
@@ -2903,4 +2903,17 @@ fn effort_diff_shape(base: &str) -> Result<effort::auto::Shape, String> {
     }
     let text = String::from_utf8_lossy(&out.stdout);
     effort::auto::Shape::from_numstat(&text)
+}
+
+/// The environment for `playbook code`: the current directory and the language
+/// server settings of this repo.
+fn code_env() -> playbook::code::Env {
+    let slug = common::repo_slug();
+    playbook::code::Env {
+        lsp: config::code::lsp_settings(
+            &common::home_dir(),
+            (!slug.is_empty()).then_some(slug.as_str()),
+        ),
+        ..playbook::code::Env::real()
+    }
 }

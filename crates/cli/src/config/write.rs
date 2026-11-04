@@ -31,6 +31,7 @@ pub fn set(
 ) -> Result<(), ConfigError> {
     validate_key_and_value(key, value)?;
     require_global_for_user_key(key, tier == Tier::Global)?;
+    reject_org_tier_for_repo_code_key(key, tier == Tier::Org)?;
     check_cap_order(tier, key, value, home, repo_slug)?;
     let root = crate::common::paths::playbook_root_from(home);
     super::store::put(&root, tier, repo_slug, key, value)
@@ -40,6 +41,14 @@ pub fn set(
 pub(crate) fn require_global_for_user_key(key: &str, global: bool) -> Result<(), ConfigError> {
     if keys::is_user_key(key) && !global {
         return Err(ConfigError::GlobalOnly(key.to_string()));
+    }
+    Ok(())
+}
+
+/// Reject a key that must not be set for a whole org, written at the org tier.
+pub(crate) fn reject_org_tier_for_repo_code_key(key: &str, org: bool) -> Result<(), ConfigError> {
+    if keys::is_not_org_key(key) && org {
+        return Err(ConfigError::NotAtOrgTier(key.to_string()));
     }
     Ok(())
 }

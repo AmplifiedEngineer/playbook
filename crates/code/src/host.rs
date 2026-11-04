@@ -67,3 +67,26 @@ pub fn make_file_private(path: &Path) -> Result<(), String> {
 pub fn command(args: &str) -> String {
     format!("{PROGRAM} code {args}")
 }
+
+/// What the language server layer reads from playbook's config. The program
+/// resolves these from its config store and passes them in, so this crate
+/// never reads the store. The default is the safe one: untrusted, no paths.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LspSettings {
+    /// `code.lsp.trustWorkspace`: whether servers may run in this repo.
+    pub trust_workspace: bool,
+    /// `code.lsp.<id>.path` values that are not empty, by server id.
+    pub server_paths: Vec<(String, PathBuf)>,
+    /// `code.python.interpreter`, when set.
+    pub python_interpreter: Option<PathBuf>,
+}
+
+impl LspSettings {
+    /// The configured path for server `id`, if any.
+    pub fn server_path(&self, id: &str) -> Option<&Path> {
+        self.server_paths
+            .iter()
+            .find(|(name, _)| name == id)
+            .map(|(_, path)| path.as_path())
+    }
+}

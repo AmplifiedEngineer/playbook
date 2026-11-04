@@ -9,6 +9,7 @@
 //! allowlist): this module governs playbook's own config keys and their
 //! defaults, not Claude Code's.
 
+pub mod code;
 pub mod keys;
 pub mod store;
 pub mod write;
@@ -87,6 +88,8 @@ pub enum ConfigError {
     DirectoryUnwritable(PathBuf),
     /// `key` is a per-user setting, so only the global tier holds it.
     GlobalOnly(String),
+    /// `key` decides whether repo code may run, so the org tier cannot set it.
+    NotAtOrgTier(String),
 }
 
 impl std::fmt::Display for ConfigError {
@@ -99,7 +102,7 @@ impl std::fmt::Display for ConfigError {
             ),
             ConfigError::UnknownKey(key) => write!(
                 f,
-                "unknown config key: {key}, valid keys are: {}, and effort.<agents|commands|skills>.<name>",
+                "unknown config key: {key}, valid keys are: {}, effort.<agents|commands|skills>.<name>, and code.lsp.<server>.path",
                 keys::KNOWN_KEYS.join(", ")
             ),
             ConfigError::WrongType { key, expected } => {
@@ -117,6 +120,11 @@ impl std::fmt::Display for ConfigError {
             ConfigError::GlobalOnly(key) => write!(
                 f,
                 "{key} is a per-user setting; set it with --global"
+            ),
+            ConfigError::NotAtOrgTier(key) => write!(
+                f,
+                "{key} cannot be set at the org tier, because one org row would cover every repo; \
+                 set it for one repo or with --global"
             ),
             ConfigError::InvalidNumber { key, value } => write!(
                 f,

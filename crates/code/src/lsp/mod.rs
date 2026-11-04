@@ -5,8 +5,10 @@
 //! framing and the byte transport.
 
 pub mod client;
+pub mod discover;
 #[cfg(test)]
 pub(crate) mod fake;
 pub mod framing;
 pub mod process;
+pub mod registry;
 pub mod transport;

@@ -433,6 +433,7 @@ pub fn import(root: &Path, doc: &Value) -> Result<usize, ConfigError> {
             }
             super::write::validate_key_and_value(key, value)?;
             super::write::require_global_for_user_key(key, tier == "global")?;
+            super::write::reject_org_tier_for_repo_code_key(key, tier == "org")?;
             rows.push((tier, scope.to_string(), key.clone(), value.clone()));
         }
         Ok(())

@@ -4,7 +4,7 @@
 //! The thin command line layer: argument shapes, and rendering of the results
 //! the library functions in `code` return.
 
-use super::host;
+use super::host::{self, LspSettings};
 use super::output::{Envelope, IndexState};
 use super::search::SearchOptions;
 use super::status;
@@ -168,12 +168,15 @@ fn parse_range_arg(spec: &str) -> Result<(usize, usize), String> {
 /// What a command needs from its surroundings.
 pub struct Env {
     pub cwd: PathBuf,
+    pub lsp: LspSettings,
 }
 
 impl Env {
+    /// The current directory with the safe default settings: no server is trusted.
     pub fn real() -> Self {
         Self {
             cwd: std::env::current_dir().unwrap_or_default(),
+            lsp: LspSettings::default(),
         }
     }
 }
