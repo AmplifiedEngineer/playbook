@@ -7,9 +7,11 @@
 use std::path::Path;
 use std::time::Duration;
 
+use super::guard::checked_swept_worktree_remove;
 use super::lock::{with_run_lock, NoHook, RunOutcome};
 use super::{Clock, GC_DIR};
 use crate::common::paths::playbook_root_from;
+use crate::worktree::SweepOpts;
 
 /// What a locked sweep did.
 #[derive(Debug, PartialEq, Eq)]
@@ -20,18 +22,58 @@ pub enum SweepRun {
     Busy,
 }
 
-/// Runs [`crate::worktree::sweep`] while holding the gc run lock, without
-/// waiting for it. A lock folder older than the stale limit is taken over, so
+/// Sweeps while holding the gc run lock, without waiting for it. Every removal
+/// goes through the guard. A lock folder older than the stale limit is taken over, so
 /// a crashed run never disables the sweep.
 pub fn sweep_locked(
     home: &Path,
     clock: &dyn Clock,
+    target: (&Path, Option<&str>),
+    dry_run: bool,
+) -> Result<SweepRun, String> {
+    run_locked(home, clock, target, None, dry_run)
+}
+
+/// The same sweep, judging only the review worktrees below `review_base`, so
+/// review setup never touches any other worktree.
+pub fn sweep_review_worktrees(
+    home: &Path,
+    clock: &dyn Clock,
     (repo_root, repo_slug): (&Path, Option<&str>),
+    review_base: &Path,
+) -> Result<SweepRun, String> {
+    run_locked(
+        home,
+        clock,
+        (repo_root, repo_slug),
+        Some(review_base),
+        false,
+    )
+}
+
+fn run_locked(
+    home: &Path,
+    clock: &dyn Clock,
+    (repo_root, repo_slug): (&Path, Option<&str>),
+    only_under: Option<&Path>,
     dry_run: bool,
 ) -> Result<SweepRun, String> {
     let gc_dir = playbook_root_from(home).join(GC_DIR);
-    let ran = with_run_lock(&gc_dir, Duration::ZERO, clock, &NoHook, |_guard| {
-        crate::worktree::sweep(repo_root, home, repo_slug, dry_run, clock.now())
+    let ran = with_run_lock(&gc_dir, Duration::ZERO, clock, &NoHook, |guard| {
+        let remove = |path: &Path, force_twice: bool| {
+            checked_swept_worktree_remove(guard, (home, repo_root), path, force_twice)
+                .map_err(|err| err.to_string())
+        };
+        crate::worktree::sweep_removing(
+            (repo_root, home, repo_slug),
+            SweepOpts {
+                dry_run,
+                now_epoch: clock.now(),
+                only_under,
+            },
+            Some(&crate::worktree::pr_state::gh_pr_state),
+            &remove,
+        )
     });
     match ran {
         Ok(RunOutcome::Ran(report)) => report.map(SweepRun::Swept),
@@ -84,6 +126,37 @@ mod tests {
 
         // Assert
         assert_eq!(convention, Convention::Unmanaged);
+    }
+
+    #[test]
+    fn guard_refuses_a_worktree_playbook_did_not_create() {
+        // Arrange
+        let home = scratch("wt-guard-home");
+        let repo = scratch("wt-guard-repo");
+        git_repo(&repo);
+        let hand_made = scratch("wt-guard-hand-made");
+        let clock = FixedClock(crate::common::time::now_secs());
+
+        // Act
+        let refused = with_run_lock(
+            &playbook_root_from(&home).join(GC_DIR),
+            Duration::ZERO,
+            &clock,
+            &NoHook,
+            |guard| {
+                [
+                    checked_swept_worktree_remove(guard, (&home, &repo), &hand_made, false),
+                    checked_swept_worktree_remove(guard, (&home, &repo), &repo, false),
+                ]
+            },
+        );
+
+        // Assert
+        let Ok(RunOutcome::Ran(results)) = refused else {
+            panic!("the lock should be free");
+        };
+        assert!(results.iter().all(Result::is_err), "{results:?}");
+        assert!(hand_made.exists() && repo.exists());
     }
 
     #[test]

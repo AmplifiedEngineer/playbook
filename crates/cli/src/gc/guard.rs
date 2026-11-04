@@ -134,6 +134,27 @@ pub fn checked_worktree_remove(
         .map_err(GuardError::Worktree)
 }
 
+/// Removes the swept worktree at `path` with `git worktree remove`, after the
+/// checks every gc removal needs: the run lock is still held, and the path is a
+/// worktree that playbook's own conventions created, never the repo itself.
+pub fn checked_swept_worktree_remove(
+    guard: &RunGuard,
+    (home, repo_root): (&Path, &Path),
+    path: &Path,
+    force_twice: bool,
+) -> Result<(), GuardError> {
+    guard.verify()?;
+    if path == repo_root
+        || crate::worktree::classify(path, home) == crate::worktree::Convention::Unmanaged
+    {
+        return Err(refuse(format!(
+            "{} is not a worktree that playbook created",
+            path.display()
+        )));
+    }
+    crate::worktree::remove_worktree(repo_root, path, force_twice).map_err(GuardError::Worktree)
+}
+
 /// Removes one build folder inside one worktree. The body arrives with the
 /// build output unit; until then every call is refused.
 pub fn checked_build_output_remove(

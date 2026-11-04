@@ -2138,7 +2138,7 @@ fn real_main() {
             sub: WorktreeCommand::Review { sub },
         } => match sub {
             ReviewWorktreeCommand::Setup { pr, head_sha } => {
-                match worktree::review::setup(&pr, &head_sha) {
+                match worktree::review::setup(&pr, &head_sha, playbook::gc::default_clock().now()) {
                     Ok(path) => println!("{path}"),
                     Err(err) => {
                         eprintln!("review worktree: {err}");

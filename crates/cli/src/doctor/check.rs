@@ -794,7 +794,7 @@ fn worktree_rows(env: &Env) -> Vec<Row> {
         )];
     };
     let now = crate::common::time::now_secs();
-    match crate::worktree::sweep(root, &env.home, env.repo_slug.as_deref(), true, now) {
+    match crate::worktree::sweep_dry_run(root, &env.home, env.repo_slug.as_deref(), now) {
         Ok(lines) if lines.is_empty() => {
             vec![Row::new("-", Level::Info, "no stale worktrees found")]
         }
