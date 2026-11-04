@@ -44,7 +44,7 @@ pub struct Flags {
     /// Install the playbook system prompt (an existing copy is refreshed either way)
     #[arg(long, overrides_with = "no_system_prompt")]
     pub system_prompt: bool,
-    /// Do not install the system prompt. Stores `systemPrompt.enabled` false so `pb cc` starts with Claude Code's own
+    /// Do not install the system prompt. It stores `systemPrompt.enabled` false so `pb cc` starts with Claude Code's own
     #[arg(long, overrides_with = "system_prompt")]
     pub no_system_prompt: bool,
     /// Answer yes to the telemetry question. Writes the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry`
@@ -98,7 +98,7 @@ pub struct Flags {
     #[arg(
         long,
         overrides_with_all = ["attribution", "attribution_off", "no_attribution_off"],
-        help = "Attribution OFF. Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values. This is what setup applies when you choose nothing"
+        help = "Attribution OFF. Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values. Setup applies this when you choose nothing and have not chosen ON before"
     )]
     pub no_attribution: bool,
     /// Deprecated name for `--no-attribution`, from 0.36 and 0.37.

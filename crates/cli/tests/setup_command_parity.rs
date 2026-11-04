@@ -199,10 +199,19 @@ fn the_only_help_lists_every_part_id() {
         .to_string();
 
     // Act
+    // Match whole ids from the comma separated list, so `path` cannot pass by
+    // sitting inside another word.
+    let listed: Vec<&str> = only
+        .split("comma separated: ")
+        .nth(1)
+        .and_then(|rest| rest.split(". ").next())
+        .expect("the --only help lists its parts")
+        .split(", ")
+        .collect();
     // A part with no flag runs on every setup, so `--only` never names it.
     let missing: Vec<&str> = catalog::PARTS
         .iter()
-        .filter(|p| !p.flags.is_empty() && !only.contains(p.id))
+        .filter(|p| !p.flags.is_empty() && !listed.contains(&p.id))
         .map(|p| p.id)
         .collect();
 
