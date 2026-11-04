@@ -26,6 +26,7 @@ pub mod limits;
 pub mod limits_history;
 pub mod limits_source;
 pub mod migrate;
+pub mod monthly_use;
 pub mod otlp;
 pub mod period;
 pub mod plan;
