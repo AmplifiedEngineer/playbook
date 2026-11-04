@@ -47,6 +47,7 @@ const ENDPOINTS: [Endpoint; 3] = [
     Endpoint::PullComments,
 ];
 const DEFAULT_TOKEN_ENV: &str = "GITHUB_TOKEN";
+const OFF_MESSAGE: &str = "watch is off: run `playbook config set watch.enabled true`\n";
 
 /// What a command needs from outside the process.
 pub struct Ctx<'a, W, C> {
@@ -177,7 +178,7 @@ pub fn once<W: GithubWrite, C: Clock, H: Http>(
 ) -> Result<String, String> {
     let settings = Settings::load(ctx.home)?;
     if !settings.enabled {
-        return Ok("watch is off: run `playbook config set watch.enabled true`\n".to_string());
+        return Ok(OFF_MESSAGE.to_string());
     }
     let since = parse_since(since)?;
     let Acquire::Held(_lock) = acquire(&ctx.data.join("watch.lock")).map_err(|e| e.to_string())?
@@ -390,6 +391,9 @@ pub fn run(cmd: &WatchCommand) -> Result<String, String> {
     let home = crate::common::session::home_dir();
     let data = playbook_data::data_dir_from(&home);
     let settings = Settings::load(&home)?;
+    if matches!(cmd, WatchCommand::Once { .. }) && !settings.enabled {
+        return Ok(OFF_MESSAGE.to_string());
+    }
     let token = if matches!(cmd, WatchCommand::Reject { .. }) {
         String::new()
     } else {
