@@ -42,6 +42,19 @@ pub struct Envelope {
     pub warnings: Vec<String>,
     /// Extra counters, printed as `stats` only when present.
     pub stats: Option<Value>,
+    /// How a language server took part, printed as `lsp` only when present.
+    pub lsp: Option<LspInfo>,
+}
+
+/// How a language server took part in an answer. `state` is `ok` or why the
+/// answer came from the index instead.
+#[derive(Debug, Clone)]
+pub struct LspInfo {
+    pub state: &'static str,
+    pub server: Option<String>,
+    /// `lsp` for a server answer, `tree_sitter_fallback` otherwise.
+    pub source: &'static str,
+    pub reason: Option<String>,
 }
 
 impl Envelope {
@@ -60,6 +73,7 @@ impl Envelope {
             omitted: 0,
             warnings: Vec::new(),
             stats: None,
+            lsp: None,
         }
     }
 
@@ -78,6 +92,17 @@ impl Envelope {
         doc.insert("warnings".into(), json!(self.warnings));
         if let Some(stats) = &self.stats {
             doc.insert("stats".into(), stats.clone());
+        }
+        if let Some(lsp) = &self.lsp {
+            doc.insert(
+                "lsp".into(),
+                json!({
+                    "state": lsp.state,
+                    "server": lsp.server,
+                    "source": lsp.source,
+                    "reason": lsp.reason,
+                }),
+            );
         }
         let mut text = Value::Object(doc).to_string();
         text.push('\n');
@@ -107,5 +132,28 @@ mod tests {
             text,
             "{\"version\":1,\"command\":\"index\",\"index\":{\"state\":\"fresh\",\"path\":\"/x/index\"},\"results\":{\"indexed\":3},\"truncated\":false,\"omitted\":0,\"warnings\":[]}\n"
         );
+    }
+
+    #[test]
+    fn the_lsp_field_appears_only_when_set() {
+        // Arrange
+        let mut envelope =
+            Envelope::new("definition", IndexState::NotUsed, String::new(), json!([]));
+        let without = envelope.to_json();
+        envelope.lsp = Some(LspInfo {
+            state: "untrusted",
+            server: None,
+            source: "tree_sitter_fallback",
+            reason: Some("not trusted".into()),
+        });
+
+        // Act
+        let with = envelope.to_json();
+
+        // Assert
+        assert!(!without.contains("\"lsp\""));
+        assert!(with.contains(
+            "\"lsp\":{\"state\":\"untrusted\",\"server\":null,\"source\":\"tree_sitter_fallback\",\"reason\":\"not trusted\"}"
+        ));
     }
 }

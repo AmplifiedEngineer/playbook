@@ -322,7 +322,10 @@ impl Client {
     /// Asks the server to shut down, then stops it. Returns how the process
     /// ended, or `None` when the client had no process.
     pub fn shutdown(mut self) -> Option<Exit> {
-        let _ = self.request("shutdown", Value::Null);
+        let grace = self.config.shutdown_grace;
+        if let Ok(id) = self.send_request("shutdown", Value::Null) {
+            let _ = self.wait_for(id, "shutdown", grace);
+        }
         let _ = self.notify("exit", Value::Null);
         self.stop()
     }

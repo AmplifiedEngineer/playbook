@@ -13,5 +13,7 @@ pub mod process;
 pub mod registry;
 pub mod session;
 pub mod status;
+#[cfg(test)]
+pub(crate) mod testkit;
 pub mod transport;
 pub mod uri;

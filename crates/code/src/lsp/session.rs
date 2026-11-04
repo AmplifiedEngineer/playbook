@@ -15,6 +15,8 @@ use std::ffi::OsString;
 use std::fmt;
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Everything a session reads from its surroundings.
@@ -26,6 +28,8 @@ pub struct Options<'a> {
     pub probe_timeout: Duration,
     /// Replaces the server's default request timeout.
     pub timeout: Option<Duration>,
+    /// Set by a signal handler; every wait then ends with `Interrupted`.
+    pub interrupt: Option<Arc<AtomicBool>>,
 }
 
 /// How to start one server process.
@@ -173,6 +177,9 @@ impl Session {
             },
         };
         let mut client = launcher.start(&launch).map_err(Unavailable::Failed)?;
+        if let Some(flag) = &options.interrupt {
+            client.set_interrupt(Arc::clone(flag));
+        }
         client
             .initialize(&uri::from_path(root), initialization_options(spec, root))
             .map_err(Unavailable::Failed)?;
@@ -239,97 +246,9 @@ fn initialization_options(spec: &ServerSpec, root: &Path) -> Value {
 mod tests {
     use super::*;
     use crate::lsp::fake::{Fake, Step};
-    use crate::lsp::transport::{pipe_pair, Transport};
-    use std::os::unix::fs::PermissionsExt;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Mutex;
-
-    fn scratch(tag: &str) -> PathBuf {
-        let dir = playbook_common::test_support::scratch_dir(tag);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn install_ts_server(dir: &Path) {
-        let path = dir.join("typescript-language-server");
-        std::fs::write(&path, "#!/bin/sh\necho 6.0.1\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-
-    /// Hands back one prepared client and counts how often it was asked.
-    struct FakeLauncher {
-        calls: AtomicUsize,
-        transport: Mutex<Option<Transport>>,
-    }
-
-    impl FakeLauncher {
-        fn new(transport: Option<Transport>) -> Self {
-            Self {
-                calls: AtomicUsize::new(0),
-                transport: Mutex::new(transport),
-            }
-        }
-    }
-
-    impl Launcher for FakeLauncher {
-        fn start(&self, launch: &Launch) -> Result<Client, ClientError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            let transport = self.transport.lock().unwrap().take().expect("one launch");
-            Ok(Client::with_transport(transport, launch.config))
-        }
-    }
-
-    struct Setup {
-        root: PathBuf,
-        file: PathBuf,
-        bin: PathBuf,
-        locks: PathBuf,
-    }
-
-    fn setup(tag: &str) -> Setup {
-        let root = scratch(tag).canonicalize().unwrap();
-        let file = root.join("a.ts");
-        std::fs::write(&file, "export const a = 1;\n").unwrap();
-        let bin = scratch(&format!("{tag}-bin"));
-        install_ts_server(&bin);
-        Setup {
-            root,
-            file,
-            bin,
-            locks: scratch(&format!("{tag}-lock")),
-        }
-    }
-
-    fn trusted() -> LspSettings {
-        LspSettings {
-            trust_workspace: true,
-            ..LspSettings::default()
-        }
-    }
-
-    fn options<'a>(
-        setup: &'a Setup,
-        settings: &'a LspSettings,
-        path_dirs: &'a [PathBuf],
-    ) -> Options<'a> {
-        Options {
-            settings,
-            path_dirs,
-            lock_dir: &setup.locks,
-            probe_timeout: Duration::from_secs(10),
-            timeout: Some(Duration::from_secs(10)),
-        }
-    }
-
-    fn initialize_script() -> Vec<Step> {
-        vec![
-            Step::Reply {
-                method: "initialize",
-                result: json!({"capabilities": {}}),
-            },
-            Step::Expect("initialized"),
-        ]
-    }
+    use crate::lsp::testkit::{initialize_script, options, scratch, setup, trusted, FakeLauncher};
+    use crate::lsp::transport::pipe_pair;
+    use std::sync::atomic::Ordering;
 
     #[test]
     fn an_untrusted_workspace_never_calls_the_launcher() {
@@ -421,7 +340,7 @@ mod tests {
                 std::fs::write(&tsserver, "").unwrap();
             }
             let (client_side, server) = pipe_pair().unwrap();
-            let fake = Fake::spawn(server, initialize_script());
+            let fake = Fake::spawn(server, initialize_script(json!({})));
             let launcher = FakeLauncher::new(Some(client_side));
             let settings = trusted();
             let dirs = [s.bin.clone()];
@@ -451,7 +370,7 @@ mod tests {
         // Arrange
         let s = setup("sess-open");
         let (client_side, server) = pipe_pair().unwrap();
-        let mut script = initialize_script();
+        let mut script = initialize_script(json!({}));
         script.push(Step::Expect("textDocument/didOpen"));
         let fake = Fake::spawn(server, script);
         let launcher = FakeLauncher::new(Some(client_side));

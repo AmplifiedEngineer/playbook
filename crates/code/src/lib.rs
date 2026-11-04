@@ -17,6 +17,7 @@ pub mod lang;
 pub mod location;
 pub mod lsp;
 pub mod output;
+pub mod queries;
 pub mod ranked;
 pub mod refs;
 pub mod search;
