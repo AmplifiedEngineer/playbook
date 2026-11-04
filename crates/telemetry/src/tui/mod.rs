@@ -6,6 +6,7 @@
 //! keys, `view` draws a frame, and `run` is the terminal loop around them.
 
 pub mod app;
+pub mod arrange;
 pub mod budget;
 pub mod burnup;
 pub mod chart;

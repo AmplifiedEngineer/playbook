@@ -167,6 +167,19 @@ pub struct Tab {
     pub rows: Option<Vec<u8>>,
 }
 
+/// The panel count of each row of the automatic grid for `n` panels, which
+/// `view::grid` draws.
+pub fn auto_rows(n: usize) -> Vec<u8> {
+    match n {
+        0 => Vec::new(),
+        1 => vec![1],
+        2 => vec![1, 1],
+        _ => (0..n.div_ceil(2))
+            .map(|i| if i * 2 + 1 < n { 2 } else { 1 })
+            .collect(),
+    }
+}
+
 /// The most tabs, so the tab bar fits and each has a number key.
 pub const MAX_TABS: usize = 12;
 /// The most panels in one row of an arranged tab.

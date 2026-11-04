@@ -1477,6 +1477,30 @@ mod tests {
         assert_eq!(placed.tabbar.height, 1);
     }
 
+    #[test]
+    fn the_editor_knows_the_rows_of_the_automatic_grid() {
+        for n in 1..=9 {
+            // Arrange
+            let area = Rect::new(0, 0, 100, 60);
+
+            // Act
+            let rects = grid(area, n);
+            let mut by_row: Vec<u8> = Vec::new();
+            let mut last_y = None;
+            for r in &rects {
+                if last_y == Some(r.y) {
+                    *by_row.last_mut().unwrap() += 1;
+                } else {
+                    by_row.push(1);
+                    last_y = Some(r.y);
+                }
+            }
+
+            // Assert
+            assert_eq!(by_row, crate::tui::layout::auto_rows(n), "{n} panels");
+        }
+    }
+
     /// The nine panels that existed before the pinned view words.
     const NINE: [PanelId; 9] = [
         PanelId::Spend,
