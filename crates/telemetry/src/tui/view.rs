@@ -1483,21 +1483,29 @@ mod tests {
     }
 
     #[test]
-    fn twelve_long_tab_names_fit_80_columns_and_keep_the_selected_name_visible() {
+    fn a_long_selected_tab_name_is_cut_so_every_tab_number_stays_visible() {
         let mut app = tabbed_app();
-        let long = "N".repeat(16);
         let text = (1..=12)
-            .map(|i| format!("{}{i:02}=spend", &long[..14]))
+            .map(|i| format!("{}{i:02}=spend", "N".repeat(14)))
             .collect::<Vec<_>>()
             .join(";");
         app.layout = Layout::parse(&text).unwrap();
-        app.go_tab(11);
+        app.go_tab(5);
 
-        let screen = screen(&app, 80, 24);
+        // The other eleven tabs need 8 * 4 + 3 * 5 = 47 columns, so 60 leaves
+        // 13 for the selected tab, which is shorter than its 21 column label.
+        // The 80 column minimum never reaches this cut, so draw the bar alone.
+        let pal = app.theme.palette(app.depth);
+        let mut terminal = Terminal::new(TestBackend::new(60, 1)).unwrap();
+        terminal
+            .draw(|f| render_tabbar(f, f.area(), &app, &pal))
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let bar: String = (0..60).map(|x| buffer[(x, 0)].symbol()).collect();
 
-        let bar = screen.lines().find(|l| l.contains(" F1 ")).unwrap();
-        assert!(bar.chars().count() <= 80, "{bar}");
-        assert!(bar.contains("F12 NNNN"), "{bar}");
+        assert!(bar.contains(" F12"), "{bar}");
+        assert!(bar.contains(" F6 NNNNNNNNN"), "{bar}");
+        assert!(!bar.contains("NNNNNNNNNNNNNN06"), "{bar}");
     }
 
     fn twelve_tabs() -> String {
