@@ -64,7 +64,7 @@ fn tombstone_runtime_dir(sid: &str, now: i64) {
     use crate::gc::tombstone::MoveOutcome;
     match crate::gc::apply::tombstone_now(&registry, &clock, &dir, "its session was pruned") {
         MoveOutcome::Moved { .. } | MoveOutcome::Busy => {}
-        MoveOutcome::Refused(why) | MoveOutcome::Failed(why) => {
+        MoveOutcome::Refused(why) | MoveOutcome::Unavailable(why) | MoveOutcome::Failed(why) => {
             eprintln!("playbook: gc left {} in place: {why}", dir.display());
         }
     }
