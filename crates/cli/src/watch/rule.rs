@@ -46,10 +46,19 @@ pub enum Do {
     /// A model with tools edits a branch for a comment, in a worktree. Never
     /// runs on its own.
     AddressComment,
+    /// Merges the base branch into a pull request's branch through the API.
+    /// It earns `auto` by the trust ladder.
+    UpdateBranch,
 }
 
 impl Do {
-    pub const ALL: [Do; 4] = [Do::Label, Do::Comment, Do::TriageIssue, Do::AddressComment];
+    pub const ALL: [Do; 5] = [
+        Do::Label,
+        Do::Comment,
+        Do::TriageIssue,
+        Do::AddressComment,
+        Do::UpdateBranch,
+    ];
 
     /// The name the rule file and the audit log use.
     pub fn as_str(self) -> &'static str {
@@ -58,6 +67,7 @@ impl Do {
             Self::Comment => "comment",
             Self::TriageIssue => "triage_issue",
             Self::AddressComment => "address_comment",
+            Self::UpdateBranch => "update_branch",
         }
     }
 
@@ -205,6 +215,12 @@ impl Stored {
             Do::TriageIssue if rule.decide != Decide::Model => {
                 return Err(RuleError(
                     "the triage_issue action needs decide set to model".to_string(),
+                ));
+            }
+            Do::UpdateBranch if !matches!(rule.on, On::PrOpened | On::PrCommented) => {
+                return Err(RuleError(
+                    "the update_branch action needs on set to pr.opened or pr.commented"
+                        .to_string(),
                 ));
             }
             Do::AddressComment

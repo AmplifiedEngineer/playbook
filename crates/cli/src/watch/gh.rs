@@ -10,7 +10,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use super::engine::{GithubWrite, IssueView, Post, HIDDEN_MARKER};
+use super::engine::{BranchUpdate, GithubWrite, IssueView, Post, HIDDEN_MARKER};
 use super::journal::RecoverOps;
 use super::store::WorkRow;
 use crate::common::proc::run_with_timeout;
@@ -79,6 +79,13 @@ pub fn parse_posts(text: &str) -> Result<Vec<Post>, String> {
             })
         })
         .collect()
+}
+
+/// Reads `<mergeable_state> <head sha>`.
+fn parse_pull_state(text: &str) -> Result<(&str, &str), String> {
+    text.trim()
+        .split_once(' ')
+        .ok_or_else(|| "the pull request state is not valid".to_string())
 }
 
 /// `gh` calls for one token.
@@ -160,6 +167,25 @@ impl GithubWrite for GhWrite {
             args.extend(["-f", field]);
         }
         self.gh(&args).map(|_| ())
+    }
+
+    fn update_branch(&self, repo: &str, number: u64) -> Result<BranchUpdate, String> {
+        let path = format!("repos/{repo}/pulls/{number}");
+        let jq = r#".mergeable_state + " " + .head.sha"#;
+        let reply = self.gh(&["api", &path, "--jq", jq])?;
+        let (state, head) = parse_pull_state(&reply)?;
+        match state {
+            "behind" => {}
+            "dirty" => return Ok(BranchUpdate::Conflict),
+            // GitHub is still working it out: try again on a later cycle.
+            "unknown" => return Err("GitHub has not worked out the mergeable state yet".into()),
+            _ => return Ok(BranchUpdate::UpToDate),
+        }
+        // The head the state was read at, so a push in between is not merged over.
+        let sha = format!("expected_head_sha={head}");
+        let update = format!("{path}/update-branch");
+        self.gh(&["api", "--method", "PUT", &update, "-f", &sha])
+            .map(|_| BranchUpdate::Updated)
     }
 
     fn thread(&self, repo: &str, number: u64) -> Result<Vec<Post>, String> {
@@ -251,6 +277,15 @@ mod tests {
         assert_eq!(posts[0].association, "MEMBER");
         assert_eq!((posts[1].author.as_str(), posts[1].body.as_str()), ("", ""));
         assert!(parse_posts("not json").is_err());
+    }
+
+    #[test]
+    fn a_pull_state_is_the_mergeable_state_then_the_head() {
+        assert_eq!(
+            parse_pull_state("behind abc123\n"),
+            Ok(("behind", "abc123"))
+        );
+        assert!(parse_pull_state("behind").is_err());
     }
 
     #[test]

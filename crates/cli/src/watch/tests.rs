@@ -46,6 +46,9 @@ impl GithubWrite for Spy {
     fn add_comment(&self, _: &str, _: u64, _: &str) -> Result<(), String> {
         Ok(())
     }
+    fn update_branch(&self, _: &str, _: u64) -> Result<crate::watch::engine::BranchUpdate, String> {
+        Ok(crate::watch::engine::BranchUpdate::UpToDate)
+    }
     fn thread(&self, _: &str, _: u64) -> Result<Vec<crate::watch::engine::Post>, String> {
         Ok(vec![])
     }

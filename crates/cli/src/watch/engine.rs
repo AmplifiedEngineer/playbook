@@ -50,6 +50,17 @@ pub struct Post {
     pub body: String,
 }
 
+/// What asking GitHub to bring a pull request up to date found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchUpdate {
+    /// The base was merged into the branch.
+    Updated,
+    /// The branch already has everything on the base.
+    UpToDate,
+    /// The merge needs a person: it conflicts.
+    Conflict,
+}
+
 /// The GitHub calls the actions make.
 pub trait GithubWrite {
     fn issue(&self, repo: &str, number: u64) -> Result<IssueView, String>;
@@ -57,6 +68,9 @@ pub trait GithubWrite {
     /// Whether a comment on the issue or pull request holds `marker`.
     fn has_comment(&self, repo: &str, number: u64, marker: &str) -> Result<bool, String>;
     fn add_comment(&self, repo: &str, number: u64, body: &str) -> Result<(), String>;
+    /// Merges the base branch into the pull request's branch, without a force
+    /// push. Does nothing when the branch is not behind.
+    fn update_branch(&self, repo: &str, number: u64) -> Result<BranchUpdate, String>;
     /// The description of a pull request and every comment on it, oldest first.
     fn thread(&self, repo: &str, number: u64) -> Result<Vec<Post>, String>;
 }
@@ -471,6 +485,11 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
                 return Ok(Step::Done(cost));
             }
             Do::AddressComment => return self.address(id, row, rule),
+            Do::UpdateBranch => match self.write.update_branch(&row.repo, row.object)? {
+                BranchUpdate::Updated => {}
+                BranchUpdate::UpToDate => return Ok(Step::AlreadyDone),
+                BranchUpdate::Conflict => return Ok(Step::Skipped("conflict")),
+            },
             Do::Comment => {
                 let marker = format!("<!-- playbook-watch:{} -->", row.key);
                 if self.write.has_comment(&row.repo, row.object, &marker)? {
@@ -599,6 +618,11 @@ mod tests {
         /// Fail every write with this error.
         fail: Option<String>,
         fork: bool,
+        /// Pull request numbers the branch was updated for.
+        updates: RefCell<Vec<u64>>,
+        /// The branch is not behind (once updated it is not either).
+        up_to_date: std::cell::Cell<bool>,
+        conflict: bool,
         /// The pull request thread, when a test sets one.
         thread: Option<Vec<Post>>,
         comments: RefCell<Vec<(u64, String)>>,
@@ -624,6 +648,16 @@ mod tests {
                 .iter()
                 .any(|(_, b)| b.contains(marker));
             Ok(posted || self.markers.iter().any(|m| m == marker))
+        }
+        fn update_branch(&self, _: &str, number: u64) -> Result<BranchUpdate, String> {
+            if self.conflict {
+                return Ok(BranchUpdate::Conflict);
+            }
+            if self.up_to_date.replace(true) {
+                return Ok(BranchUpdate::UpToDate);
+            }
+            self.updates.borrow_mut().push(number);
+            Ok(BranchUpdate::Updated)
         }
         fn thread(&self, _: &str, _: u64) -> Result<Vec<Post>, String> {
             Ok(self
@@ -1368,8 +1402,8 @@ mod tests {
     }
     const TRIAGE: &str = r#"{"on":"issue.opened","do":"triage_issue","decide":"model","autonomy":"auto","with":{"labels":["bug","docs"]}}"#;
 
-    /// Ten approved triage items that finished 30 days ago.
-    fn earn_the_ladder(f: &mut Fixture) {
+    /// Ten approved items of `class` that finished 30 days ago.
+    fn earn_the_ladder(f: &mut Fixture, class: &str) {
         let long_ago = f.clock.now() - 30 * 86_400;
         f.store
             .transaction(|tx| {
@@ -1378,7 +1412,7 @@ mod tests {
                     let item = NewWork {
                         key: &key,
                         rule: "r",
-                        class: "triage_issue",
+                        class,
                         repo: "o/r",
                         object: 100 + n,
                         body_hash: [1; 32],
@@ -1402,7 +1436,7 @@ mod tests {
     fn triage_issue_adds_one_label_and_repeat_adds_none() {
         // Arrange
         let mut f = fixture("watch-triage-repeat");
-        earn_the_ladder(&mut f);
+        earn_the_ladder(&mut f, "triage_issue");
         let spy = Spy::default();
         let rules = rules(TRIAGE);
         let events = [issue(7, "stranger")];
@@ -1425,7 +1459,7 @@ mod tests {
     fn triage_issue_skips_when_the_object_changed() {
         // Arrange: the body was edited after the event.
         let mut f = fixture("watch-triage-changed");
-        earn_the_ladder(&mut f);
+        earn_the_ladder(&mut f, "triage_issue");
         let spy = Spy {
             hash: Some([9; 32]),
             ..Spy::default()
@@ -1464,7 +1498,7 @@ mod tests {
         assert!(spy.calls.borrow().is_empty());
 
         let mut g = fixture("watch-triage-ceiling");
-        earn_the_ladder(&mut g);
+        earn_the_ladder(&mut g, "triage_issue");
         let spy = Spy::default();
         let ids = ingest_at(&mut g, &spy, &[issue(7, "a")], &rules, Autonomy::Propose);
         engine_with(&mut g, &spy, &agreeing("bug"))
@@ -1817,5 +1851,112 @@ mod tests {
         for text in rows {
             assert!(Stored::parse(text).is_err(), "{text}");
         }
+    }
+
+    const UPDATE: &str = r#"{"on":"pr.opened","do":"update_branch","autonomy":"auto"}"#;
+
+    fn pull(number: u64) -> Event {
+        Event {
+            key: format!("pr:{number}:opened"),
+            kind: crate::watch::rule::On::PrOpened,
+            ..issue(number, "a")
+        }
+    }
+
+    #[test]
+    fn update_branch_updates_once_and_a_repeat_adds_none() {
+        // Arrange
+        let mut f = fixture("watch-update-repeat");
+        let spy = Spy::default();
+        let rules = rules(UPDATE);
+        let id = ingest_at(&mut f, &spy, &[pull(7)], &rules, Autonomy::Propose)[0];
+
+        // Act: approve, then put the item back and approve it again.
+        let first = engine(&mut f, &spy).approve(id, &rules, true).unwrap();
+        f.store
+            .transaction(|tx| tx.set_state(id, "proposed", None))
+            .unwrap();
+        let second = engine(&mut f, &spy).approve(id, &rules, true).unwrap();
+
+        // Assert
+        assert_eq!(first, ApproveOutcome::Done);
+        assert_eq!(second, ApproveOutcome::AlreadyDone);
+        assert_eq!(spy.updates.borrow().as_slice(), &[7]);
+    }
+
+    #[test]
+    fn update_branch_skips_when_the_object_changed() {
+        // (what changed, the spy, the outcome)
+        let rows = [
+            (
+                Spy {
+                    closed: true,
+                    ..Spy::default()
+                },
+                "closed",
+            ),
+            (
+                Spy {
+                    hash: Some([9; 32]),
+                    ..Spy::default()
+                },
+                "body_changed",
+            ),
+            (
+                Spy {
+                    conflict: true,
+                    ..Spy::default()
+                },
+                "conflict",
+            ),
+        ];
+        for (n, (spy, why)) in rows.into_iter().enumerate() {
+            let mut f = fixture(&format!("watch-update-skip-{n}"));
+            let rules = rules(UPDATE);
+            let id = ingest_at(&mut f, &spy, &[pull(7)], &rules, Autonomy::Propose)[0];
+
+            let out = engine(&mut f, &spy).approve(id, &rules, true).unwrap();
+
+            assert_eq!(out, ApproveOutcome::Skipped(why));
+            assert!(spy.updates.borrow().is_empty());
+        }
+    }
+
+    #[test]
+    fn update_branch_never_exceeds_its_highest_level() {
+        // Arrange: no track record yet, so `auto` is held at a proposal.
+        let rules = rules(UPDATE);
+        let mut f = fixture("watch-update-ladder");
+        let spy = Spy::default();
+        let id = ingest_at(&mut f, &spy, &[pull(7)], &rules, Autonomy::Auto)[0];
+
+        // Act
+        engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+
+        // Assert
+        assert_eq!(state(&f, id), ("proposed".into(), Some("ladder".into())));
+        assert!(spy.updates.borrow().is_empty());
+
+        // A track record does not lift a propose ceiling.
+        let mut g = fixture("watch-update-ceiling");
+        earn_the_ladder(&mut g, "update_branch");
+        let spy = Spy::default();
+        let id = ingest_at(&mut g, &spy, &[pull(7)], &rules, Autonomy::Propose)[0];
+        engine(&mut g, &spy).run_approved("o/r", &rules).unwrap();
+        assert_eq!(state(&g, id).0, "proposed");
+
+        // With the ceiling and the track record, it runs.
+        let mut h = fixture("watch-update-earned");
+        earn_the_ladder(&mut h, "update_branch");
+        let spy = Spy::default();
+        ingest_at(&mut h, &spy, &[pull(7)], &rules, Autonomy::Auto);
+        engine(&mut h, &spy).run_approved("o/r", &rules).unwrap();
+        assert_eq!(spy.updates.borrow().as_slice(), &[7]);
+    }
+
+    #[test]
+    fn an_update_rule_needs_a_pull_request_event() {
+        let text = r#"{"on":"issue.opened","do":"update_branch"}"#;
+        assert!(Stored::parse(text).is_err());
     }
 }
