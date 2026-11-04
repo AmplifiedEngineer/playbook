@@ -94,7 +94,7 @@ Because each call starts its own server, every call pays the server's start. Exp
 
 ## Benchmark results
 
-`just bench-code` generates repos of 100, 5,000 and 50,000 files (Rust, TypeScript, JavaScript and Python, three uniquely named functions per file) with known answers, and compares the index against `rg` with whole-file reads (a) and `rg -C 30` (b). Bytes stand in for tokens.
+`just bench-code` generates repos of 100, 5,000 and 50,000 files (four languages, three uniquely named functions per file) with known answers, and compares the index against `rg` with whole-file reads (a) and `rg -C 30` (b). Bytes stand in for tokens.
 
 Measured on an Apple M1 Pro, macOS 15.8.1, release build, 30 tasks per size, 20 runs per latency. The 50,000 file size and the language server arm were not run.
 
