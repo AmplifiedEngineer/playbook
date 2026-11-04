@@ -10,7 +10,6 @@ use super::budget;
 use super::burnup;
 use super::data::Data;
 use super::fmt::{compact, fit, money, signed_compact, signed_count, signed_money, signed_percent};
-use super::icon::{Cue, Icon};
 use super::keys::{self, HelpLine};
 use super::layout::PanelId;
 use super::notice::{self, Notice};
