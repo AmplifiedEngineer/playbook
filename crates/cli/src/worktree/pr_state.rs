@@ -85,8 +85,19 @@ mod tests {
     fn a_merged_pr_into_another_base_is_unknown() {
         let json = r#"[{"state":"MERGED","headRefOid":"abc123","baseRefName":"feat-a"}]"#;
         assert_eq!(parse(json), None);
+    }
+
+    #[test]
+    fn a_merged_pr_with_no_known_default_is_unknown() {
         let json = r#"[{"state":"MERGED","headRefOid":"abc123","baseRefName":"main"}]"#;
         assert_eq!(parse_pr_state(json, TIP, None), None);
+    }
+
+    #[test]
+    fn a_merged_pr_is_found_behind_a_newer_closed_one() {
+        let json = r#"[{"state":"CLOSED","headRefOid":"def456","baseRefName":"main"},
+            {"state":"MERGED","headRefOid":"abc123","baseRefName":"main"}]"#;
+        assert_eq!(parse(json), Some(PrState::Merged));
     }
 
     #[test]
