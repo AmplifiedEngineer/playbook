@@ -388,6 +388,16 @@ fn a_usage_refresh_interval_from_one_to_3600_seconds_is_written_and_others_rejec
 }
 
 #[test]
+fn a_gate_round_cap_from_one_to_twenty_is_written_and_others_rejected() {
+    for value in [json!(1), json!(5), json!(20)] {
+        assert_written("gate.maxRounds", &value);
+    }
+    for value in [json!(0), json!(21), json!(-1), json!(2.5)] {
+        assert_rejected("gate.maxRounds", &value, "from 1 to 20");
+    }
+}
+
+#[test]
 fn a_fix_threshold_that_is_not_a_positive_integer_is_rejected() {
     for key in ["fix.maxFiles", "fix.maxLines"] {
         for value in [json!(0), json!(-1), json!(2.5)] {

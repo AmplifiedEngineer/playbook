@@ -35,6 +35,7 @@ pub mod codex_hooks;
 pub mod collector_service;
 pub mod completion;
 pub mod dead_hooks;
+pub mod handoff_used;
 pub mod memory_migrate;
 pub mod merge;
 pub mod migrate;

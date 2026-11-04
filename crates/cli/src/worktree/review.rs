@@ -34,9 +34,6 @@ fn git_command(args: &[&str]) -> Command {
     command
 }
 
-/// Default age past which a review worktree's lock counts as stale.
-const DEFAULT_TTL_SECS: i64 = 86_400;
-
 /// `git <args>` in the current directory, trimmed stdout on success.
 fn git_out(args: &[&str]) -> Option<String> {
     let out = run_with_timeout(&mut git_command(args), LOCAL_TIMEOUT)?;
@@ -73,55 +70,39 @@ fn git_ok(args: &[&str]) -> bool {
     run_with_timeout(&mut git_command(args), LOCAL_TIMEOUT).is_some_and(|o| o.status.success())
 }
 
-/// Removes every unlocked, or lock-expired, worktree under
-/// `<root>/review-worktrees/`, then prunes orphaned admin entries.
-fn sweep_stale(root: &Path, now: i64, ttl: i64) {
-    let Ok(entries) = fs::read_dir(root.join("worktrees")) else {
+/// Removes the review worktrees under `<git dir>/review-worktrees/` that the
+/// sweep rule calls stale. Best effort: a failed or skipped sweep never blocks
+/// setup.
+fn sweep_stale_reviews(git_common_dir: &Path, now: i64) {
+    let Ok(repo_root) = std::env::current_dir() else {
         return;
     };
-    let review_base = root.join("review-worktrees");
-    for entry in entries.flatten() {
-        let meta = entry.path();
-        let Ok(gitdir) = fs::read_to_string(meta.join("gitdir")) else {
-            continue;
-        };
-        let Some(wt_path) = Path::new(gitdir.trim()).parent() else {
-            continue;
-        };
-        if !wt_path.starts_with(&review_base) {
-            continue;
-        }
-        let stale = match fs::read_to_string(meta.join("locked")) {
-            Err(_) => true,
-            Ok(reason) => match lock_ts(&reason) {
-                None => true,
-                Some(ts) => now - ts > ttl,
-            },
-        };
-        if stale {
-            let path = wt_path.to_string_lossy();
-            git_ok(&["worktree", "remove", "-f", "-f", &path]);
-        }
-    }
-    git_ok(&["worktree", "prune"]);
-}
-
-/// The `ts=<epoch>` value inside a lock reason, if any.
-fn lock_ts(reason: &str) -> Option<i64> {
-    let rest = &reason[reason.find("ts=")? + 3..];
-    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-    digits.parse().ok()
+    let slug = crate::common::repo_slug();
+    let _ = crate::gc::worktrees::sweep_review_worktrees(
+        &crate::common::home_dir(),
+        &crate::gc::FixedClock(now),
+        (&repo_root, (!slug.is_empty()).then_some(slug.as_str())),
+        &git_common_dir.join("review-worktrees"),
+    );
 }
 
 /// Creates a locked, detached worktree for PR `pr` at `head_sha` and returns
 /// its absolute path. Warnings go to stderr so stdout stays the path alone.
-pub fn setup(pr: &str, head_sha: &str) -> Result<String, String> {
-    setup_with_url(pr, head_sha, None)
+pub fn setup(pr: &str, head_sha: &str, now: i64) -> Result<String, String> {
+    setup_with_url(pr, head_sha, None, now)
 }
 
 /// Like `setup`, with the repo URL the caller already holds so no second
 /// `gh repo view` is needed. `GH_FETCH_URL` still wins, as in `setup`.
-pub fn setup_with_url(pr: &str, head_sha: &str, known_url: Option<&str>) -> Result<String, String> {
+///
+/// Stale review worktrees are swept first, by the same rule as the daily sweep,
+/// as of `now`. A busy gc run skips the sweep and the worktree is still made.
+pub fn setup_with_url(
+    pr: &str,
+    head_sha: &str,
+    known_url: Option<&str>,
+    now: i64,
+) -> Result<String, String> {
     let short: String = head_sha.chars().take(7).collect();
     let root = git_out(&["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .ok_or("not in a git repo")?;
@@ -129,11 +110,7 @@ pub fn setup_with_url(pr: &str, head_sha: &str, known_url: Option<&str>) -> Resu
         .join("review-worktrees")
         .join(format!("{pr}-{short}"));
 
-    let ttl = std::env::var("REVIEW_WT_TTL_SECONDS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(DEFAULT_TTL_SECS);
-    sweep_stale(Path::new(&root), crate::common::time::now_secs(), ttl);
+    sweep_stale_reviews(Path::new(&root), now);
 
     let fetch_url = match std::env::var("GH_FETCH_URL") {
         Ok(url) if !url.is_empty() => url,

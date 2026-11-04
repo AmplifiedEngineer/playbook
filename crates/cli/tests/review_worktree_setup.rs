@@ -189,59 +189,6 @@ fn a_second_setup_while_live_locked_is_refused() {
 }
 
 #[test]
-fn a_stale_locked_review_worktree_is_swept_during_setup() {
-    let f = Fixture::new();
-    let new_sha = f.new_commit("v2");
-    f.set_pr_ref(7, &new_sha);
-    let root = git_ok(
-        &f.repo,
-        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    );
-    let stale = Path::new(&root)
-        .join("review-worktrees")
-        .join(format!("7-{}", &f.sha[..7]));
-    fs::create_dir_all(stale.parent().unwrap()).unwrap();
-    git_ok(
-        &f.repo,
-        &[
-            "worktree",
-            "add",
-            "--detach",
-            "-q",
-            stale.to_str().unwrap(),
-            &f.sha,
-        ],
-    );
-    let old_ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-        - 15;
-    git_ok(
-        &f.repo,
-        &[
-            "worktree",
-            "lock",
-            "--reason",
-            &format!("review pr=7 pid=999999 ts={old_ts}"),
-            stale.to_str().unwrap(),
-        ],
-    );
-
-    let out = f.playbook(
-        &["setup", "7", &new_sha],
-        &[("REVIEW_WT_TTL_SECONDS", "10")],
-    );
-
-    assert!(out.status.success(), "stderr: {}", stderr(&out));
-    assert!(Path::new(&stdout(&out)).is_absolute());
-    assert!(
-        !f.listed(stale.to_str().unwrap()),
-        "stale worktree survived"
-    );
-}
-
-#[test]
 fn setup_never_sweeps_an_unlocked_worktree_outside_review_worktrees() {
     let f = Fixture::new();
     let other = scratch("other").join("wu");
@@ -263,36 +210,6 @@ fn setup_never_sweeps_an_unlocked_worktree_outside_review_worktrees() {
     assert!(
         f.listed(other.to_str().unwrap()),
         "unrelated worktree was swept"
-    );
-}
-
-#[test]
-fn an_unlocked_leftover_under_review_worktrees_is_swept() {
-    let f = Fixture::new();
-    let root = git_ok(
-        &f.repo,
-        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    );
-    let leftover = Path::new(&root).join("review-worktrees").join("3-abcdef1");
-    fs::create_dir_all(leftover.parent().unwrap()).unwrap();
-    git_ok(
-        &f.repo,
-        &[
-            "worktree",
-            "add",
-            "--detach",
-            "-q",
-            leftover.to_str().unwrap(),
-            &f.sha,
-        ],
-    );
-
-    let out = f.setup("7", &f.sha);
-
-    assert!(out.status.success(), "stderr: {}", stderr(&out));
-    assert!(
-        !f.listed(leftover.to_str().unwrap()),
-        "unlocked leftover survived"
     );
 }
 
@@ -465,4 +382,282 @@ fn the_worktree_is_locked_with_the_pid_when_it_is_created() {
     let admin = git_ok(Path::new(&wt), &["rev-parse", "--git-dir"]);
     let reason = fs::read_to_string(Path::new(&admin).join("locked")).unwrap();
     assert!(reason.contains("review pr=7 pid="), "{reason}");
+}
+
+/// The time the binary reads as "now" in these tests, in epoch seconds.
+const NOW: u64 = 1_800_000_000;
+const HOUR: u64 = 3_600;
+/// A pid that is never alive: the setup process that wrote a lock has exited.
+const DEAD_PID: u32 = 999_999;
+
+impl Fixture {
+    /// A review worktree `<pr>-<sha7>` under the review folder, unlocked.
+    fn review_worktree(&self, name: &str) -> PathBuf {
+        let root = git_ok(
+            &self.repo,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        );
+        let dir = Path::new(&root).join("review-worktrees").join(name);
+        fs::create_dir_all(dir.parent().unwrap()).unwrap();
+        git_ok(
+            &self.repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "-q",
+                dir.to_str().unwrap(),
+                &self.sha,
+            ],
+        );
+        dir
+    }
+
+    fn lock(&self, worktree: &Path, reason: &str) {
+        git_ok(
+            &self.repo,
+            &[
+                "worktree",
+                "lock",
+                "--reason",
+                reason,
+                worktree.to_str().unwrap(),
+            ],
+        );
+    }
+
+    /// Sets the creation time the sweep reads: the modified time of the
+    /// worktree's `.git` file.
+    fn created_at(&self, worktree: &Path, epoch: u64) {
+        let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs(epoch);
+        fs::File::options()
+            .write(true)
+            .open(worktree.join(".git"))
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    }
+
+    /// Runs `setup` for PR 7 with the binary's clock at `now`.
+    fn setup_at(&self, now: u64) -> Output {
+        self.playbook(
+            &["setup", "7", &self.sha],
+            &[("PLAYBOOK_TEST_NOW", &now.to_string())],
+        )
+    }
+}
+
+#[test]
+fn a_stale_locked_review_worktree_is_swept_during_setup() {
+    let f = Fixture::new();
+    let stale = f.review_worktree("3-aaaaaaa");
+    f.lock(
+        &stale,
+        &format!("review pr=3 pid={DEAD_PID} ts={}", NOW - 25 * HOUR),
+    );
+
+    let out = f.setup_at(NOW);
+
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(Path::new(&stdout(&out)).is_absolute());
+    assert!(
+        !f.listed(stale.to_str().unwrap()),
+        "stale worktree survived"
+    );
+}
+
+#[test]
+fn an_unlocked_leftover_under_review_worktrees_is_swept() {
+    let f = Fixture::new();
+    let leftover = f.review_worktree("3-abcdef1");
+    f.created_at(&leftover, NOW - HOUR);
+
+    let out = f.setup_at(NOW);
+
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(!f.listed(leftover.to_str().unwrap()), "leftover survived");
+}
+
+#[test]
+fn review_unlocked_boundary_60s() {
+    let f = Fixture::new();
+    let leftover = f.review_worktree("3-abcdef1");
+    f.created_at(&leftover, NOW - 60);
+
+    f.setup_at(NOW);
+
+    assert!(!f.listed(leftover.to_str().unwrap()), "60 seconds goes");
+}
+
+#[test]
+fn review_unlocked_one_second_under_60s_stays() {
+    let f = Fixture::new();
+    let leftover = f.review_worktree("3-abcdef1");
+    f.created_at(&leftover, NOW - 59);
+
+    f.setup_at(NOW);
+
+    assert!(f.listed(leftover.to_str().unwrap()), "59 seconds stays");
+}
+
+#[test]
+fn review_locked_dead_pid_boundary_24h() {
+    let f = Fixture::new();
+    let old = f.review_worktree("3-aaaaaaa");
+    f.lock(
+        &old,
+        &format!("review pid={DEAD_PID} ts={}", NOW - 24 * HOUR),
+    );
+
+    f.setup_at(NOW);
+
+    assert!(!f.listed(old.to_str().unwrap()), "24 hours goes");
+}
+
+#[test]
+fn review_locked_one_second_under_24h_stays() {
+    let f = Fixture::new();
+    let young = f.review_worktree("3-aaaaaaa");
+    f.lock(
+        &young,
+        &format!("review pid={DEAD_PID} ts={}", NOW - 24 * HOUR + 1),
+    );
+
+    f.setup_at(NOW);
+
+    assert!(
+        f.listed(young.to_str().unwrap()),
+        "one second under 24 hours stays"
+    );
+}
+
+#[test]
+fn review_live_pid_stays() {
+    let f = Fixture::new();
+    let live = f.review_worktree("3-aaaaaaa");
+    f.lock(
+        &live,
+        &format!("review pid={} ts={}", std::process::id(), NOW - 25 * HOUR),
+    );
+
+    f.setup_at(NOW);
+
+    assert!(f.listed(live.to_str().unwrap()), "a live pid keeps it");
+}
+
+#[test]
+fn review_dirty_tree_stays() {
+    let f = Fixture::new();
+    let dirty = f.review_worktree("3-aaaaaaa");
+    fs::write(dirty.join("notes.txt"), "work\n").unwrap();
+    f.created_at(&dirty, NOW - HOUR);
+
+    f.setup_at(NOW);
+
+    assert!(
+        f.listed(dirty.to_str().unwrap()),
+        "uncommitted work keeps it"
+    );
+}
+
+#[test]
+fn review_ts_beats_creation_time() {
+    let f = Fixture::new();
+    let old = f.review_worktree("3-aaaaaaa");
+    f.created_at(&old, NOW - 10);
+    f.lock(
+        &old,
+        &format!("review pid={DEAD_PID} ts={}", NOW - 25 * HOUR),
+    );
+
+    f.setup_at(NOW);
+
+    assert!(
+        !f.listed(old.to_str().unwrap()),
+        "ts decides, not the young folder"
+    );
+}
+
+#[test]
+fn review_malformed_ts_falls_back() {
+    let f = Fixture::new();
+    let old = f.review_worktree("3-aaaaaaa");
+    f.created_at(&old, NOW - 25 * HOUR);
+    f.lock(&old, &format!("review pid={DEAD_PID} ts=soon"));
+
+    f.setup_at(NOW);
+
+    assert!(!f.listed(old.to_str().unwrap()), "creation time decides");
+}
+
+#[test]
+fn review_age_falls_back_to_mtime() {
+    assert_eq!(
+        playbook::worktree::review_age_secs(None, Some(100), 150),
+        50
+    );
+    assert_eq!(
+        playbook::worktree::review_age_secs(Some(120), Some(100), 150),
+        30
+    );
+    assert_eq!(playbook::worktree::review_age_secs(None, None, 150), 0);
+}
+
+#[test]
+fn review_setup_sweep_ignores_other_worktrees() {
+    let f = Fixture::new();
+    let stale_review = f.review_worktree("3-aaaaaaa");
+    f.created_at(&stale_review, NOW - 25 * HOUR);
+    let other = scratch("other3").join("wu");
+    git_ok(
+        &f.repo,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            "-q",
+            other.to_str().unwrap(),
+            &f.sha,
+        ],
+    );
+
+    let out = f.setup_at(NOW);
+
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(!f.listed(stale_review.to_str().unwrap()));
+    assert!(
+        f.listed(other.to_str().unwrap()),
+        "only review worktrees go"
+    );
+    assert!(
+        f.listed(f.repo.to_str().unwrap()),
+        "the primary checkout stays"
+    );
+}
+
+#[test]
+fn setup_skips_sweep_when_locked() {
+    // Arrange
+    let f = Fixture::new();
+    let leftover = f.review_worktree("3-abcdef1");
+    f.created_at(&leftover, 1_000);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    fs::create_dir_all(f.repo.join(".config/playbook/gc/.lock")).unwrap();
+
+    // Act
+    let out = f.setup_at(now);
+
+    // Assert
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(
+        Path::new(&stdout(&out)).is_dir(),
+        "the worktree is still made"
+    );
+    assert!(
+        f.listed(leftover.to_str().unwrap()),
+        "a busy gc run skips the sweep"
+    );
 }
