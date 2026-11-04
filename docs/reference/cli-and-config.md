@@ -350,7 +350,7 @@ Example: `playbook commands pr`
 
 ### `playbook commit`
 
-The git steps of `/playbook:commit-and-push`
+Run the git steps of `/playbook:commit-and-push`
 
 Subcommands: `prepare`, `run`
 
@@ -359,6 +359,8 @@ Subcommands: `prepare`, `run`
 Stage, format, and print what a commit message is drafted from
 
 Refuses the repo's default branch. Prints `NO_STAGED_CHANGES` when there is nothing to commit, else `BRANCH=`, the changed files and the diff.
+
+Example: `playbook commit prepare -A`
 
 - `-A`: Stage everything first (`git add -A`)
 - `-u`: Stage tracked changes first (`git add -u`)
@@ -370,11 +372,13 @@ Commit, rebase when behind, and push
 
 Reads the message from stdin, or from `--message-file`. Adds a sign-off per `commit.signOff` and signs when `user.signingkey` is set. A rejected push is never forced. Exits 1 on any failure.
 
+Example: `playbook commit run --message-file /tmp/msg.txt`
+
 - `--message-file <MESSAGE_FILE>`: File with the commit message (default: read stdin)
 - `-a`: Replace the last commit
 - `--auto`: Auto mode: never force a push
 - `--no-signoff`: Leave the sign-off trailer off
-- `--no-type-check`: Skip the check that the commit type fits the files (a docs-only change is not `feat`, a lock-file bump is not `fix`)
+- `--no-type-check`: Skip the check that the commit type fits the files. A docs-only change is not `feat`, and a lock-file bump is not `fix`
 - `--no-prose-check`: Skip the prose check (a dash, a curly quote, a banned word or a contrast phrase in the message)
 
 ### `playbook completions`
@@ -436,7 +440,7 @@ Writes to the repo tier unless you pass `--org` or `--global`. The per-user `upd
 
 ### `playbook deliver`
 
-Commit, push and open or update a pull request from any worktree
+Commit, push and open or update a PR from any worktree
 
 Stages per flag, commits when something is staged (message from `--message` or `--message-file`), rebases onto the base, pushes, then opens or updates the PR through `gh`. Refuses the default or a protected branch and a detached HEAD, never skips hooks or signing, and only force-pushes with a lease after its own rebase. Exit codes: 0 delivered, 3 refused, 4 rebase conflict, 5 a git or gh call failed, 6 PR closed or a required check failed, 7 wait timed out, 8 auto-merge did not queue, 9 nothing to do.
 
@@ -1026,7 +1030,7 @@ Prints `path<TAB>[status]<TAB>title` per file, or `NO_PLANS`.
 
 ### `playbook pr`
 
-Prepare and open pull requests, and pick a review depth
+Prepare and open PRs, and pick a review depth
 
 These are the mechanical steps behind `/playbook:create-pull-request`.
 
@@ -1040,6 +1044,8 @@ Wait for a PR's required checks to finish
 
 Prints a `checks total=.. pending=.. fail=.. cancel=..` line per read, then `CI_VERDICT=` one of NONE, FAIL, CANCELLED, PASS or TIMEOUT.
 
+Example: `playbook pr ci-wait 12 --timeout 600`
+
 - `<PR>`: PR number
 - `--timeout <TIMEOUT>`: Give up after this many seconds
 - `--interval <INTERVAL>`: Seconds between reads
@@ -1052,13 +1058,15 @@ Resolve a PR and fetch its review threads and comments
 
 Takes the command's arguments as one string (`#12 --bots --dry-run -y`). Prints the PR, head SHA, your login and the flags, and writes the threads and issue comments as JSON under `/tmp`.
 
-- `<ARGS>`: The command's arguments, as one string
+- `<ARGS>`: Command arguments as one string, such as `#12 --bots`
 
 ### `playbook pr create`
 
 Push the branch and open a PR from a drafted title and body
 
 Opens a draft unless the `pr.draft` setting is `false`.
+
+Example: `playbook pr create --title "fix(x): y" --body-file /tmp/body.md`
 
 - `--title <TITLE>`: PR title, at most 72 characters
 - `--body-file <BODY_FILE>`: File holding the PR body
@@ -1073,6 +1081,8 @@ Wait for a PR to merge or hit a gate
 
 Prints a status line per read (state, merge state, review, auto-merge), then `LAND_VERDICT=` one of MERGED, REVIEW_GATE, CHANGES_REQUESTED, RESTATE or TIMEOUT.
 
+Example: `playbook pr land-wait 12`
+
 - `<PR>`: PR number
 - `--timeout <TIMEOUT>`: Give up after this many seconds
 - `--interval <INTERVAL>`: Seconds between reads
@@ -1082,6 +1092,8 @@ Prints a status line per read (state, merge state, review, auto-merge), then `LA
 Merge a PR with auto-merge, or as an admin squash
 
 Prints `merge_rc=<code>` (or `admin_rc=`) and then what `gh` said. Always exits 0, so the caller reads the code.
+
+Example: `playbook pr merge 12 --admin`
 
 - `<PR>`: PR number
 - `--admin`: Squash with admin rights instead of arming auto-merge
@@ -1093,21 +1105,23 @@ Run pre-flight checks and gather what a PR draft needs
 
 Finds the branch and base, checks the repo is ready, writes the diff to a scratch file, and prints labeled lines for the PR drafter.
 
+Example: `playbook pr prepare --base main`
+
 - `--base <BASE>`: Base branch for the PR (default: the repo's default branch)
 - `--ticket <TICKET>`: Ticket id to cite (default: one found in the branch name)
 - `--dir <DIR>`: Work in this directory instead of the current one
 
 ### `playbook pr reply`
 
-Post one reply on a pull request, from a file
+Post one reply on a PR, from a file
 
-`--thread ID` replies in a review thread (ID is the `databaseId` of the thread's first comment, as `pr comments` writes it); `--issue` comments on the pull request itself. The body is read from `--body-file`, so quotes, backticks and newlines need no shell escaping. It refuses an empty body, an em or en dash, and AI attribution. Prints `Posted: <url>` and the body.
+`--thread ID` replies in a review thread (ID is the `databaseId` of the thread's first comment, as `pr comments` writes it); `--issue` comments on the PR itself. The body is read from `--body-file`, so quotes, backticks and newlines need no shell escaping. It refuses an empty body, an em or en dash, and AI attribution. Prints `Posted: <url>` and the body.
 
 Example: `playbook pr reply --pr 12 --thread 345 --body-file /tmp/reply.md`
 
-- `--pr <PR>`: The pull request number
+- `--pr <PR>`: PR number
 - `--thread <THREAD>`: Reply in the review thread whose first comment has this `databaseId`
-- `--issue`: Comment on the pull request itself
+- `--issue`: Comment on the PR itself
 - `--body-file <BODY_FILE>`: File holding the reply text
 - `--repo <REPO>`: `owner/name`; defaults to the current repo
 
@@ -1116,6 +1130,8 @@ Example: `playbook pr reply --pr 12 --thread 345 --body-file /tmp/reply.md`
 Choose a quick or deep self-review for a PR
 
 Asks a small model three times. Anything but a unanimous `quick` becomes `deep`.
+
+Example: `playbook pr review-triage --pr 12`
 
 - `--pr <PR>`: PR number (default: the current branch against its base)
 - `--base <BASE>`: Base branch when no PR number is given (default: the repo's default branch)
@@ -1132,11 +1148,11 @@ Reads the writing-style and engineering-standards skills from the plugin root (`
 
 ### `playbook pr stack`
 
-Find the pull requests stacked with a PR
+Find the PRs stacked with a PR
 
 Reads the GitHub stack API, then falls back to the branch chain. Takes the arguments as one string (`#12 --json --max-prs 6 --max-lines 3000`). Prints a summary, or JSON with `--json`. `--context` writes one shared review context under `/tmp/pr-stack-<pr>`. `map --stack <file> --findings <file>` gives each finding to the PR whose diff holds the line.
 
-- `<ARGS>`: The command's arguments, as one string
+- `<ARGS>`: Command arguments as one string, such as `#12 --json`
 
 ### `playbook prose`
 

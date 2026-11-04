@@ -735,7 +735,7 @@ pub enum Command {
         #[command(subcommand)]
         sub: EvalCommand,
     },
-    /// Prepare and open pull requests, and pick a review depth
+    /// Prepare and open PRs, and pick a review depth
     ///
     /// These are the mechanical steps behind `/playbook:create-pull-request`.
     ///
@@ -904,12 +904,12 @@ pub enum Command {
         #[command(subcommand)]
         sub: LearnCommand,
     },
-    /// The git steps of `/playbook:commit-and-push`
+    /// Run the git steps of `/playbook:commit-and-push`
     Commit {
         #[command(subcommand)]
         sub: CommitCommand,
     },
-    /// Commit, push and open or update a pull request from any worktree
+    /// Commit, push and open or update a PR from any worktree
     ///
     /// Stages per flag, commits when something is staged (message from
     /// `--message` or `--message-file`), rebases onto the base, pushes, then
@@ -1392,6 +1392,8 @@ pub enum PrCommand {
     ///
     /// Finds the branch and base, checks the repo is ready, writes the diff
     /// to a scratch file, and prints labeled lines for the PR drafter.
+    ///
+    /// Example: `playbook pr prepare --base main`
     Prepare {
         /// Base branch for the PR (default: the repo's default branch)
         #[arg(long)]
@@ -1406,6 +1408,8 @@ pub enum PrCommand {
     /// Push the branch and open a PR from a drafted title and body
     ///
     /// Opens a draft unless the `pr.draft` setting is `false`.
+    ///
+    /// Example: `playbook pr create --title "fix(x): y" --body-file /tmp/body.md`
     Create {
         /// PR title, at most 72 characters
         #[arg(long)]
@@ -1430,6 +1434,8 @@ pub enum PrCommand {
     ///
     /// Asks a small model three times. Anything but a unanimous `quick`
     /// becomes `deep`.
+    ///
+    /// Example: `playbook pr review-triage --pr 12`
     ReviewTriage {
         /// PR number (default: the current branch against its base)
         #[arg(long)]
@@ -1464,28 +1470,28 @@ pub enum PrCommand {
     /// Prints the PR, head SHA, your login and the flags, and writes the
     /// threads and issue comments as JSON under `/tmp`.
     Comments {
-        /// The command's arguments, as one string
+        /// Command arguments as one string, such as `#12 --bots`
         #[arg(default_value = "")]
         args: String,
     },
-    /// Post one reply on a pull request, from a file
+    /// Post one reply on a PR, from a file
     ///
     /// `--thread ID` replies in a review thread (ID is the `databaseId` of the
     /// thread's first comment, as `pr comments` writes it); `--issue` comments
-    /// on the pull request itself. The body is read from `--body-file`, so
+    /// on the PR itself. The body is read from `--body-file`, so
     /// quotes, backticks and newlines need no shell escaping. It refuses an
     /// empty body, an em or en dash, and AI attribution. Prints `Posted:
     /// <url>` and the body.
     ///
     /// Example: `playbook pr reply --pr 12 --thread 345 --body-file /tmp/reply.md`
     Reply {
-        /// The pull request number
+        /// PR number
         #[arg(long)]
         pr: String,
         /// Reply in the review thread whose first comment has this `databaseId`
         #[arg(long, conflicts_with = "issue", required_unless_present = "issue")]
         thread: Option<String>,
-        /// Comment on the pull request itself
+        /// Comment on the PR itself
         #[arg(long)]
         issue: bool,
         /// File holding the reply text
@@ -1495,7 +1501,7 @@ pub enum PrCommand {
         #[arg(long)]
         repo: Option<String>,
     },
-    /// Find the pull requests stacked with a PR
+    /// Find the PRs stacked with a PR
     ///
     /// Reads the GitHub stack API, then falls back to the branch chain. Takes
     /// the arguments as one string (`#12 --json --max-prs 6 --max-lines 3000`).
@@ -1503,7 +1509,7 @@ pub enum PrCommand {
     /// review context under `/tmp/pr-stack-<pr>`. `map --stack <file> --findings
     /// <file>` gives each finding to the PR whose diff holds the line.
     Stack {
-        /// The command's arguments, as one string
+        /// Command arguments as one string, such as `#12 --json`
         #[arg(default_value = "")]
         args: String,
     },
@@ -1511,6 +1517,8 @@ pub enum PrCommand {
     ///
     /// Prints a `checks total=.. pending=.. fail=.. cancel=..` line per read,
     /// then `CI_VERDICT=` one of NONE, FAIL, CANCELLED, PASS or TIMEOUT.
+    ///
+    /// Example: `playbook pr ci-wait 12 --timeout 600`
     CiWait {
         /// PR number
         pr: String,
@@ -1532,6 +1540,8 @@ pub enum PrCommand {
     /// Prints a status line per read (state, merge state, review, auto-merge),
     /// then `LAND_VERDICT=` one of MERGED, REVIEW_GATE, CHANGES_REQUESTED,
     /// RESTATE or TIMEOUT.
+    ///
+    /// Example: `playbook pr land-wait 12`
     LandWait {
         /// PR number
         pr: String,
@@ -1546,6 +1556,8 @@ pub enum PrCommand {
     ///
     /// Prints `merge_rc=<code>` (or `admin_rc=`) and then what `gh` said.
     /// Always exits 0, so the caller reads the code.
+    ///
+    /// Example: `playbook pr merge 12 --admin`
     Merge {
         /// PR number
         pr: String,
@@ -1723,6 +1735,8 @@ pub enum CommitCommand {
     ///
     /// Refuses the repo's default branch. Prints `NO_STAGED_CHANGES` when there
     /// is nothing to commit, else `BRANCH=`, the changed files and the diff.
+    ///
+    /// Example: `playbook commit prepare -A`
     Prepare {
         /// Stage everything first (`git add -A`)
         #[arg(short = 'A')]
@@ -1739,6 +1753,8 @@ pub enum CommitCommand {
     /// Reads the message from stdin, or from `--message-file`. Adds a
     /// sign-off per `commit.signOff` and signs when `user.signingkey` is set.
     /// A rejected push is never forced. Exits 1 on any failure.
+    ///
+    /// Example: `playbook commit run --message-file /tmp/msg.txt`
     Run {
         /// File with the commit message (default: read stdin)
         #[arg(long)]
@@ -1752,8 +1768,8 @@ pub enum CommitCommand {
         /// Leave the sign-off trailer off
         #[arg(long)]
         no_signoff: bool,
-        /// Skip the check that the commit type fits the files (a docs-only
-        /// change is not `feat`, a lock-file bump is not `fix`)
+        /// Skip the check that the commit type fits the files. A docs-only
+        /// change is not `feat`, and a lock-file bump is not `fix`
         #[arg(long)]
         no_type_check: bool,
         /// Skip the prose check (a dash, a curly quote, a banned word or a
