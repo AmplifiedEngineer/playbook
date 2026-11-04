@@ -1,6 +1,6 @@
 # ADR-0011: Memory Signals: Usage Promotion, Staleness, Similarity Edges, and Consolidation
 
-- **Status:** Accepted. Amended 2026-11-04: the Agent-dispatch injection hook of gap 1 was not built and is dropped. The hit counter, the promotion flag and the `pinned` frontmatter field stay. They raise a fact's rank in the session-start block instead of injecting it unconditionally. Amended 2026-10-19: the memory graph now lives in `~/.config/playbook/data/memory.db` (moved there in #925), not in `memory.graph.json` or `graph.json`. `playbook memory rebuild` rebuilds it and `playbook memory stats` shows what it holds. The fact files stay in `~/.config/playbook/memory/`. Paths below are as they were when this record was written.
+- **Status:** Accepted. Amended 2026-11-04: the Agent-dispatch injection hook of gap 1 was not built and is dropped. The hit counter, the promotion flag and the `pinned` frontmatter field stay. The prompt-recall hook bumps the hits, and the session-start block ranks pinned facts first and the rest by usage and links, instead of injecting a promoted fact unconditionally. Amended 2026-10-19: the memory graph now lives in `~/.config/playbook/data/memory.db` (moved there in #925), not in `memory.graph.json` or `graph.json`. `playbook memory rebuild` rebuilds it and `playbook memory stats` shows what it holds. The fact files stay in `~/.config/playbook/memory/`. Paths below are as they were when this record was written.
 - **Date created:** 2026-08-27
 - **Date modified:** 2026-11-04
 
@@ -53,14 +53,14 @@ Split the store: rename `graph.json` to `memory.graph.json` (and its lock file t
 
 Four consumer features build on this split, independently reviewable and mergeable once it lands, though not all independently schedulable: the execution blueprint sequences WU-4 and WU-6 after WU-3 for file-conflict reasons (both would otherwise edit `src/hooks/mod.rs` or `session_init.rs` at the same time), not functional coupling. Detailed in `.claude/designs/2026-08-27-memory-system-enhancements.md`:
 
-- Gap 1 (amended 2026-11-04: the dispatch hook was never built and is dropped, since it needs its own injection budget and no work has asked for it; the counter, the flag and the pin shipped as ranking inputs): ~~a new PreToolUse hook on Agent-tool dispatch injects a matched fact's full body at spawn time;~~ `memory.signals.json`'s hit counter auto-promotes a fact to unconditional SessionStart injection once it crosses a threshold within a rolling window, counted against the existing `MEMORY_BODY_CAP_CHARS` cap per Decision Driver 2. This auto-promotion is a deliberate, scoped exception to this project's general preference for human- or model-confirmed changes: the entire point of gap 1 is closing the loop on a pattern nobody noticed in time to flag by hand. A manual `pinned: true` frontmatter override ships alongside it (WU-0 parses it into `Node.pinned`, WU-3 wires `session_init.rs` to check it), so the one fact already known to need this today gets fixed immediately and cheaply, and the automatic path is validated against future, not-yet-discovered cases rather than being asked to carry the sole burden of the one case already in evidence.
+- Gap 1 (amended 2026-11-04): the dispatch hook is dropped, because it was never built. The hit counter auto-promotes a fact once it crosses a threshold within a rolling window, and the promotion flag raises that fact's rank in the capped SessionStart block (`render_ranked` in `memorycontext.rs`), counted against the existing `MEMORY_BODY_CAP_CHARS` cap per Decision Driver 2. As first written, promotion meant unconditional SessionStart injection. This auto-promotion is a deliberate, scoped exception to this project's general preference for human- or model-confirmed changes: the entire point of gap 1 is closing the loop on a pattern nobody noticed in time to flag by hand. A manual `pinned: true` frontmatter override ships alongside it (WU-0 parses it into `Node.pinned`, and the ranking gives a pin the top score), so the one fact already known to need this today gets fixed immediately and cheaply, and the automatic path is validated against future, not-yet-discovered cases rather than being asked to carry the sole burden of the one case already in evidence.
 - Gap 2: `memory.signals.json` checked first as a cache; only on a miss does a same-repo anchor get a live git-log-date comparison, or a non-repo anchor a fresh hash, with the result written back so the next surfacing is a pure JSON read. Surfaced as a soft marker at existing contact points, never a new blocking gate.
 - Gap 3: a zero-dependency local heuristic (shared anchor directory, shared type and scope, Jaccard word-overlap on fact bodies) in `rebuild_memory_graph.rs`'s existing pass writes `possible_relates_to` edges, always model-confirmed before becoming a real `relates_to`.
 - Gap 4: `memory_capture.rs`'s existing Stop-hook nudge gains a consolidation mention past a store-size threshold, using `memory.signals.json`'s cursor to evaluate only what changed since the last pass. This gap is sequenced after ADR-0009 ships, or designed against its proposed shape, per Decision Driver 4; it does not land in parallel against the hook ADR-0009 is already redesigning.
 
 **What this ADR fixes versus what stays open.** The hard-to-reverse decision this record makes is the store split itself, `memory.graph.json` plus `memory.signals.json`, unchanged rebuild contract, a cross-cutting file format multiple hooks read. The four gaps' specific mechanism shapes above (O1's promotion threshold and window, O2's cache TTL, gap 3's Jaccard cutoff, O3's cursor granularity) are proposed designs, not locked parameters. Their concrete numbers and final shape are confirmed at `/playbook:scope` time for each Work Unit, per the blueprint's own open items. Treat the bullets above as the intended mechanism, not a commitment to exact constants.
 
-**Cross-cutting principle: the JSON files are checked first, as an index, before anything more expensive.** Gap 1 matches `subagent_type` against `memory.graph.json`'s nodes directly, never scans the markdown store. Gap 2 reads `memory.signals.json`'s cached verdict before ever shelling out to `git log`. Gap 3's `possible_relates_to` edges are computed once at rebuild time and read from `memory.graph.json` thereafter, never recomputed live. Gap 4 reads the cursor before scanning anything. No consumer re-derives from the markdown source when the JSON already has the answer.
+**Cross-cutting principle: the JSON files are checked first, as an index, before anything more expensive.** Gap 1 reads hits and promotion from `memory.signals.json` and ranks nodes from `memory.graph.json`, never scans the markdown store. Gap 2 reads `memory.signals.json`'s cached verdict before ever shelling out to `git log`. Gap 3's `possible_relates_to` edges are computed once at rebuild time and read from `memory.graph.json` thereafter, never recomputed live. Gap 4 reads the cursor before scanning anything. No consumer re-derives from the markdown source when the JSON already has the answer.
 
 ## Consequences
 
@@ -91,15 +91,15 @@ flowchart LR
 
         MemJSON --> SessionInit2["session_init.rs"]
         MemJSON --> Anchors2["memory_anchors.rs"]
-        MemJSON --> Dispatch2["new: PreToolUse on Agent dispatch"]
         MemJSON --> Capture2["memory_capture.rs"]
 
-        SessionInit2 -->|bump hits, read promoted| Signals["memory.signals.json\n(stateful, incremental)"]
+        SessionInit2 -->|read hits and promoted| Signals["memory.signals.json\n(stateful, incremental)"]
         Anchors2 -->|bump hits| Signals
-        Dispatch2 -->|bump hits, inject full body| Signals
         Capture2 -->|read/advance cursor| Signals
     end
 ```
+
+The next diagram shows the dispatch hook as first designed. It was never built and is dropped (see the 2026-11-04 amendment).
 
 ```mermaid
 sequenceDiagram
