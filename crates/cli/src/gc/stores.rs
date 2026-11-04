@@ -250,6 +250,7 @@ pub fn small_stores(home: &Path) -> Vec<Store> {
             home,
         ),
         log_store(home),
+        super::build_output::store(),
     ]
 }
 
