@@ -636,6 +636,12 @@ pub(crate) mod tests {
         file.try_lock().is_ok()
     }
 
+    /// Whether the lock was released: it reads as free once a child that
+    /// another test spawned has dropped its copy of the file.
+    fn lock_is_released(p: &Paths) -> bool {
+        crate::util::wait_unlocked(&crate::daemon::lock_path(p))
+    }
+
     #[test]
     fn a_second_run_while_the_lock_is_held_binds_nothing_and_leaves_the_state() {
         let p = paths("collector-lock-busy");
@@ -674,7 +680,7 @@ pub(crate) mod tests {
             format!("{} {}\n", std::process::id(), env!("CARGO_PKG_VERSION"))
         );
         running.finish().unwrap();
-        assert!(lock_is_free(&p));
+        assert!(lock_is_released(&p));
     }
 
     #[test]
@@ -685,7 +691,7 @@ pub(crate) mod tests {
 
         running.finish().unwrap();
 
-        assert!(lock_is_free(&p));
+        assert!(lock_is_released(&p));
         bind(port).expect("the port is free with no retry");
         assert_eq!(read_state(&state_path(&p)).unwrap().pid, 0);
     }

@@ -258,10 +258,20 @@ pub(crate) fn scratch_dir(tag: &str) -> PathBuf {
 }
 
 /// How long a test waits for a file lock it has released to read as free.
-/// A child that another test spawns holds a copy of every open file until it
-/// execs, and the copy keeps an `flock` after its owner closed the file.
 #[cfg(test)]
 pub(crate) const UNLOCK_BOUND: Duration = Duration::from_secs(10);
+
+/// Waits until nobody holds a lock on `path`. A thread of the same test
+/// process that spawns a child lends it a copy of every open file until the
+/// child execs, and a copy keeps an `flock` after its owner closed the file.
+/// A lock a test has released therefore reads as free only once the copy is
+/// gone, which takes longer on a loaded machine.
+#[cfg(test)]
+pub(crate) fn wait_unlocked(path: &std::path::Path) -> bool {
+    within(UNLOCK_BOUND, || {
+        std::fs::File::open(path).is_ok_and(|f| f.try_lock().is_ok())
+    })
+}
 
 /// Paths under a fresh scratch home, with the database inside it.
 #[cfg(test)]
