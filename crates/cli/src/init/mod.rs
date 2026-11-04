@@ -31,6 +31,7 @@
 pub mod attribution;
 pub mod catalog;
 pub mod choices;
+pub mod codex_hooks;
 pub mod collector_service;
 pub mod completion;
 pub mod dead_hooks;
