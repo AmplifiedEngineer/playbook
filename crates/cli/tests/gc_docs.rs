@@ -19,7 +19,7 @@ fn internals_doc_names_every_store() {
     // Arrange
     let home = std::env::temp_dir().join("playbook-gc-changelog-home");
     let registry = playbook::gc::registry(&home);
-    let doc = repo_file("docs/internals/16-gc-and-tombstones.md").to_lowercase();
+    let doc = repo_file("docs/internals/17-gc-and-tombstones.md").to_lowercase();
 
     // Act
     let missing: Vec<&str> = registry

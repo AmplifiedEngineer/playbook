@@ -1,0 +1,30 @@
+╭─┤Agent Budget Dashboard├──┤UTC├──────────────────────────────────────────────────────────────────╮
+│last 30 days Aug 5 to Sep 3, 2026  (no previous period to compare)                                │
+│cost          $20.27                                                                              │
+│tokens        618.8K                                                                              │
+│messages          26                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ F1 Charts ╭┤ Layout: tabs and panels ├─────────────────────────────────────────────────╮
+╭─┤¹Spend p│  Charts  Numbers  Sessions                                                 │──────────╮
+│Thu 2026-0│                                                                            │7.6K tok  │
+│ $8┤┄┄┄┄┄┄│ Add after spend.model   enter add   esc back   j/k choose                  │┄┄┄┄┄┄┄┄┄┄│
+│ $4┤┄┄┄┄┄┄│ > spend              cost per day as a chart or a daily table              │┄┄┄┄┄┄┄┄┄┄│
+│ $0┤▁▄▁  ▂│   models             cost and tokens per model                             │ ▃▂  ▅  ▄ │
+│    5 7  9│   breakdown          projects, agents, skills, tools or health (v switches)│ 29 31  3 │
+╰┤peak $6.0│   live               sessions with a message in the last 15 minutes        │ haiku-5├─╯
+╭─┤²Tokens │   sessions           every session of the period, grouped by day           │──────────╮
+│total 618.│   budget             limits and how fast you are using them                │          │
+│Thu 2026-0│   projection         when each limit is reached at the current pace        │          │
+│ 50K┤┄┄┄┄┄│   spend.daily        cost per day as a table, always this view             │▇▇┄┄┄┄▇▇▇┄│
+│ 25K┤▃▃┄▃▃│ spend.total: total cost per day as a chart, always this view               │██┄┄┄┄███┄│
+│   0┤██ ██│                                                                            │██    ███ │
+│     5  6 │ Left/Right tab   h/l j/k move cursor   H/J/K/L move panel   f width        │1  2  3   │
+╰──────────│ a add   d remove   u undo   < > move tab   n new   x delete   r rename     │■■■ high├─╯
+╭─┤Burn-up├│ R reset   esc or q close   changes are saved as you make them              │iod, UTC├─╮
+│no burn-up╰────────────────────────────────────────────────────────────────────────────╯          │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ Tab tab w week m month r range v view / filter h help q quit        updated 01:46:40 UTC, every 5s

@@ -12,7 +12,7 @@ const ALLOWED: [&str; 6] = [
     "crates/cli/src/init/handoff_used.rs",
     "crates/cli/tests/handoff_used_migration.rs",
     "CHANGELOG.md",
-    "docs/internals/16-gc-and-tombstones.md",
+    "docs/internals/17-gc-and-tombstones.md",
     "docs/internals/03-worktree.md",
 ];
 const SCANNED_DIRS: [&str; 5] = ["crates", "docs", "plugins", "seed", "scripts"];

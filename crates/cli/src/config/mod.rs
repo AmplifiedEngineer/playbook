@@ -279,6 +279,16 @@ pub fn resolve_valid(
     if let Some(fixed) = gc_fallback(key, &value, source, home, repo_slug)? {
         return Ok(fixed);
     }
+    if key == "gate.maxRounds" && !value.as_i64().is_some_and(keys::gate_max_rounds_in_range) {
+        let ignored = IgnoredValue {
+            tier: source,
+            warning: format!(
+                "ignoring invalid value {value} for config key {key}, valid values are whole numbers from 1 to {}",
+                keys::GATE_MAX_ROUNDS_CEILING
+            ),
+        };
+        return Ok((known_default(key), Source::Default, Some(ignored)));
+    }
     let Some(allowed) = keys::allowed_enum_values(key) else {
         return Ok((value, source, None));
     };
@@ -417,6 +427,37 @@ mod tests {
         let (value, _, ignored) = resolve_valid("usage.theme", &home, None).unwrap();
         assert_eq!(value, Value::String("default".into()));
         assert!(ignored.is_some());
+    }
+
+    #[test]
+    fn a_gate_round_cap_outside_one_to_twenty_reads_as_the_default() {
+        // Arrange
+        let home = scratch_home("gate-rounds-range");
+        let root = crate::common::paths::playbook_root_from(&home);
+        fs::create_dir_all(&root).unwrap();
+
+        for stored in [
+            json!(0),
+            json!(21),
+            json!(500),
+            json!(-3),
+            json!(2.5),
+            json!(u64::MAX),
+        ] {
+            store::put(&root, Tier::Global, None, "gate.maxRounds", &stored).unwrap();
+
+            // Act
+            let (value, source, ignored) = resolve_valid("gate.maxRounds", &home, None).unwrap();
+
+            // Assert
+            assert_eq!(value, json!(5), "{stored}");
+            assert_eq!(source, Source::Default, "{stored}");
+            assert!(ignored.is_some(), "{stored}");
+        }
+        store::put(&root, Tier::Global, None, "gate.maxRounds", &json!(20)).unwrap();
+        let (value, _, ignored) = resolve_valid("gate.maxRounds", &home, None).unwrap();
+        assert_eq!(value, json!(20));
+        assert!(ignored.is_none());
     }
 
     #[test]
