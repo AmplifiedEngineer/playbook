@@ -669,7 +669,7 @@ impl App {
     /// defaults and the editor closes. On a failure nothing changes here.
     pub fn reset_done(&mut self, cleared: Result<bool, String>) -> Effect {
         if let Err(why) = cleared {
-            self.note = Some(format!("Reset failed: {why}, nothing changed"));
+            self.note = Some(format!("Reset failed: {why}"));
             return Effect::None;
         }
         let range = Range::ThisWeek(self.week_start);

@@ -162,9 +162,11 @@ fn event_loop(
                     Effect::Sessions => sessions.open(),
                     Effect::SaveLayout(text) => autosave.push(text),
                     Effect::ResetPrefs => {
-                        autosave.discard();
                         let cleared = ui_state::reset(&home);
                         let cleared_ok = cleared.is_ok();
+                        if cleared_ok {
+                            autosave.discard();
+                        }
                         if let Effect::Requery = app.reset_done(cleared) {
                             worker.ask(app.range, &app.filter);
                         }

@@ -1859,7 +1859,7 @@ mod tests {
         app.key(press(KeyCode::Char('e')));
 
         // Act
-        let effect = app.reset_done(Err("database is locked".into()));
+        let effect = app.reset_done(Err("database is locked, nothing changed".into()));
 
         // Assert
         assert_eq!(effect, crate::tui::app::Effect::None);

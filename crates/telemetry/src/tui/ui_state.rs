@@ -161,7 +161,7 @@ fn reset_with(
     clear_layout: impl FnOnce() -> Result<bool, String>,
     clear_state: impl FnOnce() -> Result<bool, String>,
 ) -> Result<bool, String> {
-    let layout = clear_layout()?;
+    let layout = clear_layout().map_err(|e| format!("{e}, nothing changed"))?;
     let state =
         clear_state().map_err(|e| format!("{e}; the layout setting was already cleared"))?;
     Ok(layout && state)
@@ -548,7 +548,7 @@ mod tests {
         );
 
         // Assert
-        assert_eq!(result, Err("locked".to_string()));
+        assert_eq!(result, Err("locked, nothing changed".to_string()));
         assert_eq!(state_calls, 0);
     }
 
