@@ -11,3 +11,4 @@ pub mod clock;
 pub mod lock;
 pub mod rule;
 pub mod settings;
+pub mod store;
