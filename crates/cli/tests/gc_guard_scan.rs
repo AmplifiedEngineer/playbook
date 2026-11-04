@@ -67,9 +67,64 @@ fn gc_has_no_unguarded_removal() {
 
 #[test]
 fn gc_does_not_call_the_old_worktree_sweep_outside_its_adapter() {
-    let found = hits(&["worktree::sweep"], &["worktrees.rs"]);
+    // Every spelling that reaches the old sweep: a path call, a grouped or
+    // glob import, a module import, or the injectable variant.
+    let banned = [
+        "worktree::sweep",
+        "worktree::{",
+        "worktree::*",
+        "use crate::worktree;",
+        "crate::worktree::{",
+        "sweep_with",
+    ];
+
+    let found = hits(&banned, &["worktrees.rs"]);
 
     assert!(found.is_empty(), "old sweep call: {found:#?}");
+}
+
+/// Every `.rs` file under `dir`, with the text of its non-comment lines
+/// joined and stripped of whitespace, so a call split across lines still
+/// matches.
+fn squashed_sources(dir: &Path, out: &mut Vec<(PathBuf, String)>) {
+    for entry in fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            squashed_sources(&path, out);
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            let text = fs::read_to_string(&path).unwrap();
+            let squashed: String = code_lines(&text)
+                .flat_map(|(_, line)| line.chars().filter(|c| !c.is_whitespace()))
+                .collect();
+            out.push((path, squashed));
+        }
+    }
+}
+
+#[test]
+fn only_the_adapter_and_the_dry_run_doctor_reach_the_old_sweep() {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    squashed_sources(&src, &mut files);
+    let allowed = ["gc/worktrees.rs", "doctor/check.rs", "worktree/"];
+
+    let found: Vec<String> = files
+        .iter()
+        .filter(|(path, _)| {
+            let rel = path
+                .strip_prefix(&src)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            !allowed.iter().any(|ok| rel.starts_with(ok))
+        })
+        .filter(|(_, text)| {
+            text.contains("crate::worktree::sweep") || text.contains("crate::worktree::{")
+        })
+        .map(|(path, _)| path.display().to_string())
+        .collect();
+
+    assert!(found.is_empty(), "unlocked worktree sweep: {found:#?}");
 }
 
 #[test]

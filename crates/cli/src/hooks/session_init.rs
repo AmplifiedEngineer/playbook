@@ -671,13 +671,20 @@ fn maybe_sweep_worktrees(home: &str, repo_root: &str) {
     // the same destructive pass on every SessionStart until one finishes.
     let _ = crate::state::set(&root, &marker, &now_epoch.to_string());
     let clock = crate::gc::default_clock();
-    if let Err(err) = crate::gc::worktrees::sweep_locked(
+    match crate::gc::worktrees::sweep_locked(
         home,
         &*clock,
         (Path::new(repo_root), repo_slug_opt),
         false,
     ) {
-        eprintln!("worktree-sweep: {err}");
+        Ok(crate::gc::worktrees::SweepRun::Busy) => {
+            // Nothing was swept, so give the stamp back and let the next
+            // SessionStart try again instead of waiting a full interval.
+            let before = marker_mtime_epoch.unwrap_or(0);
+            let _ = crate::state::set(&root, &marker, &before.to_string());
+        }
+        Ok(crate::gc::worktrees::SweepRun::Swept(_)) => {}
+        Err(err) => eprintln!("worktree-sweep: {err}"),
     }
 }
 
