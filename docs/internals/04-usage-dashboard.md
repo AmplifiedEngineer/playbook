@@ -344,7 +344,7 @@ A seat billed by usage has no 5 hour or 7 day window. It has a monthly dollar li
 
 | State | Text |
 |---|---|
-| Pace passes the limit | `! $986/$1500 mo, cap in 1d2h` |
+| Pace passes the limit | `! $986/$1500 mo, cap in 1d` |
 | Limit reached | `! $1600/$1500 mo CAP HIT` |
 | Pace stays under | `$410/$1500 mo, on pace` |
 | Pace lands near the limit | `$1200/$1500 mo, near cap` |

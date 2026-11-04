@@ -61,12 +61,7 @@ fn monthly(
 ) -> Option<Segment> {
     let mut account = Account::default();
     if detect(snapshot, &account, now).is_none() {
-        let size = std::fs::metadata(claude_json).ok()?.len();
-        if size > MAX_CONFIG_BYTES {
-            return None;
-        }
-        account = plan::read(claude_json);
-        detect(snapshot, &account, now)?;
+        account = plan::read_limited(claude_json, MAX_CONFIG_BYTES)?;
     }
     let figure = monthly_use(snapshot, &account, &manual_budgets(home), now)?;
     monthly_segment(&figure, now)
@@ -75,7 +70,13 @@ fn monthly(
 /// The words for a monthly figure. A stale cache projects nothing: it only
 /// says how old it is, and that the cap was hit if the amount already passed it.
 fn monthly_segment(m: &MonthlyUse, now: i64) -> Option<Segment> {
-    let headroom = m.limit.headroom(now)?;
+    // A cache holds the amount at its fetch time, so the pace is worked out
+    // there: hours since the fetch must not dilute it.
+    let seen = match m.source {
+        Source::Cache { age, .. } => now - age,
+        Source::Statusline => now,
+    };
+    let headroom = m.limit.headroom(seen)?;
     let label = if m.own_budget { "mo budget" } else { "mo" };
     let figure = format!("${:.0}/${:.0} {label}", m.limit.used, m.limit.limit);
     let exceeded = headroom.state == State::Exceeded;
@@ -90,7 +91,11 @@ fn monthly_segment(m: &MonthlyUse, now: i64) -> Option<Segment> {
             (words, exceeded, false)
         }
         (_, State::Exceeded) => (" CAP HIT".to_string(), true, true),
-        (_, State::WillExceed { at }) => (format!(", cap in {}", fmt_span(at - now)), true, true),
+        (_, State::WillExceed { at }) => (
+            format!(", cap in {}", fmt_span((at - now).max(0))),
+            true,
+            true,
+        ),
         (_, State::Under) => (", on pace".to_string(), false, true),
         (_, State::OnTrack) => (", near cap".to_string(), false, true),
         (_, State::Unknown) => (String::new(), false, true),

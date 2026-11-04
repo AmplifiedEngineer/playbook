@@ -1080,7 +1080,7 @@ fn a_fresh_enterprise_cache_on_pace_to_pass_the_limit_alarms_with_the_time_left(
     let lines = enterprise(None, HOUR_SECS);
     assert_eq!(
         lines.last().unwrap(),
-        "! $986/$1500 mo, cap in 1d2h",
+        "! $986/$1500 mo, cap in 1d",
         "{lines:?}"
     );
 }
@@ -1090,7 +1090,7 @@ fn a_lower_own_budget_is_the_limit_and_says_so() {
     let lines = enterprise(Some(1000), HOUR_SECS);
     assert_eq!(
         lines.last().unwrap(),
-        "! $986/$1000 mo budget, cap in 42m",
+        "! $986/$1000 mo budget, cap in <1m",
         "{lines:?}"
     );
     let lines = enterprise(Some(900), HOUR_SECS);
@@ -1190,7 +1190,7 @@ fn a_gateway_figure_on_stdin_wins_over_the_cache() {
     );
     let lines = monthly_lines(Some(ENTERPRISE_CACHE), None, &members, now, None);
     assert!(
-        lines.last().unwrap().starts_with("! $410/$500 mo"),
+        lines.last().unwrap().starts_with("! $410/$500 mo, cap in"),
         "{lines:?}"
     );
 }
@@ -1206,7 +1206,7 @@ fn the_monthly_figure_drops_its_words_before_the_seven_day_alarm_goes() {
     let wide = monthly_lines(Some(ENTERPRISE_CACHE), None, &members, now, None);
     assert_eq!(
         wide.last().unwrap(),
-        &format!("{seven} | ! $986/$1500 mo, cap in 1d2h")
+        &format!("{seven} | ! $986/$1500 mo, cap in 1d")
     );
     let narrow = monthly_lines(Some(ENTERPRISE_CACHE), None, &members, now, Some("36"));
     assert_eq!(
@@ -1215,4 +1215,56 @@ fn the_monthly_figure_drops_its_words_before_the_seven_day_alarm_goes() {
     );
     let tight = monthly_lines(Some(ENTERPRISE_CACHE), None, &members, now, Some("20"));
     assert_eq!(tight.last().unwrap(), seven);
+}
+
+#[test]
+fn a_gateway_figure_needs_no_config_file_and_ignores_a_corrupt_one() {
+    let now = FETCHED + HOUR_SECS;
+    let members = format!(
+        r#""rate_limits":{{"spend_limit":{{"used_percentage":82,"resets_at":{},"used_usd":600,"limit_usd":500,"period":"monthly"}}}}"#,
+        now + 10 * DAY_SECS
+    );
+    for cache in [None, Some("{not json")] {
+        let lines = monthly_lines(cache, None, &members, now, None);
+        assert_eq!(lines.last().unwrap(), "! $600/$500 mo CAP HIT", "{lines:?}");
+    }
+}
+
+#[test]
+fn the_config_file_is_found_under_claude_config_dir_or_else_home() {
+    let s = Scratch::new();
+    let cfg = s.0.join("cfg");
+    std::fs::create_dir_all(&cfg).unwrap();
+    std::fs::write(cfg.join(".claude.json"), ENTERPRISE_CACHE).unwrap();
+    let home = s.0.to_str().unwrap();
+    let body = payload(&s.0, "");
+    let now = FETCHED + HOUR_SECS;
+    let last = |pairs: Vec<(&str, &str)>| {
+        let out = render(&body, &Env::from_pairs(pairs), now);
+        strip_ansi(&text(&out)).lines().last().unwrap().to_string()
+    };
+    let moved = last(vec![
+        ("HOME", home),
+        ("CLAUDE_CONFIG_DIR", cfg.to_str().unwrap()),
+    ]);
+    assert_eq!(moved, "! $986/$1500 mo, cap in 1d");
+    // With the variable unset the file is looked for under HOME, where it is not.
+    let unset = last(vec![("HOME", home)]);
+    assert_ne!(unset, moved);
+    std::fs::write(s.0.join(".claude.json"), ENTERPRISE_CACHE).unwrap();
+    assert_eq!(last(vec![("HOME", home)]), moved);
+}
+
+#[test]
+fn a_cache_is_paced_from_its_fetch_time_not_from_now() {
+    // 986.40 used 2d1h into the month, read 6 hours later against a 13000 limit.
+    // Paced from the fetch the limit is passed. Paced from now it would only be
+    // near, and the alarm would be lost.
+    let big = ENTERPRISE_CACHE.replace("150000", "1300000");
+    let lines = monthly_lines(Some(&big), None, "", FETCHED + 6 * HOUR_SECS, None);
+    assert_eq!(
+        lines.last().unwrap(),
+        "! $986/$13000 mo, cap in 25d",
+        "{lines:?}"
+    );
 }
