@@ -444,8 +444,9 @@ mod tests {
 
         // Act
         let guarded = store.items(NOW);
-        fs::remove_file(old.join("plan.md")).unwrap();
-        fs::remove_file(legacy.join("old-handoff.md")).unwrap();
+        // Move the guarded files away: a test may not call a removal itself.
+        fs::rename(old.join("plan.md"), base.join("plan.moved")).unwrap();
+        fs::rename(legacy.join("old-handoff.md"), base.join("handoff.moved")).unwrap();
         let released = store.items(NOW);
 
         // Assert
