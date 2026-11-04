@@ -1008,7 +1008,7 @@ fn two_pinned_spend_views_draw_side_by_side_and_only_the_focused_one_is_bold() {
 #[test]
 fn two_pinned_breakdown_views_each_draw_their_own_table() {
     // Arrange
-    let mut a = app(Theme::Standard);
+    let mut a = agents_app(true);
     a.layout =
         crate::tui::layout::Layout::parse("A=breakdown.agents,breakdown.skills|tokens").unwrap();
     a.go_tab(0);
@@ -1022,8 +1022,47 @@ fn two_pinned_breakdown_views_each_draw_their_own_table() {
         .find(|l| l.contains("Agents"))
         .unwrap_or_default();
     assert!(title.contains("Skills"), "{text}");
+    assert!(
+        text.contains("general-purpose") && text.contains("review"),
+        "{text}"
+    );
     assert!(!text.contains("view:"), "{text}");
     check("split_breakdown_100x30", &text);
+}
+
+#[test]
+fn a_pinned_breakdown_slot_without_the_focus_does_not_scroll_with_its_sibling() {
+    // Arrange
+    let mut a = agents_app(true);
+    let rows = |prefix: &str| -> Vec<crate::aggregate::Group> {
+        (0..30)
+            .map(|i| crate::aggregate::Group {
+                key: format!("{prefix}{i:02}"),
+                messages: 30 - i,
+                cost_usd: 1.0 + (30 - i) as f64,
+                ..crate::aggregate::Group::default()
+            })
+            .collect()
+    };
+    let data = a.data.as_mut().unwrap();
+    data.agents.rows = rows("agent-");
+    data.skills.rows = rows("skill-");
+    a.layout = crate::tui::layout::Layout::parse("A=breakdown.agents,breakdown.skills").unwrap();
+    a.go_tab(0);
+    a.focus = Panel::Projects;
+    for _ in 0..25 {
+        a.key(ratatui::crossterm::event::KeyEvent::from(
+            ratatui::crossterm::event::KeyCode::Down,
+        ));
+    }
+
+    // Act
+    let text = draw(&a, 100, 30);
+
+    // Assert
+    assert!(text.contains("agent-25"), "{text}");
+    assert!(text.contains("skill-00"), "{text}");
+    assert!(!text.contains("skill-25"), "{text}");
 }
 
 #[test]

@@ -233,7 +233,13 @@ fn table<'a>(
     }
     let all = rows(&widths);
     let visible = visible_rows(area);
-    let selected = app.selection(panel);
+    // Pinned slots of one panel share its selection, so a slot without the
+    // focus starts at the top and no slot scrolls past its own rows.
+    let selected = if app.focus == panel && !focused {
+        0
+    } else {
+        app.selection(panel).min(all.len().saturating_sub(1))
+    };
     let start = window_start(selected, visible);
     let rows: Vec<Row> = all
         .into_iter()
@@ -742,31 +748,20 @@ pub fn projects(
 /// Cost per agent, from telemetry. The transcript totals stay the totals; the
 /// note says how much of the spend telemetry covers.
 fn agents(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, slot: PanelId) {
-    telemetry_split(
-        frame,
-        area,
-        app,
-        data,
-        pal,
-        slot,
-        ("Agents", "agent"),
-        &data.agents,
-    );
+    telemetry_split(frame, area, app, data, pal, slot, Split::Agents);
 }
 
 /// Cost per skill, from telemetry. Only requests made while a skill was
 /// active carry its name, so the rows are a share of the telemetry cost.
 fn skills(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, slot: PanelId) {
-    telemetry_split(
-        frame,
-        area,
-        app,
-        data,
-        pal,
-        slot,
-        ("Skills", "skill"),
-        &data.skills,
-    );
+    telemetry_split(frame, area, app, data, pal, slot, Split::Skills);
+}
+
+/// Which telemetry split a table shows.
+#[derive(Clone, Copy)]
+enum Split {
+    Agents,
+    Skills,
 }
 
 /// The empty state of a telemetry panel: short lines that name the cause
@@ -776,7 +771,6 @@ fn telemetry_off(app: &App) -> String {
     crate::telemetry_status::empty_panel_lines(app.telemetry).join("\n")
 }
 
-#[allow(clippy::too_many_arguments)]
 fn telemetry_split(
     frame: &mut Frame,
     area: Rect,
@@ -784,9 +778,12 @@ fn telemetry_split(
     data: &Data,
     pal: &Palette,
     slot: PanelId,
-    (title, label): (&str, &'static str),
-    view: &crate::query::AgentView,
+    split: Split,
 ) {
+    let (title, label, view) = match split {
+        Split::Agents => ("Agents", "agent", &data.agents),
+        Split::Skills => ("Skills", "skill", &data.skills),
+    };
     let mut block = view_block(
         pal,
         app,
