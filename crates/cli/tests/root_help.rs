@@ -17,6 +17,7 @@ const USER: &[&str] = &[
     "version",
     "deps",
     "doctor",
+    "gc",
     "migrate",
     "skills",
     "cc",

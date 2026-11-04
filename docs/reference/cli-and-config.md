@@ -87,6 +87,19 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `update.mode` | `notify` | `notify`, `auto`, `off` |
 | `update.checkIntervalHours` | `24` | a number, see the config keys page for the range |
 | `update.plugin` | `auto` | `auto`, `ask`, `off` |
+| `gc.enabled` | `true` | `true`, `false` |
+| `gc.graceDays` | `7` | a number, see the config keys page for the range |
+| `gc.handoffGraceDays` | `14` | a number, see the config keys page for the range |
+| `gc.sessionDirIdleDays` | `14` | a number, see the config keys page for the range |
+| `gc.logMaxDays` | `30` | a number, see the config keys page for the range |
+| `gc.logMaxMiB` | `5` | a number, see the config keys page for the range |
+| `gc.leftoverDays` | `90` | a number, see the config keys page for the range |
+| `gc.gateDbIdleDays` | `30` | a number, see the config keys page for the range |
+| `gc.buildOutputIdleDays` | `7` | a number, see the config keys page for the range |
+| `gc.buildOutputPressureIdleDays` | `1` | a number, see the config keys page for the range |
+| `gc.buildOutputActiveMinutes` | `15` | a number, see the config keys page for the range |
+| `gc.freeSpaceWarnGiB` | `10` | a number, see the config keys page for the range |
+| `gc.freeSpaceWarnPercent` | `5` | a number, see the config keys page for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands
@@ -97,7 +110,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows the Agent Budget Dashboard, and helps with PRs, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `completions`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `completions`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `gc`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -804,6 +817,17 @@ Example: `playbook gate snapshot my-plan adversarial test-review`
 
 - `<PLAN_SLUG>`: Plan slug
 - `<PHASES>`: Phase names to snapshot for
+
+### `playbook gc`
+
+Show what playbook state takes space on disk, or clean it up
+
+Lists each store of on-disk state with its size, item count, age and the action a cleanup would take. It changes nothing and takes no lock. With `--yes` it repairs interrupted moves, tombstones items past their limit and deletes tombstones past their grace period. With `--restore` it puts a tombstoned item back where it came from.
+
+Example: `playbook gc`
+
+- `--yes`: Apply the cleanup
+- `--restore <ID>`: Restore a tombstoned item by id
 
 ### `playbook glossary`
 

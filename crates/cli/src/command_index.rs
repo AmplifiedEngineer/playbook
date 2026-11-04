@@ -250,6 +250,7 @@ pub(crate) const META: &[Meta] = &[
     ro("gate check"),
     free("gate record"),
     free("gate snapshot"),
+    user("gc").for_users(),
     free("glossary")
         .purpose("Append one term to the repo's `GLOSSARY.md`")
         .for_agents(),
@@ -891,6 +892,7 @@ mod tests {
 
     const USER: &[&str] = &[
         "setup",
+        "gc",
         "hooks",
         "uninstall",
         "update",
