@@ -150,7 +150,8 @@ pub fn checked_build_output_remove(
 }
 
 /// Removes a lock folder: `gc/.lock` or `gc/.lock.stale-*` directly under
-/// `gc_dir`. Deletes the owner token first, then the folder.
+/// `gc_dir`. Deletes the owner token first, then any other plain file in it,
+/// then the folder.
 pub fn checked_remove_lock(gc_dir: &Path, lock: &Path) -> Result<(), GuardError> {
     let is_lock = lock.parent() == Some(gc_dir)
         && lock
@@ -163,10 +164,19 @@ pub fn checked_remove_lock(gc_dir: &Path, lock: &Path) -> Result<(), GuardError>
             lock.display()
         )));
     }
+    // Take the token first so no run can mistake the folder for a live lock,
+    // then any other plain file a crashed run left beside it.
     match fs::remove_file(lock.join(TOKEN_FILE)) {
         Ok(()) => {}
         Err(err) if err.kind() == io::ErrorKind::NotFound => {}
         Err(err) => return Err(err.into()),
+    }
+    if let Ok(entries) = fs::read_dir(lock) {
+        for entry in entries.flatten() {
+            if entry.file_type().is_ok_and(|kind| kind.is_file()) {
+                fs::remove_file(entry.path())?;
+            }
+        }
     }
     match fs::remove_dir(lock) {
         Ok(()) => Ok(()),

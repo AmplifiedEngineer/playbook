@@ -315,20 +315,29 @@ fn gc_fallback(
         return Ok(None);
     };
     let mut good = keys::gc_number_or_default(key, value) == value.as_i64();
+    let mut above_idle = false;
     if good && key == keys::GC_PRESSURE_KEY {
         let (idle, _) = resolve(keys::GC_PRESSURE_CAP_KEY, home, repo_slug)?;
         let idle = keys::gc_number_or_default(keys::GC_PRESSURE_CAP_KEY, &idle).unwrap_or(0);
         good = value
             .as_i64()
             .is_some_and(|n| keys::gc_pressure_within_idle(n, idle) == n);
+        above_idle = !good;
     }
     if good {
         return Ok(None);
     }
-    let warning = format!(
-        "ignoring invalid value {value} for config key {key}, valid values are {} to {}",
-        entry.min, entry.max
-    );
+    let warning = if above_idle {
+        format!(
+            "ignoring invalid value {value} for config key {key}, it must not exceed {}",
+            keys::GC_PRESSURE_CAP_KEY
+        )
+    } else {
+        format!(
+            "ignoring invalid value {value} for config key {key}, valid values are {} to {}",
+            entry.min, entry.max
+        )
+    };
     let ignored = IgnoredValue {
         tier: source,
         warning,
@@ -473,7 +482,11 @@ mod tests {
         assert_eq!((grace.0, grace.1), (Value::from(7), Source::Default));
         assert!(grace.2.is_some());
         assert_eq!(pressure.0, Value::from(1));
-        assert!(pressure.2.is_some());
+        let note = pressure.2.as_ref().unwrap();
+        assert!(note
+            .warning
+            .contains("must not exceed gc.buildOutputIdleDays"));
+        assert!(grace.2.as_ref().unwrap().warning.contains("1 to"));
         put("gc.buildOutputPressureIdleDays", 3);
         let kept = resolve_valid("gc.buildOutputPressureIdleDays", &home, None).unwrap();
         assert_eq!((kept.0, kept.2), (Value::from(3), None));

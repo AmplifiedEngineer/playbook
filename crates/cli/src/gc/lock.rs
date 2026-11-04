@@ -173,7 +173,12 @@ pub fn with_run_lock<T>(
         lock: lock.clone(),
         token: token.clone(),
     };
-    fs::write(lock.join(TOKEN_FILE), &token)?;
+    if let Err(err) = fs::write(lock.join(TOKEN_FILE), &token) {
+        // No token was written, so `Release` would leave the folder behind
+        // and block every run until it goes stale.
+        let _ = checked_remove_lock(gc_dir, &lock);
+        return Err(err.into());
+    }
     let guard = RunGuard { lock, token, clock };
     let result = f(&guard);
     drop(release);
@@ -243,8 +248,11 @@ fn claim_stale(
     if fs::rename(lock, &claimed).is_err() {
         return Ok(false);
     }
-    checked_remove_lock(gc_dir, &claimed)
-        .map_err(|err| LockError::Io(io::Error::other(err.to_string())))?;
+    // The stale lock is already gone from its name, so a failed cleanup must
+    // not stop this run; the next run sweeps what is left.
+    if let Err(err) = checked_remove_lock(gc_dir, &claimed) {
+        eprintln!("playbook: gc could not clear a stale lock: {err}");
+    }
     Ok(true)
 }
 
@@ -341,6 +349,19 @@ mod tests {
         assert_eq!(outcome, RunOutcome::Ran(()));
         let leftovers = fs::read_dir(&gc).unwrap().count();
         assert_eq!(leftovers, 0);
+    }
+
+    #[test]
+    fn stale_lock_holding_an_extra_file_is_still_removed() {
+        let gc = gc_dir("lock-stale-extra");
+        plant_lock(&gc, STALE_SECS + 10, true);
+        fs::write(gc.join(LOCK_DIR).join("leftover"), "x").unwrap();
+        age_lock(&gc.join(LOCK_DIR), STALE_SECS + 10);
+
+        let outcome = try_lock(&gc, &FixedClock(*NOW));
+
+        assert_eq!(outcome, RunOutcome::Ran(()));
+        assert_eq!(fs::read_dir(&gc).unwrap().count(), 0);
     }
 
     struct Refresh;
