@@ -77,6 +77,9 @@ const POLICY_GUARD_NOTICE: &str = "the policy guard is now off by default; to tu
 /// The `Owned` notice that the rm guard is now a short fixed rule (ADR 0045,
 /// 2026-10-19 amendment). It changes nothing and is recorded once it has run.
 pub const RM_GUARD_NOTICE_MIGRATION: &str = "rm-guard-simplified";
+/// The `Owned` move of loaded handoffs from the old `used` folder into the gc
+/// tombstone folder.
+pub const HANDOFF_USED_MIGRATION: &str = "handoff-used-to-tombstone";
 /// The step name of that notice, which the heal line shows in full.
 pub const RM_GUARD_NOTICE_STEP: &str = "rm guard";
 /// What the notice says (docs/guides/07-rm-guard.md).
@@ -413,6 +416,13 @@ pub fn registry() -> Vec<Migration> {
             kind: Kind::Auto,
             scope: Scope::Owned,
             run: rm_guard_simplified_notice,
+        },
+        Migration {
+            id: HANDOFF_USED_MIGRATION,
+            since: "next",
+            kind: Kind::Idempotent,
+            scope: Scope::Owned,
+            run: crate::init::handoff_used::run,
         },
     ]
 }
