@@ -169,6 +169,25 @@ impl GithubWrite for GhWrite {
         self.gh(&args).map(|_| ())
     }
 
+    fn diff(&self, repo: &str, number: u64) -> Result<String, String> {
+        let path = format!("repos/{repo}/pulls/{number}");
+        self.gh(&["api", &path, "-H", "Accept: application/vnd.github.diff"])
+    }
+
+    fn has_review(&self, repo: &str, number: u64, marker: &str) -> Result<bool, String> {
+        let path = format!("repos/{repo}/pulls/{number}/reviews");
+        let bodies = self.gh(&["api", "--paginate", &path, "--jq", ".[].body"])?;
+        Ok(bodies.contains(marker))
+    }
+
+    fn create_pending_review(&self, repo: &str, number: u64, body: &str) -> Result<(), String> {
+        // No `event` field: GitHub keeps the review pending until you submit it.
+        let path = format!("repos/{repo}/pulls/{number}/reviews");
+        let field = format!("body={body}");
+        self.gh(&["api", "--method", "POST", &path, "-f", &field])
+            .map(|_| ())
+    }
+
     fn update_branch(&self, repo: &str, number: u64) -> Result<BranchUpdate, String> {
         let path = format!("repos/{repo}/pulls/{number}");
         let jq = r#".mergeable_state + " " + .head.sha"#;

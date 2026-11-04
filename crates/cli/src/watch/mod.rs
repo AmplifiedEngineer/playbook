@@ -32,6 +32,7 @@ pub mod http;
 pub mod journal;
 pub mod limits;
 pub mod lock;
+pub mod review;
 pub mod rule;
 pub mod settings;
 pub mod source;

@@ -71,7 +71,7 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
 
     /// The dollars the rule has left today, or `None` when under a cent. The
     /// global cap counts too, so a rule cannot spend what the day has not got.
-    fn remaining_usd(&self, row: &WorkRow, rule: &Rule) -> Result<Option<f64>, String> {
+    pub(super) fn remaining_usd(&self, row: &WorkRow, rule: &Rule) -> Result<Option<f64>, String> {
         let day = day_of(self.clock.now());
         let (_, rule_usd) = self
             .store
@@ -102,7 +102,7 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
             .map_err(|e| e.to_string())
     }
 
-    fn spend(&mut self, row: &WorkRow, usd: f64) -> Result<(), String> {
+    pub(super) fn spend(&mut self, row: &WorkRow, usd: f64) -> Result<(), String> {
         let day = day_of(self.clock.now());
         self.store
             .transaction(|tx| tx.count_spend(day, &row.rule, usd))

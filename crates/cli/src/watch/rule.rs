@@ -49,15 +49,19 @@ pub enum Do {
     /// Merges the base branch into a pull request's branch through the API.
     /// It earns `auto` by the trust ladder.
     UpdateBranch,
+    /// A model reads the diff and the result is saved as a pending review for
+    /// you to submit. Never runs on its own.
+    ReviewPr,
 }
 
 impl Do {
-    pub const ALL: [Do; 5] = [
+    pub const ALL: [Do; 6] = [
         Do::Label,
         Do::Comment,
         Do::TriageIssue,
         Do::AddressComment,
         Do::UpdateBranch,
+        Do::ReviewPr,
     ];
 
     /// The name the rule file and the audit log use.
@@ -68,6 +72,7 @@ impl Do {
             Self::TriageIssue => "triage_issue",
             Self::AddressComment => "address_comment",
             Self::UpdateBranch => "update_branch",
+            Self::ReviewPr => "review_pr",
         }
     }
 
@@ -75,7 +80,7 @@ impl Do {
     /// Code written by a model has no ladder to climb in this release.
     pub fn highest(self) -> Autonomy {
         match self {
-            Self::AddressComment => Autonomy::Propose,
+            Self::AddressComment | Self::ReviewPr => Autonomy::Propose,
             _ => Autonomy::Auto,
         }
     }
@@ -217,9 +222,17 @@ impl Stored {
                     "the triage_issue action needs decide set to model".to_string(),
                 ));
             }
-            Do::UpdateBranch if !matches!(rule.on, On::PrOpened | On::PrCommented) => {
+            Do::UpdateBranch | Do::ReviewPr
+                if !matches!(rule.on, On::PrOpened | On::PrCommented) =>
+            {
                 return Err(RuleError(
-                    "the update_branch action needs on set to pr.opened or pr.commented"
+                    "the update_branch and review_pr actions need on set to pr.opened or pr.commented"
+                        .to_string(),
+                ));
+            }
+            Do::ReviewPr if rule.limits.usd_per_day <= 0.0 => {
+                return Err(RuleError(
+                    "the review_pr action calls a model and needs limits.usd_per_day above 0"
                         .to_string(),
                 ));
             }

@@ -46,6 +46,15 @@ impl GithubWrite for Spy {
     fn add_comment(&self, _: &str, _: u64, _: &str) -> Result<(), String> {
         Ok(())
     }
+    fn diff(&self, _: &str, _: u64) -> Result<String, String> {
+        Ok(String::new())
+    }
+    fn has_review(&self, _: &str, _: u64, _: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn create_pending_review(&self, _: &str, _: u64, _: &str) -> Result<(), String> {
+        Ok(())
+    }
     fn update_branch(&self, _: &str, _: u64) -> Result<crate::watch::engine::BranchUpdate, String> {
         Ok(crate::watch::engine::BranchUpdate::UpToDate)
     }
