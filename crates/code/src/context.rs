@@ -116,7 +116,7 @@ struct Cand {
 }
 
 fn sql_err(e: rusqlite::Error) -> String {
-    format!("context failed: {e}")
+    super::db::map_sql_error("context failed", &e)
 }
 
 fn to_usize(n: i64) -> usize {
@@ -1207,5 +1207,25 @@ mod tests {
         // Assert: three symbols in total, two of them named widget.
         let expected = (2.0 + 3.0 / (1.0 + 2.0_f64)).ln();
         assert!((weights[0] - expected).abs() < 1e-9, "{weights:?}");
+    }
+
+    #[test]
+    fn a_damaged_symbol_table_names_rebuild() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("context-damaged");
+        f.write("a.rs", "fn needle() {}\n");
+        f.run();
+        let conn = f.conn();
+        crate::testkit::damage_pages(&f);
+
+        // Act
+        let got = build(&conn, &f.root, &ContextOptions::new("needle"));
+
+        // Assert
+        let Err(message) = got else {
+            panic!("the query must fail")
+        };
+        assert!(message.contains("--rebuild"), "{message}");
     }
 }

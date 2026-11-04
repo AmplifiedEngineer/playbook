@@ -254,14 +254,14 @@ fn fts_rows(
             rusqlite::params_from_iter(params.iter()),
             |r| r.get(0),
         )
-        .map_err(|e| format!("search failed: {e}"))?;
+        .map_err(|e| super::db::map_sql_error("search failed", &e))?;
     let sql = format!(
         "SELECT f.path, f.sha256, c.start_line, c.end_line {base}
          ORDER BY bm25(chunks_fts), f.path, c.start_line LIMIT {fetch}"
     );
     let mut stmt = conn
         .prepare(&sql)
-        .map_err(|e| format!("search failed: {e}"))?;
+        .map_err(|e| super::db::map_sql_error("search failed", &e))?;
     let rows = stmt
         .query_map(rusqlite::params_from_iter(params.iter()), |r| {
             Ok(Row {
@@ -271,10 +271,10 @@ fn fts_rows(
                 end_line: usize::try_from(r.get::<_, i64>(3)?).unwrap_or(1),
             })
         })
-        .map_err(|e| format!("search failed: {e}"))?;
+        .map_err(|e| super::db::map_sql_error("search failed", &e))?;
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("search failed: {e}"))?;
+        .map_err(|e| super::db::map_sql_error("search failed", &e))?;
     Ok((rows, usize::try_from(total).unwrap_or(0)))
 }
 
@@ -371,14 +371,14 @@ pub(super) fn literal_scan(
     );
     let mut stmt = conn
         .prepare(&sql)
-        .map_err(|e| format!("search failed: {e}"))?;
+        .map_err(|e| super::db::map_sql_error("search failed", &e))?;
     let files: Vec<(String, String)> = stmt
         .query_map(rusqlite::params_from_iter(extra_params.iter()), |r| {
             Ok((r.get(0)?, r.get(1)?))
         })
-        .map_err(|e| format!("search failed: {e}"))?
+        .map_err(|e| super::db::map_sql_error("search failed", &e))?
         .collect::<Result<_, _>>()
-        .map_err(|e| format!("search failed: {e}"))?;
+        .map_err(|e| super::db::map_sql_error("search failed", &e))?;
     let mut scanned = 0usize;
     for (path, sha) in files {
         if scanned >= opts.scan_cap {
@@ -683,5 +683,25 @@ mod tests {
             Some("\"retry\" \"AND\" \"OR\"".to_string())
         );
         assert_eq!(fts_query("++ --"), None);
+    }
+
+    #[test]
+    fn a_damaged_text_index_names_rebuild() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("search-damaged");
+        f.write("a.rs", "fn needle() {}\n");
+        f.run();
+        let conn = f.conn();
+        crate::testkit::damage_pages(&f);
+
+        // Act
+        let got = text_search(&conn, &f.root, &SearchOptions::new("needle"));
+
+        // Assert
+        let Err(message) = got else {
+            panic!("the query must fail")
+        };
+        assert!(message.contains("--rebuild"), "{message}");
     }
 }

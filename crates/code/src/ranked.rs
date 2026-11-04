@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 fn sql_err(e: rusqlite::Error) -> String {
-    format!("search failed: {e}")
+    super::db::map_sql_error("search failed", &e)
 }
 
 fn to_usize(n: i64) -> usize {
@@ -511,5 +511,25 @@ mod tests {
         // Assert
         assert!(first >= 1);
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn a_damaged_symbol_table_names_rebuild() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("ranked-damaged");
+        f.write("a.rs", "fn needle() {}\n");
+        f.run();
+        let conn = f.conn();
+        crate::testkit::damage_pages(&f);
+
+        // Act
+        let got = ranked_search(&conn, &f.root, &SearchOptions::new("needle"));
+
+        // Assert
+        let Err(message) = got else {
+            panic!("the query must fail")
+        };
+        assert!(message.contains("--rebuild"), "{message}");
     }
 }

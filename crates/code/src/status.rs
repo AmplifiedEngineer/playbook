@@ -160,13 +160,15 @@ fn run_times(conn: &Connection, worktree: &str) -> (Option<i64>, Option<i64>) {
 
 fn group_counts(conn: &Connection, column: &str) -> Result<BTreeMap<String, usize>, String> {
     let sql = format!("SELECT COALESCE({column}, 'unknown'), COUNT(*) FROM files GROUP BY 1");
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| super::db::map_sql_error("status failed", &e))?;
     let rows = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| super::db::map_sql_error("status failed", &e))?;
     let mut out = BTreeMap::new();
     for row in rows {
-        let (key, n) = row.map_err(|e| e.to_string())?;
+        let (key, n) = row.map_err(|e| super::db::map_sql_error("status failed", &e))?;
         out.insert(key, usize::try_from(n).unwrap_or(0));
     }
     Ok(out)
@@ -379,6 +381,7 @@ mod tests {
             hooks: crate::index::Hooks {
                 after_batch_commit: Some(Box::new(|_| Err("stop".to_string()))),
                 before_file_insert: None,
+                ..Default::default()
             },
             ..crate::index::Options::default()
         };
@@ -448,5 +451,25 @@ mod tests {
         // Assert
         assert!(!one.is_empty());
         assert_eq!(one, two);
+    }
+
+    #[test]
+    fn a_damaged_manifest_names_rebuild() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("status-damaged");
+        f.write("a.rs", "fn needle() {}\n");
+        f.run();
+        let conn = f.conn();
+        crate::testkit::damage_pages(&f);
+
+        // Act
+        let got = status(&conn, &f.index, &f.root, &f.worktree);
+
+        // Assert
+        let Err(message) = got else {
+            panic!("the query must fail")
+        };
+        assert!(message.contains("--rebuild"), "{message}");
     }
 }

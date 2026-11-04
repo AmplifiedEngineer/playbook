@@ -90,13 +90,13 @@ fn candidate_files(conn: &Connection, name: &str, limit: usize) -> Result<Vec<St
              WHERE chunks_fts MATCH ?1 AND f.lang IS NOT NULL
              ORDER BY f.path LIMIT ?2",
         )
-        .map_err(|e| format!("refs failed: {e}"))?;
+        .map_err(|e| super::db::map_sql_error("refs failed", &e))?;
     let limit = i64::try_from(limit).unwrap_or(i64::MAX);
     let rows = stmt
         .query_map(rusqlite::params![query, limit], |r| r.get::<_, String>(0))
-        .map_err(|e| format!("refs failed: {e}"))?;
+        .map_err(|e| super::db::map_sql_error("refs failed", &e))?;
     rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("refs failed: {e}"))
+        .map_err(|e| super::db::map_sql_error("refs failed", &e))
 }
 
 /// Finds identifier uses of `opts.target` in candidate files.
@@ -432,5 +432,25 @@ mod tests {
 
         // Assert
         assert_eq!(got.refs[0].column, 14);
+    }
+
+    #[test]
+    fn a_damaged_text_index_names_rebuild() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("refs-damaged");
+        f.write("a.rs", "fn needle() {}\nfn b() { needle(); }\n");
+        f.run();
+        let conn = f.conn();
+        crate::testkit::damage_pages(&f);
+
+        // Act
+        let got = find_refs(&conn, &f.root, &RefsOptions::new("needle"));
+
+        // Assert
+        let Err(message) = got else {
+            panic!("the query must fail")
+        };
+        assert!(message.contains("--rebuild"), "{message}");
     }
 }

@@ -482,6 +482,20 @@ fn is_corrupt(err: &rusqlite::Error) -> bool {
     )
 }
 
+/// The text of a query or write error. A corrupt or foreign database (the
+/// primary codes `SQLITE_CORRUPT` and `SQLITE_NOTADB`, `CORRUPT_VTAB` included)
+/// names `--rebuild`; any other error keeps `prefix` and its own text.
+pub fn map_sql_error(prefix: &str, err: &rusqlite::Error) -> String {
+    if is_corrupt(err) {
+        format!(
+            "the code index is not a valid database; run `{}`",
+            host::command("index --rebuild")
+        )
+    } else {
+        format!("{prefix}: {err}")
+    }
+}
+
 fn step(path: &Path, what: &str, err: &rusqlite::Error) -> DbError {
     if is_corrupt(err) {
         DbError::NeedsRebuild(rebuild_hint(path, "is not a valid index database"))

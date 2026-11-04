@@ -63,9 +63,31 @@ pub type FileHook = Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 pub struct Hooks {
     pub after_batch_commit: Option<BatchHook>,
     pub before_file_insert: Option<FileHook>,
+    /// The transaction hooks of the batch writes.
+    pub tx: TxHooks,
+    /// Makes each batch fail with this SQLite result code right after `BEGIN`.
+    pub fail_write: Option<i32>,
 }
 
+/// How often a batch is tried again after `SQLITE_BUSY`.
+const BATCH_RETRIES: usize = 3;
+
+#[cfg(not(test))]
+#[cfg(not(test))]
+static NO_TX_HOOKS: TxHooks = TxHooks {
+    on_write_tx: None,
+    fail_begin: None,
+    fail_commit: None,
+};
+
 impl Options {
+    fn tx_hooks(&self) -> &TxHooks {
+        #[cfg(test)]
+        return &self.hooks.tx;
+        #[cfg(not(test))]
+        &NO_TX_HOOKS
+    }
+
     fn after_batch(&self, _batch: usize) -> Result<(), String> {
         #[cfg(test)]
         if let Some(hook) = &self.hooks.after_batch_commit {
@@ -571,6 +593,9 @@ fn mark_failed(conn: &Connection, wt: i64, path: &str, error: &str) -> rusqlite:
     Ok(())
 }
 
+/// Writes one batch in a single transaction. A busy store makes the whole
+/// batch start again, up to [`BATCH_RETRIES`] times, and the report counts
+/// only the attempt that committed.
 fn write_batch(
     conn: &mut Connection,
     batch: &[Outcome],
@@ -578,8 +603,42 @@ fn write_batch(
     wt: i64,
     report: &mut Report,
 ) -> Result<(), String> {
-    let hooks = TxHooks::default();
-    let mut tx = db::write_tx(conn, &hooks).map_err(|e| e.to_string())?;
+    for attempt in 0..=BATCH_RETRIES {
+        let mut staged = Report::default();
+        match write_batch_once(conn, batch, opts, wt, &mut staged) {
+            Ok(()) => {
+                report.changed += staged.changed;
+                report.parsed += staged.parsed;
+                report.failed += staged.failed;
+                return Ok(());
+            }
+            Err(e) if is_busy(&e) && attempt < BATCH_RETRIES => {}
+            Err(e) => return Err(db::map_sql_error("failed to write the index", &e)),
+        }
+    }
+    unreachable!("the last attempt returns")
+}
+
+fn is_busy(err: &rusqlite::Error) -> bool {
+    err.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy)
+}
+
+fn write_batch_once(
+    conn: &mut Connection,
+    batch: &[Outcome],
+    opts: &Options,
+    wt: i64,
+    report: &mut Report,
+) -> rusqlite::Result<()> {
+    let hooks = opts.tx_hooks();
+    let mut tx = db::write_tx(conn, hooks)?;
+    #[cfg(test)]
+    if let Some(code) = opts.hooks.fail_write {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(code),
+            None,
+        ));
+    }
     let mut failures: Vec<(String, String)> = Vec::new();
     for outcome in batch {
         let path = match outcome {
@@ -592,10 +651,10 @@ fn write_batch(
             }
             Outcome::Unchanged | Outcome::Missing(_) => continue,
         };
-        let sp = tx.savepoint().map_err(|e| e.to_string())?;
+        let sp = tx.savepoint()?;
         match apply(&sp, outcome, opts, wt) {
             Ok(()) => {
-                sp.commit().map_err(|e| e.to_string())?;
+                sp.commit()?;
                 if let Outcome::Write(p) = outcome {
                     report.changed += 1;
                     if p.parsed {
@@ -610,16 +669,16 @@ fn write_batch(
         }
     }
     for (path, error) in failures {
-        mark_failed(&tx, wt, &path, &error).map_err(|e| e.to_string())?;
+        mark_failed(&tx, wt, &path, &error)?;
         report.failed += 1;
     }
-    db::commit_tx(tx, &hooks).map_err(|e| e.to_string())
+    db::commit_tx(tx, hooks)
 }
 
 pub(crate) fn load_existing(conn: &Connection) -> Result<HashMap<String, Existing>, String> {
     let mut stmt = conn
         .prepare("SELECT path, sha256, status, error, size, mtime_ns, parser FROM files")
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| db::map_sql_error("failed to read the index", &e))?;
     let rows = stmt
         .query_map([], |r| {
             Ok((
@@ -634,9 +693,9 @@ pub(crate) fn load_existing(conn: &Connection) -> Result<HashMap<String, Existin
                 },
             ))
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| db::map_sql_error("failed to read the index", &e))?;
     rows.collect::<Result<HashMap<_, _>, _>>()
-        .map_err(|e| e.to_string())
+        .map_err(|e| db::map_sql_error("failed to read the index", &e))
 }
 
 /// Adds this worktree's row, or refreshes it, and returns its id. The id of an
@@ -1131,6 +1190,7 @@ mod tests {
                     Ok(())
                 })),
                 before_file_insert: None,
+                ..Default::default()
             },
             ..Options::default()
         };
@@ -1211,6 +1271,7 @@ mod tests {
             hooks: Hooks {
                 after_batch_commit: Some(Box::new(|_| Err("stop".to_string()))),
                 before_file_insert: None,
+                ..Default::default()
             },
             ..Options::default()
         };
@@ -1263,6 +1324,7 @@ mod tests {
                         Ok(())
                     }
                 })),
+                ..Default::default()
             },
             ..Options::default()
         };
@@ -1804,6 +1866,7 @@ impl P { fn go(&self) {} }
                         Ok(())
                     }
                 })),
+                ..Default::default()
             },
             ..Options::default()
         };
@@ -1961,6 +2024,7 @@ impl P { fn go(&self) {} }
             hooks: Hooks {
                 after_batch_commit: None,
                 before_file_insert: Some(Box::new(|_| Err("injected".to_string()))),
+                ..Default::default()
             },
             ..Options::default()
         };
@@ -2278,5 +2342,101 @@ impl P { fn go(&self) {} }
             db::open_query(&f.index, "other").err(),
             Some(db::DbError::Missing)
         );
+    }
+
+    fn busy() -> rusqlite::Error {
+        rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY), None)
+    }
+
+    /// Hooks whose `kind` step fails with SQLITE_BUSY for the first `n` calls.
+    fn busy_for(n: usize, at_commit: bool) -> Hooks {
+        let calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let fail: Box<dyn Fn() -> rusqlite::Result<()> + Send + Sync> = Box::new(move || {
+            if calls.fetch_add(1, Ordering::SeqCst) < n {
+                Err(busy())
+            } else {
+                Ok(())
+            }
+        });
+        let mut hooks = Hooks::default();
+        if at_commit {
+            hooks.tx.fail_commit = Some(fail);
+        } else {
+            hooks.tx.fail_begin = Some(fail);
+        }
+        hooks
+    }
+
+    #[test]
+    fn a_busy_batch_is_retried_and_counted_once() {
+        let _g = pinned();
+        for at_commit in [false, true] {
+            // Arrange
+            let f = fx(if at_commit {
+                "idx-busy-commit"
+            } else {
+                "idx-busy-begin"
+            });
+            write(&f.root, "a.rs", b"fn a() {}\n");
+            write(&f.root, "b.rs", b"fn b() {}\n");
+            let opts = Options {
+                hooks: busy_for(2, at_commit),
+                ..Options::default()
+            };
+
+            // Act
+            let report = f.run_with(&opts);
+
+            // Assert
+            assert_eq!(report.failed, 0, "at_commit {at_commit}");
+            assert_eq!(report.changed, 2);
+            assert_eq!(report.parsed, 2);
+        }
+    }
+
+    #[test]
+    fn a_batch_that_stays_busy_fails_the_run_with_the_busy_error() {
+        let _g = pinned();
+        for at_commit in [false, true] {
+            // Arrange
+            let f = fx("idx-busy-forever");
+            write(&f.root, "a.rs", b"fn a() {}\n");
+            let opts = Options {
+                hooks: busy_for(BATCH_RETRIES + 1, at_commit),
+                ..Options::default()
+            };
+
+            // Act
+            let got = run(&f.root, &f.index, &f.worktree, false, &opts);
+
+            // Assert
+            let message = got.expect_err("must fail");
+            assert!(
+                message.contains("busy") || message.contains("locked"),
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn corruption_inside_a_run_write_names_rebuild() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("idx-corrupt-write");
+        write(&f.root, "a.rs", b"fn a() {}\n");
+        let opts = Options {
+            hooks: Hooks {
+                fail_write: Some(rusqlite::ffi::SQLITE_CORRUPT),
+                ..Hooks::default()
+            },
+            ..Options::default()
+        };
+
+        // Act
+        let got = run(&f.root, &f.index, &f.worktree, false, &opts);
+
+        // Assert
+        let message = got.expect_err("must fail");
+        assert!(message.contains("--rebuild"), "{message}");
     }
 }

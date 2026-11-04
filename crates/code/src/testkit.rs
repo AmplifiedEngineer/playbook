@@ -6,6 +6,7 @@
 use super::db;
 use super::index::{self, Options, Report};
 use super::walker::test_repo::{git_in, init, write};
+use rusqlite::Connection;
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
@@ -71,4 +72,39 @@ impl Fx {
         file.set_modified(UNIX_EPOCH + Duration::from_secs(secs))
             .expect("set mtime");
     }
+}
+
+/// Overwrites every page of the store except page 1 and the worktrees table
+/// with garbage, after the store is checkpointed. A connection opened before
+/// the call still resolves its worktree and then fails on the next page it
+/// reads.
+pub(crate) fn damage_pages(f: &Fx) {
+    let (page_size, pages, keep): (i64, i64, i64) = {
+        let conn = Connection::open(&f.index).expect("raw open");
+        conn.pragma_update(None, "wal_checkpoint", "TRUNCATE").ok();
+        let size = conn
+            .query_row("PRAGMA page_size", [], |r| r.get(0))
+            .expect("page size");
+        let count = conn
+            .query_row("PRAGMA page_count", [], |r| r.get(0))
+            .expect("page count");
+        let keep = conn
+            .query_row(
+                "SELECT rootpage FROM sqlite_schema WHERE name = 'worktrees'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("worktrees page");
+        (size, count, keep)
+    };
+    let mut bytes = std::fs::read(&f.index).expect("read store");
+    let size = usize::try_from(page_size).expect("page size");
+    for page in 2..=pages {
+        if page == keep {
+            continue;
+        }
+        let start = usize::try_from(page - 1).expect("page") * size;
+        bytes[start..start + size].fill(0x5A);
+    }
+    std::fs::write(&f.index, bytes).expect("write store");
 }
