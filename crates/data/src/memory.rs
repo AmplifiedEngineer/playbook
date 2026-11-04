@@ -96,7 +96,7 @@ pub const FACT_SCOPES: [&str; 3] = ["global", "org", "project"];
 /// The schema version stored in `meta` under `schema_version`.
 pub const SCHEMA_VERSION: &str = "2";
 
-const BUSY: Duration = Duration::from_millis(5000);
+pub(crate) const BUSY: Duration = Duration::from_millis(5000);
 
 /// `<data>/memory.db`.
 pub fn db_in(data: &Path) -> PathBuf {
