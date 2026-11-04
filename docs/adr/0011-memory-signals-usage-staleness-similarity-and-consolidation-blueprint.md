@@ -1,6 +1,7 @@
 # ADR-0011 Execution Blueprint
 
 - **Parent ADR:** docs/adr/0011-memory-signals-usage-staleness-similarity-and-consolidation.md
+- **Amended 2026-11-04:** WU-3's Agent-dispatch hook (`memory_agent_dispatch.rs`) was not built and is dropped, and a promoted fact is ranked in the session-start block, not injected unconditionally. See the parent ADR.
 - **Amended 2026-10-19:** the memory graph now lives in `~/.config/playbook/data/memory.db` (moved there in #925), not in `memory.graph.json` or `graph.json`. `playbook memory rebuild` rebuilds it and `playbook memory stats` shows what it holds. The fact files stay in `~/.config/playbook/memory/`. Paths below are as they were when this record was written.
 
 ## System Snapshot
