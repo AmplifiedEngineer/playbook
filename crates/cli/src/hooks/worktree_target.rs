@@ -52,6 +52,7 @@ pub(crate) fn clone_warm_target(main_root: &Path, worktree: &Path) -> bool {
     cloned
 }
 
-fn is_ignored(dir: &Path) -> bool {
+/// Whether git ignores a `target` folder in `dir`'s checkout.
+pub(crate) fn is_ignored(dir: &Path) -> bool {
     git(dir, &["check-ignore", "-q", &format!("{TARGET_DIR}/")]).is_ok()
 }

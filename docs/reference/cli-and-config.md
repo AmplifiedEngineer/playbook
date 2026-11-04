@@ -522,7 +522,7 @@ Subcommands: `check`, `hook-commands`, `hook-commands-for-event`, `hook-commands
 
 Check the seven playbook layers and print a status table
 
-Reads your settings, shell files and PATH, and lists a PASS, INFO, WARN or FAIL row for each layer, then the review config, stale worktrees and pending migration notices. Always exits 0 when it could run the checks.
+Reads your settings, shell files and PATH, and lists a PASS, INFO, WARN or FAIL row for each layer, then the review config, stale worktrees and pending migration notices. A Rust repo also gets INFO rows for the cargo dev profile in `~/.cargo/config.toml` and, on macOS, for the warm target clone. Always exits 0 when it could run the checks.
 
 - `--json`: Print the rows as JSON
 

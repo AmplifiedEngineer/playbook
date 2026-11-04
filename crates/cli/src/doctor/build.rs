@@ -76,13 +76,13 @@ fn profile_row(profile: &DevProfile) -> Row {
         Row::new(
             "-",
             Level::Info,
-            "cargo dev profile: debug = 0 and incremental = false, so target folders stay small",
+            "~/.cargo/config.toml sets the dev profile to debug = 0 and incremental = false, so target folders stay small",
         )
     } else {
         Row::new(
             "-",
             Level::Info,
-            "cargo dev profile keeps debug info or incremental data, so each target folder grows large",
+            "~/.cargo/config.toml does not turn off dev debug info and incremental data, so each target folder grows large",
         )
         .hint(DEV_PROFILE_FIX)
     }
@@ -93,14 +93,26 @@ fn clone_row(repo: &Path) -> Option<Row> {
     let porcelain = git(repo, &["worktree", "list", "--porcelain"]).ok()?;
     let main = Path::new(&main_worktree(&porcelain)?).to_path_buf();
     if main.join("target").is_dir() {
-        return Some(Row::new(
-            "-",
-            Level::Info,
-            "new worktrees clone the main checkout's target folder",
-        )
-        .hint(
-            "the clone saves most when main was last built with cargo build and the dev profile above",
-        ));
+        if !crate::hooks::worktree_target::is_ignored(&main) {
+            return Some(
+                Row::new(
+                    "-",
+                    Level::Info,
+                    "git does not ignore the target folder, so new worktrees do not clone it",
+                )
+                .hint("add target/ to .gitignore"),
+            );
+        }
+        return Some(
+            Row::new(
+                "-",
+                Level::Info,
+                "new worktrees clone the main checkout's target folder",
+            )
+            .hint(
+                "the clone saves most when main was last built with cargo build and the dev profile above",
+            ),
+        );
     }
     Some(
         Row::new(
@@ -154,6 +166,76 @@ mod tests {
         ] {
             assert!(!parse_dev_profile(text).is_lean(), "{text:?}");
         }
+    }
+
+    fn rust_repo(name: &str, gitignore: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("pb-doctor-build-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("target")).unwrap();
+        std::fs::write(dir.join("Cargo.toml"), "[package]\n").unwrap();
+        std::fs::write(dir.join(".gitignore"), gitignore).unwrap();
+        let init = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&dir)
+            .status()
+            .unwrap();
+        assert!(init.success());
+        dir
+    }
+
+    #[test]
+    fn the_clone_row_says_so_when_git_ignores_target() {
+        // Arrange
+        let repo = rust_repo("ignored", "target\n");
+
+        // Act
+        let row = clone_row(&repo).expect("row");
+
+        // Assert
+        assert!(
+            row.message.contains("clone the main checkout"),
+            "{}",
+            row.message
+        );
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn the_clone_row_warns_when_git_does_not_ignore_target() {
+        // Arrange
+        let repo = rust_repo("unignored", "");
+
+        // Act
+        let row = clone_row(&repo).expect("row");
+
+        // Assert
+        assert!(row.message.contains("does not ignore"), "{}", row.message);
+        assert_eq!(row.hint.as_deref(), Some("add target/ to .gitignore"));
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn a_repo_without_cargo_toml_gets_no_rows() {
+        // Arrange
+        let dir = std::env::temp_dir().join(format!("pb-doctor-build-none-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let env = Env {
+            home: dir.clone(),
+            claude_home: dir.join(".claude"),
+            plugin_root: None,
+            shell: "/bin/zsh".to_string(),
+            path_var: std::ffi::OsString::new(),
+            repo_root: Some(dir.clone()),
+            repo_slug: None,
+        };
+
+        // Act
+        let found = rows(&env);
+
+        // Assert
+        assert!(found.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
