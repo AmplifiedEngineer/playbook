@@ -102,6 +102,14 @@ pub struct WorkRow {
     pub not_before: i64,
 }
 
+/// The step an action reached before it was stopped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JournalRow {
+    pub step: String,
+    pub worktree: String,
+    pub branch: String,
+}
+
 /// A proposal a person approved, for the trust ladder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Approval {
@@ -161,6 +169,12 @@ impl Store {
                  key TEXT PRIMARY KEY,
                  value TEXT NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS journal (
+                 work_id INTEGER PRIMARY KEY,
+                 step TEXT NOT NULL,
+                 worktree TEXT NOT NULL,
+                 branch TEXT NOT NULL
+             );
              CREATE TABLE IF NOT EXISTS acted (
                  rule TEXT NOT NULL,
                  repo TEXT NOT NULL,
@@ -211,6 +225,23 @@ impl Store {
             .prepare("SELECT id FROM work WHERE state = ?1 AND not_before <= ?2 ORDER BY id")?;
         let ids = stmt.query_map(params![state, now], |r| r.get(0))?;
         Ok(ids.collect::<Result<_, _>>()?)
+    }
+
+    pub fn journal(&self, id: i64) -> Result<Option<JournalRow>, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT step, worktree, branch FROM journal WHERE work_id = ?1",
+                [id],
+                |r| {
+                    Ok(JournalRow {
+                        step: r.get(0)?,
+                        worktree: r.get(1)?,
+                        branch: r.get(2)?,
+                    })
+                },
+            )
+            .optional()?)
     }
 
     /// A control flag such as `paused`.
@@ -327,6 +358,28 @@ impl Tx<'_> {
             "UPDATE work SET state = ?2, reason = ?3 WHERE id = ?1",
             params![id, state, reason],
         )?;
+        Ok(())
+    }
+
+    /// Writes the step an action reached, before the side effect it names.
+    pub fn set_journal(
+        &self,
+        id: i64,
+        step: &str,
+        worktree: &str,
+        branch: &str,
+    ) -> Result<(), StoreError> {
+        self.tx.execute(
+            "INSERT INTO journal (work_id, step, worktree, branch) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(work_id) DO UPDATE SET step = ?2, worktree = ?3, branch = ?4",
+            params![id, step, worktree, branch],
+        )?;
+        Ok(())
+    }
+
+    pub fn clear_journal(&self, id: i64) -> Result<(), StoreError> {
+        self.tx
+            .execute("DELETE FROM journal WHERE work_id = ?1", [id])?;
         Ok(())
     }
 

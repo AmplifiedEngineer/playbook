@@ -14,8 +14,11 @@ use crate::common::time::parse_iso8601_utc_epoch;
 use crate::config::{self, store as config_store};
 use crate::WatchCommand;
 
+pub mod action;
 pub mod audit;
 pub mod backoff;
+pub mod child;
+pub mod claude;
 pub mod clock;
 pub mod control;
 pub mod engine;
@@ -23,12 +26,14 @@ pub mod event;
 pub mod gh;
 pub mod github;
 pub mod http;
+pub mod journal;
 pub mod limits;
 pub mod lock;
 pub mod rule;
 pub mod settings;
 pub mod source;
 pub mod store;
+pub mod trust;
 
 use audit::AuditLog;
 use backoff::StdJitter;

@@ -103,6 +103,12 @@ pub struct Limits {
     /// Model spend. Zero means a rule that calls a model needs a number set.
     #[serde(default)]
     pub usd_per_day: f64,
+    /// Most files a change may touch. Lowers `fix.maxFiles`, never raises it.
+    #[serde(default)]
+    pub files: Option<i64>,
+    /// Most lines a change may touch. Lowers `fix.maxLines`, never raises it.
+    #[serde(default)]
+    pub lines: Option<i64>,
 }
 
 fn default_actions_per_day() -> i64 {
@@ -114,6 +120,8 @@ impl Default for Limits {
         Self {
             actions_per_day: default_actions_per_day(),
             usd_per_day: 0.0,
+            files: None,
+            lines: None,
         }
     }
 }
@@ -284,7 +292,7 @@ mod tests {
             (3, 1.5)
         );
         let bad =
-            r#"{"on":"issue.opened","do":"label","with":{"labels":["a"]},"limits":{"files":3}}"#;
+            r#"{"on":"issue.opened","do":"label","with":{"labels":["a"]},"limits":{"words":3}}"#;
         assert!(Stored::parse(bad).is_err());
     }
 
