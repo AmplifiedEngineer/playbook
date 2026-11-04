@@ -168,12 +168,12 @@ mod tests {
     }
 
     impl FsOps for FailingRename {
-        fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        fn rename(&self, guard: &RunGuard, from: &Path, to: &Path) -> io::Result<()> {
             self.calls.set(self.calls.get() + 1);
             if self.calls.get() == self.fail_at {
                 return Err(io::Error::other("injected fault"));
             }
-            self.real.rename(from, to)
+            self.real.rename(guard, from, to)
         }
         fn copy(&self, guard: &RunGuard, from: &Path, to: &Path) -> io::Result<()> {
             self.real.copy(guard, from, to)
