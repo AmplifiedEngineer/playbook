@@ -576,6 +576,16 @@ fn table() -> Vec<Case> {
         case("usage stop", &["usage", "stop"]).out("not running"),
         case("sessions", &["sessions"]).writes().out("No recent sessions"),
         case("sessions list", &["sessions", "list"]).out("No recent sessions").writes(),
+        // watch mode: nothing is enabled and no token is set on a fresh home
+        case("watch once", &["watch", "once"]).out("watch is off"),
+        case("watch dry-run", &["watch", "dry-run"]).code(1).err("GITHUB_TOKEN"),
+        case("watch approve", &["watch", "approve", "1"]).code(1).err("GITHUB_TOKEN"),
+        case("watch reject", &["watch", "reject", "1"]).code(1).err("not waiting").grows(),
+        case("watch status", &["watch", "status"]).out("enabled: false").grows(),
+        case("watch pause", &["watch", "pause"]).out("watch paused").grows(),
+        case("watch resume", &["watch", "resume"]).out("watch resumed").grows(),
+        case("watch retry", &["watch", "retry", "1"]).code(1).err("not on the dead list").grows(),
+        case("watch log", &["watch", "log"]).grows(),
         case("sessions sweep", &["sessions", "sweep", "--dry-run"])
             .out("No finished or stale sessions")
             .writes(),
