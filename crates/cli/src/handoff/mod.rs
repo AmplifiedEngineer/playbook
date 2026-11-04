@@ -189,7 +189,7 @@ fn tombstoned(dir: &Path, slug: &str, index: &Path, state: State) -> Vec<(Record
         .into_iter()
         .filter(|rec| rec.state == state)
         .filter_map(|rec| {
-            // A handoff that an older version parked in `used/` was moved to
+            // A handoff that an older version parked in its old "used" folder was moved to
             // a tombstone by the init migration, with that path as its origin.
             let used = dir.join("used");
             let original = rec.paths.iter().find(|path| {
