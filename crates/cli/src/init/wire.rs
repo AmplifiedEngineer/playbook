@@ -351,7 +351,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         matcher: None,
         name: "worktree-create",
         group: Group::Worktree,
-        purpose: "Creates worktrees under `<repo-parent>/.worktrees/<repo>/<name>`, copies files named in `.worktreeinclude` and keeps `origin/HEAD` at most a day old.",
+        purpose: "Creates worktrees under `<repo-parent>/.worktrees/<repo>/<name>`, copies files named in `.worktreeinclude`, clones the main checkout's ignored `target` folder on macOS and keeps `origin/HEAD` at most a day old.",
         if_cond: None,
         timeout: Some(180),
         also_replaces: None,
