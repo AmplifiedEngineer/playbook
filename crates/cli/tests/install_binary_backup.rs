@@ -5,8 +5,9 @@
 //! existing `$PLAYBOOK_BIN_DIR/playbook`, and `playbook uninstall --remove-binary`
 //! removing those backups. The installer runs as the real script under bash.
 //!
-//! A stub `curl` serves a fake release and a stub `uname` pins the platform,
-//! both ahead of the real tools on a scratch `PATH`, so the shipped functions
+//! A stub `curl` serves a fake release, a stub `uname` pins the platform and a
+//! stub `gh` stands in for the attestation check, all ahead of the real tools
+//! on a scratch `PATH`, so the shipped functions
 //! run unmodified. Every install runs with `--no-init`, so it ends once the
 //! binary is placed; installs are checked for their `Installed playbook` line. `$HOME` and
 //! `$PLAYBOOK_BIN_DIR` are scratch directories and every inherited
@@ -55,6 +56,16 @@ case "$1" in
 esac
 "#;
 
+/// Plays the attestation check without a network: `gh attestation` exists and
+/// finds no attestation, which the installer reports as a gap and goes on. The
+/// real `gh` on the machine would call the GitHub API, so the outcome would
+/// depend on its login, its rate limit and the network.
+const GH_STUB: &str = r#"#!/usr/bin/env bash
+[ "$1 $2" = "attestation --help" ] && exit 0
+echo "no attestations found for subject" >&2
+exit 1
+"#;
+
 /// Refuses to write the backup temp file and defers to the real `cp` for
 /// everything else, so only the backup step fails.
 const FAILING_CP_STUB: &str = r#"#!/usr/bin/env bash
@@ -86,6 +97,7 @@ impl Sandbox {
         let bin_dir = home.join("bin");
         write_executable(&stubs.join("curl"), CURL_STUB);
         write_executable(&stubs.join("uname"), UNAME_STUB);
+        write_executable(&stubs.join("gh"), GH_STUB);
         write_executable(&failing_cp.join("cp"), FAILING_CP_STUB);
         fs::create_dir_all(&home).expect("scratch home should be creatable");
         Self {
