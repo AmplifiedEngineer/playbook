@@ -64,6 +64,7 @@ impl Editor {
         if self.rename.is_none() && code == KeyCode::Char('u') {
             self.message = None;
             self.undo();
+            self.clamp_slot();
             return Outcome::Stay;
         }
         let before = self.layout.clone();
@@ -74,9 +75,14 @@ impl Editor {
             }
             self.undo.push(before);
         }
+        self.clamp_slot();
+        outcome
+    }
+
+    /// Keeps the cursor on a panel of the edited tab.
+    fn clamp_slot(&mut self) {
         let panels = self.layout.tabs.get(self.tab).map_or(0, |t| t.panels.len());
         self.slot = self.slot.min(panels.saturating_sub(1));
-        outcome
     }
 
     fn undo(&mut self) {
@@ -378,6 +384,22 @@ mod tests {
         assert!(empty.is_some_and(|m| m.contains("Nothing")));
         assert_eq!(e.undo.len(), 0);
         assert_eq!(e.message.as_deref(), Some("Nothing to undo"));
+    }
+
+    #[test]
+    fn undoing_an_added_panel_pulls_the_cursor_back_onto_the_tab() {
+        // Arrange
+        let mut e = editor();
+        e.row = ALL.iter().position(|p| *p == PanelId::Live).unwrap();
+        press_all(&mut e, "a");
+        press_all(&mut e, "ll");
+
+        // Act
+        press_all(&mut e, "u");
+
+        // Assert
+        assert_eq!(e.layout.tabs[0].panels.len(), 2);
+        assert_eq!(e.slot, 1);
     }
 
     #[test]
