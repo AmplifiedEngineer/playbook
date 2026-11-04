@@ -134,7 +134,28 @@ fn find_leftovers(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
     }
 }
 
-/// The `.copied` markers and `MOVED.txt` notes below each root.
+/// Whether the old files that `marker` stands guard over are gone. A `MOVED.txt`
+/// is the "already copied" flag of the old folder it sits in, and a `.copied`
+/// marker stops a consumed handoff in the old global folder from coming back.
+/// Removing either while those files remain would copy them again.
+fn guarded_files_gone(store: &Store, marker: &Path) -> bool {
+    let has_entries = |dir: &Path| fs::read_dir(dir).is_ok_and(|mut it| it.next().is_some());
+    if marker.file_name().is_some_and(|name| name == ".copied") {
+        let legacy = store
+            .roots
+            .first()
+            .and_then(|root| root.parent())
+            .map(|root| root.join("runtime").join("handoff"));
+        return legacy.is_none_or(|dir| !has_entries(&dir));
+    }
+    let Some(folder) = marker.parent() else {
+        return false;
+    };
+    fs::read_dir(folder).is_ok_and(|entries| entries.flatten().count() <= 1)
+}
+
+/// The `.copied` markers and `MOVED.txt` notes below each root. One is due only
+/// once the old files it guards are gone.
 fn scan_leftovers(store: &Store, now: i64) -> Vec<Item> {
     let mut paths = Vec::new();
     for root in &store.roots {
@@ -143,7 +164,13 @@ fn scan_leftovers(store: &Store, now: i64) -> Vec<Item> {
     paths.sort();
     paths
         .into_iter()
-        .filter_map(|path| aged_item(store, path, now))
+        .filter_map(|path| {
+            let mut item = aged_item(store, path, now)?;
+            if !guarded_files_gone(store, &item.path) {
+                item.due = None;
+            }
+            Some(item)
+        })
         .collect()
 }
 
@@ -333,7 +360,8 @@ mod tests {
     #[test]
     fn leftovers_follow_the_90_day_boundary() {
         // Arrange
-        let root = scratch("stores-leftovers");
+        let base = scratch("stores-leftovers");
+        let root = base.join("repos");
         let repo = root.join("acme/app");
         fs::create_dir_all(repo.join("handoff/.copied")).unwrap();
         fs::write(repo.join("handoff/.copied/slug"), "").unwrap();
@@ -354,6 +382,37 @@ mod tests {
             due_paths(&items),
             vec![repo.join("old/MOVED.txt").as_path()]
         );
+    }
+
+    #[test]
+    fn leftovers_stay_while_the_old_files_they_guard_remain() {
+        // Arrange
+        let base = scratch("stores-leftovers-guard");
+        let root = base.join("repos");
+        let old = root.join("acme/app/old");
+        fs::create_dir_all(&old).unwrap();
+        fs::write(old.join("MOVED.txt"), "").unwrap();
+        fs::write(old.join("plan.md"), "still here").unwrap();
+        backdate(&old.join("MOVED.txt"), 400 * DAY);
+        let copied = root.join("acme/app/handoff/.copied");
+        fs::create_dir_all(&copied).unwrap();
+        fs::write(copied.join("slug"), "").unwrap();
+        backdate(&copied.join("slug"), 400 * DAY);
+        backdate(&copied, 400 * DAY);
+        let legacy = base.join("runtime/handoff");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("old-handoff.md"), "x").unwrap();
+        let store = test_store(&root, scan_leftovers, 90);
+
+        // Act
+        let guarded = store.items(NOW);
+        fs::remove_file(old.join("plan.md")).unwrap();
+        fs::remove_file(legacy.join("old-handoff.md")).unwrap();
+        let released = store.items(NOW);
+
+        // Assert
+        assert!(due_paths(&guarded).is_empty());
+        assert_eq!(due_paths(&released).len(), 2);
     }
 
     #[cfg(unix)]
@@ -377,10 +436,8 @@ mod tests {
 
         // Assert
         assert!(session_items.is_empty());
-        assert_eq!(
-            due_paths(&leftover_items),
-            vec![root.join("MOVED.txt").as_path()]
-        );
+        assert_eq!(leftover_items.len(), 1);
+        assert!(due_paths(&leftover_items).is_empty());
         assert!(outside.join("keep").exists());
     }
 
