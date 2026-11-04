@@ -14,6 +14,8 @@ name: shell-ci
 
 on:
   pull_request:
+    # ready_for_review starts the macOS lane that draft pull requests skip.
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
   push:
     branches: [main]
@@ -91,14 +93,19 @@ jobs:
     # Run even if `changes` failed (fail open); never let a skipped needs
     # turn a required check into a skipped one.
     if: ${{ !cancelled() }}
-    runs-on: ${{ matrix.os }}
+    # A draft pull request runs the macOS leg on a Linux runner with every
+    # step skipped, so the required check still reports and no macOS slot is
+    # used. ready_for_review runs the full leg.
+    runs-on: ${{ (matrix.os == 'macos-latest' && github.event_name == 'pull_request' && github.event.pull_request.draft) && 'ubuntu-latest' || matrix.os }}
     timeout-minutes: 10
     permissions:
       contents: read
+    env:
+      DRAFT_SKIP: ${{ matrix.os == 'macos-latest' && github.event_name == 'pull_request' && github.event.pull_request.draft }}
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         # Linux-only action; it self-skips on macOS with a confusing warning.
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.DRAFT_SKIP != 'true'
         with:
           # Kept on audit (not block) — apt-get pulls from Ubuntu archive
           # mirrors that rotate per runner placement (azure.archive.ubuntu.com,
@@ -114,7 +121,7 @@ jobs:
           persist-credentials: false
 
       - name: Install shellcheck
-        if: runner.os == 'Linux' && needs.changes.outputs.docs_only != 'true'
+        if: runner.os == 'Linux' && env.DRAFT_SKIP != 'true' && needs.changes.outputs.docs_only != 'true'
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
       - name: ShellCheck (.sh files)
@@ -124,20 +131,21 @@ jobs:
         # (measured 2026-08-18), most are deliberate idiom, and 7 are SC1091
         # which survives even `shellcheck -x`. Tightening would mean adding
         # disable directives, not fixing bugs.
-        if: runner.os == 'Linux' && needs.changes.outputs.docs_only != 'true'
+        if: runner.os == 'Linux' && env.DRAFT_SKIP != 'true' && needs.changes.outputs.docs_only != 'true'
         run: git ls-files '*.sh' | xargs shellcheck --severity=warning
 
       - name: Bash syntax check
-        if: needs.changes.outputs.docs_only != 'true'
+        if: env.DRAFT_SKIP != 'true' && needs.changes.outputs.docs_only != 'true'
         run: |
           for f in $(git ls-files '*.sh'); do bash -n "$f"; done
 
       # Always runs, docs-only or not: it greps docs/ and README.md too.
       - name: Personal-identifier grep
+        if: env.DRAFT_SKIP != 'true'
         run: scripts/check-identifiers.sh
 
       - name: Run behavioral test suites
-        if: needs.changes.outputs.docs_only != 'true'
+        if: env.DRAFT_SKIP != 'true' && needs.changes.outputs.docs_only != 'true'
         # Discover every suite so a new *.test.sh is picked up automatically.
         # The git identity is needed by the worktree suites, which commit.
         #
