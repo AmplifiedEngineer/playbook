@@ -35,6 +35,7 @@ fn with_engine<W: GithubWrite, C: Clock, T>(
         clock: ctx.clock,
         audit: &audit,
         jitter: &StdJitter,
+        model: ctx.model,
         caps: settings.caps,
         me: ctx.me,
     };

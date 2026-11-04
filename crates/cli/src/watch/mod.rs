@@ -41,6 +41,7 @@ use backoff::StdJitter;
 use clock::{Clock, SystemClock};
 use engine::{matches, ApproveOutcome, Engine, GithubWrite, NamedRule};
 use github::{Endpoint, GithubPoller, Http};
+use journal::RecoverOps;
 use limits::GlobalCaps;
 use lock::{acquire, Acquire};
 use rule::Autonomy;
@@ -64,6 +65,7 @@ pub struct Ctx<'a, W, C> {
     pub clock: &'a C,
     /// The login of the authenticated user.
     pub me: &'a str,
+    pub model: &'a dyn claude::ModelRunner,
 }
 
 pub struct Settings {
@@ -180,7 +182,7 @@ fn poll_error(source: &str, err: &SourceError, out: &mut String) -> Result<(), S
 }
 
 /// `playbook watch once`: one poll of every repo, then the approved items.
-pub fn once<W: GithubWrite, C: Clock, H: Http>(
+pub fn once<W: GithubWrite + RecoverOps, C: Clock, H: Http>(
     ctx: &Ctx<'_, W, C>,
     since: Option<&str>,
     mut make_http: impl FnMut() -> H,
@@ -284,6 +286,7 @@ pub fn approve<W: GithubWrite, C: Clock>(ctx: &Ctx<'_, W, C>, id: i64) -> Result
         clock: ctx.clock,
         audit: &audit,
         jitter: &StdJitter,
+        model: ctx.model,
         caps: settings.caps,
         me: ctx.me,
     };
@@ -316,6 +319,7 @@ pub fn reject<W: GithubWrite, C: Clock>(ctx: &Ctx<'_, W, C>, id: i64) -> Result<
         clock: ctx.clock,
         audit: &audit,
         jitter: &StdJitter,
+        model: ctx.model,
         caps: settings.caps,
         me: ctx.me,
     };
@@ -360,6 +364,7 @@ pub fn run(cmd: Option<&WatchCommand>) -> Result<String, String> {
         write: &write,
         clock: &clock,
         me: &me,
+        model: &claude::ClaudeCli,
     };
     let Some(cmd) = cmd else {
         let mut env = cycle::LoopEnv {

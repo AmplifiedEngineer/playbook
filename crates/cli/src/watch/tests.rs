@@ -13,6 +13,7 @@ use sha2::Digest;
 
 use super::clock::ManualClock;
 use super::engine::IssueView;
+use super::journal::RecoverOps;
 use super::*;
 use crate::config::write::Tier;
 
@@ -33,6 +34,9 @@ impl GithubWrite for Spy {
             open: true,
             labels: vec![],
             body_hash: sha2::Sha256::digest(b"hello").into(),
+            title: "t".into(),
+            body: "hello".into(),
+            fork: false,
         })
     }
     fn has_comment(&self, _: &str, _: u64, _: &str) -> Result<bool, String> {
@@ -105,6 +109,7 @@ impl Env {
             write: &self.spy,
             clock: &self.clock,
             me: "me",
+            model: &NoModel,
         }
     }
 
@@ -429,6 +434,26 @@ impl Http for Broken {
     }
 }
 
+struct NoModel;
+
+impl claude::ModelRunner for NoModel {
+    fn run(&self, _: &claude::Call) -> Result<String, String> {
+        Err("no model in this test".to_string())
+    }
+}
+
+impl RecoverOps for Spy {
+    fn remove_worktree(&self, _: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn branch_pushed(&self, _: &str, _: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn ensure_marker(&self, _: &store::WorkRow) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 struct Longest;
 
 impl backoff::Jitter for Longest {
@@ -459,6 +484,46 @@ fn run_passes<H: Http>(
         cycle::run_loop(&e.ctx(), make_http, &mut env)
     };
     (result, printed.into_inner(), waits.into_inner())
+}
+
+#[test]
+fn a_source_is_not_polled_again_before_its_wait_has_passed() {
+    // Arrange
+    let e = env("watch-cmd-next-poll", true);
+    e.once(Some(EARLIER)).unwrap();
+    let after_first = e.requests.get();
+
+    // Act
+    e.once(None).unwrap();
+    let too_soon = e.requests.get();
+    e.clock.advance(61);
+    e.once(None).unwrap();
+
+    // Assert
+    assert_eq!(too_soon, after_first);
+    assert!(e.requests.get() > after_first);
+}
+
+#[test]
+fn a_pass_recovers_an_item_left_running_by_a_killed_run() {
+    // Arrange: a proposal that was running with a worktree, then the run died.
+    let e = env("watch-cmd-recover", true);
+    e.once(Some(EARLIER)).unwrap();
+    let mut store = Store::open(&e.data.join("watch.db")).unwrap();
+    store
+        .transaction(|tx| {
+            tx.set_state(1, "running", None)?;
+            tx.set_journal(1, "worktree", "/tmp/wt", "watch/b")
+        })
+        .unwrap();
+    drop(store);
+
+    // Act
+    let out = e.once(None).unwrap();
+
+    // Assert: queued again, then decided again as a proposal.
+    assert!(out.contains("item 1 recovered: Requeued"), "{out}");
+    assert_eq!(e.rows("proposed"), vec![1]);
 }
 
 #[test]
@@ -495,6 +560,8 @@ fn a_transient_error_backs_off_with_growing_waits_and_the_loop_goes_on() {
     // Arrange: cursors exist, so every pass makes requests.
     let e = env("watch-loop-transient", true);
     e.once(Some(EARLIER)).unwrap();
+    // The sources are not due again until their wait has passed.
+    e.clock.advance(120);
 
     // Act
     let (result, printed, waits) = run_passes(
@@ -514,6 +581,7 @@ fn a_transient_error_backs_off_with_growing_waits_and_the_loop_goes_on() {
 fn a_refused_token_stops_the_loop_with_a_clear_message() {
     let e = env("watch-loop-unauthorized", true);
     e.once(Some(EARLIER)).unwrap();
+    e.clock.advance(120);
     let (result, _, waits) = run_passes(&e, 5, || Broken(SourceError::Unauthorized), |_| {});
     assert!(result.unwrap_err().contains("refused the token"));
     assert!(waits.is_empty());

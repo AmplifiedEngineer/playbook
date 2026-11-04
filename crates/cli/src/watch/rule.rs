@@ -66,6 +66,8 @@ impl Do {
 pub enum Decide {
     #[default]
     Rules,
+    /// A model picks one label from `with.labels`, three calls that must agree.
+    Model,
 }
 
 /// Filters on event metadata. Text is never matched, only an exact comment
@@ -81,6 +83,9 @@ pub struct Where {
     pub paths: Vec<String>,
     pub base: Option<String>,
     pub comment_prefix: Option<String>,
+    /// Act on pull requests from forks. Off unless the rule says so.
+    #[serde(default)]
+    pub allow_forks: bool,
 }
 
 /// The arguments of the action.

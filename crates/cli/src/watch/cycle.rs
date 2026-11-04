@@ -9,9 +9,10 @@ use super::backoff::{delay, Jitter, StdJitter};
 use super::clock::Clock;
 use super::engine::{Engine, GithubWrite};
 use super::github::{GithubPoller, Http};
+use super::journal::{recover, RecoverOps};
 use super::lock::{acquire, Acquire};
 use super::source::{EventSource, Poll, SourceError};
-use super::store::Store;
+use super::store::{Cursor, Store};
 use super::{poll_error, repo_rules, start_cursor, Ctx, Settings, ENDPOINTS, OFF_MESSAGE};
 
 /// What one pass did and how long to wait before the next.
@@ -27,7 +28,7 @@ pub struct Cycle {
 
 /// Polls every repo once, queues what matched, and runs the approved items.
 /// `since` replays from that time instead of starting a new source from now.
-pub fn cycle<W: GithubWrite, C: Clock, H: Http>(
+pub fn cycle<W: GithubWrite + RecoverOps, C: Clock, H: Http>(
     ctx: &Ctx<'_, W, C>,
     settings: &Settings,
     since: Option<i64>,
@@ -39,6 +40,12 @@ pub fn cycle<W: GithubWrite, C: Clock, H: Http>(
         wait: settings.poll_seconds,
         ..Cycle::default()
     };
+    // The lock is held, so an item still `running` belongs to a killed run.
+    for (id, how) in recover(store, ctx.write).map_err(|e| e.to_string())? {
+        report
+            .out
+            .push_str(&format!("item {id} recovered: {how:?}\n"));
+    }
     let mut events = Vec::new();
     for repo in &settings.repos {
         let (rules, level) = repo_rules(ctx.home, repo)?;
@@ -62,15 +69,23 @@ pub fn cycle<W: GithubWrite, C: Clock, H: Http>(
                     .push_str(&format!("{source}: watching from now\n"));
                 continue;
             }
+            // A source answers at most once per its wait, whichever process asks.
+            let now = ctx.clock.now();
+            if since.is_none() && cursor.next_poll_at > now {
+                report.wait = report.wait.max(cursor.next_poll_at - now);
+                continue;
+            }
             match poller.poll(&cursor, &mut events) {
-                Ok(Poll::Events { next, next_in }) => {
+                Ok(Poll::Events { mut next, next_in }) => {
                     report.wait = report.wait.max(next_in);
+                    next.next_poll_at = now + next_in;
                     let mut engine = Engine {
                         store,
                         write: ctx.write,
                         clock: ctx.clock,
                         audit,
                         jitter: &StdJitter,
+                        model: ctx.model,
                         caps: settings.caps,
                         me: ctx.me,
                     };
@@ -93,7 +108,16 @@ pub fn cycle<W: GithubWrite, C: Clock, H: Http>(
                         }
                     }
                 }
-                Ok(Poll::Unchanged { next_in }) => report.wait = report.wait.max(next_in),
+                Ok(Poll::Unchanged { next_in }) => {
+                    report.wait = report.wait.max(next_in);
+                    let later = Cursor {
+                        next_poll_at: now + next_in,
+                        ..cursor
+                    };
+                    store
+                        .transaction(|tx| tx.set_cursor(&source, &later))
+                        .map_err(|e| e.to_string())?;
+                }
                 Err(err) => {
                     poll_error(&source, &err, &mut report.out)?;
                     match err {
@@ -111,6 +135,7 @@ pub fn cycle<W: GithubWrite, C: Clock, H: Http>(
             clock: ctx.clock,
             audit,
             jitter: &StdJitter,
+            model: ctx.model,
             caps: settings.caps,
             me: ctx.me,
         };
@@ -143,7 +168,7 @@ pub struct LoopEnv<'a> {
 /// `playbook watch` with no verb: passes until stopped. The instance lock is
 /// held for the whole run. A transient failure backs off and goes on; a
 /// refused token stops the loop.
-pub fn run_loop<W: GithubWrite, C: Clock, H: Http>(
+pub fn run_loop<W: GithubWrite + RecoverOps, C: Clock, H: Http>(
     ctx: &Ctx<'_, W, C>,
     mut make_http: impl FnMut() -> H,
     env: &mut LoopEnv<'_>,

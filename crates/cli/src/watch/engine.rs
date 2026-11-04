@@ -10,12 +10,14 @@ use serde_json::json;
 
 use super::audit::AuditLog;
 use super::backoff::{delay, Jitter, MAX_ATTEMPTS};
+use super::claude::{decide_label, Decision, ModelRunner};
 use super::clock::Clock;
 use super::event::Event;
 use super::limits::{check, day_of, ladder_allows, Caps, GlobalCaps, Usage};
-use super::rule::{Autonomy, Do, On, Rule};
+use super::rule::{Autonomy, Decide, Do, On, Rule};
 use super::settings::effective;
 use super::store::{Cursor, Insert, NewWork, Store, StoreError, Tx, WorkRow};
+use super::trust::wrap_untrusted;
 
 /// The marker an automated comment carries so watch mode ignores its own text.
 pub const HIDDEN_MARKER: &str = "<!-- playbook-watch -->";
@@ -32,6 +34,10 @@ pub struct IssueView {
     pub labels: Vec<String>,
     /// SHA-256 of the body, the same hash an event carries.
     pub body_hash: [u8; 32],
+    pub title: String,
+    pub body: String,
+    /// A pull request whose head is in another repository.
+    pub fork: bool,
 }
 
 /// The GitHub calls the actions make.
@@ -128,7 +134,10 @@ fn is_comment(event: &Event) -> bool {
 
 /// What one try at an action found.
 enum Step {
-    Done,
+    /// The action was taken, at this model cost in dollars.
+    Done(f64),
+    /// Back to a proposal, with this reason.
+    Demote(&'static str),
     AlreadyDone,
     Skipped(&'static str),
 }
@@ -139,6 +148,7 @@ pub struct Engine<'a, W, C> {
     pub clock: &'a C,
     pub audit: &'a AuditLog,
     pub jitter: &'a dyn Jitter,
+    pub model: &'a dyn ModelRunner,
     /// The caps from `watch.limits.*`.
     pub caps: GlobalCaps,
     /// The login of the authenticated user.
@@ -326,7 +336,7 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
         rules: &[NamedRule],
     ) -> Result<ApproveOutcome, EngineError> {
         let Some((_, rule)) = rules.iter().find(|(name, _)| name == &row.rule) else {
-            return self.finish(id, row, ApproveOutcome::Skipped("rule_missing"));
+            return self.finish(id, row, ApproveOutcome::Skipped("rule_missing"), 0.0);
         };
         if row.reason.as_deref() == Some(AUTO) {
             if let Some((reason, detail)) = self.demotion(row, rule)? {
@@ -336,9 +346,14 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
             }
         }
         match self.perform(row, rule) {
-            Ok(Step::Done) => self.finish(id, row, ApproveOutcome::Done),
-            Ok(Step::AlreadyDone) => self.finish(id, row, ApproveOutcome::AlreadyDone),
-            Ok(Step::Skipped(why)) => self.finish(id, row, ApproveOutcome::Skipped(why)),
+            Ok(Step::Done(cost)) => self.finish(id, row, ApproveOutcome::Done, cost),
+            Ok(Step::Demote(reason)) => {
+                self.set(id, "proposed", Some(reason))?;
+                self.record(&row.rule, &row.key, reason);
+                Ok(ApproveOutcome::Demoted(reason))
+            }
+            Ok(Step::AlreadyDone) => self.finish(id, row, ApproveOutcome::AlreadyDone, 0.0),
+            Ok(Step::Skipped(why)) => self.finish(id, row, ApproveOutcome::Skipped(why), 0.0),
             Err(why) => self.fail(id, row, &why),
         }
     }
@@ -386,6 +401,11 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
         if !view.open {
             return Ok(Step::Skipped("closed"));
         }
+        // An autonomous watcher does not touch a fork's pull request unless
+        // the rule opts in: its content comes from outside the repository.
+        if view.fork && !rule.filter.allow_forks {
+            return Ok(Step::Skipped("fork"));
+        }
         // Only these events carry the hash of the body that `issue` returns.
         let opened = matches!(rule.on, On::IssueOpened | On::PrOpened);
         if opened && view.body_hash[..] != row.body_hash[..] {
@@ -393,9 +413,19 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
         }
         match rule.action {
             Do::Label => {
-                let missing: Vec<String> = rule
-                    .with
-                    .labels
+                let mut cost = 0.0;
+                let wanted: Vec<String> = if rule.decide == Decide::Model {
+                    let text = wrap_untrusted(&format!("Title: {}\n\n{}", view.title, view.body));
+                    let (decision, spent) = decide_label(self.model, &rule.with.labels, &text);
+                    cost = spent;
+                    match decision {
+                        Decision::Label(label) => vec![label],
+                        other => return Ok(Step::Demote(other.reason().unwrap_or("disagree"))),
+                    }
+                } else {
+                    rule.with.labels.clone()
+                };
+                let missing: Vec<String> = wanted
                     .iter()
                     .filter(|l| !view.labels.contains(l))
                     .cloned()
@@ -404,6 +434,7 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
                     return Ok(Step::AlreadyDone);
                 }
                 self.write.add_labels(&row.repo, row.object, &missing)?;
+                return Ok(Step::Done(cost));
             }
             Do::Comment => {
                 let marker = format!("<!-- playbook-watch:{} -->", row.key);
@@ -415,7 +446,7 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
                 self.write.add_comment(&row.repo, row.object, &body)?;
             }
         }
-        Ok(Step::Done)
+        Ok(Step::Done(0.0))
     }
 
     /// A failed try goes back to `approved` with a later `not_before`, so an
@@ -441,6 +472,7 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
         id: i64,
         row: &WorkRow,
         outcome: ApproveOutcome,
+        cost: f64,
     ) -> Result<ApproveOutcome, EngineError> {
         let label = match &outcome {
             ApproveOutcome::Done => "done",
@@ -456,7 +488,7 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
         self.store.transaction(|tx| {
             tx.set_state(id, "done", Some(reason))?;
             if outcome == ApproveOutcome::Done {
-                tx.count_action(day_of(now), row, 0.0, now)?;
+                tx.count_action(day_of(now), row, cost, now)?;
             }
             Ok(())
         })?;
@@ -514,6 +546,7 @@ fn queue(
 mod tests {
     use super::*;
     use crate::watch::backoff::Jitter;
+    use crate::watch::claude::ModelRunner;
     use crate::watch::clock::ManualClock;
     use crate::watch::rule::Stored;
     use std::cell::RefCell;
@@ -529,7 +562,10 @@ mod tests {
         markers: Vec<String>,
         /// Fail every write with this error.
         fail: Option<String>,
+        fork: bool,
         comments: RefCell<Vec<(u64, String)>>,
+        /// Pause the watch through this database while the first label call runs.
+        pause_through: Option<std::path::PathBuf>,
     }
 
     impl GithubWrite for Spy {
@@ -538,6 +574,9 @@ mod tests {
                 open: !self.closed,
                 labels: self.have.clone(),
                 body_hash: self.hash.unwrap_or([1; 32]),
+                title: "title".into(),
+                body: "body".into(),
+                fork: self.fork,
             })
         }
         fn has_comment(&self, _: &str, _: u64, marker: &str) -> Result<bool, String> {
@@ -551,12 +590,42 @@ mod tests {
             if let Some(why) = &self.fail {
                 return Err(why.clone());
             }
+            if let Some(db) = &self.pause_through {
+                let mut other = Store::open(db).unwrap();
+                other
+                    .transaction(|tx| tx.set_control("paused", "1"))
+                    .unwrap();
+            }
             self.calls
                 .borrow_mut()
                 .push((repo.into(), number, labels.to_vec()));
             Ok(())
         }
     }
+
+    struct NoModel;
+    impl ModelRunner for NoModel {
+        fn run(&self, _: &crate::watch::claude::Call) -> Result<String, String> {
+            Err("no model in this test".to_string())
+        }
+    }
+
+    /// Answers with the next scripted reply.
+    struct Scripted(RefCell<Vec<String>>);
+    impl ModelRunner for Scripted {
+        fn run(&self, _: &crate::watch::claude::Call) -> Result<String, String> {
+            self.0
+                .borrow_mut()
+                .pop()
+                .ok_or_else(|| "no reply".to_string())
+        }
+    }
+
+    fn label_reply(label: &str) -> String {
+        format!(r#"{{"structured_output":{{"label":"{label}"}},"total_cost_usd":0.01}}"#)
+    }
+
+    const MODEL_LABEL: &str = r#"{"on":"issue.opened","do":"label","decide":"model","autonomy":"auto","with":{"labels":["bug","docs"]}}"#;
 
     /// Always picks the longest wait.
     struct Longest;
@@ -656,12 +725,21 @@ mod tests {
     }
 
     fn engine<'a>(f: &'a mut Fixture, spy: &'a Spy) -> Engine<'a, Spy, ManualClock> {
+        engine_with(f, spy, &NoModel)
+    }
+
+    fn engine_with<'a>(
+        f: &'a mut Fixture,
+        spy: &'a Spy,
+        model: &'a dyn ModelRunner,
+    ) -> Engine<'a, Spy, ManualClock> {
         Engine {
             store: &mut f.store,
             write: spy,
             clock: &f.clock,
             audit: &f.audit,
             jitter: &Longest,
+            model,
             caps: CAPS,
             me: "me",
         }
@@ -1036,6 +1114,117 @@ mod tests {
             .unwrap();
         assert_eq!(out, ApproveOutcome::Handed);
         assert!(spy.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_pause_during_an_action_lets_it_finish_and_starts_no_other() {
+        // Arrange: two approved items, and the pause arrives during the first.
+        let mut f = fixture("watch-engine-inflight");
+        let spy = Spy {
+            pause_through: Some(f.dir.join("data/watch.db")),
+            ..Spy::default()
+        };
+        let rules = rules(AUTO_LABEL);
+        let ids = ingest_at(
+            &mut f,
+            &spy,
+            &[issue(7, "a"), issue(8, "a")],
+            &rules,
+            Autonomy::Auto,
+        );
+
+        // Act
+        let ran = engine(&mut f, &spy).run_approved("o/r", &rules).unwrap();
+
+        // Assert
+        assert_eq!(ran, 1);
+        assert_eq!(state(&f, ids[0]).0, "done");
+        assert_eq!(state(&f, ids[1]).0, "approved");
+    }
+
+    #[test]
+    fn a_fork_pull_request_is_skipped_unless_the_rule_allows_forks() {
+        let mut f = fixture("watch-engine-fork");
+        let spy = Spy {
+            fork: true,
+            ..Spy::default()
+        };
+        let id = ingest(&mut f, &spy, &[issue(7, "a")], &rules(LABEL))[0];
+        let out = engine(&mut f, &spy)
+            .approve(id, &rules(LABEL), true)
+            .unwrap();
+        assert_eq!(out, ApproveOutcome::Skipped("fork"));
+        assert!(spy.calls.borrow().is_empty());
+
+        let open = LABEL.replace(
+            r#""do":"label""#,
+            r#""where":{"allow_forks":true},"do":"label""#,
+        );
+        let id = ingest(&mut f, &spy, &[issue(9, "a")], &rules(&open))[0];
+        let out = engine(&mut f, &spy)
+            .approve(id, &rules(&open), true)
+            .unwrap();
+        assert_eq!(out, ApproveOutcome::Done);
+    }
+
+    #[test]
+    fn a_model_rule_adds_only_the_label_three_replies_agree_on_and_counts_the_cost() {
+        // Arrange
+        let mut f = fixture("watch-engine-model");
+        let spy = Spy::default();
+        let rules = rules(MODEL_LABEL);
+        let ids = ingest_at(
+            &mut f,
+            &spy,
+            &[issue(7, "stranger")],
+            &rules,
+            Autonomy::Auto,
+        );
+        let model = Scripted(RefCell::new(vec![label_reply("docs"); 3]));
+
+        // Act
+        engine_with(&mut f, &spy, &model)
+            .run_approved("o/r", &rules)
+            .unwrap();
+
+        // Assert
+        assert_eq!(
+            spy.calls.borrow().as_slice(),
+            &[("o/r".to_string(), 7, vec!["docs".to_string()])]
+        );
+        assert_eq!(state(&f, ids[0]).0, "done");
+        let (_, usd) = f.store.counter(day_of(f.clock.now()), "*").unwrap();
+        assert!((usd - 0.03).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_model_rule_with_disagreeing_or_invalid_replies_becomes_a_proposal_and_writes_nothing() {
+        let rules = rules(MODEL_LABEL);
+        let cases = [
+            (
+                vec![label_reply("bug"), label_reply("bug"), label_reply("docs")],
+                "disagree",
+            ),
+            (
+                vec![
+                    label_reply("bug"),
+                    label_reply("bug"),
+                    label_reply("security"),
+                ],
+                "invalid_reply",
+            ),
+        ];
+        for (n, (replies, reason)) in cases.into_iter().enumerate() {
+            let mut f = fixture(&format!("watch-engine-model-bad-{n}"));
+            let spy = Spy::default();
+            let ids = ingest_at(&mut f, &spy, &[issue(7, "a")], &rules, Autonomy::Auto);
+            let model = Scripted(RefCell::new(replies));
+            engine_with(&mut f, &spy, &model)
+                .run_approved("o/r", &rules)
+                .unwrap();
+            assert_eq!(state(&f, ids[0]), ("proposed".into(), Some(reason.into())));
+            assert!(spy.calls.borrow().is_empty());
+        }
     }
 
     #[test]
