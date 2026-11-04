@@ -15,6 +15,7 @@ pub mod host;
 pub mod index;
 pub mod lang;
 pub mod location;
+pub mod lsp;
 pub mod output;
 pub mod ranked;
 pub mod refs;

@@ -49,6 +49,18 @@ fn a_form_the_fast_path_skips_is_still_parsed_or_rejected_by_clap() {
 }
 
 #[test]
+fn the_code_semantic_commands_are_left_to_clap() {
+    for parts in [
+        &["playbook", "code", "definition", "src/a.ts:1:4"][..],
+        &["playbook", "code", "hover", "src/a.ts:1:4"],
+        &["playbook", "code", "diagnostics"],
+        &["playbook", "code", "lsp", "status"],
+    ] {
+        assert!(classify(&argv(parts)).is_none(), "{parts:?}");
+    }
+}
+
+#[test]
 fn version_text_equals_what_clap_renders() {
     assert_eq!(version_text(), Cli::command().render_version());
 }
