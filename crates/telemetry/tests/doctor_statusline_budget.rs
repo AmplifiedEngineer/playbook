@@ -120,3 +120,25 @@ fn raw_adds_the_numbers_and_field_types_and_the_plain_report_stays_short() {
     }
     assert!(raw.lines().count() > plain.lines().count());
 }
+
+#[test]
+fn a_fresh_statusline_snapshot_with_dollars_is_named_as_the_source() {
+    let home = Home::new("gateway", FIXTURE);
+    let now = FETCHED + HOUR;
+    let input = format!(
+        r#"{{"rate_limits":{{"five_hour":{{"used_percentage":10,"resets_at":{}}},"spend_limit":{{"used_percentage":82,"resets_at":{},"used_usd":410,"limit_usd":500,"period":"monthly"}}}}}}"#,
+        now + HOUR,
+        now + 10 * DAY
+    );
+    playbook_telemetry::limits_source::remember(&home.0, &input, now);
+    let text = home.report(&[], HOUR, true);
+    assert!(
+        text.contains("  monthly: from the statusline reading (fresh)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("raw: monthly used $410.00 of reported limit $500.00, own budget none, limit in force $500.00"),
+        "{text}"
+    );
+    assert!(!text.contains("5 hour window: absent"), "{text}");
+}

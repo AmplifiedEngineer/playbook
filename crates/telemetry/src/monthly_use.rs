@@ -81,9 +81,10 @@ pub fn detect(snapshot: Option<&Snapshot>, account: &Account, now: i64) -> Optio
         };
         Some((limit, source))
     };
+    let usable = |f: &(Limit, Source)| f.0.used > 0.0 && f.0.limit > 0.0;
     from_statusline
-        .or_else(from_cache)
-        .filter(|(l, _)| l.used > 0.0 && l.limit > 0.0)
+        .filter(usable)
+        .or_else(|| from_cache().filter(usable))
 }
 
 /// [`detect`], then the manual monthly budget in `budgets` if it is lower.
@@ -239,6 +240,13 @@ mod tests {
         let now = FETCHED + HOUR;
         let old = gateway(now - STALE_SECONDS - 1, 410.0, 500.0);
         let m = monthly_use(Some(&old), &account(), &[], now).unwrap();
+        assert_eq!(used_of(&m), (986.4, 1500.0));
+    }
+
+    #[test]
+    fn a_statusline_figure_with_nothing_used_falls_back_to_the_cache() {
+        let now = FETCHED + HOUR;
+        let m = monthly_use(Some(&gateway(now, 0.0, 500.0)), &account(), &[], now).unwrap();
         assert_eq!(used_of(&m), (986.4, 1500.0));
     }
 
