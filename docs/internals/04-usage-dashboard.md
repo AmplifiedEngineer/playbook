@@ -338,6 +338,28 @@ When the 7 day or 5 hour window is reached, or its pace reaches the cap before i
 - **Width.** The line is fitted to `COLUMNS` (120 when unset, and 0 when it is not a number, which leaves only the 7 day segment). The 7 day segment comes first and is kept, and the 5 hour segment is dropped whole on a terminal too narrow for both.
 - **No switch.** There is no setting that hides the line.
 
+#### The monthly dollar figure
+
+A seat billed by usage has no 5 hour or 7 day window. It has a monthly dollar limit, which Claude Code keeps in the `spend` block of the `cachedUsageUtilization` entry of its config file (`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`). The statusline reads that block, so the same fourth line carries one more segment. It reads the file only when stdin has no dollar figure, and skips a file over 512 KiB.
+
+| State | Text |
+|---|---|
+| Pace passes the limit | `! $986/$1500 mo, cap in 1d` |
+| Limit reached | `! $1600/$1500 mo CAP HIT` |
+| Pace stays under | `$410/$1500 mo, on pace` |
+| Pace lands near the limit | `$1200/$1500 mo, near cap` |
+| Under an hour into the month | `$986/$1500 mo` |
+| Cache older than six hours | `$986/$1500 mo (10d14h old)` |
+
+- **Which source wins.** The amount used and the limit come from the first source that has them: the statusline reading when it carries dollars and was read within six hours (a Claude apps gateway sends it), then the cache. The cache must have been fetched this UTC month and not in the future, because a figure from last month says nothing about this one. With neither, the segment is left out, and so is a figure of zero used.
+- **A stale cache.** Claude Code writes the cache when it fetches usage, and the `/usage` view does that, so it can be days old. After six hours (`STALE_SECONDS`) the figure is still shown, because spend only grows within a month, but with its age and without a projection. It is red only when the amount already passed the limit.
+- **Your own budget.** `usage.budget.monthlyUsd` replaces the limit when it is lower than the one Claude reports, and the text then says `mo budget` instead of `mo`. It never supplies an amount used, because that needs the local usage database, so a budget alone shows nothing. A higher budget changes nothing.
+- **Not the whole account.** The amount comes from Claude Code, not from this machine's transcripts. Whether it counts the whole organization or only your seat is not documented, so the line never calls it the organization total.
+- **No 5 hour note.** When the data has no 5 hour window the line says nothing about it.
+- **Narrow terminals.** The words after the figure go first, then the whole segment. The 7 day alarm is kept.
+
+`playbook usage doctor` prints the same decision under "What the statusline budget line will show": where the figure comes from and how old it is, the limit in force and why, and the order the sources are tried. `--raw` adds the numbers behind each choice. The plain output stays short.
+
 ### The Projection panel
 
 The Projection panel says when each limit is reached at your current pace, in the time zone shown in the panel title (UTC or local). Each limit gets one plain line. A dollar limit has two paces on it:

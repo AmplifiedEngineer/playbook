@@ -352,6 +352,24 @@ pub fn read(path: &Path) -> Account {
     load(path).map_or_else(Account::default, |root| account(&root))
 }
 
+/// [`read`] for a caller that must stay cheap: the file is opened once, must be
+/// a regular file, and is read through at most `max_bytes`. A larger file, a
+/// pipe or a directory gives `None`, and so does an unreadable one.
+pub fn read_limited(path: &Path, max_bytes: u64) -> Option<Account> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    file.take(max_bytes + 1).read_to_string(&mut text).ok()?;
+    if text.len() as u64 > max_bytes {
+        return None;
+    }
+    let root = serde_json::from_str(&text).ok()?;
+    Some(account(&root))
+}
+
 /// What the last read of the config file returned, and which file state it
 /// came from.
 struct Seen {
