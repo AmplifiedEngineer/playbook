@@ -491,8 +491,9 @@ fn node_id(rel: &str, scope: Scope, project: Option<&str>) -> String {
 
 // --- Graph shape and rebuild ------------------------------------------------
 
-// `version` and `pinned` (below) have no reader yet; both are written for a
-// future consumer described in ADR-0011.
+// `version` has no reader yet; it is written for a future schema check
+// described in ADR-0011. `pinned` is read by `render_ranked` in
+// `json/memorycontext.rs`.
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
 struct Graph {

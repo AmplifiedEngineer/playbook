@@ -11,6 +11,7 @@ use super::data::{Data, Slots};
 use super::fmt::{
     compact, duration_ms, fit, money, percent, signed_money, signed_percent, WEEKDAYS,
 };
+use super::layout::PanelId;
 use super::sort::{
     self, cost_change, group_rows, group_tokens, pair_rows, session_day_rows, session_rows, Panel,
     Sort,
@@ -114,13 +115,17 @@ fn view_block(
     app: &App,
     area: Rect,
     panel: Panel,
+    slot: Option<PanelId>,
     title: &str,
     box_ink: Ink,
 ) -> Block<'static> {
-    let focused = app.focus == panel;
+    let focused = slot.map_or(app.focus == panel, |id| app.focus_slot() == Some(id));
     let block = panel_block(pal, panel, title, box_ink, focused);
     let name = match panel {
+        // A pinned panel always shows one view, so it has no tag to switch.
+        Panel::Spend if slot.is_some_and(|id| id.spend_view().is_some()) => return block,
         Panel::Spend => app.spend_view.name(),
+        Panel::Projects if slot.is_some_and(|id| id.projects_view().is_some()) => return block,
         Panel::Projects => app.projects_view.name(),
         _ => return block,
     };
@@ -201,6 +206,7 @@ fn table<'a>(
     app: &App,
     pal: &Palette,
     panel: Panel,
+    focused: bool,
     block: Block<'static>,
     cols: &[Col],
     sortable: bool,
@@ -227,9 +233,14 @@ fn table<'a>(
     }
     let all = rows(&widths);
     let visible = visible_rows(area);
-    let selected = app.selection(panel);
+    // Pinned slots of one panel share its selection, so a slot without the
+    // focus starts at the top and no slot scrolls past its own rows.
+    let selected = if app.focus == panel && !focused {
+        0
+    } else {
+        app.selection(panel).min(all.len().saturating_sub(1))
+    };
     let start = window_start(selected, visible);
-    let focused = app.focus == panel;
     let rows: Vec<Row> = all
         .into_iter()
         .enumerate()
@@ -364,13 +375,21 @@ pub fn swatch(pal: &Palette, slot: usize) -> Span<'static> {
 }
 
 /// Cost per day or tokens per day: a bar chart with axes, a cursor and a legend.
-fn chart_panel(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, panel: Panel) {
+fn chart_panel(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    data: &Data,
+    pal: &Palette,
+    panel: Panel,
+    slot: Option<PanelId>,
+) {
     let (name, fill, box_ink, what) = match panel {
         Panel::Tokens => ("Tokens", pal.down, pal.box_net, "tokens"),
         _ => ("Spend", pal.cpu, pal.box_cpu, "cost"),
     };
     if data.series.is_empty() {
-        let block = view_block(pal, app, area, panel, name, box_ink);
+        let block = view_block(pal, app, area, panel, slot, name, box_ink);
         return empty(frame, area, pal, block, "No usage in this range.");
     }
     let plot = chart_plot(area, data, panel);
@@ -378,7 +397,8 @@ fn chart_panel(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pale
         1 => "day".to_string(),
         n => format!("{n} days"),
     };
-    let stacked = panel == Panel::Spend && app.spend_view == SpendView::ByModel;
+    let view = slot.and_then(PanelId::spend_view).unwrap_or(app.spend_view);
+    let stacked = panel == Panel::Spend && view == SpendView::ByModel;
     // Today charts the last seven days, which the title says.
     let span = if data.range == Range::Today {
         ", 7 days"
@@ -390,7 +410,10 @@ fn chart_panel(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pale
         _ if stacked => format!("Spend per {per} by model, USD{span}"),
         _ => format!("Spend per {per}, USD{span}"),
     };
-    let mut block = view_block(pal, app, area, panel, &title, box_ink);
+    let mut block = view_block(pal, app, area, panel, slot, &title, box_ink);
+    // Width the peak note takes from the bottom border, so a legend sharing it
+    // shortens instead of running over the note.
+    let mut note_width = 0;
     if plot.geo.stats_y.is_none() {
         // No room for the totals line, so the peak goes in the bottom border.
         let peak = plot
@@ -399,6 +422,7 @@ fn chart_panel(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pale
             .map(|b| b.value(plot.metric))
             .fold(0.0, f64::max);
         let note = format!("peak {}", plot.metric.show(peak));
+        note_width = note.chars().count() + 2;
         block = block.title_bottom(Line::from(vec![
             Span::styled("\u{2524}", fg(pal, box_ink)),
             Span::styled(note, fg(pal, pal.fg)),
@@ -406,7 +430,12 @@ fn chart_panel(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pale
         ]));
     }
     if stacked {
-        let legend = model_legend(pal, &data.slots, usize::from(area.width), box_ink);
+        let legend = model_legend(
+            pal,
+            &data.slots,
+            usize::from(area.width).saturating_sub(note_width),
+            box_ink,
+        );
         block = block.title_bottom(legend.right_aligned());
     } else if let Some(legend) = gradient_legend(pal, fill, what, box_ink) {
         block = block.title_bottom(legend.right_aligned());
@@ -422,10 +451,10 @@ fn chart_panel(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pale
 }
 
 /// Cost per day: a chart, stacked by model, or a table of the days.
-pub fn spend(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    match app.spend_view {
-        SpendView::Daily => daily_table(frame, area, app, data, pal),
-        _ => chart_panel(frame, area, app, data, pal, Panel::Spend),
+pub fn spend(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, slot: PanelId) {
+    match slot.spend_view().unwrap_or(app.spend_view) {
+        SpendView::Daily => daily_table(frame, area, app, data, pal, slot),
+        _ => chart_panel(frame, area, app, data, pal, Panel::Spend, Some(slot)),
     }
 }
 
@@ -441,9 +470,25 @@ pub fn peak_style(pal: &Palette) -> Style {
 
 /// One row for each day up to today: date, messages, tokens, cost and the model
 /// that cost the most. Today and the peak day are marked.
-fn daily_table(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
+fn daily_table(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    data: &Data,
+    pal: &Palette,
+    slot: PanelId,
+) {
     let today = crate::tz::day_of(data.now);
-    let mut block = view_block(pal, app, area, Panel::Spend, "Daily cost", pal.box_cpu);
+    let focused = app.focus_slot() == Some(slot);
+    let mut block = view_block(
+        pal,
+        app,
+        area,
+        Panel::Spend,
+        Some(slot),
+        "Daily cost",
+        pal.box_cpu,
+    );
     let edge = fg(pal, pal.box_cpu);
     block = block.title_bottom(
         Line::from(vec![
@@ -478,6 +523,7 @@ fn daily_table(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pale
         app,
         pal,
         Panel::Spend,
+        focused,
         block,
         &cols,
         true,
@@ -523,7 +569,7 @@ fn daily_table(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pale
 
 /// Tokens per day.
 pub fn tokens(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    chart_panel(frame, area, app, data, pal, Panel::Tokens);
+    chart_panel(frame, area, app, data, pal, Panel::Tokens, None);
 }
 
 /// How a change reads in color: more spend is the warning color, less is the
@@ -589,6 +635,7 @@ pub fn models(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palet
         app,
         pal,
         Panel::Models,
+        app.focus == Panel::Models,
         block,
         &cols,
         true,
@@ -639,15 +686,30 @@ pub fn models(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palet
 }
 
 /// Projects of the period: messages, tokens, cost and share of the total cost.
-pub fn projects(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    match app.projects_view {
-        ProjectsView::Agents => return agents(frame, area, app, data, pal),
-        ProjectsView::Skills => return skills(frame, area, app, data, pal),
-        ProjectsView::Tools => return tools(frame, area, app, data, pal),
-        ProjectsView::Health => return health(frame, area, app, data, pal),
+pub fn projects(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    data: &Data,
+    pal: &Palette,
+    slot: PanelId,
+) {
+    match slot.projects_view().unwrap_or(app.projects_view) {
+        ProjectsView::Agents => return agents(frame, area, app, data, pal, slot),
+        ProjectsView::Skills => return skills(frame, area, app, data, pal, slot),
+        ProjectsView::Tools => return tools(frame, area, app, data, pal, slot),
+        ProjectsView::Health => return health(frame, area, app, data, pal, slot),
         ProjectsView::Projects => {}
     }
-    let block = view_block(pal, app, area, Panel::Projects, "Projects", pal.box_mem);
+    let block = view_block(
+        pal,
+        app,
+        area,
+        Panel::Projects,
+        Some(slot),
+        "Projects",
+        pal.box_mem,
+    );
     if data.repos.is_empty() {
         return empty(frame, area, pal, block, "No usage in this range.");
     }
@@ -666,6 +728,7 @@ pub fn projects(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pal
         app,
         pal,
         Panel::Projects,
+        app.focus_slot() == Some(slot),
         block,
         &cols,
         true,
@@ -693,30 +756,21 @@ pub fn projects(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pal
 
 /// Cost per agent, from telemetry. The transcript totals stay the totals; the
 /// note says how much of the spend telemetry covers.
-fn agents(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    telemetry_split(
-        frame,
-        area,
-        app,
-        data,
-        pal,
-        ("Agents", "agent"),
-        &data.agents,
-    );
+fn agents(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, slot: PanelId) {
+    telemetry_split(frame, area, app, data, pal, slot, Split::Agents);
 }
 
 /// Cost per skill, from telemetry. Only requests made while a skill was
 /// active carry its name, so the rows are a share of the telemetry cost.
-fn skills(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    telemetry_split(
-        frame,
-        area,
-        app,
-        data,
-        pal,
-        ("Skills", "skill"),
-        &data.skills,
-    );
+fn skills(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, slot: PanelId) {
+    telemetry_split(frame, area, app, data, pal, slot, Split::Skills);
+}
+
+/// Which telemetry split a table shows.
+#[derive(Clone, Copy)]
+enum Split {
+    Agents,
+    Skills,
 }
 
 /// The empty state of a telemetry panel: short lines that name the cause
@@ -732,10 +786,22 @@ fn telemetry_split(
     app: &App,
     data: &Data,
     pal: &Palette,
-    (title, label): (&str, &'static str),
-    view: &crate::query::AgentView,
+    slot: PanelId,
+    split: Split,
 ) {
-    let mut block = view_block(pal, app, area, Panel::Projects, title, pal.box_mem);
+    let (title, label, view) = match split {
+        Split::Agents => ("Agents", "agent", &data.agents),
+        Split::Skills => ("Skills", "skill", &data.skills),
+    };
+    let mut block = view_block(
+        pal,
+        app,
+        area,
+        Panel::Projects,
+        Some(slot),
+        title,
+        pal.box_mem,
+    );
     if !data.telemetry_rows && view.is_empty() {
         return empty(frame, area, pal, block, &telemetry_off(app));
     }
@@ -775,6 +841,7 @@ fn telemetry_split(
         app,
         pal,
         Panel::Projects,
+        app.focus_slot() == Some(slot),
         block,
         &cols,
         true,
@@ -824,8 +891,16 @@ fn telemetry_note(pal: &Palette, data: &Data) -> Line<'static> {
 
 /// Latency and error rate per tool, from telemetry. For a period each tool
 /// also shows its average latency in the previous span and the change.
-fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    let mut block = view_block(pal, app, area, Panel::Projects, "Tools", pal.box_mem);
+fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, slot: PanelId) {
+    let mut block = view_block(
+        pal,
+        app,
+        area,
+        Panel::Projects,
+        Some(slot),
+        "Tools",
+        pal.box_mem,
+    );
     if !data.telemetry_rows {
         return empty(frame, area, pal, block, &telemetry_off(app));
     }
@@ -863,6 +938,7 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
         app,
         pal,
         Panel::Projects,
+        app.focus_slot() == Some(slot),
         block,
         &cols,
         false,
@@ -992,8 +1068,16 @@ fn figures(data: &Data) -> Vec<Figure> {
 /// API errors, retries, tool errors, busy time and cache hit rate for the
 /// range against the previous span, from telemetry. The cache hit rate comes
 /// from transcripts, so it stays available without telemetry.
-fn health(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
-    let mut block = view_block(pal, app, area, Panel::Projects, "Health", pal.box_mem);
+fn health(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, slot: PanelId) {
+    let mut block = view_block(
+        pal,
+        app,
+        area,
+        Panel::Projects,
+        Some(slot),
+        "Health",
+        pal.box_mem,
+    );
     if !data.telemetry_rows {
         return empty(frame, area, pal, block, &telemetry_off(app));
     }
@@ -1017,6 +1101,7 @@ fn health(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) 
         app,
         pal,
         Panel::Projects,
+        app.focus_slot() == Some(slot),
         block,
         &cols,
         false,
@@ -1098,6 +1183,7 @@ pub fn live(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette
         app,
         pal,
         Panel::Live,
+        app.focus == Panel::Live,
         block,
         &cols,
         true,
@@ -1154,6 +1240,7 @@ pub fn sessions(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Pal
         app,
         pal,
         Panel::Sessions,
+        app.focus == Panel::Sessions,
         block,
         &cols,
         true,

@@ -76,9 +76,9 @@ Every hook is a module under `crates/cli/src/hooks/`, run as `playbook hook <nam
 
 1. `context-hygiene` (UserPromptSubmit) asks the model to run `playbook handoff save --session <id>`. The file is named `<dir>-<epoch>-<pid>-<id>.md` under `~/.config/playbook/runtime/handoff/`, keyed by directory like any handoff.
 2. When the session ends with `/clear`, `session-clean-exit` (SessionEnd, reason `clear`) drops a marker in `handoff/cleared/`.
-3. The next `session-init` with source `clear` takes the tagged handoff whose marker is freshest. It injects at most 3,000 characters of it with the path of the full file (moved to `handoff/used/`), and removes the marker, so it loads once.
+3. The next `session-init` with source `clear` takes the tagged handoff whose marker is freshest. It injects at most 3,000 characters of it with the path of the full file (tombstoned by gc), and removes the marker, so it loads once.
 
-A tagged handoff with no marker belongs to a session still running and is left alone. Tagged handoffs expire after a day and markers after an hour. Handoffs saved without `--session` behave as before. A `/compact` needs no marker, because the session id stays the same: the next `session-init` with source `compact` takes the unread handoff tagged with the current session id, with the same 3,000 character cap, and moves it to `handoff/used/`. The compact summary and the handoff can repeat each other in part. Older unread handoffs with the same tag move to `handoff/used/` unread. A handoff tagged for another session is left alone. A compact uses up the handoff, so a `/clear` after it loads nothing (see #1392).
+A tagged handoff with no marker belongs to a session still running and is left alone. Tagged handoffs expire after a day and markers after an hour. Handoffs saved without `--session` behave as before. A `/compact` needs no marker, because the session id stays the same: the next `session-init` with source `compact` takes the unread handoff tagged with the current session id, with the same 3,000 character cap, and tombstones it. The compact summary and the handoff can repeat each other in part. Older unread handoffs with the same tag are tombstoned unread. A handoff tagged for another session is left alone. A compact uses up the handoff, so a `/clear` after it loads nothing (see #1392).
 
 ### PreToolUse
 

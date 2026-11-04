@@ -4,8 +4,9 @@
 //! Replaces the retired shell retention step: bounds disk use by keeping only the
 //! newest transcripts for the current project.
 //!
-//! Deletes three things per pruned session: the transcript, its tool-result
-//! sidecar directory, and its runtime state.
+//! Removes three things per pruned session: the transcript and its tool-result
+//! sidecar directory are deleted, and its playbook runtime folder is
+//! tombstoned by gc so it can be restored for a grace period.
 
 use super::{claude_dir, project_slug};
 use std::fs;
@@ -19,7 +20,9 @@ const DEFAULT_KEEP: usize = 5;
 /// delete the session the next launch is about to resume from.
 const KEEP_FLOOR: usize = 2;
 
-pub fn prune(cwd: &str) {
+/// Prunes the sessions of the project at `cwd`. `now` is epoch seconds and
+/// times the gc lock.
+pub fn prune(cwd: &str, now: i64) {
     // Zero disables retention entirely, which is the documented escape
     // hatch for anyone who wants their full history.
     let Some(keep) = resolve_keep() else {
@@ -42,7 +45,28 @@ pub fn prune(cwd: &str) {
         };
         let _ = fs::remove_file(path);
         let _ = fs::remove_dir_all(project_dir.join(&sid));
-        let _ = fs::remove_dir_all(claude_dir().join("runtime").join(&sid));
+        tombstone_runtime_dir(&sid, now);
+    }
+}
+
+/// Hands a pruned session's runtime folder to gc. When a gc run holds the lock
+/// the folder stays, and the scheduled sweep deals with it once it is idle.
+fn tombstone_runtime_dir(sid: &str, now: i64) {
+    let home = crate::common::home_dir();
+    let dir = crate::common::paths::playbook_root_from(&home)
+        .join("runtime")
+        .join(sid);
+    if !dir.is_dir() {
+        return;
+    }
+    let registry = crate::gc::registry(&home);
+    let clock = crate::gc::FixedClock(now);
+    use crate::gc::tombstone::MoveOutcome;
+    match crate::gc::apply::tombstone_now(&registry, &clock, &dir, "its session was pruned") {
+        MoveOutcome::Moved { .. } | MoveOutcome::Busy => {}
+        MoveOutcome::Refused(why) | MoveOutcome::Unavailable(why) | MoveOutcome::Failed(why) => {
+            eprintln!("playbook: gc left {} in place: {why}", dir.display());
+        }
     }
 }
 

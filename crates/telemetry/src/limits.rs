@@ -16,12 +16,14 @@ use super::query::{day_of, month_first_day, utc_month_bounds, week_first_day, We
 use super::UsageEvent;
 use serde_json::{json, Value};
 
-const HOUR: f64 = 3600.0;
+const SECONDS_PER_HOUR: i64 = 3600;
+const SECONDS_PER_MINUTE: i64 = 60;
+const HOUR: f64 = SECONDS_PER_HOUR as f64;
 const DAY: f64 = SECONDS_PER_DAY as f64;
 
 /// A projection needs at least this much elapsed time. Before that the burn
 /// rate is one message scaled up by a thousand, which says nothing.
-pub const MIN_PROJECTION_SECONDS: i64 = 3600;
+pub const MIN_PROJECTION_SECONDS: i64 = SECONDS_PER_HOUR;
 
 /// A projected total at or above this share of the limit is "on track" (close
 /// to the limit) rather than "under".
@@ -451,11 +453,173 @@ impl Burn {
     }
 }
 
+/// Shown for a span under one minute, and for one that is not positive.
+const UNDER_A_MINUTE: &str = "<1m";
+
+/// A span of seconds as at most two units, rounded down: `4d9h`, `2d`,
+/// `1h20m`, `3h`, `45m`, or `<1m`. A day or more shows days and hours, under a
+/// day shows hours and minutes, under an hour shows minutes.
+pub fn fmt_span(seconds: i64) -> String {
+    let units = |big: i64, big_unit: &str, small: i64, small_unit: &str| {
+        let (big_count, rest) = (seconds / big, seconds % big);
+        match rest / small {
+            0 => format!("{big_count}{big_unit}"),
+            n => format!("{big_count}{big_unit}{n}{small_unit}"),
+        }
+    };
+    if seconds >= SECONDS_PER_DAY {
+        units(SECONDS_PER_DAY, "d", SECONDS_PER_HOUR, "h")
+    } else if seconds >= SECONDS_PER_HOUR {
+        units(SECONDS_PER_HOUR, "h", SECONDS_PER_MINUTE, "m")
+    } else if seconds >= SECONDS_PER_MINUTE {
+        format!("{}m", seconds / SECONDS_PER_MINUTE)
+    } else {
+        UNDER_A_MINUTE.to_string()
+    }
+}
+
+/// A one line reading of a limit that is, or will be, at its cap, for a small
+/// display such as the statusline. The caller marks it so the cue is more than
+/// a colour.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Brief {
+    /// The label and words, for example `7d CAP HIT` or `5h cap in 1h20m`.
+    pub text: String,
+}
+
+/// The short label of a Pro and Max window, `None` for any other period.
+fn window_label(period: LimitPeriod) -> Option<&'static str> {
+    match period {
+        LimitPeriod::SevenDay => Some("7d"),
+        LimitPeriod::FiveHour => Some("5h"),
+        _ => None,
+    }
+}
+
+/// The brief of a Pro and Max window given its [`headroom`] at `now`. A window
+/// that is reached says `CAP HIT`, one on pace to reach the cap says how long
+/// that takes. A window on track, under, or too young to project has nothing
+/// to add, as its percent is already shown elsewhere. Other limits give `None`.
+pub fn brief(limit: &Limit, headroom: &Headroom, now: i64) -> Option<Brief> {
+    let label = window_label(limit.period).filter(|_| limit.unit == Unit::Percent)?;
+    let words = match headroom.state {
+        State::Exceeded => "CAP HIT".to_string(),
+        State::WillExceed { at } => format!("cap in {}", fmt_span(at - now)),
+        State::Unknown | State::Under | State::OnTrack => return None,
+    };
+    Some(Brief {
+        text: format!("{label} {words}"),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const D: i64 = SECONDS_PER_DAY;
+    const SEVEN_DAYS: i64 = 7 * D;
+    const FIVE_HOURS: i64 = 5 * SECONDS_PER_HOUR;
+
+    fn window(period: LimitPeriod, used: f64, length: i64) -> Limit {
+        Limit {
+            unit: Unit::Percent,
+            period,
+            origin: Origin::Measured,
+            used,
+            limit: 100.0,
+            start: 0,
+            end: length,
+        }
+    }
+
+    fn brief_at(limit: &Limit, now: i64) -> Option<Brief> {
+        let h = limit.headroom(now)?;
+        brief(limit, &h, now)
+    }
+
+    fn text_at(limit: &Limit, now: i64) -> Option<String> {
+        brief_at(limit, now).map(|b| b.text)
+    }
+
+    #[test]
+    fn a_reached_window_says_cap_hit_at_any_elapsed_time() {
+        let seven = window(LimitPeriod::SevenDay, 100.0, SEVEN_DAYS);
+        assert_eq!(text_at(&seven, 3 * D), Some("7d CAP HIT".into()));
+        assert_eq!(text_at(&seven, 0), Some("7d CAP HIT".into()));
+        let five = window(LimitPeriod::FiveHour, 100.0, FIVE_HOURS);
+        assert_eq!(text_at(&five, 60), Some("5h CAP HIT".into()));
+    }
+
+    #[test]
+    fn a_window_on_pace_to_reach_the_cap_names_the_span_left() {
+        let seven = window(LimitPeriod::SevenDay, 60.0, SEVEN_DAYS);
+        assert_eq!(text_at(&seven, 3 * D), Some("7d cap in 2d".into()));
+        let five = window(LimitPeriod::FiveHour, 60.0, FIVE_HOURS);
+        assert_eq!(text_at(&five, 2 * 3600), Some("5h cap in 1h20m".into()));
+    }
+
+    #[test]
+    fn a_window_that_stays_within_the_cap_says_nothing() {
+        let at_half_week = 3 * D + D / 2;
+        // Exactly 50 percent at the half way point projects to the limit, not past it.
+        let exact = window(LimitPeriod::SevenDay, 50.0, SEVEN_DAYS);
+        assert_eq!(brief_at(&exact, at_half_week), None);
+        for used in [0.0, 49.9] {
+            let w = window(LimitPeriod::SevenDay, used, SEVEN_DAYS);
+            assert_eq!(brief_at(&w, at_half_week), None, "{used} percent");
+        }
+    }
+
+    #[test]
+    fn a_window_too_young_to_project_says_nothing() {
+        let w = window(LimitPeriod::SevenDay, 90.0, SEVEN_DAYS);
+        assert_eq!(brief_at(&w, MIN_PROJECTION_SECONDS - 1), None);
+    }
+
+    #[test]
+    fn a_zero_limit_or_a_finished_period_says_nothing() {
+        let mut zero = window(LimitPeriod::SevenDay, 10.0, SEVEN_DAYS);
+        zero.limit = 0.0;
+        assert_eq!(brief_at(&zero, 3 * D), None);
+        let over = window(LimitPeriod::SevenDay, 60.0, SEVEN_DAYS);
+        assert_eq!(brief_at(&over, SEVEN_DAYS + D), None);
+    }
+
+    #[test]
+    fn only_the_pro_and_max_windows_have_a_brief() {
+        let mut monthly = window(LimitPeriod::Monthly, 100.0, 30 * D);
+        monthly.unit = Unit::Dollars;
+        assert_eq!(brief_at(&monthly, 10 * D), None);
+        // Each guard alone: a window period in dollars, a monthly period in percent.
+        let mut seven_dollars = window(LimitPeriod::SevenDay, 100.0, SEVEN_DAYS);
+        seven_dollars.unit = Unit::Dollars;
+        assert_eq!(brief_at(&seven_dollars, 3 * D), None);
+        let monthly_percent = window(LimitPeriod::Monthly, 100.0, 30 * D);
+        assert_eq!(brief_at(&monthly_percent, 10 * D), None);
+    }
+
+    #[test]
+    fn fmt_span_rounds_down_to_two_units() {
+        let (m, h, d) = (SECONDS_PER_MINUTE, SECONDS_PER_HOUR, SECONDS_PER_DAY);
+        let rows = [
+            (2 * d + 3 * h, "2d3h"),
+            (2 * d, "2d"),
+            (4 * d + 9 * h, "4d9h"),
+            (d, "1d"),
+            (d - 1, "23h59m"),
+            (3 * h, "3h"),
+            (h + 20 * m, "1h20m"),
+            (h, "1h"),
+            (h - 1, "59m"),
+            (45 * m, "45m"),
+            (59, "<1m"),
+            (0, "<1m"),
+            (-5, "<1m"),
+        ];
+        for (seconds, want) in rows {
+            assert_eq!(fmt_span(seconds), want, "{seconds}s");
+        }
+    }
 
     fn ev(ts: i64, cost: f64) -> UsageEvent {
         UsageEvent {
