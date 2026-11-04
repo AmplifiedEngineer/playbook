@@ -211,9 +211,26 @@ impl fmt::Display for RuleError {
 
 impl std::error::Error for RuleError {}
 
+/// The longest rule text read. The config store flattens objects, so every rule
+/// is stored as text and checked here on each read.
+const MAX_RULE_BYTES: usize = 8 * 1024;
+/// The most labels one rule can add, and the longest one (the GitHub limit).
+const MAX_LABELS: usize = 20;
+const MAX_LABEL_CHARS: usize = 50;
+/// The most entries in one filter list, and the longest filter text.
+const MAX_FILTER_ENTRIES: usize = 50;
+const MAX_FILTER_CHARS: usize = 200;
+/// The longest rule id.
+const MAX_RULE_ID: usize = 64;
+
 impl Stored {
     /// Parses the JSON text of one rule.
     pub fn parse(text: &str) -> Result<Self, RuleError> {
+        if text.len() > MAX_RULE_BYTES {
+            return Err(RuleError(format!(
+                "the rule is longer than {MAX_RULE_BYTES} bytes"
+            )));
+        }
         let value: Value = serde_json::from_str(text)
             .map_err(|e| RuleError(format!("the rule is not valid JSON: {e}")))?;
         if is_tombstone(&value) {
@@ -282,8 +299,61 @@ impl Stored {
             }
             _ => {}
         }
+        check_text(&rule)?;
         Ok(Self::Rule(Box::new(rule)))
     }
+}
+
+/// Refuses entries that could never match or that GitHub would reject, so a
+/// typo fails when the rule is read and not when an event arrives.
+fn check_text(rule: &Rule) -> Result<(), RuleError> {
+    let labels = &rule.with.labels;
+    if labels.len() > MAX_LABELS {
+        return Err(RuleError(format!(
+            "with.labels holds more than {MAX_LABELS} entries"
+        )));
+    }
+    for label in labels {
+        if label.trim().is_empty() || label.chars().count() > MAX_LABEL_CHARS {
+            return Err(RuleError(format!(
+                "a label must have 1 to {MAX_LABEL_CHARS} characters"
+            )));
+        }
+        if label.chars().any(char::is_control) || label.trim() != label {
+            return Err(RuleError(
+                "a label cannot have control characters or edge spaces".to_string(),
+            ));
+        }
+    }
+    let f = &rule.filter;
+    for (name, list) in [
+        ("labels_any", &f.labels_any),
+        ("authors", &f.authors),
+        ("paths", &f.paths),
+    ] {
+        if list.len() > MAX_FILTER_ENTRIES {
+            return Err(RuleError(format!(
+                "where.{name} holds more than {MAX_FILTER_ENTRIES} entries"
+            )));
+        }
+        if list.iter().any(|e| bad_filter_text(e)) {
+            return Err(RuleError(format!(
+                "where.{name} has an empty or too long entry"
+            )));
+        }
+    }
+    for (name, one) in [("base", &f.base), ("comment_prefix", &f.comment_prefix)] {
+        if one.as_deref().is_some_and(bad_filter_text) {
+            return Err(RuleError(format!(
+                "where.{name} is empty or too long, and an empty prefix would match every comment"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn bad_filter_text(text: &str) -> bool {
+    text.is_empty() || text.chars().count() > MAX_FILTER_CHARS
 }
 
 fn is_tombstone(value: &Value) -> bool {
@@ -296,6 +366,7 @@ fn is_tombstone(value: &Value) -> bool {
 /// empty and not starting with a hyphen.
 pub fn is_rule_id(id: &str) -> bool {
     !id.is_empty()
+        && id.len() <= MAX_RULE_ID
         && !id.starts_with('-')
         && id
             .bytes()
@@ -413,6 +484,46 @@ mod tests {
         assert!(Stored::parse("not json").is_err());
     }
 
+    fn with_labels(labels: &str) -> String {
+        format!(r#"{{"on":"issue.opened","do":"label","with":{{"labels":{labels}}}}}"#)
+    }
+
+    #[test]
+    fn a_blank_padded_control_or_long_label_is_refused() {
+        for bad in [r#"[""]"#, r#"["  "]"#, r#"[" x"]"#, r#"["a\nb"]"#] {
+            assert!(Stored::parse(&with_labels(bad)).is_err(), "{bad}");
+        }
+        let long = format!(r#"["{}"]"#, "x".repeat(51));
+        assert!(Stored::parse(&with_labels(&long)).is_err());
+        let fifty = format!(r#"["{}"]"#, "x".repeat(50));
+        assert!(Stored::parse(&with_labels(&fifty)).is_ok());
+    }
+
+    #[test]
+    fn too_many_labels_are_refused() {
+        let many = format!("[{}]", vec![r#""a""#; 21].join(","));
+        assert!(Stored::parse(&with_labels(&many)).is_err());
+    }
+
+    #[test]
+    fn an_empty_comment_prefix_is_refused_because_it_matches_every_comment() {
+        let text = r#"{"on":"issue.commented","do":"label","with":{"labels":["a"]},"where":{"comment_prefix":""}}"#;
+        assert!(Stored::parse(text).is_err());
+    }
+
+    #[test]
+    fn an_empty_filter_entry_is_refused() {
+        let text =
+            r#"{"on":"pr.opened","do":"label","with":{"labels":["a"]},"where":{"authors":[""]}}"#;
+        assert!(Stored::parse(text).is_err());
+    }
+
+    #[test]
+    fn a_rule_text_over_the_size_limit_is_refused() {
+        let text = format!("{LABEL}{}", " ".repeat(MAX_RULE_BYTES));
+        assert!(Stored::parse(&text).is_err());
+    }
+
     #[test]
     fn rule_ids_are_lowercase_words() {
         assert!(is_rule_id("triage-issue"));
@@ -421,5 +532,6 @@ mod tests {
         assert!(!is_rule_id(""));
         assert!(!is_rule_id("-x"));
         assert!(!is_rule_id("a.b"));
+        assert!(!is_rule_id(&"a".repeat(65)));
     }
 }
