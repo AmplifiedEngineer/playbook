@@ -10,6 +10,7 @@ use super::budget;
 use super::burnup;
 use super::data::Data;
 use super::fmt::{compact, fit, money, signed_compact, signed_count, signed_money, signed_percent};
+use super::icon::{Cue, Icon};
 use super::keys::{self, HelpLine};
 use super::layout::PanelId;
 use super::notice::{self, Notice};
@@ -269,7 +270,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     match (&app.data, notice::body(app)) {
         (Some(data), None) => {
             if p.budget.height > 0 {
-                budget::render(frame, p.budget, data, &pal);
+                budget::render(frame, p.budget, data, &pal, app.icon);
             }
             for (id, rect) in &p.panels {
                 match id {
@@ -298,7 +299,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         (data, Some(n)) => {
             if let Some(data) = data {
                 if p.budget.height > 0 {
-                    budget::render(frame, p.budget, data, &pal);
+                    budget::render(frame, p.budget, data, &pal, app.icon);
                 }
             }
             render_notice(frame, body, &n, &pal);
@@ -319,7 +320,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         render_help(frame, area, scroll, &pal);
     }
     if let Some(editor) = &app.editor {
-        super::editor_view::render(frame, area, editor, &pal);
+        super::editor_view::render(frame, area, editor, &pal, app.icon);
     }
 }
 
@@ -1522,6 +1523,22 @@ mod tests {
             // Assert
             assert_eq!(placed.panels.len(), n, "{n} panels");
         }
+    }
+
+    #[test]
+    fn an_editor_refusal_starts_with_an_alert_mark() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.key(press(KeyCode::Char('e')));
+
+        // Act
+        for _ in 0..13 {
+            app.key(press(KeyCode::Char('n')));
+        }
+        let text = screen(&app, 100, 30);
+
+        // Assert
+        assert!(text.contains("! At most 9 tabs"), "{text}");
     }
 
     #[test]

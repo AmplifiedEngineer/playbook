@@ -6,6 +6,7 @@
 
 use super::arrange;
 use super::editor::Editor;
+use super::icon::{Cue, Icon};
 use super::theme::Palette;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -20,7 +21,7 @@ const PICKER_LINES: usize = BODY_LINES - 1;
 /// Tab line, rename line, body, description, message, three key lines and the two border lines.
 const WINDOW_LINES: u16 = (BODY_LINES + 9) as u16;
 
-pub fn render(frame: &mut Frame, area: Rect, ed: &Editor, pal: &Palette) {
+pub fn render(frame: &mut Frame, area: Rect, ed: &Editor, pal: &Palette, icon: Icon) {
     let width = area.width.saturating_sub(2).min(78);
     let height = WINDOW_LINES.min(area.height.saturating_sub(2));
     let rect = Rect::new(
@@ -57,7 +58,12 @@ pub fn render(frame: &mut Frame, area: Rect, ed: &Editor, pal: &Palette) {
             " Reset layout and view settings to the defaults? [y/N]",
             accent,
         ),
-        Some(m) => Line::styled(format!(" {m}"), Style::default().fg(pal.color(pal.error))),
+        Some(m) => Line::styled(
+            format!(" {}{m}", icon.mark(Cue::Alert)),
+            Style::default()
+                .fg(pal.color(pal.error))
+                .add_modifier(Modifier::BOLD),
+        ),
         None => Line::raw(""),
     });
     for keys in [
