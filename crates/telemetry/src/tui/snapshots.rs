@@ -970,6 +970,42 @@ fn the_charts_tab_stacks_the_three_charts_at_100x30() {
 }
 
 #[test]
+fn two_pinned_spend_views_draw_side_by_side_and_only_the_focused_one_is_bold() {
+    // Arrange
+    let mut a = app(Theme::Standard);
+    a.layout = crate::tui::layout::Layout::parse("A=spend.total,spend.model|tokens").unwrap();
+    a.go_tab(0);
+    a.focus = crate::tui::sort::Panel::Spend;
+    a.key(ratatui::crossterm::event::KeyEvent::new(
+        ratatui::crossterm::event::KeyCode::Tab,
+        ratatui::crossterm::event::KeyModifiers::NONE,
+    ));
+
+    // Act
+    let (text, buf) = draw_with(100, 30, |f| render(f, &a));
+
+    // Assert
+    let title = text.lines().find(|l| l.contains("Spend per")).unwrap_or("");
+    assert!(title.contains("Spend per day, USD"), "{text}");
+    assert!(title.contains("Spend per day by model, USD"), "{text}");
+    assert!(!text.contains("view:"), "{text}");
+    let at = |needle: &str| {
+        let (y, line) = text
+            .lines()
+            .enumerate()
+            .find(|(_, l)| l.contains(needle))
+            .unwrap_or((0, ""));
+        let x = line[..line.find(needle).unwrap_or(0)].chars().count();
+        buf[(x as u16, y as u16)]
+            .modifier
+            .contains(ratatui::style::Modifier::BOLD)
+    };
+    assert!(!at("Spend per day, USD"));
+    assert!(at("Spend per day by model"));
+    check("split_spend_100x30", &text);
+}
+
+#[test]
 fn the_numbers_tab_shows_the_tables_and_the_budget_at_100x30() {
     check("tab_numbers_100x30", &draw(&tabbed(1), 100, 30));
 }

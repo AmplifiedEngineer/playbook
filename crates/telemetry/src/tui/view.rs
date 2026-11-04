@@ -276,7 +276,7 @@ pub fn render(frame: &mut Frame, app: &App) {
                     PanelId::Spend
                     | PanelId::SpendTotal
                     | PanelId::SpendModel
-                    | PanelId::SpendDaily => panels::spend(frame, *rect, app, data, &pal),
+                    | PanelId::SpendDaily => panels::spend(frame, *rect, app, data, &pal, *id),
                     PanelId::Tokens => panels::tokens(frame, *rect, app, data, &pal),
                     PanelId::Models => panels::models(frame, *rect, app, data, &pal),
                     PanelId::Breakdown
