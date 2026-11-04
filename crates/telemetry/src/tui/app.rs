@@ -183,7 +183,7 @@ pub enum Effect {
 }
 
 /// What `v` says on a panel pinned to one view.
-const PINNED_NOTE: &str = "This panel shows one view. Use the unpinned panel to switch";
+const PINNED_NOTE: &str = "This panel shows one view. Press e to add an unpinned one";
 
 impl App {
     pub fn new(range: Range) -> App {

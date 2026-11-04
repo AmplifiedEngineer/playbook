@@ -405,6 +405,9 @@ fn chart_panel(
         _ => format!("Spend per {per}, USD{span}"),
     };
     let mut block = view_block(pal, app, area, panel, slot, &title, box_ink);
+    // Width the peak note takes from the bottom border, so a legend sharing it
+    // shortens instead of running over the note.
+    let mut note_width = 0;
     if plot.geo.stats_y.is_none() {
         // No room for the totals line, so the peak goes in the bottom border.
         let peak = plot
@@ -413,6 +416,7 @@ fn chart_panel(
             .map(|b| b.value(plot.metric))
             .fold(0.0, f64::max);
         let note = format!("peak {}", plot.metric.show(peak));
+        note_width = note.chars().count() + 2;
         block = block.title_bottom(Line::from(vec![
             Span::styled("\u{2524}", fg(pal, box_ink)),
             Span::styled(note, fg(pal, pal.fg)),
@@ -420,7 +424,12 @@ fn chart_panel(
         ]));
     }
     if stacked {
-        let legend = model_legend(pal, &data.slots, usize::from(area.width), box_ink);
+        let legend = model_legend(
+            pal,
+            &data.slots,
+            usize::from(area.width).saturating_sub(note_width),
+            box_ink,
+        );
         block = block.title_bottom(legend.right_aligned());
     } else if let Some(legend) = gradient_legend(pal, fill, what, box_ink) {
         block = block.title_bottom(legend.right_aligned());

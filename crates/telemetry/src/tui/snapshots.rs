@@ -958,7 +958,7 @@ fn tabbed(tab: usize) -> App {
 }
 
 #[test]
-fn the_charts_tab_stacks_the_three_charts_at_100x30() {
+fn the_charts_tab_splits_spend_above_full_width_tokens_at_100x30() {
     let a = with_limits(
         tabbed(0),
         None,
@@ -1355,7 +1355,7 @@ fn before_the_period_starts_the_panel_says_so() {
 }
 
 #[test]
-fn the_charts_tab_draws_the_burnup_beside_the_other_charts_at_140x40() {
+fn the_charts_tab_draws_the_burnup_on_its_own_row_at_140x40() {
     let a = with_limits(
         tabbed(0),
         Some(&plan_snapshot()),
