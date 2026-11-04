@@ -998,8 +998,9 @@ fn recall_candidates(
         .iter()
         .filter(|h| !indexed.contains(h.fact_id.as_str()) && !h.file.is_empty())
         .map(|h| {
-            let desc = h.description.replace('\n', " ");
-            format!("\t{}\t{}\t{desc}\t\t{}\t", h.fact_id, h.name, h.file)
+            let flat = |text: &str| text.replace(['\t', '\n'], " ");
+            let (name, desc) = (flat(&h.name), flat(&h.description));
+            format!("\t{}\t{name}\t{desc}\t\t{}\t", h.fact_id, h.file)
         })
         .collect();
     Ok(score_rows(
