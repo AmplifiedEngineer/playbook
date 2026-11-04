@@ -167,13 +167,17 @@ Clear caches that would freeze old settings into a session
 
 ### `playbook cc clean`
 
-Mode of the `playbook cc` launcher: clean up and resume (no action by itself)
+Clean up and resume a session
+
+Clones the session named for this directory with its settings overrides stripped, then resumes the clone in `claude`, so settings, plugins and hooks reload from the current config. Starts a fresh session when none matches. The same as `playbook cc --clean`.
 
 - `<ARGS>`: Arguments passed through to claude
 
 ### `playbook cc fresh`
 
-Mode of the `playbook cc` launcher: start a fresh session (no action by itself)
+Start a fresh session
+
+Starts a new `claude` session without resuming an earlier one, with the current settings applied. The same as `playbook cc --fresh`.
 
 - `<ARGS>`: Arguments passed through to claude
 
@@ -194,9 +198,9 @@ Remove stale runtime state
 
 ### `playbook cc raw`
 
-Mode of the `playbook cc` launcher: resume a session as it was (no action by itself)
+Resume a session as it was
 
-The launcher handles these modes. Running this command directly does nothing and exits 0.
+Resumes a session in `claude` as it was, with no fork and its settings overrides kept. Starts a fresh session when none matches. The same as `playbook cc --raw`.
 
 - `<ARGS>`: Session id to resume (default: the most recent), then arguments for claude
 
@@ -206,8 +210,10 @@ Create a git worktree for a branch and print its path
 
 Prints only the path, so a shell can run `cd "$(playbook cc worktree my-branch)"`.
 
+Example: `playbook cc worktree my-branch`
+
 - `<BRANCH>`: Branch to create the worktree for
-- `<ENV_BASE>`: Folder (relative to the repo root) holding the `.env` to copy in
+- `<ENV_BASE>`: Directory (relative to the repo root) holding the `.env` to copy in
 
 ### `playbook ccd`
 
@@ -1336,9 +1342,9 @@ Example: `playbook segment size --base main`
 
 ### `playbook sessions`
 
-List recent agent sessions with repo, branch, worktree, linked PR, state, context size and cost
+List recent agent sessions and their state
 
-Read only. A session is done when the pull request of its branch is merged or closed, and stale after `sessions.staleAfterDays` without activity. Suggestions are printed, never acted on, and a worktree with uncommitted changes is flagged, never removed.
+Shows the repo, branch, worktree, linked PR, state, context size and cost of each session. Read only. A session is done when the pull request of its branch is merged or closed, and stale after `sessions.staleAfterDays` without activity. Suggestions are printed, never acted on, and a worktree with uncommitted changes is flagged, never removed.
 
 Example: `playbook sessions --json`
 
@@ -1439,9 +1445,11 @@ Subcommands: `sync`
 
 ### `playbook skills sync`
 
-Copy the playbook skills into another agent's skill folder
+Copy the playbook skills into another agent's skill directory
 
 Without `--agent`, every agent found on this machine is synced. A second run with nothing new changes nothing.
+
+Example: `playbook skills sync --agent codex`
 
 - `--agent <AGENT>`: Sync only this agent (one of `codex`)
 - `--dry-run`: Show what would change and write nothing
@@ -1529,9 +1537,9 @@ Example: `playbook usage --range today`
 
 - `--json`: Print the totals, groupings and live view as JSON
 - `--summary`: Print the text summary and exit (every recorded session unless `--range` is given)
-- `--range <RANGE>`: Date range (days in the chosen time zone): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
-- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
-- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--range <RANGE>`: Date range, counted in days of the chosen time zone. One of today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
 Subcommands: `collect`, `doctor`, `prune`, `status`, `stop`
 
@@ -1543,10 +1551,10 @@ Listens on 127.0.0.1 only (default port 47318, chosen once and then kept; a free
 
 Example: `playbook usage collect --idle-seconds 1800`
 
-- `--port <PORT>`: Port to listen on (an error when busy). Default: the recorded port, chosen once (47318, or a free one when that is taken) and kept. A port given here also replaces the recorded one; run `playbook setup --only telemetry` afterwards (older versions: `playbook init --only telemetry`)
+- `--port <PORT>`: Port to listen on. It is an error when the port is busy. Defaults to the recorded port, chosen once (47318, or a free one when that is taken) and kept. A port given here also replaces the recorded one; run `playbook setup --only telemetry` afterwards (older versions: `playbook init --only telemetry`)
 - `--idle-seconds <IDLE_SECONDS>`: Stop after this many seconds with no request; 0 means never
-- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
-- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
 ### `playbook usage doctor`
 
@@ -1557,8 +1565,8 @@ Lists which sources exist: the plan fields and cached usage numbers in the Claud
 Example: `playbook usage doctor --raw`
 
 - `--raw`: Also print the plan field values and the cached spend limit
-- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
-- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
 ### `playbook usage prune`
 
@@ -1569,8 +1577,8 @@ Removes telemetry rows older than `usage.telemetryRetentionDays` (default 90, 0 
 Example: `playbook usage prune --dry-run`
 
 - `--dry-run`: Say what would be removed without deleting anything
-- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
-- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
 ### `playbook usage status`
 
@@ -1581,8 +1589,8 @@ Prints how telemetry is configured (on with the collector running, off because y
 Example: `playbook usage status --json`
 
 - `--json`: Print the status as JSON
-- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
-- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
 ### `playbook usage stop`
 
@@ -1592,8 +1600,8 @@ Asks the collector that holds the lock to stop through its authenticated shutdow
 
 Example: `playbook usage stop`
 
-- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
-- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
 ### `playbook version`
 

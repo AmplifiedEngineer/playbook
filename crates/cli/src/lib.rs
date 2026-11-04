@@ -141,10 +141,12 @@ pub struct Cli {
 /// `playbook skills` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum SkillsCommand {
-    /// Copy the playbook skills into another agent's skill folder
+    /// Copy the playbook skills into another agent's skill directory
     ///
     /// Without `--agent`, every agent found on this machine is synced. A
     /// second run with nothing new changes nothing.
+    ///
+    /// Example: `playbook skills sync --agent codex`
     Sync {
         /// Sync only this agent
         #[arg(long, value_parser = ["codex"])]
@@ -699,21 +701,22 @@ pub enum Command {
         /// Print the text summary and exit (every recorded session unless `--range` is given)
         #[arg(long, conflicts_with_all = ["json"])]
         summary: bool,
-        /// Date range (days in the chosen time zone): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
+        /// Date range, counted in days of the chosen time zone. One of today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
         #[arg(long, value_name = "RANGE")]
         range: Option<String>,
-        /// Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+        /// Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
         #[arg(long, global = true, conflicts_with = "local")]
         utc: bool,
-        /// Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+        /// Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
         #[arg(long, global = true, conflicts_with = "utc")]
         local: bool,
     },
-    /// List recent agent sessions with repo, branch, worktree, linked PR, state, context size and cost
+    /// List recent agent sessions and their state
     ///
-    /// Read only. A session is done when the pull request of its branch is
-    /// merged or closed, and stale after `sessions.staleAfterDays` without
-    /// activity. Suggestions are printed, never acted on, and a worktree with
+    /// Shows the repo, branch, worktree, linked PR, state, context size and
+    /// cost of each session. Read only. A session is done when the pull request
+    /// of its branch is merged or closed, and stale after
+    /// `sessions.staleAfterDays` without activity. Suggestions are printed, never acted on, and a worktree with
     /// uncommitted changes is flagged, never removed.
     ///
     /// Example: `playbook sessions --json`
@@ -2361,22 +2364,31 @@ pub enum HooksCommand {
 /// `playbook cc` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum CcCommand {
-    /// Mode of the `playbook cc` launcher: clean up and resume (no action by itself)
+    /// Clean up and resume a session
+    ///
+    /// Clones the session named for this directory with its settings overrides
+    /// stripped, then resumes the clone in `claude`, so settings, plugins and
+    /// hooks reload from the current config. Starts a fresh session when none
+    /// matches. The same as `playbook cc --clean`.
     Clean {
         /// Arguments passed through to claude
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Mode of the `playbook cc` launcher: start a fresh session (no action by itself)
+    /// Start a fresh session
+    ///
+    /// Starts a new `claude` session without resuming an earlier one, with the
+    /// current settings applied. The same as `playbook cc --fresh`.
     Fresh {
         /// Arguments passed through to claude
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Mode of the `playbook cc` launcher: resume a session as it was (no action by itself)
+    /// Resume a session as it was
     ///
-    /// The launcher handles these modes. Running this command directly
-    /// does nothing and exits 0.
+    /// Resumes a session in `claude` as it was, with no fork and its settings
+    /// overrides kept. Starts a fresh session when none matches. The same as
+    /// `playbook cc --raw`.
     Raw {
         /// Session id to resume (default: the most recent), then arguments for claude
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -2402,23 +2414,29 @@ pub enum CcCommand {
     /// Background half of the worktree launch, spawned by the launcher
     #[command(hide = true)]
     Housekeep {
+        /// Path of the repo root
         #[arg(long)]
         repo_root: String,
+        /// Path of the worktree to tidy
         #[arg(long)]
         worktree: String,
+        /// Branch of the worktree
         #[arg(long)]
         branch: String,
+        /// Skip pushing the branch
         #[arg(long)]
         no_push: bool,
     },
     /// Create a git worktree for a branch and print its path
     ///
     /// Prints only the path, so a shell can run `cd "$(playbook cc worktree my-branch)"`.
+    ///
+    /// Example: `playbook cc worktree my-branch`
     #[command(alias = "new")]
     Worktree {
         /// Branch to create the worktree for
         branch: String,
-        /// Folder (relative to the repo root) holding the `.env` to copy in
+        /// Directory (relative to the repo root) holding the `.env` to copy in
         env_base: Option<String>,
     },
 }
