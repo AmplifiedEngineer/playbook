@@ -1,0 +1,36 @@
+[
+  {
+    "id": 5313363810,
+    "number": 314,
+    "state": "closed",
+    "title": "feat: add memory staleness marker and legacy graph.json migration",
+    "created_at": "2026-09-01T14:55:43Z",
+    "updated_at": "2026-10-01T16:51:43Z",
+    "author_association": "MEMBER",
+    "user": {
+      "login": "user-1"
+    },
+    "labels": [
+      "dco:passed",
+      "cla:signed"
+    ],
+    "is_pr": true
+  },
+  {
+    "id": 5309852822,
+    "number": 313,
+    "state": "closed",
+    "title": "fix(init): resolve plugin root when env var is missing",
+    "created_at": "2026-09-01T08:54:43Z",
+    "updated_at": "2026-10-01T16:51:46Z",
+    "author_association": "MEMBER",
+    "user": {
+      "login": "user-1"
+    },
+    "labels": [
+      "dco:passed",
+      "cla:signed"
+    ],
+    "is_pr": true
+  }
+]
