@@ -11,20 +11,30 @@
 
 use super::layout::{auto_rows, PanelId, Tab, MAX_ARRANGED_PANELS, MAX_ROWS, MAX_ROW_PANELS};
 
-/// The size of each row as the tab is drawn.
-pub fn rows(tab: &Tab) -> Vec<u8> {
-    tab.rows
-        .clone()
-        .unwrap_or_else(|| auto_rows(tab.panels.len()))
+/// The cells of the tab as it is drawn: the size of each row and, for each
+/// cell in screen order, the index of its panel. The budget strip of an
+/// automatic tab has no cell, so it is left out and the rows match the grid.
+fn cells(tab: &Tab) -> (Vec<u8>, Vec<usize>) {
+    if let Some(rows) = &tab.rows {
+        return (rows.clone(), (0..tab.panels.len()).collect());
+    }
+    let cells: Vec<usize> = tab
+        .panels
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| **p != PanelId::Budget)
+        .map(|(i, _)| i)
+        .collect();
+    (auto_rows(cells.len()), cells)
 }
 
-/// The row and the column of `slot`.
-fn locate(rows: &[u8], slot: usize) -> (usize, usize) {
+/// The row and the column of cell `at`.
+fn locate(rows: &[u8], at: usize) -> (usize, usize) {
     let mut start = 0;
     for (row, n) in rows.iter().enumerate() {
         let n = usize::from(*n);
-        if slot < start + n {
-            return (row, slot - start);
+        if at < start + n {
+            return (row, at - start);
         }
         start += n;
     }
@@ -35,31 +45,39 @@ fn row_start(rows: &[u8], row: usize) -> usize {
     rows[..row].iter().map(|n| usize::from(*n)).sum()
 }
 
+/// The cell of panel `slot`, or why it has none.
+fn cell_of(cells: &[usize], slot: usize) -> Result<usize, String> {
+    cells
+        .iter()
+        .position(|i| *i == slot)
+        .ok_or_else(|| "The budget strip is not part of the grid".to_string())
+}
+
 /// Swaps the panel with its neighbour in the same row.
 pub fn move_sideways(tab: &mut Tab, slot: usize, by: isize) -> Result<usize, String> {
-    let rows = rows(tab);
-    let (row, col) = locate(&rows, slot);
+    let (rows, cells) = cells(tab);
+    let (row, col) = locate(&rows, cell_of(&cells, slot)?);
     let to = col
         .checked_add_signed(by)
         .filter(|c| *c < usize::from(rows[row]));
     let Some(to) = to else {
         return Err("The panel is at the edge of its row".to_string());
     };
-    let target = row_start(&rows, row) + to;
+    let target = cells[row_start(&rows, row) + to];
     tab.panels.swap(slot, target);
     Ok(target)
 }
 
-/// The slot above or below `slot`, in the same column or the last one of a
+/// The panel above or below `slot`, in the same column or the last one of a
 /// shorter row.
 pub fn vertical_neighbour(tab: &Tab, slot: usize, by: isize) -> Result<usize, String> {
-    let rows = rows(tab);
-    let (row, col) = locate(&rows, slot);
+    let (rows, cells) = cells(tab);
+    let (row, col) = locate(&rows, cell_of(&cells, slot)?);
     let Some(next) = row.checked_add_signed(by).filter(|r| *r < rows.len()) else {
         let edge = if by < 0 { "top" } else { "bottom" };
         return Err(format!("The panel is at the {edge} of the tab"));
     };
-    Ok(row_start(&rows, next) + col.min(usize::from(rows[next]) - 1))
+    Ok(cells[row_start(&rows, next) + col.min(usize::from(rows[next]) - 1)])
 }
 
 /// Swaps the panel with the one above or below it.
@@ -67,6 +85,36 @@ pub fn move_vertically(tab: &mut Tab, slot: usize, by: isize) -> Result<usize, S
     let target = vertical_neighbour(tab, slot, by)?;
     tab.panels.swap(slot, target);
     Ok(target)
+}
+
+/// The rows, the panels in screen order, the cursor slot in them, and how many
+/// leading rows hold grid cells, for turning `tab` into an arranged tab. An
+/// automatic tab gets the rows of its grid, with the budget strip, which has no
+/// cell, moved to a row of its own at the end.
+fn arranged(tab: &Tab, slot: usize) -> Result<(Vec<u8>, Vec<PanelId>, usize, usize), String> {
+    if let Some(rows) = &tab.rows {
+        return Ok((rows.clone(), tab.panels.clone(), slot, rows.len()));
+    }
+    let Some(budget) = tab.panels.iter().position(|p| *p == PanelId::Budget) else {
+        let rows = auto_rows(tab.panels.len());
+        let joinable = rows.len();
+        return Ok((rows, tab.panels.clone(), slot, joinable));
+    };
+    let mut rows = auto_rows(tab.panels.len() - 1);
+    let joinable = rows.len();
+    if joinable >= MAX_ROWS {
+        return Err(format!("At most {MAX_ROWS} rows"));
+    }
+    rows.push(1);
+    let mut panels = tab.panels.clone();
+    let strip = panels.remove(budget);
+    panels.push(strip);
+    let slot = match slot.cmp(&budget) {
+        std::cmp::Ordering::Equal => panels.len() - 1,
+        std::cmp::Ordering::Greater => slot - 1,
+        std::cmp::Ordering::Less => slot,
+    };
+    Ok((rows, panels, slot, joinable))
 }
 
 /// Splits a row of two into two rows, or joins a row of one with a row of one
@@ -77,15 +125,18 @@ pub fn toggle_width(tab: &mut Tab, slot: usize) -> Result<usize, String> {
             "An arranged tab holds at most {MAX_ARRANGED_PANELS} panels"
         ));
     }
-    let mut rows = rows(tab);
+    let (mut rows, panels, slot, joinable) = arranged(tab, slot)?;
     let (row, _) = locate(&rows, slot);
+    if row >= joinable {
+        return Err("The budget strip is not part of the grid".to_string());
+    }
     if usize::from(rows[row]) == MAX_ROW_PANELS {
         if rows.len() >= MAX_ROWS {
             return Err(format!("At most {MAX_ROWS} rows"));
         }
         rows[row] = 1;
         rows.insert(row + 1, 1);
-    } else if rows.get(row + 1) == Some(&1) {
+    } else if row + 1 < joinable && rows.get(row + 1) == Some(&1) {
         rows[row] = 2;
         rows.remove(row + 1);
     } else if row > 0 && rows[row - 1] == 1 {
@@ -94,6 +145,7 @@ pub fn toggle_width(tab: &mut Tab, slot: usize) -> Result<usize, String> {
     } else {
         return Err("No row of one panel beside it to share with".to_string());
     }
+    tab.panels = panels;
     tab.rows = Some(rows);
     Ok(slot)
 }
@@ -365,5 +417,60 @@ mod tests {
         // Assert
         assert!(result.is_err());
         assert_eq!(words(&t), ["spend"]);
+    }
+
+    #[test]
+    fn moves_in_an_automatic_tab_skip_the_budget_strip() {
+        // Arrange
+        let mut t = tab("A=models,breakdown,budget,projection");
+
+        // Act
+        let down = move_vertically(&mut t, 0, 1);
+
+        // Assert
+        assert_eq!(down, Ok(3));
+        assert_eq!(words(&t), ["projection", "breakdown", "budget", "models"]);
+        assert!(move_sideways(&mut t, 2, 1).is_err());
+    }
+
+    #[test]
+    fn the_width_toggle_keeps_the_budget_strip_out_of_the_grid() {
+        // Arrange
+        let mut t = tab("A=models,budget,breakdown,projection");
+
+        // Act
+        let to = toggle_width(&mut t, 0);
+
+        // Assert
+        assert_eq!(to, Ok(0));
+        assert_eq!(t.rows, Some(vec![1, 1, 1, 1]));
+        assert_eq!(words(&t), ["models", "breakdown", "projection", "budget"]);
+    }
+
+    #[test]
+    fn the_width_toggle_does_not_join_a_row_with_the_budget_strip() {
+        // Arrange
+        let mut t = tab("A=models,budget");
+
+        // Act
+        let on_panel = toggle_width(&mut t, 0);
+        let on_strip = toggle_width(&mut t, 1);
+
+        // Assert
+        assert!(on_panel.is_err() && on_strip.is_err());
+        assert_eq!(t.rows, None);
+    }
+
+    #[test]
+    fn the_width_toggle_refuses_a_single_panel_row_with_only_full_rows_beside_it() {
+        // Arrange
+        let mut t = tab("A=spend,tokens|models|live,sessions");
+
+        // Act
+        let result = toggle_width(&mut t, 2);
+
+        // Assert
+        assert!(result.is_err());
+        assert_eq!(t.rows, Some(vec![2, 1, 2]));
     }
 }

@@ -10,6 +10,7 @@
 use super::arrange;
 use super::layout::{Layout, PanelId, Tab, ALL, MAX_NAME, MAX_TABS};
 use ratatui::crossterm::event::KeyCode;
+use std::collections::VecDeque;
 
 /// How many changes `u` can take back.
 const UNDO_DEPTH: usize = 20;
@@ -34,8 +35,9 @@ pub struct Editor {
     pub picker: Option<usize>,
     /// The panel slot the arranging keys act on, in screen order.
     pub slot: usize,
-    /// The layouts before the latest changes, oldest first.
-    undo: Vec<Layout>,
+    /// The layouts, each with the tab being edited, before the latest changes,
+    /// oldest first.
+    undo: VecDeque<(Layout, usize)>,
     /// The new name while a tab is being renamed.
     pub rename: Option<String>,
     /// True while the reset waits for a `y`.
@@ -51,7 +53,7 @@ impl Editor {
             tab: tab.min(layout.tabs.len().saturating_sub(1)),
             picker: None,
             slot: 0,
-            undo: Vec::new(),
+            undo: VecDeque::new(),
             rename: None,
             confirm_reset: false,
             message: None,
@@ -75,12 +77,13 @@ impl Editor {
             return Outcome::Stay;
         }
         let before = self.layout.clone();
+        let tab = self.tab;
         let outcome = self.dispatch(code);
         if self.layout != before {
             if self.undo.len() == UNDO_DEPTH {
-                self.undo.remove(0);
+                self.undo.pop_front();
             }
-            self.undo.push(before);
+            self.undo.push_back((before, tab));
         }
         self.clamp_slot();
         outcome
@@ -93,9 +96,9 @@ impl Editor {
     }
 
     fn undo(&mut self) {
-        match self.undo.pop() {
-            Some(layout) => {
-                self.tab = self.tab.min(layout.tabs.len().saturating_sub(1));
+        match self.undo.pop_back() {
+            Some((layout, tab)) => {
+                self.tab = tab.min(layout.tabs.len().saturating_sub(1));
                 self.layout = layout;
             }
             None => self.message = Some("Nothing to undo".to_string()),
@@ -482,26 +485,65 @@ mod tests {
     }
 
     #[test]
-    fn u_with_nothing_to_undo_says_so_and_keeps_only_twenty_steps() {
+    fn u_with_nothing_to_undo_says_so() {
         // Arrange
         let mut e = editor();
-        let empty = {
-            press_all(&mut e, "u");
-            e.message.clone()
-        };
 
         // Act
-        for _ in 0..UNDO_DEPTH + 5 {
-            press_all(&mut e, "J");
+        press_all(&mut e, "u");
+
+        // Assert
+        assert_eq!(e.message.as_deref(), Some("Nothing to undo"));
+    }
+
+    #[test]
+    fn only_the_last_twenty_changes_can_be_undone() {
+        // Arrange
+        let mut e = editor();
+        let original = e.layout.clone();
+
+        // Act
+        for i in 0..UNDO_DEPTH + 5 {
+            press_all(&mut e, if i % 2 == 0 { "J" } else { "K" });
         }
+        let kept = e.undo.len();
         for _ in 0..UNDO_DEPTH + 5 {
             press_all(&mut e, "u");
         }
 
         // Assert
-        assert!(empty.is_some_and(|m| m.contains("Nothing")));
-        assert_eq!(e.undo.len(), 0);
+        assert_eq!(kept, UNDO_DEPTH);
+        assert!(e.undo.is_empty());
         assert_eq!(e.message.as_deref(), Some("Nothing to undo"));
+        assert_ne!(e.layout, original);
+    }
+
+    #[test]
+    fn undoing_a_tab_move_puts_the_cursor_back_on_the_tab_it_was_on() {
+        // Arrange
+        let mut e = editor();
+        let first = e.layout.tabs[0].name.clone();
+
+        // Act
+        press_all(&mut e, ">u");
+
+        // Assert
+        assert_eq!(e.layout.tabs[0].name, first);
+        assert_eq!(e.tab, 0);
+    }
+
+    #[test]
+    fn undoing_a_new_tab_keeps_the_cursor_on_a_tab_that_exists() {
+        // Arrange
+        let mut e = editor();
+        let tabs = e.layout.tabs.len();
+
+        // Act
+        press_all(&mut e, "nu");
+
+        // Assert
+        assert_eq!(e.layout.tabs.len(), tabs);
+        assert!(e.tab < e.layout.tabs.len());
     }
 
     #[test]

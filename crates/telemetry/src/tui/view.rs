@@ -11,7 +11,7 @@ use super::burnup;
 use super::data::Data;
 use super::fmt::{compact, fit, money, signed_compact, signed_count, signed_money, signed_percent};
 use super::keys::{self, HelpLine};
-use super::layout::PanelId;
+use super::layout::{auto_rows, PanelId};
 use super::notice::{self, Notice};
 use super::panels;
 use super::projection;
@@ -135,18 +135,20 @@ fn tile(body: Rect, rows: &[(usize, u16)]) -> Vec<Rect> {
 /// one wide panel). Six panels land exactly where the classic screen puts them.
 /// Beyond six, rows of two share the height equally, the last one wide if odd.
 fn grid(body: Rect, n: usize) -> Vec<Rect> {
-    let rows: Vec<(usize, u16)> = match n {
-        0 => return Vec::new(),
-        1 => vec![(1, 1)],
-        2 => vec![(1, 1), (1, 1)],
-        3 => vec![(2, 1), (1, 1)],
-        4 => vec![(2, 1), (2, 1)],
-        5 => vec![(2, 40), (2, 26), (1, 34)],
-        6 => vec![(2, 40), (2, 26), (2, 34)],
-        _ => (0..n.div_ceil(2))
-            .map(|i| (if i * 2 + 1 < n { 2 } else { 1 }, 1))
-            .collect(),
+    if n == 0 {
+        return Vec::new();
+    }
+    // The panel count of each row is `auto_rows`, which the editor shares; only
+    // five and six panels weigh their row heights.
+    let heights: &[u16] = match n {
+        5 | 6 => &[40, 26, 34],
+        _ => &[],
     };
+    let rows: Vec<(usize, u16)> = auto_rows(n)
+        .iter()
+        .enumerate()
+        .map(|(i, cols)| (usize::from(*cols), heights.get(i).copied().unwrap_or(1)))
+        .collect();
     tile(body, &rows)
 }
 
@@ -1425,7 +1427,7 @@ mod tests {
             }
 
             // Assert
-            assert_eq!(by_row, crate::tui::layout::auto_rows(n), "{n} panels");
+            assert_eq!(by_row, auto_rows(n), "{n} panels");
         }
     }
 
