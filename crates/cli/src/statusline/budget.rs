@@ -41,12 +41,12 @@ pub fn build(input: &str, now: i64) -> Vec<Segment> {
         .filter_map(|limit| {
             let headroom = limit.headroom(now)?;
             let brief = brief(limit, &headroom, now)?;
-            let mark = if brief.alarm { ALARM_MARK } else { "" };
+            // A brief is only given for a cap that is hit or on pace to be.
             Some(Segment {
-                text: format!("{mark}{}", brief.text),
+                text: format!("{ALARM_MARK}{}", brief.text),
                 short: None,
                 priority: PRIORITY_SEVEN_DAY,
-                alarm: brief.alarm,
+                alarm: true,
             })
         })
         .collect()
