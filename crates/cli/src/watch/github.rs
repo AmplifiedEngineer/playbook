@@ -102,6 +102,17 @@ struct Item {
     body: Option<String>,
     #[serde(default)]
     html_url: Option<String>,
+    #[serde(default)]
+    issue_url: Option<String>,
+    #[serde(default)]
+    pull_request_url: Option<String>,
+}
+
+/// The number at the end of an API URL such as `.../issues/42`.
+fn trailing_number(url: Option<&str>) -> u64 {
+    url.and_then(|u| u.rsplit('/').next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(0)
 }
 
 pub struct GithubPoller<H, C> {
@@ -224,6 +235,11 @@ impl<H: Http, C: Clock> GithubPoller<H, C> {
             author: item.user.login.clone(),
             association: item.author_association.clone(),
             object,
+            number: match self.endpoint {
+                Endpoint::Issues => item.number,
+                Endpoint::IssueComments => trailing_number(item.issue_url.as_deref()),
+                Endpoint::PullComments => trailing_number(item.pull_request_url.as_deref()),
+            },
             updated_at,
             body_hash: Sha256::digest(body.as_bytes()).into(),
             labels: item

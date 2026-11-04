@@ -22,6 +22,9 @@ pub struct Event {
     pub association: String,
     /// The issue or pull request number, or the comment id for a comment.
     pub object: u64,
+    /// The issue or pull request the event is about. For a comment, the one it
+    /// was written on.
+    pub number: u64,
     pub updated_at: i64,
     pub body_hash: [u8; 32],
     pub labels: Vec<String>,

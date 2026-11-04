@@ -8,6 +8,7 @@
 
 pub mod audit;
 pub mod clock;
+pub mod engine;
 pub mod event;
 pub mod github;
 pub mod lock;

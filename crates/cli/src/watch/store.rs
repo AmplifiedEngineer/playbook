@@ -66,9 +66,12 @@ pub struct Cursor {
 /// One event that a rule matched and that should become work.
 #[derive(Debug, Clone)]
 pub struct NewWork<'a> {
-    /// `<source>:<object id>:<kind>[:<sha>]`, unique per event.
+    /// `<source>:<object id>:<kind>[:<sha>]`, unique per event and rule.
     pub key: &'a str,
     pub rule: &'a str,
+    /// `owner/name` and the issue or pull request number the action touches.
+    pub repo: &'a str,
+    pub object: u64,
     pub body_hash: [u8; 32],
 }
 
@@ -87,6 +90,9 @@ pub enum Insert {
 pub struct WorkRow {
     pub key: String,
     pub rule: String,
+    pub repo: String,
+    pub object: u64,
+    pub body_hash: Vec<u8>,
     pub state: String,
     pub reason: Option<String>,
 }
@@ -124,6 +130,9 @@ impl Store {
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
                  key TEXT NOT NULL UNIQUE,
                  rule TEXT NOT NULL,
+                 repo TEXT NOT NULL,
+                 object INTEGER NOT NULL,
+                 body_hash BLOB NOT NULL,
                  state TEXT NOT NULL,
                  reason TEXT,
                  created_at INTEGER NOT NULL
@@ -151,18 +160,30 @@ impl Store {
             .optional()?)
     }
 
+    /// The ids of work rows in `state`, oldest first.
+    pub fn ids_in_state(&self, state: &str) -> Result<Vec<i64>, StoreError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM work WHERE state = ?1 ORDER BY id")?;
+        let ids = stmt.query_map([state], |r| r.get(0))?;
+        Ok(ids.collect::<Result<_, _>>()?)
+    }
+
     pub fn work(&self, id: i64) -> Result<Option<WorkRow>, StoreError> {
         Ok(self
             .conn
             .query_row(
-                "SELECT key, rule, state, reason FROM work WHERE id = ?1",
+                "SELECT key, rule, repo, object, body_hash, state, reason FROM work WHERE id = ?1",
                 [id],
                 |r| {
                     Ok(WorkRow {
                         key: r.get(0)?,
                         rule: r.get(1)?,
-                        state: r.get(2)?,
-                        reason: r.get(3)?,
+                        repo: r.get(2)?,
+                        object: r.get::<_, i64>(3)?.try_into().unwrap_or(0),
+                        body_hash: r.get(4)?,
+                        state: r.get(5)?,
+                        reason: r.get(6)?,
                     })
                 },
             )
@@ -198,6 +219,15 @@ impl Tx<'_> {
         Ok(())
     }
 
+    /// Moves a work row to `state`, with the reason or outcome that explains it.
+    pub fn set_state(&self, id: i64, state: &str, reason: Option<&str>) -> Result<(), StoreError> {
+        self.tx.execute(
+            "UPDATE work SET state = ?2, reason = ?3 WHERE id = ?1",
+            params![id, state, reason],
+        )?;
+        Ok(())
+    }
+
     /// Records the event as seen and queues its work, unless the key is known.
     pub fn insert_work(&self, item: &NewWork<'_>, now: i64) -> Result<Insert, StoreError> {
         let fresh = self.tx.execute(
@@ -218,8 +248,18 @@ impl Tx<'_> {
             ("queued", None)
         };
         self.tx.execute(
-            "INSERT INTO work (key, rule, state, reason, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![item.key, item.rule, state, reason, now],
+            "INSERT INTO work (key, rule, repo, object, body_hash, state, reason, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                item.key,
+                item.rule,
+                item.repo,
+                i64::try_from(item.object).unwrap_or(i64::MAX),
+                item.body_hash.as_slice(),
+                state,
+                reason,
+                now
+            ],
         )?;
         let id = self.tx.last_insert_rowid();
         Ok(if state == "dead" {
@@ -255,6 +295,8 @@ mod tests {
         NewWork {
             key,
             rule: "label-new-issues",
+            repo: "o/r",
+            object: 1,
             body_hash: [7; 32],
         }
     }
