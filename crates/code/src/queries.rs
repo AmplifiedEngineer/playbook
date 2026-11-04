@@ -12,7 +12,7 @@ use crate::semantic::{lsp_position, Fallback, Target};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Hover text longer than this many bytes is cut.
 pub const HOVER_LIMIT: usize = 8 * 1024;
@@ -129,6 +129,10 @@ fn ask<T>(
         );
     }
     let encoding = session.client().encoding();
+    let total = ctx
+        .options
+        .timeout
+        .unwrap_or(session.spec().request_timeout);
     let position = lsp_position(&opened.text, target, encoding)?;
     let mut params = json!({
         "textDocument": {"uri": opened.uri},
@@ -137,7 +141,7 @@ fn ask<T>(
     if let (Some(base), Some(more)) = (params.as_object_mut(), extra.as_object()) {
         base.extend(more.clone());
     }
-    match session.client().request(method, params) {
+    match request_with_retry(&mut session, method, &params, total) {
         Ok(value) => {
             let (value, warnings) = parse(&value, encoding, ctx.root);
             session.finish();
@@ -148,8 +152,47 @@ fn ask<T>(
             }))
         }
         Err(ClientError::Interrupted) => Ok(Outcome::Interrupted),
+        Err(e) if e.is_retryable() => fallback(
+            Fallback::Timeout,
+            format!("the server kept asking to retry: {e}"),
+        ),
         Err(e) => fallback(Fallback::from_client_error(&e), e.to_string()),
     }
+}
+
+/// Sends the request, and once more when the server asks for a retry
+/// (`ContentModified`, `ServerCancelled`) or answers empty while it is still
+/// loading the project. Both attempts share one deadline of `total`.
+fn request_with_retry(
+    session: &mut Session,
+    method: &str,
+    params: &Value,
+    total: Duration,
+) -> Result<Value, ClientError> {
+    let deadline = Instant::now() + total;
+    let left = || deadline.saturating_duration_since(Instant::now());
+    let first = {
+        let id = session.client().send_request(method, params.clone())?;
+        session.client().wait_for(id, method, left())
+    };
+    let retry = match &first {
+        Ok(value) => is_empty(value) && session.client().quiescent() == Some(false),
+        Err(e) => e.is_retryable(),
+    };
+    if !retry {
+        return first;
+    }
+    while session.client().quiescent() == Some(false) {
+        if session.client().next_notification(left())?.is_none() {
+            break;
+        }
+    }
+    let id = session.client().send_request(method, params.clone())?;
+    session.client().wait_for(id, method, left())
+}
+
+fn is_empty(value: &Value) -> bool {
+    value.is_null() || value.as_array().is_some_and(Vec::is_empty)
 }
 
 /// Diagnostics shown at most.
@@ -871,5 +914,123 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    fn one_location(s: &Setup) -> Value {
+        json!([{"uri": file_uri(&s.file),
+                "range": {"start": {"line": 0, "character": 13}, "end": {"line": 0, "character": 19}}}])
+    }
+
+    fn status(quiescent: bool) -> Step {
+        Step::Notify {
+            method: "experimental/serverStatus",
+            params: json!({"quiescent": quiescent, "health": "ok"}),
+        }
+    }
+
+    fn reply_definition(result: Value) -> Step {
+        Step::Reply {
+            method: "textDocument/definition",
+            result,
+        }
+    }
+
+    fn content_modified() -> Step {
+        Step::ReplyError {
+            method: "textDocument/definition",
+            code: -32801,
+            message: "content modified",
+        }
+    }
+
+    /// Runs `definition` against a server that gets `rest` after `didOpen`.
+    fn definition_with(s: &Setup, rest: Vec<Step>) -> Outcome<Locations> {
+        let (client_side, server) = pipe_pair().unwrap();
+        let fake = Fake::spawn(server, script(json!({"definitionProvider": true}), rest));
+        let launcher = FakeLauncher::new(Some(client_side));
+        let settings = trusted();
+        let dirs = [s.bin.clone()];
+        let opts = options(s, &settings, &dirs);
+        let ctx = Ctx {
+            root: &s.root,
+            options: &opts,
+            launcher: &launcher,
+        };
+        let got = definition(&ctx, &target(s, 1, 14)).unwrap();
+        drop(ctx);
+        drop(launcher);
+        fake.finish();
+        got
+    }
+
+    #[test]
+    fn a_content_modified_error_is_retried_once_and_the_second_answer_is_returned() {
+        // Arrange
+        let s = setup("q-retry-modified");
+        let mut rest = vec![content_modified(), reply_definition(one_location(&s))];
+        rest.extend(clean_exit());
+
+        // Act
+        let got = definition_with(&s, rest);
+
+        // Assert
+        let Outcome::Answered(answered) = got else {
+            panic!("expected an answer");
+        };
+        assert_eq!(answered.value.items.len(), 1);
+    }
+
+    #[test]
+    fn an_empty_first_answer_while_the_server_is_loading_is_retried_after_it_settles() {
+        // Arrange
+        let s = setup("q-retry-quiescent");
+        let mut rest = vec![
+            status(false),
+            reply_definition(Value::Null),
+            status(true),
+            reply_definition(one_location(&s)),
+        ];
+        rest.extend(clean_exit());
+
+        // Act
+        let got = definition_with(&s, rest);
+
+        // Assert
+        let Outcome::Answered(answered) = got else {
+            panic!("expected an answer");
+        };
+        assert_eq!(answered.value.items.len(), 1);
+    }
+
+    #[test]
+    fn an_empty_answer_from_a_settled_server_is_not_retried() {
+        // Arrange
+        let s = setup("q-no-retry");
+        let mut rest = vec![status(true), reply_definition(Value::Null)];
+        rest.extend(clean_exit());
+
+        // Act
+        let got = definition_with(&s, rest);
+
+        // Assert
+        let Outcome::Answered(answered) = got else {
+            panic!("expected an answer");
+        };
+        assert!(answered.value.items.is_empty());
+    }
+
+    #[test]
+    fn a_server_that_keeps_asking_for_a_retry_falls_back_with_timeout() {
+        // Arrange
+        let s = setup("q-retry-forever");
+
+        // Act
+        let got = definition_with(&s, vec![content_modified(), content_modified()]);
+
+        // Assert
+        match got {
+            Outcome::Fallback { why, .. } => assert_eq!(why, Fallback::Timeout),
+            _ => panic!("expected a fallback"),
+        }
     }
 }

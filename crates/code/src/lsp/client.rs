@@ -146,6 +146,7 @@ pub struct Client {
     configuration: ConfigurationReply,
     encoding: Encoding,
     capabilities: Value,
+    quiescent: Option<bool>,
 }
 
 impl Client {
@@ -212,6 +213,7 @@ impl Client {
             }),
             encoding: Encoding::Utf16,
             capabilities: Value::Null,
+            quiescent: None,
         }
     }
 
@@ -231,6 +233,12 @@ impl Client {
     /// The `capabilities` object the server returned from `initialize`.
     pub fn capabilities(&self) -> &Value {
         &self.capabilities
+    }
+
+    /// Whether the server last said it has finished loading the project
+    /// (`experimental/serverStatus`). `None` until it says anything.
+    pub fn quiescent(&self) -> Option<bool> {
+        self.quiescent
     }
 
     /// Notifications received so far, oldest first.
@@ -281,6 +289,7 @@ impl Client {
                 "general": {"positionEncodings": ["utf-8", "utf-16"]},
                 "workspace": {"configuration": true},
                 "window": {"workDoneProgress": true},
+                "experimental": {"serverStatusNotification": true},
             },
             "initializationOptions": options,
         });
@@ -379,6 +388,9 @@ impl Client {
                 Ok(())
             }
             (None, true) => {
+                if message["method"] == "experimental/serverStatus" {
+                    self.quiescent = message["params"]["quiescent"].as_bool();
+                }
                 self.notifications.push(message);
                 Ok(())
             }
