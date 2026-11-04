@@ -487,6 +487,42 @@ fn a_ui_layout_takes_tabs_of_known_panels_and_nothing_else() {
 }
 
 #[test]
+fn a_bad_ui_layout_error_lists_the_panels_and_the_dotted_view_words() {
+    // Arrange
+    let home = scratch_home("layout-message");
+
+    // Act
+    let result = set(
+        Tier::Global,
+        "usage.ui.layout",
+        &json!("A=bogus"),
+        &home,
+        None,
+    );
+
+    // Assert
+    let err = result.expect_err("a bogus panel must be rejected");
+    assert_eq!(
+        err.to_string(),
+        "config key usage.ui.layout does not accept '\"A=bogus\"', must be tabs like \
+         Charts=spend,tokens;Numbers=models (1 to 12 tabs; panels: spend, tokens, models, \
+         breakdown, live, sessions, budget, projection, burnup; views pinned with dotted words: \
+         spend.total, spend.model, spend.daily, breakdown.projects, breakdown.agents, \
+         breakdown.skills, breakdown.tools, breakdown.health; | starts a row of up to 2 \
+         panels, with at most 4 rows and 8 panels in a tab; a name is 1 to 16 characters)"
+    );
+    for panel in playbook_telemetry::tui::layout::ALL {
+        assert!(
+            err.to_string().contains(panel.word()),
+            "the error does not mention {}",
+            panel.word()
+        );
+    }
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
 fn docs_max_memory_mb_accepts_up_to_the_ceiling_and_refuses_more() {
     // Arrange
     let home = std::env::temp_dir().join(format!("playbook-memory-cap-{}", std::process::id()));

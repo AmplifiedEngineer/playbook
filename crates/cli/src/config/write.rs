@@ -111,7 +111,7 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
             return Err(ConfigError::OutOfRange {
                 key: key.to_string(),
                 value: value.to_string(),
-                constraint: "tabs like Charts=spend,tokens;Numbers=models (1 to 12 tabs; panels: spend, tokens, models, breakdown, live, sessions, budget, projection; | starts a row of up to 2 panels; a name is 1 to 16 characters)",
+                constraint: "tabs like Charts=spend,tokens;Numbers=models (1 to 12 tabs; panels: spend, tokens, models, breakdown, live, sessions, budget, projection, burnup; views pinned with dotted words: spend.total, spend.model, spend.daily, breakdown.projects, breakdown.agents, breakdown.skills, breakdown.tools, breakdown.health; | starts a row of up to 2 panels, with at most 4 rows and 8 panels in a tab; a name is 1 to 16 characters)",
             });
         }
     }
