@@ -184,10 +184,10 @@ impl Theme {
                 box_net: ink(hex(0xa0678a)),
                 box_proc: ink(gray(0x8a)),
                 cpu: Fill::Gradient(hex(0x1b6fb5), SKY, hex(0xb8e2f8)),
-                down: Fill::Gradient(hex(0x1f4e79), hex(0x3f89b8), hex(0xb8e2f8)),
-                cached: Fill::Gradient(hex(0x1f4e79), SKY, hex(0xb8e2f8)),
-                avail: Fill::Gradient(hex(0x8a5a00), ORANGE, hex(0xffd27a)),
-                process: Fill::Gradient(hex(0x8a5a00), ORANGE, hex(0xffd27a)),
+                down: Fill::Gradient(hex(0x1b6fb5), hex(0x3f89b8), hex(0xb8e2f8)),
+                cached: Fill::Gradient(hex(0x1b6fb5), SKY, hex(0xb8e2f8)),
+                avail: Fill::Gradient(hex(0xb07d00), ORANGE, hex(0xffd27a)),
+                process: Fill::Gradient(hex(0xb07d00), ORANGE, hex(0xffd27a)),
                 live: ink(hex(0x009e73)),
                 warn: ink(ORANGE),
                 error: ink(hex(0xd55e00)),
@@ -414,6 +414,12 @@ mod tests {
         assert_eq!(rgb(p.live), Color::Rgb(0x00, 0x9e, 0x73));
         assert_eq!(rgb(p.div_line), Color::Rgb(0x6b, 0x6b, 0x6b));
         assert_eq!(rgb(p.meter_bg), Color::Rgb(0x6b, 0x6b, 0x6b));
+        let g = |a, b, c| Fill::Gradient(hex(a), hex(b), hex(c));
+        assert_eq!(p.cpu, g(0x1b6fb5, 0x56b4e9, 0xb8e2f8));
+        assert_eq!(p.down, g(0x1b6fb5, 0x3f89b8, 0xb8e2f8));
+        assert_eq!(p.cached, g(0x1b6fb5, 0x56b4e9, 0xb8e2f8));
+        assert_eq!(p.avail, g(0xb07d00, 0xe69f00, 0xffd27a));
+        assert_eq!(p.process, g(0xb07d00, 0xe69f00, 0xffd27a));
     }
 
     #[test]
@@ -596,6 +602,32 @@ mod tests {
                 let ratio = contrast(rgb_of(ink), bg);
                 assert!(ratio >= NON_TEXT_CONTRAST, "{ink:?} is {ratio:.2}");
             }
+            for fill in [p.cpu, p.down, p.cached, p.avail, p.process] {
+                let Fill::Gradient(a, b, c) = fill else {
+                    panic!("the Standard theme uses gradients, got {fill:?}");
+                };
+                for stop in [a, b, c] {
+                    let ratio = contrast(stop, bg);
+                    assert!(ratio >= NON_TEXT_CONTRAST, "{stop:?} is {ratio:.2}");
+                }
+            }
+        }
+
+        /// Costs are drawn as text in the `process` color, so its start must
+        /// read as text.
+        #[test]
+        fn the_cost_text_ramp_starts_readable() {
+            let Fill::Gradient(start, _, _) = standard().process else {
+                panic!("the Standard theme uses gradients");
+            };
+            assert!(contrast(start, Rgb(0, 0, 0)) >= TEXT_CONTRAST);
+        }
+
+        #[test]
+        fn the_state_colors_stay_apart_under_each_color_vision_type() {
+            let p = standard();
+            let states = [rgb_of(p.warn), rgb_of(p.error), rgb_of(p.live)];
+            assert_eq!(confusable(&states), None);
         }
 
         #[test]
@@ -644,7 +676,7 @@ mod tests {
         }
 
         #[test]
-        fn the_checker_flags_the_old_graph_text_gray() {
+        fn the_checker_rejects_a_low_contrast_gray() {
             assert!(contrast(gray(0x60), Rgb(0, 0, 0)) < TEXT_CONTRAST);
         }
     }
