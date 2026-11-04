@@ -4,7 +4,7 @@
 ││1 to 6     Focus a panel by its number              all panels              ││
 ││Tab        Show the next tab                        all panels              ││
 ╰│Shift-Tab  Show the previous tab                    all panels              │╯
-╭│F1 to F9   Show a tab by its number                 all panels              │╮
+╭│F1 to F12  Show a tab by its number                 all panels              │╮
 ││]          Focus the next panel of the tab          all panels              ││
 ││[          Focus the previous panel of the tab      all panels              ││
 ││Down, j    Select the next row                      tables                  ││

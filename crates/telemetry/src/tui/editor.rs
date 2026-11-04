@@ -2,22 +2,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The layout editor: a small window to add, remove, rename and reorder tabs
-//! and to choose which panels each tab shows. It works on a copy of the
-//! layout; nothing changes until the user saves.
+//! and to arrange the panels each tab shows. It works on a copy of the
+//! layout, and the app applies and stores it after every change. The cursor
+//! sits on a panel slot, a picker adds the panels the tab does not show, and
+//! the last changes can be undone.
 
+use super::arrange;
 use super::layout::{Layout, PanelId, Tab, ALL, MAX_NAME, MAX_TABS};
 use ratatui::crossterm::event::KeyCode;
+use std::collections::VecDeque;
+
+/// How many changes `u` can take back.
+const UNDO_DEPTH: usize = 20;
 
 /// What the app does after a key in the editor.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     Stay,
-    /// Close without saving.
-    Cancel,
-    /// Apply and store the edited layout.
-    Save,
-    /// Go back to the default layout and clear the stored one.
-    Reset,
+    /// Close the editor; every valid change was already applied.
+    Close,
+    /// The user confirmed putting the layout and the screen setup back to
+    /// the defaults.
+    ResetAll,
 }
 
 #[derive(Debug, Clone)]
@@ -25,10 +31,17 @@ pub struct Editor {
     pub layout: Layout,
     /// The tab being edited.
     pub tab: usize,
-    /// The highlighted line of the panel list.
-    pub row: usize,
+    /// The line of the picker while it is open: the panels the tab does not show.
+    pub picker: Option<usize>,
+    /// The panel slot the arranging keys act on, in screen order.
+    pub slot: usize,
+    /// The layouts, each with the tab being edited, before the latest changes,
+    /// oldest first.
+    undo: VecDeque<(Layout, usize)>,
     /// The new name while a tab is being renamed.
     pub rename: Option<String>,
+    /// True while the reset waits for a `y`.
+    pub confirm_reset: bool,
     /// The last thing the user should know, such as why a key did nothing.
     pub message: Option<String>,
 }
@@ -38,8 +51,11 @@ impl Editor {
         Editor {
             layout: layout.clone(),
             tab: tab.min(layout.tabs.len().saturating_sub(1)),
-            row: 0,
+            picker: None,
+            slot: 0,
+            undo: VecDeque::new(),
             rename: None,
+            confirm_reset: false,
             message: None,
         }
     }
@@ -48,21 +64,80 @@ impl Editor {
         self.layout.tabs.get_mut(self.tab)
     }
 
+    /// Runs one key and remembers the layout before it when the key changed it.
     pub fn key(&mut self, code: KeyCode) -> Outcome {
+        if self.rename.is_none()
+            && self.picker.is_none()
+            && !self.confirm_reset
+            && code == KeyCode::Char('u')
+        {
+            self.message = None;
+            self.undo();
+            self.clamp_slot();
+            return Outcome::Stay;
+        }
+        let before = self.layout.clone();
+        let tab = self.tab;
+        let outcome = self.dispatch(code);
+        if self.layout != before {
+            if self.undo.len() == UNDO_DEPTH {
+                self.undo.pop_front();
+            }
+            self.undo.push_back((before, tab));
+        }
+        self.clamp_slot();
+        outcome
+    }
+
+    /// Keeps the cursor on a panel of the edited tab.
+    fn clamp_slot(&mut self) {
+        let panels = self.layout.tabs.get(self.tab).map_or(0, |t| t.panels.len());
+        self.slot = self.slot.min(panels.saturating_sub(1));
+    }
+
+    fn undo(&mut self) {
+        match self.undo.pop_back() {
+            Some((layout, tab)) => {
+                self.tab = tab.min(layout.tabs.len().saturating_sub(1));
+                self.layout = layout;
+            }
+            None => self.message = Some("Nothing to undo".to_string()),
+        }
+    }
+
+    fn dispatch(&mut self, code: KeyCode) -> Outcome {
         if self.rename.is_some() {
             self.rename_key(code);
             return Outcome::Stay;
         }
+        if self.confirm_reset {
+            self.confirm_reset = false;
+            return if code == KeyCode::Char('y') {
+                Outcome::ResetAll
+            } else {
+                Outcome::Stay
+            };
+        }
+        if self.picker.is_some() {
+            self.picker_key(code);
+            return Outcome::Stay;
+        }
         self.message = None;
         match code {
-            KeyCode::Esc | KeyCode::Char('q') => return Outcome::Cancel,
-            KeyCode::Down | KeyCode::Char('j') => self.row = (self.row + 1).min(ALL.len() - 1),
-            KeyCode::Up | KeyCode::Char('k') => self.row = self.row.saturating_sub(1),
+            KeyCode::Esc | KeyCode::Char('q') => return Outcome::Close,
+            KeyCode::Down | KeyCode::Char('j') => self.look(1),
+            KeyCode::Up | KeyCode::Char('k') => self.look(-1),
             KeyCode::Right => self.go(1),
             KeyCode::Left => self.go(-1),
-            KeyCode::Char(' ') | KeyCode::Enter => self.toggle(),
-            KeyCode::Char('K') => self.move_panel(-1),
-            KeyCode::Char('J') => self.move_panel(1),
+            KeyCode::Char('h') => self.slot = self.slot.saturating_sub(1),
+            KeyCode::Char('l') => self.slot += 1,
+            KeyCode::Char('H') => self.arrange(|t, s| arrange::move_sideways(t, s, -1)),
+            KeyCode::Char('L') => self.arrange(|t, s| arrange::move_sideways(t, s, 1)),
+            KeyCode::Char('K') => self.arrange(|t, s| arrange::move_vertically(t, s, -1)),
+            KeyCode::Char('J') => self.arrange(|t, s| arrange::move_vertically(t, s, 1)),
+            KeyCode::Char('f') => self.arrange(arrange::toggle_width),
+            KeyCode::Char('d') => self.arrange(arrange::remove),
+            KeyCode::Char('a') => self.open_picker(),
             KeyCode::Char('<') => self.move_tab(-1),
             KeyCode::Char('>') => self.move_tab(1),
             KeyCode::Char('n') => self.new_tab(),
@@ -70,16 +145,7 @@ impl Editor {
             KeyCode::Char('r') => {
                 self.rename = self.layout.tabs.get(self.tab).map(|t| t.name.clone());
             }
-            KeyCode::Char('w') | KeyCode::Char('s') => {
-                return match Layout::parse(&self.layout.to_text()) {
-                    Ok(_) => Outcome::Save,
-                    Err(why) => {
-                        self.message = Some(why);
-                        Outcome::Stay
-                    }
-                };
-            }
-            KeyCode::Char('R') => return Outcome::Reset,
+            KeyCode::Char('R') => self.confirm_reset = true,
             _ => {}
         }
         Outcome::Stay
@@ -89,35 +155,67 @@ impl Editor {
     fn go(&mut self, by: isize) {
         let n = self.layout.tabs.len().max(1) as isize;
         self.tab = (self.tab as isize + by).rem_euclid(n) as usize;
+        self.slot = 0;
     }
 
-    /// Adds the highlighted panel to the tab, or takes it off. A tab keeps at
-    /// least one panel.
-    fn toggle(&mut self) {
-        let panel = ALL[self.row];
+    /// Applies one arranging operation to the edited tab and moves the cursor
+    /// to where it says; a refusal leaves the tab as it was and says why.
+    fn arrange(&mut self, op: impl FnOnce(&mut Tab, usize) -> Result<usize, String>) {
+        let slot = self.slot;
         let Some(tab) = self.current() else { return };
-        if let Some(at) = tab.panels.iter().position(|p| *p == panel) {
-            if tab.panels.len() == 1 {
-                self.message = Some("A tab needs at least one panel".to_string());
-            } else {
-                tab.panels.remove(at);
-            }
-        } else {
-            tab.panels.push(panel);
+        match op(tab, slot.min(tab.panels.len().saturating_sub(1))) {
+            Ok(to) => self.slot = to,
+            Err(why) => self.message = Some(why),
         }
     }
 
-    /// Moves the highlighted panel earlier or later within the tab.
-    fn move_panel(&mut self, by: isize) {
-        let panel = ALL[self.row];
-        let Some(tab) = self.current() else { return };
-        let Some(at) = tab.panels.iter().position(|p| *p == panel) else {
-            self.message = Some("Add the panel to the tab first".to_string());
+    /// Moves the cursor to the cell above or below it.
+    fn look(&mut self, by: isize) {
+        let Some(tab) = self.layout.tabs.get(self.tab) else {
             return;
         };
-        let to = at as isize + by;
-        if to >= 0 && (to as usize) < tab.panels.len() {
-            tab.panels.swap(at, to as usize);
+        if let Ok(to) = arrange::vertical_neighbour(tab, self.slot, by) {
+            self.slot = to;
+        }
+    }
+
+    /// The panels the edited tab does not show, in the order of the list.
+    pub fn available(&self) -> Vec<PanelId> {
+        let shown = self
+            .layout
+            .tabs
+            .get(self.tab)
+            .map_or(&[][..], |t| &t.panels);
+        ALL.iter().copied().filter(|p| !shown.contains(p)).collect()
+    }
+
+    fn open_picker(&mut self) {
+        if self.available().is_empty() {
+            self.message = Some("Every panel is already on the tab".to_string());
+        } else {
+            self.picker = Some(0);
+        }
+    }
+
+    fn picker_key(&mut self, code: KeyCode) {
+        let choices = self.available();
+        let at = self
+            .picker
+            .unwrap_or(0)
+            .min(choices.len().saturating_sub(1));
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => self.picker = None,
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.picker = Some((at + 1).min(choices.len().saturating_sub(1)));
+            }
+            KeyCode::Up | KeyCode::Char('k') => self.picker = Some(at.saturating_sub(1)),
+            KeyCode::Enter => {
+                self.picker = None;
+                if let Some(panel) = choices.get(at).copied() {
+                    self.arrange(|t, s| arrange::insert_after(t, s, panel));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -126,6 +224,7 @@ impl Editor {
         if to >= 0 && (to as usize) < self.layout.tabs.len() {
             self.layout.tabs.swap(self.tab, to as usize);
             self.tab = to as usize;
+            self.slot = 0;
         }
     }
 
@@ -144,11 +243,20 @@ impl Editor {
                     .any(|t| t.name.eq_ignore_ascii_case(n))
             })
             .unwrap_or_default();
+        let first = self
+            .layout
+            .tabs
+            .get(self.tab)
+            .and_then(|t| t.panels.get(self.slot))
+            .copied()
+            .unwrap_or(ALL[0]);
         self.layout.tabs.push(Tab {
             name,
-            panels: vec![ALL[self.row]],
+            panels: vec![first],
+            rows: None,
         });
         self.tab = self.layout.tabs.len() - 1;
+        self.slot = 0;
     }
 
     fn delete_tab(&mut self) {
@@ -158,6 +266,7 @@ impl Editor {
         }
         self.layout.tabs.remove(self.tab);
         self.tab = self.tab.min(self.layout.tabs.len() - 1);
+        self.slot = 0;
     }
 
     fn rename_key(&mut self, code: KeyCode) {
@@ -171,7 +280,7 @@ impl Editor {
             }
             KeyCode::Char(c)
                 if !c.is_control()
-                    && !matches!(c, ';' | '=' | ',')
+                    && !matches!(c, ';' | '=' | ',' | '|')
                     && name.chars().count() < MAX_NAME =>
             {
                 name.push(c);
@@ -199,16 +308,6 @@ impl Editor {
             _ => {}
         }
     }
-
-    /// Whether the highlighted panel is on the tab being edited, and where.
-    pub fn position(&self, panel: PanelId) -> Option<usize> {
-        self.layout
-            .tabs
-            .get(self.tab)?
-            .panels
-            .iter()
-            .position(|p| *p == panel)
-    }
 }
 
 #[cfg(test)]
@@ -229,36 +328,308 @@ mod tests {
     }
 
     #[test]
-    fn space_adds_and_removes_the_highlighted_panel() {
+    fn the_picker_lists_only_the_panels_the_tab_does_not_show() {
+        // Arrange
         let mut e = editor();
-        e.row = 2;
 
-        e.key(KeyCode::Char(' '));
-        let added = e.position(PanelId::Models);
-        e.key(KeyCode::Char(' '));
+        // Act
+        e.key(KeyCode::Char('a'));
 
-        assert_eq!(added, Some(2));
-        assert_eq!(e.position(PanelId::Models), None);
+        // Assert
+        let choices = e.available();
+        assert_eq!(e.picker, Some(0));
+        assert!(!choices.contains(&PanelId::Spend) && !choices.contains(&PanelId::Tokens));
+        assert_eq!(choices.len(), ALL.len() - 2);
     }
 
     #[test]
-    fn the_last_panel_of_a_tab_cannot_be_removed() {
+    fn enter_in_the_picker_adds_the_chosen_panel_after_the_cursor_and_closes_it() {
+        // Arrange
+        let mut e = editor();
+        let second = e.available()[1];
+
+        // Act
+        e.key(KeyCode::Char('a'));
+        e.key(KeyCode::Char('j'));
+        e.key(KeyCode::Enter);
+
+        // Assert
+        assert_eq!(
+            e.layout.tabs[0].panels,
+            [PanelId::Spend, second, PanelId::Tokens]
+        );
+        assert_eq!(e.picker, None);
+        assert_eq!(e.slot, 1);
+    }
+
+    #[test]
+    fn escape_in_the_picker_goes_back_to_the_editor_without_a_change() {
+        // Arrange
+        let mut e = editor();
+        e.key(KeyCode::Char('a'));
+
+        // Act
+        let outcome = e.key(KeyCode::Esc);
+
+        // Assert
+        assert_eq!(outcome, Outcome::Stay);
+        assert_eq!(e.picker, None);
+        assert_eq!(e.layout.tabs[0].panels, [PanelId::Spend, PanelId::Tokens]);
+        assert!(e.undo.is_empty());
+    }
+
+    #[test]
+    fn u_and_q_in_the_picker_neither_undo_nor_close_the_editor() {
+        // Arrange
+        let mut e = editor();
+        e.key(KeyCode::Char('a'));
+        e.key(KeyCode::Enter);
+        e.key(KeyCode::Char('a'));
+        let panels = e.layout.tabs[0].panels.clone();
+
+        // Act
+        let undo = e.key(KeyCode::Char('u'));
+        let after_u = (e.picker, e.layout.tabs[0].panels.clone());
+        let quit = e.key(KeyCode::Char('q'));
+
+        // Assert
+        assert_eq!(undo, Outcome::Stay);
+        assert_eq!(after_u, (Some(0), panels.clone()));
+        assert_eq!(quit, Outcome::Stay);
+        assert_eq!(e.picker, None);
+        assert_eq!(e.layout.tabs[0].panels, panels);
+    }
+
+    #[test]
+    fn a_on_a_tab_that_shows_every_panel_opens_no_picker_and_says_why() {
+        // Arrange
+        let all: Vec<&str> = ALL.iter().map(|p| p.word()).collect();
+        let mut e = Editor::new(
+            &Layout::parse(&format!("All={}", all.join(","))).unwrap(),
+            0,
+        );
+
+        // Act
+        e.key(KeyCode::Char('a'));
+
+        // Assert
+        assert_eq!(e.picker, None);
+        assert_eq!(
+            e.message.as_deref(),
+            Some("Every panel is already on the tab")
+        );
+    }
+
+    #[test]
+    fn the_picker_stops_at_its_first_and_last_line() {
+        // Arrange
+        let mut e = editor();
+        e.key(KeyCode::Char('a'));
+        let last = e.available().len() - 1;
+
+        // Act
+        for _ in 0..=ALL.len() {
+            e.key(KeyCode::Char('j'));
+        }
+        let bottom = e.picker;
+        for _ in 0..=ALL.len() {
+            e.key(KeyCode::Char('k'));
+        }
+
+        // Assert
+        assert_eq!(bottom, Some(last));
+        assert_eq!(e.picker, Some(0));
+    }
+
+    #[test]
+    fn a_panel_added_to_an_arranged_tab_gets_a_row_of_its_own() {
+        // Arrange
+        let mut e = editor();
+        e.layout = Layout::parse("A=spend,tokens|models").unwrap();
+        e.tab = 0;
+
+        // Act
+        e.key(KeyCode::Char('a'));
+        e.key(KeyCode::Enter);
+
+        // Assert
+        assert_eq!(e.layout.tabs[0].rows, Some(vec![2, 1, 1]));
+        assert_eq!(e.layout.tabs[0].panels.len(), 4);
+    }
+
+    #[test]
+    fn j_and_k_move_the_cursor_to_the_cell_below_and_above() {
+        // Arrange
+        let mut e = editor();
+        e.layout = Layout::parse("A=spend,tokens|models").unwrap();
+        e.tab = 0;
+        e.slot = 1;
+
+        // Act
+        e.key(KeyCode::Char('j'));
+        let below = e.slot;
+        e.key(KeyCode::Char('k'));
+
+        // Assert
+        assert_eq!(below, 2);
+        assert_eq!(e.slot, 0);
+    }
+
+    fn press_all(e: &mut Editor, keys: &str) {
+        for c in keys.chars() {
+            e.key(KeyCode::Char(c));
+        }
+    }
+
+    #[test]
+    fn capital_j_and_k_move_the_slot_across_rows_and_the_cursor_follows() {
+        // Arrange
+        let mut e = editor();
+
+        // Act
+        press_all(&mut e, "J");
+
+        // Assert
+        assert_eq!(e.layout.tabs[0].panels, [PanelId::Tokens, PanelId::Spend]);
+        assert_eq!(e.slot, 1);
+        assert_eq!(e.layout.tabs[0].rows, None);
+    }
+
+    #[test]
+    fn h_and_l_move_the_cursor_through_the_slots_and_stop_at_the_ends() {
+        // Arrange
+        let mut e = editor();
+
+        // Act
+        press_all(&mut e, "lll");
+        let end = e.slot;
+        press_all(&mut e, "hhh");
+
+        // Assert
+        assert_eq!(end, 1);
+        assert_eq!(e.slot, 0);
+    }
+
+    #[test]
+    fn f_splits_a_row_and_u_takes_the_change_back() {
+        // Arrange
+        let mut e = Editor::new(&Layout::parse("A=spend,tokens").unwrap(), 0);
+        e.layout.tabs[0].rows = Some(vec![2]);
+
+        // Act
+        press_all(&mut e, "f");
+        let split = e.layout.tabs[0].rows.clone();
+        press_all(&mut e, "u");
+
+        // Assert
+        assert_eq!(split, Some(vec![1, 1]));
+        assert_eq!(e.layout.tabs[0].rows, Some(vec![2]));
+    }
+
+    #[test]
+    fn u_with_nothing_to_undo_says_so() {
+        // Arrange
+        let mut e = editor();
+
+        // Act
+        press_all(&mut e, "u");
+
+        // Assert
+        assert_eq!(e.message.as_deref(), Some("Nothing to undo"));
+    }
+
+    #[test]
+    fn only_the_last_twenty_changes_can_be_undone() {
+        // Arrange
+        let mut e = editor();
+        let original = e.layout.clone();
+
+        // Act
+        for i in 0..UNDO_DEPTH + 5 {
+            press_all(&mut e, if i % 2 == 0 { "J" } else { "K" });
+        }
+        let kept = e.undo.len();
+        for _ in 0..UNDO_DEPTH + 5 {
+            press_all(&mut e, "u");
+        }
+
+        // Assert
+        assert_eq!(kept, UNDO_DEPTH);
+        assert!(e.undo.is_empty());
+        assert_eq!(e.message.as_deref(), Some("Nothing to undo"));
+        assert_ne!(e.layout, original);
+    }
+
+    #[test]
+    fn undoing_a_tab_move_puts_the_cursor_back_on_the_tab_it_was_on() {
+        // Arrange
+        let mut e = editor();
+        let first = e.layout.tabs[0].name.clone();
+
+        // Act
+        press_all(&mut e, ">u");
+
+        // Assert
+        assert_eq!(e.layout.tabs[0].name, first);
+        assert_eq!(e.tab, 0);
+    }
+
+    #[test]
+    fn undoing_a_new_tab_keeps_the_cursor_on_a_tab_that_exists() {
+        // Arrange
+        let mut e = editor();
+        let tabs = e.layout.tabs.len();
+
+        // Act
+        press_all(&mut e, "nu");
+
+        // Assert
+        assert_eq!(e.layout.tabs.len(), tabs);
+        assert!(e.tab < e.layout.tabs.len());
+    }
+
+    #[test]
+    fn undoing_an_added_panel_pulls_the_cursor_back_onto_the_tab() {
+        // Arrange
+        let mut e = editor();
+        press_all(&mut e, "a");
+        e.key(KeyCode::Enter);
+        press_all(&mut e, "ll");
+
+        // Act
+        press_all(&mut e, "u");
+
+        // Assert
+        assert_eq!(e.layout.tabs[0].panels.len(), 2);
+        assert_eq!(e.slot, 1);
+    }
+
+    #[test]
+    fn d_removes_the_cursor_slot() {
+        // Arrange
+        let mut e = editor();
+        e.slot = 1;
+
+        // Act
+        press_all(&mut e, "d");
+
+        // Assert
+        assert_eq!(e.layout.tabs[0].panels, [PanelId::Spend]);
+        assert_eq!(e.slot, 0);
+    }
+
+    #[test]
+    fn a_refused_arranging_key_changes_nothing_and_leaves_no_undo_step() {
+        // Arrange
         let mut e = Editor::new(&Layout::parse("Only=spend").unwrap(), 0);
 
-        e.key(KeyCode::Char(' '));
+        // Act
+        press_all(&mut e, "dKH");
 
+        // Assert
         assert_eq!(e.layout.tabs[0].panels, [PanelId::Spend]);
+        assert!(e.undo.is_empty());
         assert!(e.message.is_some());
-    }
-
-    #[test]
-    fn capital_j_and_k_reorder_the_panels_of_a_tab() {
-        let mut e = editor();
-        e.row = 0;
-
-        e.key(KeyCode::Char('J'));
-
-        assert_eq!(e.layout.tabs[0].panels, [PanelId::Tokens, PanelId::Spend]);
     }
 
     #[test]
@@ -294,9 +665,9 @@ mod tests {
     }
 
     #[test]
-    fn at_most_nine_tabs_can_be_added() {
+    fn at_most_twelve_tabs_can_be_added() {
         let mut e = editor();
-        for _ in 0..10 {
+        for _ in 0..MAX_TABS + 1 {
             e.key(KeyCode::Char('n'));
         }
 
@@ -336,46 +707,80 @@ mod tests {
         e.key(KeyCode::Char('r'));
         e.rename = Some(String::new());
 
-        for c in "a;b=c,d".chars() {
+        for c in "a;b=c,d|e".chars() {
             e.key(KeyCode::Char(c));
         }
 
-        assert_eq!(e.rename.as_deref(), Some("abcd"));
+        assert_eq!(e.rename.as_deref(), Some("abcde"));
     }
 
     #[test]
-    fn save_returns_a_layout_that_parses_and_escape_cancels() {
+    fn escape_and_q_close_the_editor_and_w_and_s_do_nothing() {
+        // Arrange
         let mut e = editor();
 
-        let save = e.key(KeyCode::Char('w'));
-        let cancel = e.key(KeyCode::Esc);
+        // Act
+        let saves = [KeyCode::Char('w'), KeyCode::Char('s')].map(|k| e.key(k));
+        let esc = e.key(KeyCode::Esc);
+        let q = e.key(KeyCode::Char('q'));
 
-        assert_eq!(save, Outcome::Save);
-        assert_eq!(cancel, Outcome::Cancel);
-        assert!(Layout::parse(&e.layout.to_text()).is_ok());
+        // Assert
+        assert_eq!(saves, [Outcome::Stay, Outcome::Stay]);
+        assert_eq!((esc, q), (Outcome::Close, Outcome::Close));
+        assert_eq!(e.layout, Layout::parse(THREE_TABS).unwrap());
     }
 
     #[test]
-    fn capital_r_asks_for_the_default_layout() {
-        let mut e = editor();
+    fn capital_r_asks_first_and_only_y_confirms_the_reset() {
+        for (answer, expected) in [
+            ('y', Outcome::ResetAll),
+            ('n', Outcome::Stay),
+            ('Y', Outcome::Stay),
+            ('x', Outcome::Stay),
+        ] {
+            // Arrange
+            let mut e = editor();
+            let asked = e.key(KeyCode::Char('R'));
 
-        assert_eq!(e.key(KeyCode::Char('R')), Outcome::Reset);
-    }
+            // Act
+            let outcome = e.key(KeyCode::Char(answer));
 
-    #[test]
-    fn the_line_keys_stop_at_the_first_and_last_panel() {
-        let mut e = editor();
-
-        for _ in 0..10 {
-            e.key(KeyCode::Char('j'));
+            // Assert
+            assert_eq!(asked, Outcome::Stay);
+            assert_eq!(outcome, expected, "{answer}");
+            assert!(!e.confirm_reset, "{answer}");
         }
-        let bottom = e.row;
-        for _ in 0..10 {
-            e.key(KeyCode::Char('k'));
-        }
+    }
 
-        assert_eq!(bottom, ALL.len() - 1);
-        assert_eq!(e.row, 0);
+    #[test]
+    fn undo_is_ignored_while_the_reset_question_is_showing() {
+        // Arrange
+        let mut e = editor();
+        e.key(KeyCode::Char('d'));
+        let edited = e.layout.clone();
+        e.key(KeyCode::Char('R'));
+
+        // Act
+        let outcome = e.key(KeyCode::Char('u'));
+
+        // Assert
+        assert_eq!(outcome, Outcome::Stay);
+        assert!(!e.confirm_reset);
+        assert_eq!(e.layout, edited);
+    }
+
+    #[test]
+    fn escape_answers_the_reset_question_with_no_and_does_not_close_the_editor() {
+        // Arrange
+        let mut e = editor();
+        e.key(KeyCode::Char('R'));
+
+        // Act
+        let outcome = e.key(KeyCode::Esc);
+
+        // Assert
+        assert_eq!(outcome, Outcome::Stay);
+        assert!(!e.confirm_reset);
     }
 
     #[test]
@@ -420,25 +825,19 @@ mod tests {
     }
 
     #[test]
-    fn moving_a_panel_not_in_the_tab_changes_nothing_and_says_why() {
+    fn moving_a_panel_past_either_end_changes_nothing_and_says_why() {
+        // Arrange
         let mut e = editor();
-        e.row = 4;
 
+        // Act
         e.key(KeyCode::Char('K'));
-
-        assert_eq!(e.layout.tabs[0].panels, [PanelId::Spend, PanelId::Tokens]);
-        assert!(e.message.is_some());
-    }
-
-    #[test]
-    fn moving_a_panel_past_either_end_changes_nothing() {
-        let mut e = editor();
-        e.row = 0;
-        e.key(KeyCode::Char('K'));
-        e.row = 1;
+        let top = e.message.clone();
+        e.slot = 1;
         e.key(KeyCode::Char('J'));
 
+        // Assert
         assert_eq!(e.layout.tabs[0].panels, [PanelId::Spend, PanelId::Tokens]);
+        assert!(top.is_some() && e.message.is_some());
     }
 
     #[test]
@@ -466,7 +865,7 @@ mod tests {
     #[test]
     fn k_moves_a_panel_earlier_and_a_successful_rename_clears_a_stale_message() {
         let mut e = editor();
-        e.row = 1;
+        e.slot = 1;
         e.key(KeyCode::Char('K'));
         e.key(KeyCode::Char('r'));
         e.message = Some("old".into());

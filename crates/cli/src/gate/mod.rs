@@ -12,3 +12,15 @@ pub mod db;
 pub mod hash;
 pub mod record;
 pub mod snapshot;
+
+use crate::config::keys::GATE_MAX_ROUNDS_DEFAULT;
+use std::path::Path;
+
+/// The configured `gate.maxRounds`, or the default when it is unset, unreadable
+/// or out of range.
+pub fn max_rounds(home: &Path, repo_slug: Option<&str>) -> i64 {
+    crate::config::resolve_valid("gate.maxRounds", home, repo_slug)
+        .ok()
+        .and_then(|(v, _, _)| v.as_i64())
+        .unwrap_or(GATE_MAX_ROUNDS_DEFAULT)
+}
