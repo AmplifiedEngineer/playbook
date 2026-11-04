@@ -8,7 +8,7 @@
 
 use crate::cc::worktree::{main_worktree, resolve_base};
 use crate::common::{run_with_timeout, Payload};
-use crate::hooks::worktree_setup;
+use crate::hooks::{worktree_setup, worktree_target};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -86,6 +86,9 @@ fn create(payload: &Payload) -> Result<PathBuf, String> {
         let copied = worktree_setup::copy_worktreeinclude(&main_root, &path);
         if copied > 0 {
             eprintln!("playbook worktree-create: copied {copied} file(s) from .worktreeinclude");
+        }
+        if worktree_target::clone_warm_target(&main_root, &path) {
+            eprintln!("playbook worktree-create: cloned the main checkout's target folder");
         }
     }
     Ok(path)

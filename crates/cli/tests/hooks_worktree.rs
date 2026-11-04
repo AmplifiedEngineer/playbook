@@ -683,3 +683,137 @@ fn create_keeps_a_non_empty_unregistered_directory_and_names_it() {
     assert!(out.status.success(), "fallback should still place it");
     assert!(stderr(&out).contains("not a worktree of this repo"));
 }
+
+/// Commits a `.gitignore` for `target` and fills the main checkout's
+/// `target` with one build artifact.
+fn warm_target(repo: &Path) {
+    fs::write(repo.join(".gitignore"), "target\n").unwrap();
+    git_ok(repo, &["add", "."]);
+    git_ok(repo, &["commit", "-q", "-m", "ignore target"]);
+    git_ok(repo, &["push", "-q"]);
+    fs::create_dir_all(repo.join("target/debug")).unwrap();
+    fs::write(repo.join("target/debug/dep.rlib"), "warm\n").unwrap();
+}
+
+/// Whether `dir` sits on a filesystem that supports `cp -c` clones.
+fn supports_clone(dir: &Path) -> bool {
+    let probe = dir.join("clone-probe");
+    fs::write(&probe, "x").unwrap();
+    let cloned = Command::new("cp")
+        .arg("-c")
+        .arg(&probe)
+        .arg(dir.join("clone-probe-copy"))
+        .status()
+        .is_ok_and(|s| s.success());
+    let _ = fs::remove_file(&probe);
+    let _ = fs::remove_file(dir.join("clone-probe-copy"));
+    cloned
+}
+
+macro_rules! require_clone_fs {
+    ($f:expr) => {
+        if !cfg!(target_os = "macos") || !supports_clone(&$f.root) {
+            eprintln!("skipped: needs macOS on a filesystem with clonefile support (APFS)");
+            return;
+        }
+    };
+}
+
+#[test]
+fn create_seeds_the_new_worktree_with_a_copy_on_write_clone_of_target() {
+    // Arrange: a main checkout with a warm, git-ignored target
+    let f = fixture("clone");
+    require_clone_fs!(f);
+    warm_target(&f.repo);
+
+    // Act
+    let path = created_path(&create(&f.repo, "probe"));
+
+    // Assert: the artifact arrived, and writing it leaves the main copy alone
+    let cloned = path.join("target/debug/dep.rlib");
+    assert_eq!(fs::read_to_string(&cloned).unwrap(), "warm\n");
+    fs::write(&cloned, "changed\n").unwrap();
+    assert_eq!(
+        fs::read_to_string(f.repo.join("target/debug/dep.rlib")).unwrap(),
+        "warm\n"
+    );
+}
+
+#[test]
+fn create_skips_the_clone_when_main_has_no_target() {
+    // Arrange
+    let f = fixture("clone-none");
+
+    // Act
+    let path = created_path(&create(&f.repo, "probe"));
+
+    // Assert
+    assert!(!path.join("target").exists());
+}
+
+#[test]
+fn create_skips_the_clone_when_target_is_not_git_ignored() {
+    // Arrange: a target that git would list as untracked
+    let f = fixture("clone-unignored");
+    fs::create_dir_all(f.repo.join("target")).unwrap();
+    fs::write(f.repo.join("target/dep.rlib"), "warm\n").unwrap();
+
+    // Act
+    let path = created_path(&create(&f.repo, "probe"));
+
+    // Assert: cloning it would make the fresh worktree look dirty
+    assert!(!path.join("target").exists());
+}
+
+#[test]
+fn create_leaves_no_partial_target_when_the_clone_fails() {
+    // Arrange: an unreadable artifact makes the copy fail midway
+    let f = fixture("clone-fail");
+    require_clone_fs!(f);
+    warm_target(&f.repo);
+    let locked = f.repo.join("target/debug/locked.rlib");
+    fs::write(&locked, "x").unwrap();
+    fs::set_permissions(&locked, std::os::unix::fs::PermissionsExt::from_mode(0o000)).unwrap();
+
+    // Act
+    let out = create(&f.repo, "probe");
+
+    // Assert: the hook still succeeds and the worktree starts without a target
+    let path = created_path(&out);
+    assert!(!path.join("target").exists());
+}
+
+#[test]
+fn create_does_not_touch_an_existing_target_in_a_reused_worktree() {
+    // Arrange: a worktree that already has its own target
+    let f = fixture("clone-reuse");
+    require_clone_fs!(f);
+    warm_target(&f.repo);
+    let first = created_path(&create(&f.repo, "probe"));
+    fs::write(first.join("target/debug/dep.rlib"), "mine\n").unwrap();
+
+    // Act
+    let second = created_path(&create(&f.repo, "probe"));
+
+    // Assert
+    assert_eq!(
+        fs::read_to_string(second.join("target/debug/dep.rlib")).unwrap(),
+        "mine\n"
+    );
+}
+
+#[test]
+fn remove_deletes_the_cloned_target_with_the_worktree() {
+    // Arrange
+    let f = fixture("clone-remove");
+    require_clone_fs!(f);
+    warm_target(&f.repo);
+    let path = created_path(&create(&f.repo, "probe"));
+
+    // Act
+    remove(&f.repo, &path);
+
+    // Assert: the ignored target does not keep the worktree alive
+    assert!(!path.exists());
+    assert!(f.repo.join("target/debug/dep.rlib").exists());
+}
