@@ -829,18 +829,23 @@ fn from_stack(found: StackFacts, cfg: &Cfg, max_prs: u64) -> Result<Suggestion, 
 /// `pr` is `None`, and decide. With `Scope::Stack` the facts are those of
 /// every open PR in the PR's stack.
 pub fn run(pr: Option<&str>, base: Option<&str>, scope: Scope) -> Result<Suggestion, String> {
-    let cfg = Cfg::load();
-    match (pr.map(|p| p.trim_start_matches('#')), scope) {
-        (Some(n), _) if n.is_empty() || !n.chars().all(|c| c.is_ascii_digit()) => {
-            Err(format!("`{n}` is not a PR number"))
+    let number = pr.map(|p| p.trim_start_matches('#'));
+    if let (Some(n), Some(given)) = (number, pr) {
+        if n.is_empty() || !n.chars().all(|c| c.is_ascii_digit()) {
+            return Err(format!("`{given}` is not a PR number"));
         }
+    }
+    if number.is_none() && scope == Scope::Stack {
+        return Err("--scope stack needs a PR number".to_string());
+    }
+    let cfg = Cfg::load();
+    match (number, scope) {
         (Some(n), Scope::Stack) => {
             let max_prs = config_count("review.stackMaxPrs", 6);
             from_stack(stack_facts(&|a| gh(a), n, max_prs)?, &cfg, max_prs)
         }
         (Some(n), Scope::ThisPr) => decided(pr_facts(&|a| gh(a), n)?, &cfg, Scope::ThisPr, None),
-        (None, Scope::Stack) => Err("--scope stack needs a PR number".to_string()),
-        (None, Scope::ThisPr) => decided(local_facts(base)?, &cfg, Scope::ThisPr, None),
+        (None, _) => decided(local_facts(base)?, &cfg, Scope::ThisPr, None),
     }
 }
 
@@ -850,6 +855,17 @@ mod tests {
     use super::*;
 
     const C: Cfg = Cfg::DEFAULT;
+
+    #[test]
+    fn run_rejects_a_bad_pr_number_and_a_missing_one_before_any_call() {
+        let bad = run(Some("#abc"), None, Scope::Stack).unwrap_err();
+        let empty = run(Some("#"), None, Scope::ThisPr).unwrap_err();
+        let missing = run(None, None, Scope::Stack).unwrap_err();
+
+        assert_eq!(bad, "`#abc` is not a PR number");
+        assert_eq!(empty, "`#` is not a PR number");
+        assert_eq!(missing, "--scope stack needs a PR number");
+    }
 
     fn file(path: &str, lines: u64) -> File {
         File { path: path.into(), added: lines, removed: 0, renamed: false }
