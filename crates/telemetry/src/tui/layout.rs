@@ -421,7 +421,7 @@ mod tests {
     }
 
     #[test]
-    fn every_pinned_word_maps_to_the_focusable_panel_of_its_switcher() {
+    fn every_pinned_word_parses_back_and_maps_to_the_focusable_panel_of_its_switcher() {
         for id in ALL.into_iter().filter(|id| id.is_pinned()) {
             let base = if id.spend_view().is_some() {
                 PanelId::Spend
