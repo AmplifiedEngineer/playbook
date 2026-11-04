@@ -484,9 +484,13 @@ impl App {
     /// Keeps the focus on a panel the selected tab shows.
     fn fix_focus(&mut self) {
         let shown = self.tab_slots();
-        if self.focus_slot().is_none() {
-            if let Some(first) = shown.first() {
-                self.focus_on(*first);
+        // Re-count the slot so a stale index from another tab cannot linger.
+        match self.focus_slot() {
+            Some(slot) => self.focus_on(slot),
+            None => {
+                if let Some(first) = shown.first() {
+                    self.focus_on(*first);
+                }
             }
         }
     }
@@ -547,8 +551,12 @@ impl App {
     /// `isize::MIN` or `isize::MAX` steps. With no cursor yet it starts from today's bar.
     fn move_cursor(&mut self, by: isize) {
         let shown = self.tab_panels();
-        // The daily table owns the cursor keys while it has the focus;
-        // otherwise the chart that is shown moves the shared cursor.
+        // The daily table owns the cursor keys while it has the focus, even
+        // when another Spend slot of the tab charts; otherwise the chart that
+        // is shown moves the shared cursor.
+        if self.focus == Panel::Spend && self.is_table(Panel::Spend) {
+            return;
+        }
         let chart = if shown.contains(&Panel::Spend)
             && (!self.is_table(Panel::Spend)
                 || self.focus == Panel::Spend
@@ -766,9 +774,7 @@ impl App {
                         .focus_slot()
                         .is_some_and(|id| id.spend_view().is_some()) =>
                 {
-                    self.note = Some(
-                        "This panel shows one view. Use the spend panel to switch".to_string(),
-                    );
+                    self.note = Some("This panel is pinned to one view".to_string());
                 }
                 Panel::Spend => self.spend_view = self.spend_view.next(),
                 _ => {}
@@ -1236,20 +1242,25 @@ mod tests {
     }
 
     #[test]
-    fn the_daily_table_owns_the_cursor_keys_only_while_its_slot_has_the_focus() {
+    fn the_daily_table_owns_the_row_and_cursor_keys_only_while_its_slot_has_the_focus() {
         // Arrange
         let mut app = charted(Range::LastDays(30), 30);
         app.layout = crate::tui::layout::Layout::parse("A=spend.daily,spend.total").unwrap();
         app.go_tab(0);
         app.focus = Panel::Spend;
         let on_table = app.is_table(Panel::Spend);
+        app.key(press(KeyCode::Left));
+        let cursor_on_table = app.cursor;
 
         // Act
         app.key(press(KeyCode::Tab));
+        app.key(press(KeyCode::Left));
 
         // Assert
         assert!(on_table);
+        assert_eq!(cursor_on_table, None);
         assert!(!app.is_table(Panel::Spend));
+        assert_eq!(app.cursor, Some(today() - 1));
     }
 
     #[test]
