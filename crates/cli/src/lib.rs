@@ -2146,7 +2146,7 @@ pub enum WorktreeCommand {
     },
     /// Remove one worktree if it has landed and is not in use
     ///
-    /// Example: `playbook worktree remove ../my-branch`
+    /// Example: `playbook worktree remove ../.worktrees/my-repo/my-branch`
     Remove {
         /// Worktree path, as shown by `git worktree list`
         path: PathBuf,
@@ -2168,18 +2168,18 @@ pub enum ReviewWorktreeCommand {
     /// Fetches the PR head, adds a locked detached worktree for it, and
     /// prints its absolute path on stdout. Warnings go to stderr.
     ///
-    /// Example: `playbook worktree review setup 12 abc1234`
+    /// Example: `playbook worktree review setup 12 0123456789abcdef0123456789abcdef01234567`
     Setup {
         /// PR number
         pr: String,
-        /// Head commit the review was resolved against
+        /// Full head commit sha the review was resolved against
         head_sha: String,
     },
     /// Remove a review worktree, even a dirty one
     ///
-    /// Always exits 0.
+    /// Always exits 0, and skips any path outside the review worktrees.
     ///
-    /// Example: `playbook worktree review teardown /tmp/review-wt`
+    /// Example: `playbook worktree review teardown .git/review-worktrees/12-0123456`
     Teardown {
         /// Worktree path printed by `setup`
         path: PathBuf,

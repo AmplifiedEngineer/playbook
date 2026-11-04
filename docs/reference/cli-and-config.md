@@ -1595,7 +1595,7 @@ Subcommands: `remove`, `review`, `sweep`
 
 Remove one worktree if it has landed and is not in use
 
-Example: `playbook worktree remove ../my-branch`
+Example: `playbook worktree remove ../.worktrees/my-repo/my-branch`
 
 - `<PATH>`: Worktree path, as shown by `git worktree list`
 
@@ -1613,18 +1613,18 @@ Add a locked worktree for a PR head and print its path
 
 Fetches the PR head, adds a locked detached worktree for it, and prints its absolute path on stdout. Warnings go to stderr.
 
-Example: `playbook worktree review setup 12 abc1234`
+Example: `playbook worktree review setup 12 0123456789abcdef0123456789abcdef01234567`
 
 - `<PR>`: PR number
-- `<HEAD_SHA>`: Head commit the review was resolved against
+- `<HEAD_SHA>`: Full head commit sha the review was resolved against
 
 ### `playbook worktree review teardown`
 
 Remove a review worktree, even a dirty one
 
-Always exits 0.
+Always exits 0, and skips any path outside the review worktrees.
 
-Example: `playbook worktree review teardown /tmp/review-wt`
+Example: `playbook worktree review teardown .git/review-worktrees/12-0123456`
 
 - `<PATH>`: Worktree path printed by `setup`
 
