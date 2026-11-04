@@ -11,7 +11,7 @@ use super::burnup;
 use super::data::Data;
 use super::fmt::{compact, fit, money, signed_compact, signed_count, signed_money, signed_percent};
 use super::keys::{self, HelpLine};
-use super::layout::PanelId;
+use super::layout::{auto_rows, PanelId};
 use super::notice::{self, Notice};
 use super::panels;
 use super::projection;
@@ -135,18 +135,20 @@ fn tile(body: Rect, rows: &[(usize, u16)]) -> Vec<Rect> {
 /// one wide panel). Six panels land exactly where the classic screen puts them.
 /// Beyond six, rows of two share the height equally, the last one wide if odd.
 fn grid(body: Rect, n: usize) -> Vec<Rect> {
-    let rows: Vec<(usize, u16)> = match n {
-        0 => return Vec::new(),
-        1 => vec![(1, 1)],
-        2 => vec![(1, 1), (1, 1)],
-        3 => vec![(2, 1), (1, 1)],
-        4 => vec![(2, 1), (2, 1)],
-        5 => vec![(2, 40), (2, 26), (1, 34)],
-        6 => vec![(2, 40), (2, 26), (2, 34)],
-        _ => (0..n.div_ceil(2))
-            .map(|i| (if i * 2 + 1 < n { 2 } else { 1 }, 1))
-            .collect(),
+    if n == 0 {
+        return Vec::new();
+    }
+    // The panel count of each row is `auto_rows`, which the editor shares; only
+    // five and six panels weigh their row heights.
+    let heights: &[u16] = match n {
+        5 | 6 => &[40, 26, 34],
+        _ => &[],
     };
+    let rows: Vec<(usize, u16)> = auto_rows(n)
+        .iter()
+        .enumerate()
+        .map(|(i, cols)| (usize::from(*cols), heights.get(i).copied().unwrap_or(1)))
+        .collect();
     tile(body, &rows)
 }
 
@@ -326,8 +328,8 @@ pub fn render(frame: &mut Frame, app: &App) {
 /// The layout editor window, centered over the panels.
 fn render_editor(frame: &mut Frame, area: Rect, ed: &super::editor::Editor, pal: &Palette) {
     let width = area.width.saturating_sub(2).min(78);
-    // Tab line, rename line, one line per panel, a message line, two key lines and the border.
-    let wanted = super::layout::ALL.len() as u16 + 7;
+    // Tab line, rename line, one line per panel, a message line, three key lines and the border.
+    let wanted = super::layout::ALL.len() as u16 + 8;
     let height = wanted.min(area.height.saturating_sub(2));
     let rect = Rect::new(
         area.x + (area.width - width) / 2,
@@ -370,6 +372,8 @@ fn render_editor(frame: &mut Frame, area: Rect, ed: &super::editor::Editor, pal:
     });
     for (i, id) in super::layout::ALL.iter().enumerate() {
         let mark = match ed.position(*id) {
+            // Round brackets mark the panel the arranging keys act on.
+            Some(at) if at == ed.slot => format!("({})", at + 1),
             Some(at) => format!("[{}]", at + 1),
             None => "[ ]".to_string(),
         };
@@ -386,7 +390,11 @@ fn render_editor(frame: &mut Frame, area: Rect, ed: &super::editor::Editor, pal:
         None => Line::raw(""),
     });
     lines.push(Line::styled(
-        " Left/Right tab   j/k line   space add or remove   J/K move panel",
+        " Left/Right tab   j/k line   space add or remove   a add after   d remove",
+        plain,
+    ));
+    lines.push(Line::styled(
+        " h/l pick the (n) slot   H/L/J/K move it   f split or join its row   u undo",
         plain,
     ));
     lines.push(Line::styled(
@@ -1497,7 +1505,7 @@ mod tests {
             }
 
             // Assert
-            assert_eq!(by_row, crate::tui::layout::auto_rows(n), "{n} panels");
+            assert_eq!(by_row, auto_rows(n), "{n} panels");
         }
     }
 
@@ -1842,7 +1850,7 @@ mod tests {
         let text = screen(&app, 100, 30);
 
         assert!(text.contains("Layout: tabs and panels"), "{text}");
-        assert!(text.contains("[1] spend"), "{text}");
+        assert!(text.contains("(1) spend"), "{text}");
         assert!(text.contains("[ ] live"), "{text}");
         assert!(text.contains("w save"), "{text}");
     }

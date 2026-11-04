@@ -235,7 +235,8 @@ impl Tab {
             return words.collect::<Vec<_>>().join(",");
         };
         let mut words = words;
-        rows.iter()
+        let text = rows
+            .iter()
             .map(|n| {
                 words
                     .by_ref()
@@ -244,15 +245,27 @@ impl Tab {
                     .join(",")
             })
             .collect::<Vec<_>>()
-            .join(&ROW_SEPARATOR.to_string())
+            .join(&ROW_SEPARATOR.to_string());
+        // One row of two has no `|` inside it, and without a mark it would read
+        // back as the automatic grid, which stacks two panels.
+        if rows.as_slice() == [2] {
+            format!("{text}{ROW_SEPARATOR}")
+        } else {
+            text
+        }
     }
 }
 
 /// Reads the part after `=` of one tab into panels and, when it holds `|`, the
 /// size of each row.
 fn parse_rows(name: &str, list: &str) -> Result<(Vec<PanelId>, Option<Vec<u8>>), String> {
-    let lines: Vec<&str> = list.split(ROW_SEPARATOR).collect();
-    let arranged = lines.len() > 1;
+    // A `|` at the end marks an arranged tab of one row.
+    let (body, marked) = match list.trim_end().strip_suffix(ROW_SEPARATOR) {
+        Some(body) => (body, true),
+        None => (list, false),
+    };
+    let lines: Vec<&str> = body.split(ROW_SEPARATOR).collect();
+    let arranged = lines.len() > 1 || marked;
     let mut panels: Vec<PanelId> = Vec::new();
     let mut rows: Vec<u8> = Vec::new();
     for (i, line) in lines.iter().enumerate() {
@@ -551,11 +564,30 @@ mod tests {
     }
 
     #[test]
+    fn one_row_of_two_panels_survives_saving_and_reading() {
+        // Arrange
+        let layout = Layout {
+            tabs: vec![Tab {
+                name: "A".to_string(),
+                panels: vec![PanelId::Spend, PanelId::Tokens],
+                rows: Some(vec![2]),
+            }],
+        };
+
+        // Act
+        let text = layout.to_text();
+
+        // Assert
+        assert_eq!(text, "A=spend,tokens|");
+        assert_eq!(Layout::parse(&text).unwrap(), layout);
+    }
+
+    #[test]
     fn rows_that_are_too_big_or_empty_are_refused_with_the_row_named() {
         for (bad, hint) in [
             ("Charts=spend|tokens,models,live", "row 2 of `Charts` has 3"),
             ("Charts=spend||tokens", "row 2 of `Charts` is empty"),
-            ("Charts=spend|", "row 2 of `Charts` is empty"),
+            ("Charts=spend||", "row 2 of `Charts` is empty"),
             ("Charts=|spend", "row 1 of `Charts` is empty"),
             ("Charts=spend|spend", "appears twice"),
         ] {
