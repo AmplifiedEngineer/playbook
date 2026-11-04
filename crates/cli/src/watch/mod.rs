@@ -15,11 +15,13 @@ use crate::config::{self, store as config_store};
 use crate::WatchCommand;
 
 pub mod action;
+pub mod address;
 pub mod audit;
 pub mod backoff;
 pub mod child;
 pub mod claude;
 pub mod clock;
+pub mod code;
 pub mod control;
 pub mod cycle;
 pub mod engine;
@@ -66,6 +68,34 @@ pub struct Ctx<'a, W, C> {
     /// The login of the authenticated user.
     pub me: &'a str,
     pub model: &'a dyn claude::ModelRunner,
+    pub code: &'a dyn code::CodeWork,
+}
+
+impl<'a, W, C> Ctx<'a, W, C> {
+    /// An engine over `store` with this context's seams and `settings`.
+    pub fn engine<'e>(
+        &'e self,
+        store: &'e mut Store,
+        audit: &'e AuditLog,
+        settings: &'e Settings,
+    ) -> Engine<'e, W, C>
+    where
+        'a: 'e,
+    {
+        Engine {
+            store,
+            write: self.write,
+            clock: self.clock,
+            audit,
+            jitter: &StdJitter,
+            model: self.model,
+            code: self.code,
+            allowed: &settings.allowed_authors,
+            fix: settings.fix,
+            caps: settings.caps,
+            me: self.me,
+        }
+    }
 }
 
 pub struct Settings {
@@ -75,6 +105,10 @@ pub struct Settings {
     pub max_catchup_seconds: i64,
     pub token_env: String,
     pub caps: GlobalCaps,
+    /// `watch.allowedAuthors`: logins that count as trusted.
+    pub allowed_authors: Vec<String>,
+    /// `fix.maxFiles` and `fix.maxLines`, the most a change may touch.
+    pub fix: action::DiffCaps,
 }
 
 impl Settings {
@@ -84,15 +118,18 @@ impl Settings {
                 .map(|(value, _, _)| value)
                 .map_err(|e| e.to_string())
         };
-        let repos = get("watch.repos")?
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(Value::as_str)
-                    .map(String::from)
-                    .collect()
-            })
-            .unwrap_or_default();
+        let strings = |key: &str| -> Result<Vec<String>, String> {
+            Ok(get(key)?
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(String::from)
+                        .collect()
+                })
+                .unwrap_or_default())
+        };
+        let repos = strings("watch.repos")?;
         Ok(Self {
             enabled: get("watch.enabled")?.as_bool().unwrap_or(false),
             repos,
@@ -103,6 +140,11 @@ impl Settings {
                 .filter(|s| !s.is_empty())
                 .unwrap_or(DEFAULT_TOKEN_ENV)
                 .to_string(),
+            allowed_authors: strings("watch.allowedAuthors")?,
+            fix: action::DiffCaps {
+                files: get("fix.maxFiles")?.as_i64().unwrap_or(3),
+                lines: get("fix.maxLines")?.as_i64().unwrap_or(500),
+            },
             caps: GlobalCaps {
                 actions_per_day: get("watch.limits.actionsPerDay")?.as_i64().unwrap_or(50),
                 usd_per_day: get("watch.limits.usdPerDay")?.as_f64().unwrap_or(5.0),
@@ -280,16 +322,7 @@ pub fn approve<W: GithubWrite, C: Clock>(ctx: &Ctx<'_, W, C>, id: i64) -> Result
     let settings = Settings::load(ctx.home)?;
     let lock = acquire(&ctx.data.join("watch.lock")).map_err(|e| e.to_string())?;
     let audit = AuditLog::new(&ctx.data.join("watch"));
-    let mut engine = Engine {
-        store: &mut store,
-        write: ctx.write,
-        clock: ctx.clock,
-        audit: &audit,
-        jitter: &StdJitter,
-        model: ctx.model,
-        caps: settings.caps,
-        me: ctx.me,
-    };
+    let mut engine = ctx.engine(&mut store, &audit, &settings);
     let outcome = engine
         .approve(id, &rules, matches!(lock, Acquire::Held(_)))
         .map_err(|e| e.to_string())?;
@@ -304,6 +337,9 @@ pub fn approve<W: GithubWrite, C: Clock>(ctx: &Ctx<'_, W, C>, id: i64) -> Result
         ApproveOutcome::Dead => {
             format!("item {id} failed too many times and is on the dead list\n")
         }
+        ApproveOutcome::Stopped => {
+            format!("item {id} stopped by the kill switch: it stays approved\n")
+        }
         ApproveOutcome::Demoted(why) => format!("item {id} stays a proposal: {why}\n"),
     })
 }
@@ -313,16 +349,7 @@ pub fn reject<W: GithubWrite, C: Clock>(ctx: &Ctx<'_, W, C>, id: i64) -> Result<
     let settings = Settings::load(ctx.home)?;
     let mut store = Store::open(&ctx.data.join("watch.db")).map_err(|e| e.to_string())?;
     let audit = AuditLog::new(&ctx.data.join("watch"));
-    let mut engine = Engine {
-        store: &mut store,
-        write: ctx.write,
-        clock: ctx.clock,
-        audit: &audit,
-        jitter: &StdJitter,
-        model: ctx.model,
-        caps: settings.caps,
-        me: ctx.me,
-    };
+    let mut engine = ctx.engine(&mut store, &audit, &settings);
     engine.reject(id).map_err(|e| e.to_string())?;
     Ok(format!("item {id} rejected\n"))
 }
@@ -358,6 +385,12 @@ pub fn run(cmd: Option<&WatchCommand>) -> Result<String, String> {
         None | Some(WatchCommand::Once { .. } | WatchCommand::DryRun { .. }) => write.login()?,
         _ => String::new(),
     };
+    let clone = std::env::current_dir().map_err(|e| format!("no current directory: {e}"))?;
+    let code = code::GitCode {
+        clone: &clone,
+        worktrees: data.join("watch").join("worktrees"),
+        home: &home,
+    };
     let ctx = Ctx {
         home: &home,
         data: &data,
@@ -365,6 +398,7 @@ pub fn run(cmd: Option<&WatchCommand>) -> Result<String, String> {
         clock: &clock,
         me: &me,
         model: &claude::ClaudeCli,
+        code: &code,
     };
     let Some(cmd) = cmd else {
         let mut env = cycle::LoopEnv {

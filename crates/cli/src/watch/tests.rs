@@ -12,6 +12,7 @@ use serde_json::json;
 use sha2::Digest;
 
 use super::clock::ManualClock;
+use super::code::FakeCode;
 use super::engine::IssueView;
 use super::journal::RecoverOps;
 use super::*;
@@ -44,6 +45,9 @@ impl GithubWrite for Spy {
     }
     fn add_comment(&self, _: &str, _: u64, _: &str) -> Result<(), String> {
         Ok(())
+    }
+    fn thread(&self, _: &str, _: u64) -> Result<Vec<crate::watch::engine::Post>, String> {
+        Ok(vec![])
     }
     fn add_labels(&self, _: &str, number: u64, labels: &[String]) -> Result<(), String> {
         self.calls.borrow_mut().push((number, labels.to_vec()));
@@ -80,6 +84,7 @@ struct Env {
     data: PathBuf,
     clock: ManualClock,
     spy: Spy,
+    code: FakeCode,
     requests: Rc<Cell<usize>>,
 }
 
@@ -97,6 +102,7 @@ fn env(tag: &str, enabled: bool) -> Env {
         home,
         clock: ManualClock::new(parse_iso8601_utc_epoch(NOW).unwrap()),
         spy: Spy::default(),
+        code: FakeCode::default(),
         requests: Rc::default(),
     }
 }
@@ -110,6 +116,7 @@ impl Env {
             clock: &self.clock,
             me: "me",
             model: &NoModel,
+            code: &self.code,
         }
     }
 
@@ -646,6 +653,25 @@ fn the_real_http_client_is_built_only_in_mod_rs() {
 
     // Assert
     assert!(offenders.is_empty(), "{offenders:?}");
+}
+
+#[test]
+fn the_kill_switch_is_watch_enabled_read_fresh_each_time() {
+    use super::code::{CodeWork, GitCode};
+    // (the setting, whether the switch is on)
+    for (enabled, killed) in [(true, false), (false, true)] {
+        // Arrange
+        let env = env(&format!("watch-kill-{enabled}"), enabled);
+        let clone = env.home.clone();
+        let code = GitCode {
+            clone: &clone,
+            worktrees: env.data.join("trees"),
+            home: &env.home,
+        };
+
+        // Act / Assert
+        assert_eq!(code.killed(), killed);
+    }
 }
 
 #[test]

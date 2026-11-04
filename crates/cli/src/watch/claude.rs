@@ -27,6 +27,8 @@ pub struct Call {
     pub argv: Vec<String>,
     pub env: Vec<(String, String)>,
     pub stdin: String,
+    /// The directory the program runs in, or the current one.
+    pub cwd: Option<String>,
 }
 
 fn args(list: &[&str]) -> Vec<String> {
@@ -66,17 +68,30 @@ pub fn classify_call(labels: &[String], text: &str) -> Call {
         argv,
         env: Vec::new(),
         stdin: text.to_string(),
+        cwd: None,
     }
 }
 
-/// The call that lets the model use tools, held to `budget_usd` and
-/// `max_turns`. It runs in auto mode so the playbook guards stay on.
-pub fn tool_call(budget_usd: f64, max_turns: u32, system: &str, text: &str) -> Call {
+/// The tools a code editing call may use. Anything else, a shell included,
+/// is denied, and a denial fails the call.
+const EDIT_TOOLS: &str = "Read,Edit,Write,Glob,Grep";
+
+/// The call that lets the model edit files in `dir`, held to `budget_usd` and
+/// `max_turns`. It runs in auto mode so the playbook guards stay on. It keeps
+/// its session: the spend guard reads the transcript, and without one it
+/// denies every write as "cost unreadable".
+pub fn tool_call(budget_usd: f64, max_turns: u32, dir: &str, system: &str, text: &str) -> Call {
     let mut argv = args(&["-p", "--output-format", "json", "--max-budget-usd"]);
     argv.push(budget_usd.to_string());
     argv.push("--max-turns".to_string());
     argv.push(max_turns.to_string());
-    argv.extend(args(&["--no-session-persistence", "--system-prompt"]));
+    argv.extend(args(&[
+        "--permission-mode",
+        "acceptEdits",
+        "--allowedTools",
+        EDIT_TOOLS,
+        "--system-prompt",
+    ]));
     argv.push(system.to_string());
     Call {
         argv,
@@ -85,6 +100,7 @@ pub fn tool_call(budget_usd: f64, max_turns: u32, system: &str, text: &str) -> C
             ("PLAYBOOK_MODE".to_string(), "auto".to_string()),
         ],
         stdin: text.to_string(),
+        cwd: Some(dir.to_string()),
     }
 }
 
@@ -147,6 +163,9 @@ impl ModelRunner for ClaudeCli {
     fn run(&self, call: &Call) -> Result<String, String> {
         let mut command = Command::new("claude");
         command.args(&call.argv).envs(call.env.iter().cloned());
+        if let Some(dir) = &call.cwd {
+            command.current_dir(dir);
+        }
         let output = run_with_input(&mut command, call.stdin.as_bytes(), CALL_TIMEOUT)
             .ok_or_else(|| "claude did not finish (missing, or timed out)".to_string())?;
         if !output.status.success() {
@@ -261,13 +280,13 @@ mod tests {
         let call = classify_call(&labels(), &format!("title {sentinel}"));
         assert!(call.stdin.contains(sentinel));
         assert!(!call.argv.iter().any(|a| a.contains(sentinel)));
-        let tools = tool_call(1.0, 5, "system", &format!("title {sentinel}"));
+        let tools = tool_call(1.0, 5, "/w", "system", &format!("title {sentinel}"));
         assert!(!tools.argv.iter().any(|a| a.contains(sentinel)));
     }
 
     #[test]
     fn the_tool_call_has_a_budget_a_turn_cap_and_the_auto_guards() {
-        let call = tool_call(0.75, 12, "system", "text");
+        let call = tool_call(0.75, 12, "/w", "system", "text");
         assert_eq!(
             pair(&call.argv, "--max-budget-usd").as_deref(),
             Some("0.75")
@@ -278,6 +297,12 @@ mod tests {
         let joined = call.argv.join(" ");
         assert!(!joined.contains("--bare"));
         assert!(!joined.contains("bypass"));
+        assert!(!joined.contains("--no-session-persistence"));
+        assert_eq!(
+            pair(&call.argv, "--allowedTools").as_deref(),
+            Some("Read,Edit,Write,Glob,Grep")
+        );
+        assert_eq!(call.cwd.as_deref(), Some("/w"));
     }
 
     #[test]

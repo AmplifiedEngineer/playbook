@@ -5,9 +5,9 @@
 //! one pass, so cron, tests and the foreground loop run the same code.
 
 use super::audit::AuditLog;
-use super::backoff::{delay, Jitter, StdJitter};
+use super::backoff::{delay, Jitter};
 use super::clock::Clock;
-use super::engine::{Engine, GithubWrite};
+use super::engine::GithubWrite;
 use super::github::{GithubPoller, Http};
 use super::journal::{recover, RecoverOps};
 use super::lock::{acquire, Acquire};
@@ -79,16 +79,7 @@ pub fn cycle<W: GithubWrite + RecoverOps, C: Clock, H: Http>(
                 Ok(Poll::Events { mut next, next_in }) => {
                     report.wait = report.wait.max(next_in);
                     next.next_poll_at = now + next_in;
-                    let mut engine = Engine {
-                        store,
-                        write: ctx.write,
-                        clock: ctx.clock,
-                        audit,
-                        jitter: &StdJitter,
-                        model: ctx.model,
-                        caps: settings.caps,
-                        me: ctx.me,
-                    };
+                    let mut engine = ctx.engine(store, audit, settings);
                     let ids = engine
                         .ingest(
                             &source,
@@ -129,16 +120,7 @@ pub fn cycle<W: GithubWrite + RecoverOps, C: Clock, H: Http>(
                 }
             }
         }
-        let mut engine = Engine {
-            store,
-            write: ctx.write,
-            clock: ctx.clock,
-            audit,
-            jitter: &StdJitter,
-            model: ctx.model,
-            caps: settings.caps,
-            me: ctx.me,
-        };
+        let mut engine = ctx.engine(store, audit, settings);
         engine
             .redecide(repo, &rules, level)
             .map_err(|e| e.to_string())?;

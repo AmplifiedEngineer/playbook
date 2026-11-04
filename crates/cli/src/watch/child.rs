@@ -80,9 +80,12 @@ mod os {
 
         /// Starts the program with the call's arguments, environment and stdin.
         pub fn spawn(&self, call: &Call) -> io::Result<OsChild> {
-            let mut child = Command::new(&self.program)
-                .args(&call.argv)
-                .envs(call.env.iter().cloned())
+            let mut command = Command::new(&self.program);
+            command.args(&call.argv).envs(call.env.iter().cloned());
+            if let Some(dir) = &call.cwd {
+                command.current_dir(dir);
+            }
+            let mut child = command
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
@@ -220,6 +223,7 @@ mod tests {
                 argv: argv.iter().map(|s| s.to_string()).collect(),
                 env: Vec::new(),
                 stdin: stdin.to_string(),
+                cwd: None,
             }
         }
 
@@ -242,6 +246,26 @@ mod tests {
             .unwrap();
             assert_eq!(ended, Ended::Exited { success: true });
             assert_eq!(child.output(), "hello");
+        }
+
+        #[test]
+        fn a_real_child_runs_in_the_directory_of_the_call() {
+            // Arrange
+            let dir = std::env::temp_dir().canonicalize().unwrap();
+            let call = Call {
+                cwd: Some(dir.display().to_string()),
+                ..call(&[], "")
+            };
+
+            // Act
+            let mut child = OsSpawner::new("pwd").spawn(&call).unwrap();
+            supervise(&mut child, &|| false, &mut |_| {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            })
+            .unwrap();
+
+            // Assert
+            assert_eq!(child.output().trim(), dir.display().to_string());
         }
 
         #[test]

@@ -43,10 +43,13 @@ pub enum Do {
     /// A model picks one label from `with.labels`. It earns `auto` by the
     /// trust ladder.
     TriageIssue,
+    /// A model with tools edits a branch for a comment, in a worktree. Never
+    /// runs on its own.
+    AddressComment,
 }
 
 impl Do {
-    pub const ALL: [Do; 3] = [Do::Label, Do::Comment, Do::TriageIssue];
+    pub const ALL: [Do; 4] = [Do::Label, Do::Comment, Do::TriageIssue, Do::AddressComment];
 
     /// The name the rule file and the audit log use.
     pub fn as_str(self) -> &'static str {
@@ -54,6 +57,16 @@ impl Do {
             Self::Label => "label",
             Self::Comment => "comment",
             Self::TriageIssue => "triage_issue",
+            Self::AddressComment => "address_comment",
+        }
+    }
+
+    /// The most freedom the action can have, whatever the rule asks for.
+    /// Code written by a model has no ladder to climb in this release.
+    pub fn highest(self) -> Autonomy {
+        match self {
+            Self::AddressComment => Autonomy::Propose,
+            _ => Autonomy::Auto,
         }
     }
 
@@ -192,6 +205,20 @@ impl Stored {
             Do::TriageIssue if rule.decide != Decide::Model => {
                 return Err(RuleError(
                     "the triage_issue action needs decide set to model".to_string(),
+                ));
+            }
+            Do::AddressComment
+                if rule.on != On::PrCommented || rule.filter.comment_prefix.is_none() =>
+            {
+                return Err(RuleError(
+                    "the address_comment action needs on set to pr.commented and a where.comment_prefix"
+                        .to_string(),
+                ));
+            }
+            Do::AddressComment if rule.limits.usd_per_day <= 0.0 => {
+                return Err(RuleError(
+                    "the address_comment action calls a model and needs limits.usd_per_day above 0"
+                        .to_string(),
                 ));
             }
             Do::Label | Do::TriageIssue if rule.with.labels.is_empty() => {

@@ -10,7 +10,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use super::engine::{GithubWrite, IssueView, HIDDEN_MARKER};
+use super::engine::{GithubWrite, IssueView, Post, HIDDEN_MARKER};
 use super::journal::RecoverOps;
 use super::store::WorkRow;
 use crate::common::proc::run_with_timeout;
@@ -52,6 +52,33 @@ pub fn parse_issue(json: &str) -> Result<(IssueView, bool), String> {
         fork: false,
     };
     Ok((view, issue.pull_request.is_some()))
+}
+
+#[derive(Deserialize)]
+struct RawPost {
+    #[serde(default)]
+    author: Option<String>,
+    #[serde(default)]
+    association: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+}
+
+/// Reads one JSON object per line. A missing author becomes the empty login,
+/// which no one trusts.
+pub fn parse_posts(text: &str) -> Result<Vec<Post>, String> {
+    text.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            let raw: RawPost =
+                serde_json::from_str(line).map_err(|e| format!("a comment is not valid: {e}"))?;
+            Ok(Post {
+                author: raw.author.unwrap_or_default(),
+                association: raw.association.unwrap_or_default(),
+                body: raw.body.unwrap_or_default(),
+            })
+        })
+        .collect()
 }
 
 /// `gh` calls for one token.
@@ -135,6 +162,34 @@ impl GithubWrite for GhWrite {
         self.gh(&args).map(|_| ())
     }
 
+    fn thread(&self, repo: &str, number: u64) -> Result<Vec<Post>, String> {
+        const POST: &str =
+            r#"{author: .user.login, association: .author_association, body: .body}"#;
+        let each = format!(".[] | {POST}");
+        let sources = [
+            (format!("repos/{repo}/issues/{number}"), POST),
+            (
+                format!("repos/{repo}/issues/{number}/comments"),
+                each.as_str(),
+            ),
+            (
+                format!("repos/{repo}/pulls/{number}/comments"),
+                each.as_str(),
+            ),
+        ];
+        let mut posts = Vec::new();
+        for (path, jq) in &sources {
+            posts.extend(parse_posts(&self.gh(&[
+                "api",
+                "--paginate",
+                path,
+                "--jq",
+                jq,
+            ])?)?);
+        }
+        Ok(posts)
+    }
+
     fn has_comment(&self, repo: &str, number: u64, marker: &str) -> Result<bool, String> {
         let path = format!("repos/{repo}/issues/{number}/comments");
         let bodies = self.gh(&["api", "--paginate", &path, "--jq", ".[].body"])?;
@@ -181,6 +236,21 @@ mod tests {
     fn a_pull_request_is_recognised_by_its_pull_request_key() {
         let (_, is_pr) = parse_issue(r#"{"state":"open","pull_request":{"url":"u"}}"#).unwrap();
         assert!(is_pr);
+    }
+
+    #[test]
+    fn posts_are_read_one_per_line_and_a_missing_author_is_empty() {
+        // Arrange
+        let text = "{\"author\":\"ann\",\"association\":\"MEMBER\",\"body\":\"hi\"}\n\n{\"author\":null,\"body\":null}";
+
+        // Act
+        let posts = parse_posts(text).unwrap();
+
+        // Assert
+        assert_eq!(posts.len(), 2);
+        assert_eq!(posts[0].association, "MEMBER");
+        assert_eq!((posts[1].author.as_str(), posts[1].body.as_str()), ("", ""));
+        assert!(parse_posts("not json").is_err());
     }
 
     #[test]

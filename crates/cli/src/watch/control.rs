@@ -7,7 +7,6 @@
 use serde_json::{json, Value};
 
 use super::audit::AuditLog;
-use super::backoff::StdJitter;
 use super::clock::Clock;
 use super::engine::{Engine, GithubWrite};
 use super::limits::day_of;
@@ -29,16 +28,7 @@ fn with_engine<W: GithubWrite, C: Clock, T>(
     let settings = Settings::load(ctx.home)?;
     let mut store = open(ctx.data)?;
     let audit = AuditLog::new(&ctx.data.join("watch"));
-    let mut engine = Engine {
-        store: &mut store,
-        write: ctx.write,
-        clock: ctx.clock,
-        audit: &audit,
-        jitter: &StdJitter,
-        model: ctx.model,
-        caps: settings.caps,
-        me: ctx.me,
-    };
+    let mut engine = ctx.engine(&mut store, &audit, &settings);
     body(&mut engine)
 }
 

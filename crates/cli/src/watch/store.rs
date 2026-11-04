@@ -446,6 +446,19 @@ impl Tx<'_> {
         Ok(())
     }
 
+    /// Adds model spend for a try that took no action, so it still counts
+    /// against the day's dollars.
+    pub fn count_spend(&self, day: i64, rule: &str, usd: f64) -> Result<(), StoreError> {
+        for scope in ["*", rule] {
+            self.tx.execute(
+                "INSERT INTO counter (day, scope, actions, usd) VALUES (?1, ?2, 0, ?3)
+                 ON CONFLICT(day, scope) DO UPDATE SET usd = usd + ?3",
+                params![day, scope, usd],
+            )?;
+        }
+        Ok(())
+    }
+
     /// Records the event as seen and queues its work, unless the key is known.
     pub fn insert_work(&self, item: &NewWork<'_>, now: i64) -> Result<Insert, StoreError> {
         let fresh = self.tx.execute(
