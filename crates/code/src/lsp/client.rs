@@ -238,6 +238,31 @@ impl Client {
         std::mem::take(&mut self.notifications)
     }
 
+    /// The oldest notification not yet taken, waiting up to `timeout` for one.
+    /// `None` means none arrived in time.
+    pub fn next_notification(&mut self, timeout: Duration) -> Result<Option<Value>, ClientError> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if !self.notifications.is_empty() {
+                return Ok(Some(self.notifications.remove(0)));
+            }
+            self.check_interrupt()?;
+            if let Some(ended) = self.ended.clone() {
+                return Err(self.ended_error(&ended));
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return Ok(None);
+            }
+            match self.inbound.recv_timeout((deadline - now).min(POLL_SLICE)) {
+                Ok(Inbound::Message(message)) => self.route(message)?,
+                Ok(Inbound::End(ended)) => self.ended = Some(ended),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => self.ended = Some(Ended::Closed),
+            }
+        }
+    }
+
     /// The server's recent stderr, for crash reports.
     pub fn stderr_tail(&self) -> String {
         self.process

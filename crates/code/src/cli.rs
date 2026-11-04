@@ -6,8 +6,9 @@
 
 use super::host::{self, LspSettings};
 use super::lsp;
-use super::output::{Envelope, IndexState};
+use super::output::{Envelope, IndexState, LspInfo};
 use super::search::SearchOptions;
+use super::semantic;
 use super::semantic_render;
 use super::status;
 use clap::Subcommand;
@@ -132,13 +133,21 @@ pub enum CodeCommand {
     /// candidate: nothing checks scope or types, so unrelated names that share
     /// a spelling also appear.
     ///
+    /// Given `<path>:<line>:<column>` instead of a name, a language server
+    /// resolves the symbol at that position and lists its real references,
+    /// marked resolved. If no server can answer, the name candidates are
+    /// listed and the reason is reported.
+    ///
     /// Example: `playbook code refs processPayment`
     Refs {
-        /// Name to look for. A dotted or scoped name uses its last part
+        /// Name to look for, or a position as `<path>:<line>:<column>`. A dotted or scoped name uses its last part
         target: String,
         /// Most results to show, from 1 to 200
         #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=200))]
         limit: u32,
+        /// Longest wait for the server, in milliseconds, for a position
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=600_000))]
+        timeout: Option<u64>,
         /// Print one JSON document
         #[arg(long)]
         json: bool,
@@ -157,6 +166,25 @@ pub enum CodeCommand {
         /// Budget in tokens for the whole text output, counted as four bytes each
         #[arg(long, default_value_t = 4000, value_parser = clap::value_parser!(u32).range(200..=65536))]
         max_tokens: u32,
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show compile and type errors from a language server
+    ///
+    /// Without a path, checks the files that changed since the last index, up
+    /// to 20. With one, checks that file. A server reports as it indexes, so a
+    /// quiet answer on a big project may mean it is not done. At most 200
+    /// problems are shown. Without a server the list is empty and the reason
+    /// is reported.
+    ///
+    /// Example: `playbook code diagnostics src/app.ts`
+    Diagnostics {
+        /// File to check
+        path: Option<String>,
+        /// Longest wait for the server, in milliseconds
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=600_000))]
+        timeout: Option<u64>,
         /// Print one JSON document
         #[arg(long)]
         json: bool,
@@ -285,8 +313,28 @@ pub fn run(sub: CodeCommand, env: &Env) -> Result<String, String> {
         CodeCommand::Refs {
             target,
             limit,
+            timeout,
             json,
-        } => render_refs(env, &target, limit as usize, json),
+        } if semantic::looks_like_position(&target) => semantic_render::refs(
+            &semantic_render::Request {
+                env,
+                spec: &target,
+                timeout_ms: timeout,
+                json,
+            },
+            limit as usize,
+        ),
+        CodeCommand::Refs {
+            target,
+            limit,
+            json,
+            ..
+        } => render_refs(env, &target, limit as usize, json, None),
+        CodeCommand::Diagnostics {
+            path,
+            timeout,
+            json,
+        } => semantic_render::diagnostics(env, path.as_deref(), timeout, json),
         CodeCommand::Definition {
             target,
             timeout,
@@ -549,12 +597,23 @@ fn visible_block(text: &str) -> String {
     text.split('\n').map(visible).collect::<Vec<_>>().join("\n")
 }
 
-fn render_refs(env: &Env, target: &str, limit: usize, json: bool) -> Result<String, String> {
+/// Name candidates for `target`. `lsp` says why they stand in for resolved
+/// references, when they do.
+pub(crate) fn render_refs(
+    env: &Env,
+    target: &str,
+    limit: usize,
+    json: bool,
+    lsp: Option<(LspInfo, String)>,
+) -> Result<String, String> {
     let mut opts = super::refs::RefsOptions::new(target);
     opts.limit = limit;
     let out = super::find_refs(&env.cwd, &opts)?;
     let state = status::state_of(&out.drift);
     let mut warnings = Vec::new();
+    if let Some((_, reason)) = &lsp {
+        warnings.push(reason.clone());
+    }
     if state == IndexState::Stale {
         warnings.push(status::stale_warning(&out.drift));
     }
@@ -589,6 +648,7 @@ fn render_refs(env: &Env, target: &str, limit: usize, json: bool) -> Result<Stri
         envelope.truncated = out.result.truncated;
         envelope.omitted = out.result.omitted;
         envelope.warnings = warnings;
+        envelope.lsp = lsp.map(|(info, _)| info);
         envelope.stats = Some(json!({"files_scanned": out.result.files_scanned}));
         return Ok(envelope.to_json());
     }

@@ -71,6 +71,25 @@ pub fn status(cwd: &Path) -> Result<StatusOutcome, String> {
     }
 }
 
+/// Files added or changed since the last index, by the quick check. Fails
+/// when there is no index to compare with.
+pub fn changed_files(cwd: &Path) -> Result<Vec<String>, String> {
+    let root = location::repo_root(cwd)?;
+    let index_path = location::index_path()?;
+    let conn = match db::open_index(&index_path, db::OpenMode::Query) {
+        Err(db::DbError::Missing) => {
+            return Err(format!(
+                "no index yet; pass a path or run `{}`",
+                host::command("index")
+            ))
+        }
+        Err(e) => return Err(e.to_string()),
+        Ok(conn) => conn,
+    };
+    let drift = status::quick_check(&conn, &root)?;
+    Ok(drift.added.into_iter().chain(drift.changed).collect())
+}
+
 /// A search answer plus the freshness of the index it came from.
 pub struct SearchOutcome {
     pub index_path: PathBuf,

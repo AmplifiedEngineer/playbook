@@ -194,6 +194,7 @@ pub(crate) const META: &[Meta] = &[
     free("code").for_agents(),
     ro("code context"),
     ro("code definition"),
+    ro("code diagnostics"),
     ro("code hover"),
     free("code index"),
     free("code lsp"),

@@ -239,7 +239,7 @@ Index and search the repo's source code
 
 The index is a cache kept under the playbook state directory for this worktree. Nothing is written inside the repo.
 
-Subcommands: `context`, `definition`, `hover`, `index`, `lsp`, `outline`, `read`, `refs`, `search`, `status`, `symbol`
+Subcommands: `context`, `definition`, `diagnostics`, `hover`, `index`, `lsp`, `outline`, `read`, `refs`, `search`, `status`, `symbol`
 
 ### `playbook code context`
 
@@ -262,6 +262,18 @@ Takes `<path>:<line>:<column>`, with the column counted in characters from 1. A 
 Example: `playbook code definition src/app.ts:12:5`
 
 - `<TARGET>`: Position, as `<path>:<line>:<column>`
+- `--timeout <TIMEOUT>`: Longest wait for the server, in milliseconds
+- `--json`: Print one JSON document
+
+### `playbook code diagnostics`
+
+Show compile and type errors from a language server
+
+Without a path, checks the files that changed since the last index, up to 20. With one, checks that file. A server reports as it indexes, so a quiet answer on a big project may mean it is not done. At most 200 problems are shown. Without a server the list is empty and the reason is reported.
+
+Example: `playbook code diagnostics src/app.ts`
+
+- `<PATH>`: File to check
 - `--timeout <TIMEOUT>`: Longest wait for the server, in milliseconds
 - `--json`: Print one JSON document
 
@@ -347,10 +359,13 @@ List syntax references to a name
 
 Finds identifiers in code that spell the name, including declarations and imports, and skips comments and strings. Every result is a candidate: nothing checks scope or types, so unrelated names that share a spelling also appear.
 
+Given `<path>:<line>:<column>` instead of a name, a language server resolves the symbol at that position and lists its real references, marked resolved. If no server can answer, the name candidates are listed and the reason is reported.
+
 Example: `playbook code refs processPayment`
 
-- `<TARGET>`: Name to look for. A dotted or scoped name uses its last part
+- `<TARGET>`: Name to look for, or a position as `<path>:<line>:<column>`. A dotted or scoped name uses its last part
 - `--limit <LIMIT>`: Most results to show, from 1 to 200
+- `--timeout <TIMEOUT>`: Longest wait for the server, in milliseconds, for a position
 - `--json`: Print one JSON document
 
 ### `playbook code search`

@@ -9,7 +9,7 @@ use crate::host;
 use crate::lsp::discover;
 use crate::lsp::session::{Options, ProcessLauncher};
 use crate::output::{Envelope, IndexState, LspInfo};
-use crate::queries::{self, Answered, Ctx, Hover, Locations, Outcome};
+use crate::queries::{self, Answered, Ctx, Diagnostics, Hover, Locations, Outcome};
 use crate::search::SearchOptions;
 use crate::semantic::{identifier_at, parse_target, Fallback, Target};
 use crate::{location, status};
@@ -85,6 +85,226 @@ pub fn hover(request: &Request<'_>) -> Result<String, String> {
         Outcome::Interrupted => return Err("interrupted".to_string()),
     };
     Ok(render_hover(request, &hover, info, warnings, index))
+}
+
+/// `refs` at a position: resolved references from a server, or name
+/// candidates and the reason when none can answer.
+pub fn refs(request: &Request<'_>, limit: usize) -> Result<String, String> {
+    let (root, target) = resolve_target(request)?;
+    let outcome = with_production_ctx(request, &root, |ctx| queries::references(ctx, &target))?;
+    match outcome {
+        Outcome::Answered(Answered {
+            value,
+            server,
+            warnings,
+        }) => Ok(render_resolved_refs(
+            request,
+            &value,
+            ok_info(server),
+            warnings,
+            limit,
+        )),
+        Outcome::Fallback { why, reason } => {
+            let info = fallback_info(why, &reason);
+            let name = std::fs::read_to_string(&target.path)
+                .ok()
+                .and_then(|text| identifier_at(&text, target.line, target.column));
+            match name {
+                Some(name) => Ok(crate::cli::render_refs(
+                    request.env,
+                    &name,
+                    limit,
+                    request.json,
+                    Some((info.clone(), reason.clone())),
+                )
+                .unwrap_or_else(|why| render_empty(request, "refs", info, vec![reason, why]))),
+                None => Ok(render_empty(
+                    request,
+                    "refs",
+                    info,
+                    vec![reason, "no identifier at that position".to_string()],
+                )),
+            }
+        }
+        Outcome::Interrupted => Err("interrupted".to_string()),
+    }
+}
+
+fn render_resolved_refs(
+    request: &Request<'_>,
+    found: &Locations,
+    info: LspInfo,
+    warnings: Vec<String>,
+    limit: usize,
+) -> String {
+    let shown = &found.items[..found.items.len().min(limit)];
+    let omitted = found.items.len() - shown.len();
+    if request.json {
+        let rows: Vec<Value> = shown
+            .iter()
+            .map(|l| {
+                json!({
+                    "path": l.path,
+                    "line": l.line,
+                    "column": l.column,
+                    "end_line": l.end_line,
+                    "end_column": l.end_column,
+                    "confidence": "resolved",
+                })
+            })
+            .collect();
+        let mut envelope = envelope(
+            "refs",
+            Value::Array(rows),
+            info,
+            warnings,
+            &Index::default(),
+        );
+        envelope.truncated = omitted > 0;
+        envelope.omitted = omitted;
+        envelope.stats = Some(json!({"dropped": found.dropped}));
+        return envelope.to_json();
+    }
+    print_warnings(&warnings);
+    let mut text: String = shown
+        .iter()
+        .map(|l| format!("{}:{}:{}  (resolved)\n", l.path, l.line, l.column))
+        .collect();
+    if omitted > 0 {
+        text.push_str(&format!("{omitted} more results not shown\n"));
+    }
+    if shown.is_empty() {
+        text.push_str("no references\n");
+    }
+    text
+}
+
+/// `diagnostics` for one file, or for the files changed since the last index.
+pub fn diagnostics(
+    env: &crate::cli::Env,
+    path: Option<&str>,
+    timeout_ms: Option<u64>,
+    json: bool,
+) -> Result<String, String> {
+    let request = Request {
+        env,
+        spec: path.unwrap_or(""),
+        timeout_ms,
+        json,
+    };
+    let root = location::repo_root(&env.cwd)?;
+    let files: Vec<PathBuf> = match path {
+        Some(path) => vec![parse_target(&format!("{path}:1:1"), &env.cwd, &root)?.path],
+        None => crate::changed_files(&env.cwd)?
+            .into_iter()
+            .map(|relative| root.join(relative))
+            .filter(|file| file.is_file())
+            .collect(),
+    };
+    if files.is_empty() {
+        return Ok(render_nothing_to_check(&request));
+    }
+    let outcome = with_production_ctx(&request, &root, |ctx| queries::diagnostics(ctx, &files))?;
+    match outcome {
+        Outcome::Answered(Answered {
+            value,
+            server,
+            warnings,
+        }) => Ok(render_diagnostics(
+            &request,
+            &value,
+            ok_info(server),
+            warnings,
+        )),
+        Outcome::Fallback { why, reason } => Ok(render_empty(
+            &request,
+            "diagnostics",
+            fallback_info(why, &reason),
+            vec![reason],
+        )),
+        Outcome::Interrupted => Err("interrupted".to_string()),
+    }
+}
+
+fn render_nothing_to_check(request: &Request<'_>) -> String {
+    if request.json {
+        return envelope(
+            "diagnostics",
+            json!([]),
+            ok_info("none"),
+            vec!["no changed files to check".to_string()],
+            &Index::default(),
+        )
+        .to_json();
+    }
+    "no changed files to check\n".to_string()
+}
+
+fn render_diagnostics(
+    request: &Request<'_>,
+    found: &Diagnostics,
+    info: LspInfo,
+    warnings: Vec<String>,
+) -> String {
+    if request.json {
+        let rows: Vec<Value> = found
+            .items
+            .iter()
+            .map(|d| {
+                json!({
+                    "path": d.path,
+                    "line": d.line,
+                    "column": d.column,
+                    "severity": d.severity,
+                    "message": d.message,
+                    "source": d.source,
+                    "code": d.code,
+                })
+            })
+            .collect();
+        let mut envelope = envelope(
+            "diagnostics",
+            Value::Array(rows),
+            info,
+            warnings,
+            &Index::default(),
+        );
+        envelope.truncated = found.truncated;
+        envelope.stats = Some(json!({"files_opened": found.files_opened}));
+        return envelope.to_json();
+    }
+    print_warnings(&warnings);
+    let mut text: String = found
+        .items
+        .iter()
+        .map(|d| {
+            format!(
+                "{}:{}:{}  {}  {}\n",
+                d.path, d.line, d.column, d.severity, d.message
+            )
+        })
+        .collect();
+    if found.truncated {
+        text.push_str("more problems exist than are shown\n");
+    }
+    if found.items.is_empty() {
+        text.push_str("no problems reported\n");
+    }
+    text
+}
+
+/// An answer with no rows, for a command that has no index equivalent.
+fn render_empty(
+    request: &Request<'_>,
+    command: &'static str,
+    info: LspInfo,
+    warnings: Vec<String>,
+) -> String {
+    if request.json {
+        return envelope(command, json!([]), info, warnings, &Index::default()).to_json();
+    }
+    print_warnings(&warnings);
+    "no results\n".to_string()
 }
 
 fn resolve_target(request: &Request<'_>) -> Result<(PathBuf, Target), String> {

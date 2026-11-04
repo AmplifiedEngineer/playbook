@@ -65,6 +65,15 @@ pub fn parse_target(spec: &str, cwd: &Path, root: &Path) -> Result<Target, Strin
     })
 }
 
+/// Whether `target` has the `<path>:<line>:<column>` shape rather than a name.
+pub fn looks_like_position(target: &str) -> bool {
+    let mut parts = target.rsplitn(3, ':');
+    let number = |part: Option<&str>| {
+        part.is_some_and(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    };
+    number(parts.next()) && number(parts.next()) && parts.next().is_some_and(|p| !p.is_empty())
+}
+
 /// A zero-based LSP position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Position {
@@ -287,6 +296,21 @@ mod tests {
         let root = scratch("sem-missing");
         let err = parse_target("nope.ts:1:1", &root, &root).unwrap_err();
         assert!(err.contains("no such file"), "{err}");
+    }
+
+    #[test]
+    fn only_path_line_column_shapes_count_as_positions() {
+        for (text, expected) in [
+            ("src/a.ts:12:5", true),
+            ("C:/repo/a.ts:1:1", true),
+            ("processPayment", false),
+            ("Payment::process", false),
+            ("a.ts:12", false),
+            ("a.ts:x:5", false),
+            (":1:2", false),
+        ] {
+            assert_eq!(looks_like_position(text), expected, "{text}");
+        }
     }
 
     #[test]

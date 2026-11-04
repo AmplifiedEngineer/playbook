@@ -12,6 +12,7 @@ use crate::semantic::{lsp_position, Fallback, Target};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 /// Hover text longer than this many bytes is cut.
 pub const HOVER_LIMIT: usize = 8 * 1024;
@@ -68,17 +69,8 @@ pub fn definition(ctx: &Ctx<'_>, target: &Target) -> Result<Outcome<Locations>, 
         target,
         "definitionProvider",
         "textDocument/definition",
-        |value, encoding, root| {
-            let found = locations(value, root, encoding);
-            let mut warnings = Vec::new();
-            if found.dropped > 0 {
-                warnings.push(format!(
-                    "dropped {} location(s) that are not files inside the repo",
-                    found.dropped
-                ));
-            }
-            (found, warnings)
-        },
+        json!({}),
+        parse_locations,
     )
 }
 
@@ -88,7 +80,20 @@ pub fn hover(ctx: &Ctx<'_>, target: &Target) -> Result<Outcome<Hover>, String> {
         target,
         "hoverProvider",
         "textDocument/hover",
+        json!({}),
         |value, _, _| (hover_from(value), Vec::new()),
+    )
+}
+
+/// Resolved references to the symbol at `target`, declaration included.
+pub fn references(ctx: &Ctx<'_>, target: &Target) -> Result<Outcome<Locations>, String> {
+    ask(
+        ctx,
+        target,
+        "referencesProvider",
+        "textDocument/references",
+        json!({"context": {"includeDeclaration": true}}),
+        parse_locations,
     )
 }
 
@@ -100,6 +105,7 @@ fn ask<T>(
     target: &Target,
     capability: &str,
     method: &str,
+    extra: Value,
     parse: impl FnOnce(&Value, Encoding, &Path) -> (T, Vec<String>),
 ) -> Result<Outcome<T>, String> {
     let text = std::fs::read_to_string(&target.path)
@@ -124,10 +130,13 @@ fn ask<T>(
     }
     let encoding = session.client().encoding();
     let position = lsp_position(&opened.text, target, encoding)?;
-    let params = json!({
+    let mut params = json!({
         "textDocument": {"uri": opened.uri},
         "position": {"line": position.line, "character": position.character},
     });
+    if let (Some(base), Some(more)) = (params.as_object_mut(), extra.as_object()) {
+        base.extend(more.clone());
+    }
     match session.client().request(method, params) {
         Ok(value) => {
             let (value, warnings) = parse(&value, encoding, ctx.root);
@@ -143,11 +152,158 @@ fn ask<T>(
     }
 }
 
+/// Diagnostics shown at most.
+pub const DIAGNOSTICS_LIMIT: usize = 200;
+/// Files opened for diagnostics at most.
+pub const DIAGNOSTICS_FILES: usize = 20;
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Diagnostic {
+    pub path: String,
+    pub line: usize,
+    pub column: usize,
+    pub severity: &'static str,
+    pub message: String,
+    pub source: Option<String>,
+    pub code: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct Diagnostics {
+    pub items: Vec<Diagnostic>,
+    pub truncated: bool,
+    pub files_opened: usize,
+}
+
+/// Opens `files` (all handled by the server of the first), then collects
+/// `publishDiagnostics` until every opened file has reported or the server's
+/// request timeout passes. At most [`DIAGNOSTICS_FILES`] are opened and
+/// [`DIAGNOSTICS_LIMIT`] diagnostics returned.
+pub fn diagnostics(ctx: &Ctx<'_>, files: &[PathBuf]) -> Result<Outcome<Diagnostics>, String> {
+    let Some(first) = files.first() else {
+        return Err("no files to check".to_string());
+    };
+    let fallback = |why: Fallback, reason: String| Ok(Outcome::Fallback { why, reason });
+    let mut session = match Session::for_file(ctx.root, first, ctx.options, ctx.launcher) {
+        Ok(session) => session,
+        Err(Unavailable::Failed(ClientError::Interrupted)) => return Ok(Outcome::Interrupted),
+        Err(why) => return fallback(Fallback::from_unavailable(&why), why.to_string()),
+    };
+    let server = session.spec();
+    let mut warnings = Vec::new();
+    let mut waiting: HashMap<String, PathBuf> = HashMap::new();
+    let mut texts: HashMap<PathBuf, String> = HashMap::new();
+    let mut opened = 0;
+    for file in files {
+        let extension = file.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if !server.extensions.contains(&extension) {
+            continue;
+        }
+        if opened == DIAGNOSTICS_FILES {
+            warnings.push(format!("checked only the first {DIAGNOSTICS_FILES} files"));
+            break;
+        }
+        match session.open(file) {
+            Ok(doc) => {
+                waiting.insert(doc.uri, file.clone());
+                texts.insert(file.clone(), doc.text);
+                opened += 1;
+            }
+            Err(why) => return fallback(Fallback::from_unavailable(&why), why.to_string()),
+        }
+    }
+    let truncated_files = !warnings.is_empty();
+    let deadline = Instant::now() + ctx.options.timeout.unwrap_or(server.request_timeout);
+    let encoding = session.client().encoding();
+    let mut result = Diagnostics {
+        files_opened: opened,
+        ..Diagnostics::default()
+    };
+    while !waiting.is_empty() {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match session.client().next_notification(left) {
+            Ok(Some(note)) => {
+                if note["method"] != "textDocument/publishDiagnostics" {
+                    continue;
+                }
+                let uri = note["params"]["uri"].as_str().unwrap_or("");
+                let Some(path) = waiting.remove(uri) else {
+                    continue;
+                };
+                let text = texts.get(&path).map_or("", String::as_str);
+                let relative = relative(&path, ctx.root);
+                for raw in note["params"]["diagnostics"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                {
+                    if result.items.len() == DIAGNOSTICS_LIMIT {
+                        result.truncated = true;
+                        break;
+                    }
+                    result
+                        .items
+                        .push(diagnostic_from(raw, &relative, text, encoding));
+                }
+            }
+            Ok(None) => break,
+            Err(ClientError::Interrupted) => return Ok(Outcome::Interrupted),
+            Err(e) => return fallback(Fallback::from_client_error(&e), e.to_string()),
+        }
+    }
+    if !waiting.is_empty() && result.items.is_empty() {
+        warnings.push("the server reported nothing yet; it may still be indexing".to_string());
+    }
+    result.truncated |= truncated_files;
+    let id = server.id;
+    session.finish();
+    Ok(Outcome::Answered(Answered {
+        value: result,
+        server: id,
+        warnings,
+    }))
+}
+
+fn diagnostic_from(raw: &Value, path: &str, text: &str, encoding: Encoding) -> Diagnostic {
+    let (line, column) = to_line_column(text, &raw["range"]["start"], encoding);
+    let severity = match raw["severity"].as_u64() {
+        Some(1) => "error",
+        Some(2) => "warning",
+        Some(3) => "information",
+        _ => "hint",
+    };
+    Diagnostic {
+        path: path.to_string(),
+        line,
+        column,
+        severity,
+        message: raw["message"].as_str().unwrap_or("").to_string(),
+        source: raw["source"].as_str().map(str::to_string),
+        code: match &raw["code"] {
+            Value::String(code) => Some(code.clone()),
+            Value::Number(code) => Some(code.to_string()),
+            _ => None,
+        },
+    }
+}
+
 fn has_capability(capabilities: &Value, name: &str) -> bool {
     !matches!(
         capabilities.get(name),
         None | Some(Value::Null | Value::Bool(false))
     )
+}
+
+fn parse_locations(value: &Value, encoding: Encoding, root: &Path) -> (Locations, Vec<String>) {
+    let found = locations(value, root, encoding);
+    let mut warnings = Vec::new();
+    if found.dropped > 0 {
+        warnings.push(format!(
+            "dropped {} location(s) that are not files inside the repo",
+            found.dropped
+        ));
+    }
+    (found, warnings)
 }
 
 /// Reads a `Location`, a `LocationLink` or an array of either, keeping the
@@ -548,5 +704,167 @@ mod tests {
         // Assert
         assert_eq!((got.items[0].line, got.items[0].column), (1, 3));
         assert_eq!(got.items[0].end_column, 4);
+    }
+
+    /// Writes `count` TypeScript files into the repo and returns their paths.
+    fn extra_files(s: &Setup, count: usize) -> Vec<PathBuf> {
+        (0..count)
+            .map(|i| {
+                let path = s.root.join(format!("f{i}.ts"));
+                std::fs::write(&path, "export const v = 1;\n").unwrap();
+                path
+            })
+            .collect()
+    }
+
+    /// Runs `diagnostics` over `files` against a server that reads one
+    /// `didOpen` per opened file, then sends `notes`.
+    fn run_diagnostics(
+        s: &Setup,
+        files: &[PathBuf],
+        opened: usize,
+        notes: Vec<Step>,
+    ) -> (Outcome<Diagnostics>, Vec<Value>) {
+        let (client_side, server) = pipe_pair().unwrap();
+        let mut steps = initialize_script(json!({}));
+        steps.extend((0..opened).map(|_| Step::Expect("textDocument/didOpen")));
+        steps.extend(notes);
+        steps.extend(clean_exit());
+        let fake = Fake::spawn(server, steps);
+        let launcher = FakeLauncher::new(Some(client_side));
+        let settings = trusted();
+        let dirs = [s.bin.clone()];
+        let mut opts = options(s, &settings, &dirs);
+        opts.timeout = Some(Duration::from_millis(100));
+        let ctx = Ctx {
+            root: &s.root,
+            options: &opts,
+            launcher: &launcher,
+        };
+        let got = diagnostics(&ctx, files).unwrap();
+        (got, fake.finish())
+    }
+
+    fn publish(file: &Path, count: usize) -> Step {
+        let items: Vec<Value> = (0..count)
+            .map(|i| {
+                json!({"range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}},
+                       "severity": 1, "message": format!("problem {i}"), "source": "ts", "code": 2304})
+            })
+            .collect();
+        Step::Notify {
+            method: "textDocument/publishDiagnostics",
+            params: json!({"uri": file_uri(file), "diagnostics": items}),
+        }
+    }
+
+    #[test]
+    fn diagnostics_are_returned_in_full_up_to_200_and_cut_above() {
+        for (count, truncated) in [(199usize, false), (200, false), (201, true)] {
+            // Arrange
+            let s = setup(&format!("q-diag-{count}"));
+
+            // Act
+            let (got, _) = run_diagnostics(&s, &[s.file.clone()], 1, vec![publish(&s.file, count)]);
+
+            // Assert
+            let Outcome::Answered(answered) = got else {
+                panic!("expected an answer");
+            };
+            assert_eq!(
+                answered.value.items.len(),
+                count.min(DIAGNOSTICS_LIMIT),
+                "{count}"
+            );
+            assert_eq!(answered.value.truncated, truncated, "{count}");
+            let first = &answered.value.items[0];
+            assert_eq!(
+                (first.path.as_str(), first.severity, first.code.as_deref()),
+                ("a.ts", "error", Some("2304"))
+            );
+        }
+    }
+
+    #[test]
+    fn no_report_before_the_deadline_returns_an_empty_list_and_a_warning_after_three_opens() {
+        // Arrange
+        let s = setup("q-diag-quiet");
+        let mut files = vec![s.file.clone()];
+        files.extend(extra_files(&s, 2));
+
+        // Act
+        let (got, log) = run_diagnostics(&s, &files, 3, vec![]);
+
+        // Assert
+        let Outcome::Answered(answered) = got else {
+            panic!("expected an answer");
+        };
+        assert!(answered.value.items.is_empty());
+        assert!(
+            answered.warnings[0].contains("may still be indexing"),
+            "{:?}",
+            answered.warnings
+        );
+        let opens = log
+            .iter()
+            .filter(|m| m["method"] == "textDocument/didOpen")
+            .count();
+        assert_eq!(opens, 3);
+    }
+
+    #[test]
+    fn nineteen_twenty_and_twenty_one_files_open_nineteen_twenty_and_twenty() {
+        for (count, opened, truncated) in
+            [(19usize, 19usize, false), (20, 20, false), (21, 20, true)]
+        {
+            // Arrange
+            let s = setup(&format!("q-files-{count}"));
+            let files = extra_files(&s, count);
+
+            // Act
+            let (got, log) = run_diagnostics(&s, &files, opened, vec![]);
+
+            // Assert
+            let Outcome::Answered(answered) = got else {
+                panic!("expected an answer");
+            };
+            assert_eq!(answered.value.files_opened, opened, "{count}");
+            assert_eq!(answered.value.truncated, truncated, "{count}");
+            let opens = log
+                .iter()
+                .filter(|m| m["method"] == "textDocument/didOpen")
+                .count();
+            assert_eq!(opens, opened, "{count}");
+        }
+    }
+
+    #[test]
+    fn a_server_without_references_support_falls_back_with_capability_missing() {
+        // Arrange
+        let s = setup("q-refs-nocap");
+        let (client_side, server) = pipe_pair().unwrap();
+        let fake = Fake::spawn(server, script(json!({}), vec![]));
+        let launcher = FakeLauncher::new(Some(client_side));
+        let settings = trusted();
+        let dirs = [s.bin.clone()];
+        let opts = options(&s, &settings, &dirs);
+        let ctx = Ctx {
+            root: &s.root,
+            options: &opts,
+            launcher: &launcher,
+        };
+
+        // Act
+        let got = references(&ctx, &target(&s, 1, 14)).unwrap();
+        fake.finish();
+
+        // Assert
+        assert!(matches!(
+            got,
+            Outcome::Fallback {
+                why: Fallback::CapabilityMissing,
+                ..
+            }
+        ));
     }
 }

@@ -377,7 +377,7 @@ arg playbook gate check id=command long=- short=- value_names=COMMAND possible=-
 arg playbook gate check id=phases long=- short=- value_names=PHASES possible=- defaults=- aliases=- required=false hidden=false global=false action=Append num_args=1.. parser=alloc::string::String conflicts=-
 arg playbook gate check id=source long=source short=- value_names=SOURCE possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 arg playbook gate check id=json long=json short=- value_names=JSON possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
-command playbook code subcommands=index,status,search,symbol,outline,read,refs,context,definition,hover,lsp aliases=- groups=Code[-]
+command playbook code subcommands=index,status,search,symbol,outline,read,refs,context,diagnostics,definition,hover,lsp aliases=- groups=Code[-]
 command playbook code index subcommands=- aliases=- groups=Index[json,rebuild]
 arg playbook code index id=json long=json short=- value_names=JSON possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
 arg playbook code index id=rebuild long=rebuild short=- value_names=REBUILD possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
@@ -404,14 +404,19 @@ command playbook code read subcommands=- aliases=- groups=Read[path,lines,json]
 arg playbook code read id=path long=- short=- value_names=PATH possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 arg playbook code read id=lines long=- short=- value_names=LINES possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=(usize, usize) conflicts=-
 arg playbook code read id=json long=json short=- value_names=JSON possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
-command playbook code refs subcommands=- aliases=- groups=Refs[target,limit,json]
+command playbook code refs subcommands=- aliases=- groups=Refs[target,limit,timeout,json]
 arg playbook code refs id=target long=- short=- value_names=TARGET possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 arg playbook code refs id=limit long=limit short=- value_names=LIMIT possible=- defaults=50 aliases=- required=false hidden=false global=false action=Set num_args=- parser=u32 conflicts=-
+arg playbook code refs id=timeout long=timeout short=- value_names=TIMEOUT possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=u64 conflicts=-
 arg playbook code refs id=json long=json short=- value_names=JSON possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
 command playbook code context subcommands=- aliases=- groups=Context[query,max_tokens,json]
 arg playbook code context id=query long=- short=- value_names=QUERY possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 arg playbook code context id=max_tokens long=max-tokens short=- value_names=MAX_TOKENS possible=- defaults=4000 aliases=- required=false hidden=false global=false action=Set num_args=- parser=u32 conflicts=-
 arg playbook code context id=json long=json short=- value_names=JSON possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
+command playbook code diagnostics subcommands=- aliases=- groups=Diagnostics[path,timeout,json]
+arg playbook code diagnostics id=path long=- short=- value_names=PATH possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
+arg playbook code diagnostics id=timeout long=timeout short=- value_names=TIMEOUT possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=u64 conflicts=-
+arg playbook code diagnostics id=json long=json short=- value_names=JSON possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
 command playbook code definition subcommands=- aliases=- groups=Definition[target,timeout,json]
 arg playbook code definition id=target long=- short=- value_names=TARGET possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 arg playbook code definition id=timeout long=timeout short=- value_names=TIMEOUT possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=u64 conflicts=-

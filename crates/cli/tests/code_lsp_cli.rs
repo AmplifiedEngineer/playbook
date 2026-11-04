@@ -345,6 +345,11 @@ mod semantic {
 
     #[test]
     fn every_failure_state_falls_back_with_exit_0_json_and_its_own_lsp_state() {
+        let commands = [
+            ("definition", "definitionProvider"),
+            ("hover", "hoverProvider"),
+            ("refs", "referencesProvider"),
+        ];
         let rows = [
             "untrusted",
             "busy",
@@ -354,52 +359,161 @@ mod semantic {
             "server_crashed",
             "error",
         ];
-        for state in rows {
+        for (command, capability) in commands {
+            for state in rows {
+                // Arrange
+                let fx = Fixture::new(&format!("matrix-{command}-{state}"));
+                fx.source();
+                let mut extra: Vec<&str> = Vec::new();
+                let mut _held = None;
+                if state != "untrusted" {
+                    fx.trust();
+                }
+                let capable = initialize_reply(&format!(r#"{{"{capability}":true}}"#));
+                match state {
+                    "busy" => _held = Some(hold_workspace_lock(&fx)),
+                    "capability_missing" => {
+                        fx.scripted_server(&initialize_reply("{}"), "/bin/cat >/dev/null", None);
+                    }
+                    "timeout" => {
+                        fx.scripted_server(&capable, "exec /bin/sleep 300", None);
+                        extra = vec!["--timeout", "300"];
+                    }
+                    "server_crashed" => fx.scripted_server(&capable, "exit 0", None),
+                    "error" => {
+                        let failure = frame(
+                            r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"boom"}}"#,
+                        );
+                        let frames = capable + &failure + &shutdown_reply();
+                        fx.scripted_server(&frames, "/bin/cat >/dev/null", None);
+                    }
+                    _ => {}
+                }
+                let mut args = vec!["code", command, "a.ts:1:14", "--json"];
+                args.extend(extra);
+
+                // Act
+                let out = fx.playbook(&args);
+
+                // Assert
+                let case = format!("{command} {state}");
+                assert_eq!(
+                    out.status.code(),
+                    Some(0),
+                    "{case}: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                let lsp = lsp_of(&out);
+                assert_eq!(lsp["state"], state, "{case}");
+                assert_eq!(lsp["source"], "tree_sitter_fallback", "{case}");
+            }
+        }
+    }
+
+    #[test]
+    fn diagnostics_with_no_usable_server_exit_0_with_an_empty_list_and_the_state() {
+        for state in ["untrusted", "server_missing", "server_crashed"] {
             // Arrange
-            let fx = Fixture::new(&format!("matrix-{state}"));
+            let fx = Fixture::new(&format!("diag-{state}"));
             fx.source();
-            let mut extra: Vec<&str> = Vec::new();
-            let mut _held = None;
             if state != "untrusted" {
                 fx.trust();
             }
-            let capable = initialize_reply(r#"{"definitionProvider":true}"#);
-            match state {
-                "busy" => _held = Some(hold_workspace_lock(&fx)),
-                "capability_missing" => {
-                    fx.scripted_server(&initialize_reply("{}"), "/bin/cat >/dev/null", None);
-                }
-                "timeout" => {
-                    fx.scripted_server(&capable, "exec /bin/sleep 300", None);
-                    extra = vec!["--timeout", "300"];
-                }
-                "server_crashed" => fx.scripted_server(&capable, "exit 0", None),
-                "error" => {
-                    let failure = frame(
-                        r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"boom"}}"#,
-                    );
-                    let frames = capable + &failure + &shutdown_reply();
-                    fx.scripted_server(&frames, "/bin/cat >/dev/null", None);
-                }
-                _ => {}
+            if state == "server_crashed" {
+                fx.scripted_server(&initialize_reply("{}"), "exit 0", None);
             }
-            let mut args = vec!["code", "definition", "a.ts:1:14", "--json"];
-            args.extend(extra);
 
             // Act
-            let out = fx.playbook(&args);
+            let out = fx.playbook(&["code", "diagnostics", "a.ts", "--json"]);
 
             // Assert
-            assert_eq!(
-                out.status.code(),
-                Some(0),
-                "{state}: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
-            let lsp = lsp_of(&out);
-            assert_eq!(lsp["state"], state, "{state}");
-            assert_eq!(lsp["source"], "tree_sitter_fallback", "{state}");
+            assert_eq!(out.status.code(), Some(0), "{state}");
+            let doc = json_of(&out);
+            assert_eq!(doc["command"], "diagnostics");
+            assert_eq!(doc["results"], serde_json::json!([]), "{state}");
+            assert_eq!(doc["lsp"]["state"], state);
         }
+    }
+
+    #[test]
+    fn refs_at_a_position_lists_the_references_a_scripted_server_resolves() {
+        // Arrange
+        let fx = Fixture::new("refs-ok");
+        let file = fx.source();
+        let uri = format!("file://{}", file.display());
+        let at = |start: u32, end: u32| {
+            format!(
+                r#"{{"uri":"{uri}","range":{{"start":{{"line":0,"character":{start}}},"end":{{"line":0,"character":{end}}}}}}}"#
+            )
+        };
+        let answer = frame(&format!(
+            r#"{{"jsonrpc":"2.0","id":2,"result":[{},{}]}}"#,
+            at(13, 19),
+            at(0, 6)
+        ));
+        let frames =
+            initialize_reply(r#"{"referencesProvider":true}"#) + &answer + &shutdown_reply();
+        fx.scripted_server(&frames, "/bin/cat >/dev/null", None);
+        fx.trust();
+
+        // Act
+        let out = fx.playbook(&["code", "refs", "a.ts:1:14", "--json"]);
+
+        // Assert
+        let doc = json_of(&out);
+        assert_eq!(doc["lsp"]["state"], "ok");
+        let results = doc["results"].as_array().unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(
+            results.iter().all(|r| r["confidence"] == "resolved"),
+            "{results:?}"
+        );
+    }
+
+    #[test]
+    fn hover_and_diagnostics_print_json_from_a_scripted_server() {
+        // Arrange
+        let fx = Fixture::new("hover-diag-ok");
+        let file = fx.source();
+        let hover = frame(
+            r#"{"jsonrpc":"2.0","id":2,"result":{"contents":{"kind":"markdown","value":"const answer: 42"}}}"#,
+        );
+        fx.scripted_server(
+            &(initialize_reply(r#"{"hoverProvider":true}"#) + &hover + &shutdown_reply()),
+            "/bin/cat >/dev/null",
+            None,
+        );
+        fx.trust();
+
+        // Act
+        let hovered = fx.playbook(&["code", "hover", "a.ts:1:14", "--json"]);
+
+        // Assert
+        let doc = json_of(&hovered);
+        assert_eq!(doc["lsp"]["state"], "ok");
+        assert_eq!(doc["results"]["text"], "const answer: 42");
+
+        // Arrange
+        let uri = format!("file://{}", file.display());
+        let published = frame(&format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{{"uri":"{uri}","diagnostics":[{{"range":{{"start":{{"line":0,"character":13}},"end":{{"line":0,"character":19}}}},"severity":1,"message":"bad","source":"ts","code":2304}}]}}}}"#
+        ));
+        let closing = frame(r#"{"jsonrpc":"2.0","id":2,"result":null}"#);
+        fx.scripted_server(
+            &(initialize_reply("{}") + &published + &closing),
+            "/bin/cat >/dev/null",
+            None,
+        );
+
+        // Act
+        let checked = fx.playbook(&["code", "diagnostics", "a.ts", "--json"]);
+
+        // Assert
+        let doc = json_of(&checked);
+        assert_eq!(doc["lsp"]["state"], "ok", "{doc}");
+        assert_eq!(doc["results"][0]["severity"], "error");
+        assert_eq!(doc["results"][0]["message"], "bad");
+        assert_eq!(doc["results"][0]["line"], 1);
     }
 
     #[test]
