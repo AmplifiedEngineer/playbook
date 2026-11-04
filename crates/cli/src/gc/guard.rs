@@ -63,7 +63,7 @@ fn refuse(why: impl Into<String>) -> GuardError {
 
 /// Checks that `path` may be removed under `roots`. Returns `Ok(false)` when
 /// the path does not exist, because there is nothing to remove.
-fn validate(roots: &[PathBuf], path: &Path) -> Result<bool, GuardError> {
+pub(super) fn validate(roots: &[PathBuf], path: &Path) -> Result<bool, GuardError> {
     if path.components().any(|part| part == Component::ParentDir) {
         return Err(refuse(format!("{} has a parent reference", path.display())));
     }
@@ -188,6 +188,12 @@ pub fn checked_remove_lock(gc_dir: &Path, lock: &Path) -> Result<(), GuardError>
 /// The filesystem calls gc makes, behind a trait so a test can make one fail.
 pub trait FsOps {
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
+    /// Copies a file or folder to `to`, touching the run lock as it goes.
+    fn copy(&self, guard: &RunGuard, from: &Path, to: &Path) -> io::Result<()>;
+    /// Runs after a copy finished and before anything else looks at the source.
+    fn after_copy(&self, _source: &Path) {}
+    /// Appends one line to the tombstone index and syncs it to disk.
+    fn append_index(&self, index: &Path, line: &str) -> io::Result<()>;
     fn remove(&self, guard: &RunGuard, path: &Path) -> Result<(), GuardError>;
 }
 
@@ -207,6 +213,14 @@ impl RealFs {
 impl FsOps for RealFs {
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         fs::rename(from, to)
+    }
+
+    fn copy(&self, guard: &RunGuard, from: &Path, to: &Path) -> io::Result<()> {
+        super::tombstone::copy_tree(guard, from, to)
+    }
+
+    fn append_index(&self, index: &Path, line: &str) -> io::Result<()> {
+        super::index::append_line(index, line)
     }
 
     fn remove(&self, guard: &RunGuard, path: &Path) -> Result<(), GuardError> {
