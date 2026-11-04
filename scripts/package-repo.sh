@@ -68,7 +68,7 @@ release_packages() {
   done < "$sums"
   for f in "$dir"/playbook_*.deb "$dir"/playbook-*.rpm; do
     [ -e "$f" ] || continue
-    grep -Fq " ${f##*/}" "$sums" || fail "${f##*/} is not listed in the SHA256SUMS of release $v"
+    awk -v n="${f##*/}" '{ sub(/^\*/, "", $2); if ($2 == n) found = 1 } END { exit !found }' "$sums" || fail "${f##*/} is not listed in the SHA256SUMS of release $v"
   done
 }
 
@@ -140,14 +140,14 @@ build() {
 
   work="$(mktemp -d)"
   chmod 700 "$work"
-  trap 'rm -rf "$work"' EXIT
+  trap 'gpgconf --kill gpg-agent 2> /dev/null || true; rm -rf "$work"' EXIT
   export GNUPGHOME="$work/gnupg"
   mkdir -m 700 "$GNUPGHOME"
 
   yanked_versions "$yank" > "$work/yanked"
   mkdir "$work/selected"
   SELECTED="$work/selected"
-  for dir in $(find "$root" -mindepth 1 -maxdepth 1 -type d | sort -V -r); do
+  while IFS= read -r dir; do
     v="${dir##*/}"
     semver "$v" || continue
     if grep -Fxq "$v" "$work/yanked"; then
@@ -164,7 +164,7 @@ build() {
     echo "$v" >> "$work/kept"
     [ -n "${NEWEST:-}" ] || NEWEST="$dir"
     n=$((n + 1))
-  done
+  done < <(find "$root" -mindepth 1 -maxdepth 1 -type d | sort -V -r)
   [ "$n" -gt 0 ] || fail "no packaged release found in $root"
 
   printf '%s' "$PACKAGE_SIGNING_KEY" | gpg --batch --quiet --import 2> /dev/null
