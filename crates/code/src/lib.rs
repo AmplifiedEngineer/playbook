@@ -72,6 +72,15 @@ pub fn forget_worktree(data: &Path, slug: &str, worktree: &str) -> Result<(), St
         return Ok(());
     };
     let store = dir.join(format!("store-v{}.sqlite3", db::SCHEMA_VERSION));
+    // A held run lock means that worktree is indexing now, so nothing changes.
+    let lock_path = dir.join(format!("{worktree}.lock"));
+    let held = match std::fs::OpenOptions::new().write(true).open(&lock_path) {
+        Ok(file) => match file.try_lock() {
+            Ok(()) => Some(file),
+            Err(_) => return Ok(()),
+        },
+        Err(_) => None,
+    };
     match db::open_maintenance(&store) {
         Ok(mut conn) => {
             let hooks = db::TxHooks::default();
@@ -89,7 +98,8 @@ pub fn forget_worktree(data: &Path, slug: &str, worktree: &str) -> Result<(), St
         Err(db::DbError::Failed(_)) => return Ok(()),
         Err(e) => return Err(e.to_string()),
     }
-    let _ = std::fs::remove_file(dir.join(format!("{worktree}.lock")));
+    drop(held);
+    let _ = std::fs::remove_file(&lock_path);
     Ok(())
 }
 
@@ -265,6 +275,7 @@ mod tests {
         // Arrange
         let data = two_worktrees("forget-cascade");
         let store = store_in(&data);
+        assert_eq!(rows(&store, "SELECT COUNT(*) FROM manifest"), 2);
 
         // Act
         forget_worktree(&data, "o/r", "a").expect("forget");
@@ -307,9 +318,13 @@ mod tests {
             ("o", "a"),
         ] {
             forget_worktree(&data, slug, worktree).expect("ignored");
-        }
 
-        // Assert
+            // Assert
+            assert!(
+                playbook_data::code_dir_in(&data, slug, worktree).is_none(),
+                "{slug} {worktree}"
+            );
+        }
         assert_eq!(rows(&store, "SELECT COUNT(*) FROM worktrees"), 2);
         assert!(keep.exists());
     }
@@ -329,6 +344,86 @@ mod tests {
 
         // Assert
         assert_eq!(rows(&store, "SELECT COUNT(*) FROM worktrees"), 2);
+        assert!(data.join("code/o/r/a.lock").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_repo_folder_changes_nothing() {
+        let _g = pinned();
+        // Arrange
+        let data = two_worktrees("forget-symlink-repo");
+        let store = store_in(&data);
+        std::os::unix::fs::symlink(data.join("code/o/r"), data.join("code/o/r2")).expect("link");
+
+        // Act
+        forget_worktree(&data, "o/r2", "a").expect("ignored");
+
+        // Assert
+        assert_eq!(rows(&store, "SELECT COUNT(*) FROM worktrees"), 2);
+        assert!(data.join("code/o/r/a.lock").exists());
+    }
+
+    #[test]
+    fn a_held_run_lock_keeps_the_row_and_the_lock() {
+        let _g = pinned();
+        // Arrange
+        let data = two_worktrees("forget-running");
+        let store = store_in(&data);
+        let lock = data.join("code/o/r/a.lock");
+        let running = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&lock)
+            .expect("open");
+        running.try_lock().expect("take");
+
+        // Act
+        forget_worktree(&data, "o/r", "a").expect("forget");
+
+        // Assert
+        assert_eq!(rows(&store, "SELECT COUNT(*) FROM worktrees"), 2);
+        assert!(lock.exists());
+    }
+
+    #[test]
+    fn a_store_being_rebuilt_keeps_the_row_and_the_lock() {
+        let _g = pinned();
+        // Arrange
+        let data = two_worktrees("forget-rebuilding");
+        let store = store_in(&data);
+        let rebuilding = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(store.with_extension("lock"))
+            .expect("store lock");
+        rebuilding.lock().expect("exclusive");
+
+        // Act
+        let got = forget_worktree(&data, "o/r", "a");
+
+        // Assert
+        assert!(got.is_ok());
+        assert_eq!(rows(&store, "SELECT COUNT(*) FROM worktrees"), 2);
+        assert!(data.join("code/o/r/a.lock").exists());
+    }
+
+    #[test]
+    fn a_damaged_store_reports_an_error() {
+        let _g = pinned();
+        // Arrange
+        let data = two_worktrees("forget-damaged");
+        let store = store_in(&data);
+        Connection::open(&store)
+            .expect("open")
+            .execute_batch("DROP TABLE manifest; DROP TABLE worktrees;")
+            .expect("damage");
+
+        // Act
+        let got = forget_worktree(&data, "o/r", "a");
+
+        // Assert
+        assert!(got.is_err());
     }
 
     #[test]

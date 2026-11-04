@@ -409,6 +409,16 @@ fn removing_a_worktree_drops_its_store_row_and_lock_and_keeps_the_sibling() {
     run_playbook(&f, &wt, &["code", "index"]);
     run_playbook(&f, &f.repo, &["code", "index"]);
     assert_eq!(store_rows(&f).len(), 2);
+    let data_dir = f.home.join(".config/playbook/data/code/acme/widgets");
+    let locks_before = fs::read_dir(&data_dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            n.ends_with(".lock") && n != "store-v4.lock"
+        })
+        .count();
+    assert_eq!(locks_before, 2);
     age(&wt, 1);
 
     let out = sweep(&f);
