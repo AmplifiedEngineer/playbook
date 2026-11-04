@@ -71,7 +71,7 @@ Keys:
 | Key | Action |
 |---|---|
 | `Tab`, `Shift-Tab` | Show the next or previous tab. With one tab they move the panel focus instead. |
-| `F1` to `F9` | Show a tab by its number. |
+| `F1` to `F12` | Show a tab by its number. |
 | `e` | Open the layout editor. It draws the tab as rows of cells and keeps a cursor on one panel: `h`, `l` move the cursor along the panels and `j`, `k` between rows, `H`, `L` swap the panel with its neighbour in the row, `J`, `K` with the cell below or above, `f` splits a row of two or joins a row of one with its neighbour, `a` opens a picker of the panels the tab lacks and `Enter` adds one after the cursor, `d` removes the panel, `u` undoes the last 20 changes, `Left`, `Right` pick the tab, `<`, `>` reorder tabs, `n` adds a tab, `x` deletes one, `r` renames. Every change shows on the tab behind the window and is saved to `usage.ui.layout` within 200 ms, and anything still pending is saved when the editor closes or `pbtop` quits; `Esc` or `q` close the window. A failed write is retried and the footer says why. With no config store the footer shows the command to run, once. `R` asks `[y/N]` and on `y` resets the layout and the saved view settings (`usage.ui.state`: tab, range, views, sorts, filter) to the defaults; the theme and every other setting stay. |
 | `1` to `6`, `]`, `[` | Focus a panel of the current tab by number, or the next or previous one. The focused panel's hint is a badge. |
 | `Left`, `Right` | Move the chart cursor one day (or one bar). `Home`, `End`, `g`, `G` jump to the ends while a chart has the focus. |

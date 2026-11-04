@@ -395,13 +395,22 @@ fn render_tabbar(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
         .enumerate()
         .map(|(i, t)| format!(" F{} {} ", i + 1, t.name).chars().count())
         .sum();
-    // When the names do not fit, only the selected tab keeps its name.
+    // When the names do not fit, only the selected tab keeps its name, cut to
+    // the width the numbered tabs leave over.
     let names = full <= usize::from(area.width);
+    let numbered: usize = (0..app.layout.tabs.len())
+        .filter(|&i| i != app.tab)
+        .map(|i| format!(" F{} ", i + 1).chars().count())
+        .sum();
     let mut spans = Vec::new();
     for (i, tab) in app.layout.tabs.iter().enumerate() {
         let style = if i == app.tab { chosen } else { plain };
-        let text = if names || i == app.tab {
+        let text = if names {
             format!(" F{} {} ", i + 1, tab.name)
+        } else if i == app.tab {
+            let room = usize::from(area.width).saturating_sub(numbered);
+            let whole = format!(" F{} {} ", i + 1, tab.name);
+            whole.chars().take(room).collect()
         } else {
             format!(" F{} ", i + 1)
         };
@@ -1576,6 +1585,54 @@ mod tests {
         assert_eq!(second, 1);
         assert_eq!(wrapped, 2);
         assert_eq!(app.tab, 1);
+    }
+
+    #[test]
+    fn f10_to_f12_select_the_last_tabs_and_a_missing_tab_changes_nothing() {
+        let mut app = tabbed_app();
+        app.layout = Layout::parse(&twelve_tabs()).unwrap();
+
+        app.key(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
+        let twelfth = app.tab;
+        app.key(KeyEvent::new(KeyCode::F(10), KeyModifiers::NONE));
+        let tenth = app.tab;
+        app.layout = Layout::parse("A=spend;B=tokens;C=live;D=models;E=sessions").unwrap();
+        app.key(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
+
+        assert_eq!((twelfth, tenth, app.tab), (11, 9, 9));
+    }
+
+    #[test]
+    fn a_long_selected_tab_name_is_cut_so_every_tab_number_stays_visible() {
+        let mut app = tabbed_app();
+        let text = (1..=12)
+            .map(|i| format!("{}{i:02}=spend", "N".repeat(14)))
+            .collect::<Vec<_>>()
+            .join(";");
+        app.layout = Layout::parse(&text).unwrap();
+        app.go_tab(5);
+
+        // The other eleven tabs need 8 * 4 + 3 * 5 = 47 columns, so 60 leaves
+        // 13 for the selected tab, which is shorter than its 21 column label.
+        // The 80 column minimum never reaches this cut, so draw the bar alone.
+        let pal = app.theme.palette(app.depth);
+        let mut terminal = Terminal::new(TestBackend::new(60, 1)).unwrap();
+        terminal
+            .draw(|f| render_tabbar(f, f.area(), &app, &pal))
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let bar: String = (0..60).map(|x| buffer[(x, 0)].symbol()).collect();
+
+        assert!(bar.contains(" F12"), "{bar}");
+        assert!(bar.contains(" F6 NNNNNNNNN"), "{bar}");
+        assert!(!bar.contains("NNNNNNNNNNNNNN06"), "{bar}");
+    }
+
+    fn twelve_tabs() -> String {
+        (1..=12)
+            .map(|i| format!("T{i}=spend"))
+            .collect::<Vec<_>>()
+            .join(";")
     }
 
     #[test]

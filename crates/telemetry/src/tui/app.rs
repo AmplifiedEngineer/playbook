@@ -800,7 +800,7 @@ impl App {
             Cmd::NextTab => self.go_tab(self.tab as isize + 1),
             Cmd::PrevTab => self.go_tab(self.tab as isize - 1),
             Cmd::GoTab => {
-                if let KeyCode::F(n @ 1..=9) = code {
+                if let KeyCode::F(n @ 1..=12) = code {
                     if usize::from(n) <= self.layout.tabs.len() {
                         self.go_tab(isize::from(n) - 1);
                     }
