@@ -45,7 +45,7 @@ pub struct Row {
 }
 
 impl Row {
-    fn new(layer: &'static str, level: Level, message: impl Into<String>) -> Row {
+    pub(super) fn new(layer: &'static str, level: Level, message: impl Into<String>) -> Row {
         Row {
             layer,
             level,
@@ -54,7 +54,7 @@ impl Row {
         }
     }
 
-    fn hint(mut self, hint: impl Into<String>) -> Row {
+    pub(super) fn hint(mut self, hint: impl Into<String>) -> Row {
         self.hint = Some(hint.into());
         self
     }
@@ -126,7 +126,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 22] = [
+const PROBES: [Probe; 23] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -154,6 +154,7 @@ const PROBES: [Probe; 22] = [
     doc_rows,
     |env| gc_rows(env, &crate::gc::space::RealProbe),
     completion_rows,
+    super::build::rows,
 ];
 
 /// Run every check. The probes only read, and several wait on child processes
@@ -1574,8 +1575,8 @@ pub fn failed(rows: &[Row]) -> bool {
 mod tests {
     use super::*;
 
-    const PROBE_COUNT: usize = 22;
-    const COMPLETION_PROBE_AT: usize = PROBE_COUNT - 1;
+    const PROBE_COUNT: usize = 23;
+    const COMPLETION_PROBE_AT: usize = PROBE_COUNT - 2;
 
     fn env_for(home: &Path) -> Env {
         Env {
@@ -1590,7 +1591,7 @@ mod tests {
     }
 
     #[test]
-    fn the_probes_table_has_21_entries_in_order() {
+    fn the_probes_table_has_23_entries_in_order() {
         // Arrange
         let home = crate::common::test_support::scratch_dir("doctor-probes");
         std::fs::create_dir_all(&home).unwrap();
