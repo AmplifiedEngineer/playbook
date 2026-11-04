@@ -4,11 +4,11 @@
 │tokens        618.8K                                                                              │
 │messages          26                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─┤⁴Agents├──────────────────────────────────────╮╭─┤⁴Skills├──────────────────────────────────────╮
-│No rows: telemetry is off.                      ││No rows: telemetry is off.                      │
-│Turn it on with:                                ││Turn it on with:                                │
-│playbook setup --only telemetry                 ││playbook setup --only telemetry                 │
-│Or start sessions with `playbook cc`.           ││Or start sessions with `playbook cc`.           │
+╭─┤⁴Agents├──────┤source telemetry 59% of spend├─╮╭─┤⁴Skills├──────┤source telemetry 20% of spend├─╮
+│agent            reqs  tokens     cost▼ share   ││skill            reqs  tokens     cost▼ share   │
+│main               40   60.0K     $9.00 ■■■■■■··││review              9   13.5K     $3.00 ■■■■■■··│
+│general-purpose    12   18.0K     $2.50 ■■······││plan                4    6.0K     $1.00 ■■······│
+│reviewer            5    7.5K     $0.50 ········││                                                │
 │                                                ││                                                │
 │                                                ││                                                │
 │                                                ││                                                │
