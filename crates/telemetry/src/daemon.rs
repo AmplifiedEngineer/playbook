@@ -1034,7 +1034,7 @@ mod tests {
     #[cfg(unix)]
     mod starter {
         use super::super::*;
-        use super::seed_stamp;
+        use super::{lock_frees_soon, seed_stamp};
         use crate::collector::tests::Running;
         use crate::collector::{read_state, State};
         use crate::receiver::bind;
@@ -1070,8 +1070,10 @@ mod tests {
         const IGNORED_BOUND: Duration = Duration::from_millis(600);
         /// Scheduling slack on top of `IGNORED_BOUND`.
         const IGNORED_SLACK: Duration = Duration::from_millis(250);
-        /// A stop budget an in-process collector meets even on a busy runner.
-        const ROUTE_BUDGET: Duration = Duration::from_secs(3);
+        /// A stop budget an in-process collector meets even on a starved
+        /// runner. A stop returns as soon as the lock frees, so a generous
+        /// deadline costs nothing when the collector answers.
+        const ROUTE_BUDGET: Duration = Duration::from_secs(10);
 
         fn opts(probe: bool, may_kill: bool) -> EnsureOpts {
             EnsureOpts {
@@ -1340,10 +1342,23 @@ mod tests {
                 ..opts(false, false)
             };
 
-            assert_eq!(ensure_now(&p, o, &fakes), Ensured::Replaced);
-            assert_eq!(fakes.spawns(), 1);
-            assert!(fakes.process.sent().is_empty());
-            assert_eq!(lock_state(&p), LockState::Free);
+            let ensured = ensure_now(&p, o, &fakes);
+
+            let state = || {
+                format!(
+                    "lock {:?}, lock file {:?}, stamp {:?}, collector.json {:?}, spawns {}, signals {:?}",
+                    lock_state(&p),
+                    std::fs::read_to_string(lock_path(&p)).ok(),
+                    std::fs::read_to_string(stamp_path(&p)).ok(),
+                    std::fs::read_to_string(crate::collector::state_path(&p)).ok(),
+                    fakes.spawns(),
+                    fakes.process.sent(),
+                )
+            };
+            assert_eq!(ensured, Ensured::Replaced, "{}", state());
+            assert_eq!(fakes.spawns(), 1, "{}", state());
+            assert!(fakes.process.sent().is_empty(), "{}", state());
+            assert!(lock_frees_soon(&p), "{}", state());
         }
 
         #[test]
