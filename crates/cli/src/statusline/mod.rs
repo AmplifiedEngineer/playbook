@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook statusline`: a byte-for-byte port of `statusline.sh`. Reads
-//! Claude Code's session JSON on stdin and prints up to four ANSI lines, the fourth only when a usage cap needs saying. Not
-//! wired into any settings file yet; the shell script is still what runs.
+//! `playbook statusline`: a port of `statusline.sh`. Reads Claude Code's
+//! session JSON on stdin and prints ANSI lines. Lines 1 to 3 match the shell
+//! script byte for byte. Line 4 is new in the Rust port and shows only when a
+//! usage cap needs saying. Not wired into any settings file yet; the shell
+//! script is still what runs.
 
 pub mod budget;
 mod fmt;

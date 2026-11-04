@@ -369,12 +369,22 @@ fn the_jira_ticket_links_only_when_a_base_url_is_configured() {
 // ---- time-dependent segments, with an injected clock -----------------------
 
 fn env_for(home: &Path) -> Env {
-    Env::from_pairs([
-        ("HOME", home.to_str().unwrap()),
-        ("CLAUDE_CONFIG_DIR", home.to_str().unwrap()),
-        ("PWD", home.to_str().unwrap()),
+    env_with_columns(home, None)
+}
+
+/// A clean environment rooted at `home`, with COLUMNS set when given.
+fn env_with_columns(home: &Path, columns: Option<&str>) -> Env {
+    let home = home.to_str().unwrap();
+    let mut pairs = vec![
+        ("HOME", home),
+        ("CLAUDE_CONFIG_DIR", home),
+        ("PWD", home),
         ("PATH", ""),
-    ])
+    ];
+    if let Some(c) = columns {
+        pairs.push(("COLUMNS", c));
+    }
+    Env::from_pairs(pairs)
 }
 
 #[test]
@@ -876,17 +886,7 @@ fn seven_day_lines(used: f64, elapsed: i64, columns: Option<&str>) -> Vec<String
             r#""rate_limits":{{"seven_day":{{"used_percentage":{used},"resets_at":{resets_at}}}}}"#
         ),
     );
-    let home = s.0.to_str().unwrap();
-    let mut pairs = vec![
-        ("HOME", home),
-        ("CLAUDE_CONFIG_DIR", home),
-        ("PWD", home),
-        ("PATH", ""),
-    ];
-    if let Some(c) = columns {
-        pairs.push(("COLUMNS", c));
-    }
-    let out = render(&body, &Env::from_pairs(pairs), BUDGET_NOW);
+    let out = render(&body, &env_with_columns(&s.0, columns), BUDGET_NOW);
     strip_ansi(&text(&out))
         .lines()
         .map(str::to_string)
@@ -911,9 +911,10 @@ fn a_seven_day_pace_past_the_cap_names_the_time_left() {
 
 #[test]
 fn a_seven_day_window_within_the_cap_adds_no_line() {
+    // Only the first line prints, so a fourth would show as a longer output.
     for (used, elapsed) in [(0.0, 3 * DAY_SECS), (49.9, 3 * DAY_SECS + DAY_SECS / 2)] {
         let lines = seven_day_lines(used, elapsed, None);
-        assert!(lines.iter().all(|l| !l.starts_with('!')), "{lines:?}");
+        assert_eq!(lines.len(), 1, "{lines:?}");
     }
 }
 
@@ -929,13 +930,11 @@ fn a_seven_day_window_already_reset_adds_no_line() {
 }
 
 #[test]
-fn input_without_rate_limits_keeps_the_three_line_layout() {
+fn expired_or_undated_windows_keep_the_three_line_layout() {
+    // In FULL the 5 hour window reset long before the clock and the 7 day
+    // window has no reset time, so neither can make a budget line.
     let s = Scratch::new();
-    let full = FULL.replace(
-        r#","rate_limits":{"five_hour":{"used_percentage":55.4,"resets_at":1000},"seven_day":{"used_percentage":60}}"#,
-        "",
-    );
-    let body = payload(&s.0, &full);
+    let body = payload(&s.0, FULL);
     let out = strip_ansi(&text(&render(&body, &env_for(&s.0), BUDGET_NOW)));
     assert_eq!(out.lines().count(), 3, "{out:?}");
 }
