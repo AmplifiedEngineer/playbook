@@ -332,10 +332,12 @@ fn with_production_ctx<T>(
     };
     let signals = Signals::install();
     let path_dirs = discover::process_path();
+    let lsp_root = host::lsp_root();
     let virtual_env = std::env::var_os("VIRTUAL_ENV").map(PathBuf::from);
     let options = Options {
         settings: &request.env.lsp,
         path_dirs: &path_dirs,
+        lsp_root: Some(&lsp_root),
         lock_dir: &lock_dir,
         probe_timeout: discover::PROBE_TIMEOUT,
         timeout: request.timeout_ms.map(Duration::from_millis),

@@ -92,3 +92,14 @@ impl LspSettings {
             .map(|(_, path)| path.as_path())
     }
 }
+
+/// Fetches a URL's body over HTTPS. The program passes one in so this crate
+/// has no HTTP client of its own, and tests pass canned bytes.
+pub trait Fetch {
+    fn get(&self, url: &str) -> Result<Vec<u8>, String>;
+}
+
+/// The folder managed language servers are installed under.
+pub fn lsp_root() -> PathBuf {
+    playbook_common::paths::lsp_root()
+}

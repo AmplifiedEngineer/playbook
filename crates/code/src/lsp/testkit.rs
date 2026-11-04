@@ -92,6 +92,7 @@ pub(crate) fn options<'a>(
     Options {
         settings,
         path_dirs,
+        lsp_root: None,
         lock_dir: &setup.locks,
         probe_timeout: Duration::from_secs(10),
         timeout: Some(Duration::from_secs(10)),

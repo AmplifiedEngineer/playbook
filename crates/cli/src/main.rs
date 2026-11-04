@@ -2943,6 +2943,22 @@ fn code_env() -> playbook::code::Env {
             &common::home_dir(),
             (!slug.is_empty()).then_some(slug.as_str()),
         ),
+        fetch: Some(Box::new(HttpFetch)),
         ..playbook::code::Env::real()
+    }
+}
+
+/// Lets `playbook code lsp install` download through the program's one HTTPS
+/// client.
+struct HttpFetch;
+
+impl playbook::code::host::Fetch for HttpFetch {
+    fn get(&self, url: &str) -> Result<Vec<u8>, String> {
+        use playbook::update::download::Fetcher;
+        playbook::update::download::HttpFetcher {
+            local_http: false,
+            timeout: playbook::update::download::DOWNLOAD_TIMEOUT,
+        }
+        .get(url)
     }
 }

@@ -311,7 +311,18 @@ Language servers answer exact questions about code. They run workspace code, so 
 
 Example: `playbook code lsp status`
 
-Subcommands: `list`, `status`
+Subcommands: `install`, `list`, `remove`, `status`
+
+### `playbook code lsp install`
+
+Download and install a language server
+
+Checks the download against a hash built into this program before anything is unpacked. Installs under the playbook folder, needs no administrator rights and uses no package manager. `gopls` is not installed this way: use `go install`.
+
+Example: `playbook code lsp install pyright`
+
+- `<ID>`: Server to install: typescript-language-server, rust-analyzer or pyright
+- `--force`: Replace an install that is already there
 
 ### `playbook code lsp list`
 
@@ -322,6 +333,16 @@ Shows each server with the languages it handles, its license and where playbook 
 Example: `playbook code lsp list`
 
 - `--json`: Print one JSON document
+
+### `playbook code lsp remove`
+
+Remove an installed language server
+
+Deletes every installed version of the server. Only folders inside the playbook install folder are removed.
+
+Example: `playbook code lsp remove pyright`
+
+- `<ID>`: Server to remove
 
 ### `playbook code lsp status`
 

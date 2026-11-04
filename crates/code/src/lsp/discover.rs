@@ -1,10 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Finds a language server binary: the configured path first, then `PATH`.
+//! Finds a language server binary: the configured path first, then a managed
+//! install, then `PATH`.
 
+use super::install;
+use super::manifest::{self, Runner};
 use super::registry::ServerSpec;
 use crate::host::LspSettings;
+use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -20,6 +24,8 @@ const UNKNOWN_VERSION: &str = "unknown";
 pub enum Source {
     /// The `code.lsp.<id>.path` setting.
     Config,
+    /// An install made by `lsp install`.
+    Managed,
     Path,
 }
 
@@ -27,6 +33,7 @@ impl Source {
     pub fn label(self) -> &'static str {
         match self {
             Self::Config => "config",
+            Self::Managed => "managed",
             Self::Path => "PATH",
         }
     }
@@ -38,6 +45,11 @@ pub struct Found {
     pub source: Source,
     /// The first line `--version` printed, or `unknown`.
     pub version: String,
+    /// The arguments to start it with when they differ from the registry's, as
+    /// for a managed Node server that is started as `node <entry> --stdio`.
+    pub args: Option<Vec<OsString>>,
+    /// The managed `tsserver.js`, for the TypeScript server.
+    pub tsserver: Option<PathBuf>,
 }
 
 /// A configured path that cannot be a server.
@@ -60,28 +72,102 @@ impl fmt::Display for BadPath {
 
 impl std::error::Error for BadPath {}
 
-/// Finds `spec`: the configured path wins and must be valid, else the first
-/// match on `path_dirs`. `Ok(None)` means no server is installed.
+/// Finds `spec` with no managed install. See [`find_with`].
 pub fn find(
     spec: &ServerSpec,
     settings: &LspSettings,
     path_dirs: &[PathBuf],
     probe_timeout: Duration,
 ) -> Result<Option<Found>, BadPath> {
-    let (path, source) = if let Some(configured) = settings.server_path(spec.id) {
+    find_with(spec, settings, None, path_dirs, probe_timeout)
+}
+
+/// Finds `spec`: the configured path wins and must be valid, then a managed
+/// install under `managed_root` whose version matches the pin, then the first
+/// match on `path_dirs`. `Ok(None)` means no server is installed.
+pub fn find_with(
+    spec: &ServerSpec,
+    settings: &LspSettings,
+    managed_root: Option<&Path>,
+    path_dirs: &[PathBuf],
+    probe_timeout: Duration,
+) -> Result<Option<Found>, BadPath> {
+    if let Some(configured) = settings.server_path(spec.id) {
         check_executable(configured)?;
-        (configured.to_path_buf(), Source::Config)
-    } else if let Some(hit) = search_path(spec.executable, path_dirs) {
-        (hit, Source::Path)
-    } else {
-        return Ok(None);
-    };
+        return Ok(Some(found_at(
+            configured.to_path_buf(),
+            Source::Config,
+            probe_timeout,
+        )));
+    }
+    if let Some(found) = managed_root.and_then(|root| managed(spec, root, path_dirs)) {
+        return Ok(Some(found));
+    }
+    Ok(search_path(spec.executable, path_dirs)
+        .map(|hit| found_at(hit, Source::Path, probe_timeout)))
+}
+
+fn found_at(path: PathBuf, source: Source, probe_timeout: Duration) -> Found {
     let version = probe_version(&path, probe_timeout);
-    Ok(Some(Found {
+    Found {
         path,
         source,
         version,
-    }))
+        args: None,
+        tsserver: None,
+    }
+}
+
+/// The install of the current pin, if complete. A published folder always has
+/// its receipt, so a folder without one is ignored.
+fn managed(spec: &ServerSpec, root: &Path, path_dirs: &[PathBuf]) -> Option<Found> {
+    let pin = manifest::pin_for(spec.id)?;
+    let dir = install::version_dir(root, pin);
+    if !dir.join("install.json").is_file() {
+        return None;
+    }
+    let release = pin.releases.first()?;
+    let entry = dir.join(release.component).join(release.entry);
+    let extra = spec.args.iter().map(OsString::from);
+    let (path, args) = match release.runner {
+        Runner::Direct => (entry, None),
+        Runner::Node => {
+            let node = search_path("node", path_dirs)?;
+            let args = std::iter::once(entry.into_os_string())
+                .chain(extra)
+                .collect();
+            (node, Some(args))
+        }
+    };
+    let tsserver = pin
+        .releases
+        .iter()
+        .find(|r| r.component == "typescript")
+        .map(|r| dir.join(r.component).join(r.entry));
+    Some(Found {
+        path,
+        source: Source::Managed,
+        version: release.version.to_string(),
+        args,
+        tsserver,
+    })
+}
+
+/// Installed versions of the server that are not the current pin.
+pub fn old_versions(spec: &ServerSpec, root: &Path) -> Vec<String> {
+    let Some(pin) = manifest::pin_for(spec.id) else {
+        return Vec::new();
+    };
+    let current = pin.releases[0].version;
+    let mut old: Vec<String> = std::fs::read_dir(root.join(spec.id))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|name| name != current)
+        .collect();
+    old.sort();
+    old
 }
 
 fn check_executable(path: &Path) -> Result<(), BadPath> {
@@ -285,8 +371,15 @@ mod tests {
         );
 
         // Act
-        // Long enough for the shell to record its pid before the probe is cut off.
-        let version = probe_version(&blocker, Duration::from_secs(1));
+        // A loaded machine can cut the probe off before the shell records its
+        // pid, so retry with a longer limit until it did.
+        let mut version = String::new();
+        for seconds in [1, 3, 10] {
+            version = probe_version(&blocker, Duration::from_secs(seconds));
+            if pidfile.exists() {
+                break;
+            }
+        }
 
         // Assert
         assert_eq!(version, "unknown");
@@ -309,5 +402,113 @@ mod tests {
 
         // Assert
         assert_eq!(version, "unknown");
+    }
+
+    /// A published managed install of the current pin, with a `node` on a PATH dir.
+    fn managed_install(tag: &str, id: &str) -> (PathBuf, PathBuf) {
+        let root = scratch(&format!("{tag}-lsp"));
+        let bin = scratch(&format!("{tag}-bin"));
+        script(&bin, "node", "exit 0");
+        let pin = manifest::pin_for(id).unwrap();
+        let dir = install::version_dir(&root, pin);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("install.json"), "{}").unwrap();
+        (root, bin)
+    }
+
+    #[test]
+    fn a_managed_install_of_the_current_pin_beats_path_and_loses_to_config() {
+        // Arrange
+        let (root, bin) = managed_install("managed-prec", "pyright");
+        script(&bin, "pyright-langserver", "echo from-path");
+        let spec = registry::by_id("pyright").unwrap();
+        let dirs = [bin];
+
+        // Act
+        let managed = find_with(spec, &LspSettings::default(), Some(&root), &dirs, PATIENT)
+            .unwrap()
+            .unwrap();
+        let configured = script(&scratch("managed-cfg"), "pl", "echo configured");
+        let config = find_with(
+            spec,
+            &settings_with("pyright", &configured),
+            Some(&root),
+            &dirs,
+            PATIENT,
+        )
+        .unwrap()
+        .unwrap();
+
+        // Assert
+        assert_eq!(managed.source, Source::Managed);
+        assert_eq!(
+            managed.version,
+            manifest::pin_for("pyright").unwrap().releases[0].version
+        );
+        let args = managed.args.unwrap();
+        assert!(
+            args[0]
+                .to_string_lossy()
+                .ends_with("pyright/package/langserver.index.js"),
+            "{args:?}"
+        );
+        assert_eq!(args[1], "--stdio");
+        assert_eq!(config.source, Source::Config);
+    }
+
+    #[test]
+    fn a_leftover_older_version_is_ignored_and_listed() {
+        // Arrange
+        let (root, bin) = managed_install("managed-old", "pyright");
+        let pin = manifest::pin_for("pyright").unwrap();
+        std::fs::remove_dir_all(install::version_dir(&root, pin)).unwrap();
+        std::fs::create_dir_all(root.join("pyright/1.0.0")).unwrap();
+        let spec = registry::by_id("pyright").unwrap();
+
+        // Act
+        let got = find_with(spec, &LspSettings::default(), Some(&root), &[bin], PATIENT).unwrap();
+
+        // Assert
+        assert_eq!(got, None);
+        assert_eq!(old_versions(spec, &root), ["1.0.0"]);
+    }
+
+    #[test]
+    fn the_typescript_server_reports_its_managed_companion() {
+        // Arrange
+        let (root, bin) = managed_install("managed-ts", "typescript-language-server");
+        let spec = registry::by_id("typescript-language-server").unwrap();
+
+        // Act
+        let found = find_with(spec, &LspSettings::default(), Some(&root), &[bin], PATIENT)
+            .unwrap()
+            .unwrap();
+
+        // Assert
+        let tsserver = found.tsserver.unwrap();
+        assert!(
+            tsserver.ends_with("typescript/package/lib/tsserver.js"),
+            "{tsserver:?}"
+        );
+    }
+
+    #[test]
+    fn a_managed_node_server_without_node_on_path_is_not_found() {
+        // Arrange
+        let (root, _) = managed_install("managed-nonode", "pyright");
+        let spec = registry::by_id("pyright").unwrap();
+
+        // Act
+        let got = find_with(
+            spec,
+            &LspSettings::default(),
+            Some(&root),
+            &[scratch("no-node")],
+            PATIENT,
+        )
+        .unwrap();
+
+        // Assert
+        assert_eq!(got, None);
     }
 }

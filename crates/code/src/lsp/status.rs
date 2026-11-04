@@ -33,6 +33,8 @@ pub struct Machine {
     pub rust_src: Box<dyn Fn() -> RustSrc>,
     /// Today as days since 1970-01-01, to age the pinned releases.
     pub today: i64,
+    /// Where managed servers live; `None` skips them.
+    pub lsp_root: Option<PathBuf>,
 }
 
 impl Machine {
@@ -42,6 +44,7 @@ impl Machine {
             probe_timeout: PROBE_TIMEOUT,
             rust_src: Box::new(rust_src_from_rustup),
             today: today_days(),
+            lsp_root: Some(crate::host::lsp_root()),
         }
     }
 }
@@ -81,6 +84,8 @@ pub struct ServerStatus {
     pub missing: Vec<String>,
     /// The release playbook would install, when it installs this server.
     pub pin: Option<PinInfo>,
+    /// Installed versions that are not the current pin and are ignored.
+    pub old_versions: Vec<String>,
 }
 
 pub struct PinInfo {
@@ -105,9 +110,20 @@ pub fn collect(settings: &LspSettings, machine: &Machine) -> Vec<ServerStatus> {
         .iter()
         .map(|spec| ServerStatus {
             spec,
-            found: discover::find(spec, settings, &machine.path_dirs, machine.probe_timeout),
+            found: discover::find_with(
+                spec,
+                settings,
+                machine.lsp_root.as_deref(),
+                &machine.path_dirs,
+                machine.probe_timeout,
+            ),
             missing: missing_prerequisites(spec, machine),
             pin: pin_info(spec, machine.today),
+            old_versions: machine
+                .lsp_root
+                .as_deref()
+                .map(|root| discover::old_versions(spec, root))
+                .unwrap_or_default(),
         })
         .collect()
 }
@@ -146,7 +162,7 @@ fn install_hint(spec: &ServerSpec) -> String {
 }
 
 /// The sources a server can come from, in precedence order.
-const SOURCES: &str = "config path, PATH";
+const SOURCES: &str = "config path, managed install, PATH";
 
 pub fn list_text() -> String {
     SERVERS
@@ -192,6 +208,12 @@ pub fn status_text(settings: &LspSettings, statuses: &[ServerStatus]) -> String 
         }
         for need in &status.missing {
             out.push_str(&format!("  missing: {need}\n"));
+        }
+        if !status.old_versions.is_empty() {
+            out.push_str(&format!(
+                "  ignored old installs: {} (remove the server to clear them)\n",
+                status.old_versions.join(", ")
+            ));
         }
         if let Some(pin) = &status.pin {
             out.push_str(&format!(
@@ -239,6 +261,7 @@ fn server_json(status: &ServerStatus) -> Value {
         "license": status.spec.license,
         "missing": status.missing,
     });
+    doc["old_versions"] = json!(status.old_versions);
     if let Some(pin) = &status.pin {
         doc["pin"] = json!({"version": pin.version, "age_days": pin.age_days, "stale": pin.stale});
     }
@@ -285,6 +308,7 @@ mod tests {
             probe_timeout: Duration::from_secs(10),
             rust_src: Box::new(move || rust_src),
             today: manifest::days_from_civil((2026, 11, 5)),
+            lsp_root: None,
         }
     }
 

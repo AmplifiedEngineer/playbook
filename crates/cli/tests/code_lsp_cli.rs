@@ -189,6 +189,31 @@ fn status_shows_trust_and_its_tier_once_the_repo_is_trusted() {
     assert_eq!(doc["results"]["trust"]["tier"], "repo");
 }
 
+#[test]
+fn install_of_an_unknown_id_exits_1_and_lists_the_valid_ids() {
+    let fx = Fixture::new("install-unknown");
+    let out = fx.playbook(&["code", "lsp", "install", "nosuch"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("valid ids"));
+}
+
+#[test]
+fn install_of_gopls_exits_1_and_prints_the_go_install_line() {
+    let fx = Fixture::new("install-gopls");
+    let out = fx.playbook(&["code", "lsp", "install", "gopls"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr)
+        .contains("go install golang.org/x/tools/gopls@v0.24.0"));
+}
+
+#[test]
+fn remove_with_nothing_installed_exits_1_and_says_not_installed() {
+    let fx = Fixture::new("remove-none");
+    let out = fx.playbook(&["code", "lsp", "remove", "rust-analyzer"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not installed"));
+}
+
 #[cfg(unix)]
 mod semantic {
     use super::*;

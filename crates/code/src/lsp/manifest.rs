@@ -52,6 +52,15 @@ pub struct Asset {
 /// A release date as year, month, day.
 pub type Date = (i32, u32, u32);
 
+/// How an installed release is started.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Runner {
+    /// The entry is the executable.
+    Direct,
+    /// `node <entry>`.
+    Node,
+}
+
 #[derive(Debug)]
 pub struct Release {
     /// The package or program name.
@@ -60,6 +69,9 @@ pub struct Release {
     pub released: Date,
     pub license: &'static str,
     pub assets: &'static [Asset],
+    /// The launched file, relative to the release's folder in the install.
+    pub entry: &'static str,
+    pub runner: Runner,
 }
 
 /// Everything installed for one server. The first release is the server.
@@ -143,6 +155,8 @@ pub static PINS: [Pin; 3] = [
             released: (2026, 10, 5),
             license: "MIT OR Apache-2.0",
             assets: &RUST_ANALYZER,
+            entry: "rust-analyzer",
+            runner: Runner::Direct,
         }],
     },
     Pin {
@@ -154,6 +168,8 @@ pub static PINS: [Pin; 3] = [
                 released: (2026, 9, 24),
                 license: "Apache-2.0",
                 assets: &TYPESCRIPT_LANGUAGE_SERVER,
+                entry: "package/lib/cli.mjs",
+                runner: Runner::Node,
             },
             Release {
                 component: "typescript",
@@ -161,6 +177,8 @@ pub static PINS: [Pin; 3] = [
                 released: (2026, 4, 16),
                 license: "Apache-2.0",
                 assets: &TYPESCRIPT,
+                entry: "package/lib/tsserver.js",
+                runner: Runner::Node,
             },
         ],
     },
@@ -172,9 +190,42 @@ pub static PINS: [Pin; 3] = [
             released: (2026, 9, 9),
             license: "MIT",
             assets: &PYRIGHT,
+            entry: "package/langserver.index.js",
+            runner: Runner::Node,
         }],
     },
 ];
+
+/// Whether `bytes` are the download the table promises.
+pub fn verify(hash: Hash, bytes: &[u8]) -> bool {
+    use sha2::{Digest, Sha512};
+    match hash {
+        Hash::Sha256(expected) => playbook_common::hash::sha256_hex(bytes) == expected,
+        Hash::NpmSha512(expected) => {
+            format!("sha512-{}", base64(&Sha512::digest(bytes))) == expected
+        }
+    }
+}
+
+/// Standard base64 with padding.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(char::from(ALPHABET[(n >> (18 - 6 * i) & 63) as usize]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
 
 /// A pin older than this many days is flagged in `lsp status`.
 pub const STALE_AFTER_DAYS: i64 = 365;
@@ -213,7 +264,7 @@ impl std::error::Error for ManifestError {}
 /// The asset of `release` for `target`. Platform independent packages match
 /// every target.
 pub fn asset_for(
-    pin: &'static Pin,
+    pin: &Pin,
     release: &'static Release,
     target: &str,
 ) -> Result<&'static Asset, ManifestError> {
@@ -359,6 +410,35 @@ mod tests {
             );
             assert!(release.assets.iter().all(|a| a.url.contains(v)), "{v}");
         }
+    }
+
+    #[test]
+    fn base64_matches_the_standard_test_vectors() {
+        for (input, expected) in [
+            (&b""[..], ""),
+            (b"f", "Zg=="),
+            (b"fo", "Zm8="),
+            (b"foo", "Zm9v"),
+            (b"foob", "Zm9vYg=="),
+            (b"fooba", "Zm9vYmE="),
+            (b"foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(base64(input), expected);
+        }
+    }
+
+    #[test]
+    fn verify_accepts_the_matching_digest_and_rejects_any_other_bytes() {
+        // Arrange
+        let sha256 =
+            Hash::Sha256("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+        let sha512 = Hash::NpmSha512("sha512-m3HSJL1i83hdltRq0+o9czGb+8KJDKra4t/3JRlnPKcjI8PZm6XBHXx6zG4UuMXaDEZjR1wuXDre9G9zvN7AQw==");
+
+        // Act and Assert
+        assert!(verify(sha256, b"hello"));
+        assert!(!verify(sha256, b"hellp"));
+        assert!(verify(sha512, b"hello"));
+        assert!(!verify(sha512, b"hello!"));
     }
 
     #[test]

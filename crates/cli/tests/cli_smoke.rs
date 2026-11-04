@@ -631,6 +631,8 @@ fn table() -> Vec<Case> {
         case("code definition", &["code", "definition", "src/lib.rs:1:1"]).code(1).err("no such file"),
         case("code diagnostics", &["code", "diagnostics", "src/lib.rs"]).code(1).err("no such file"),
         case("code hover", &["code", "hover", "src/lib.rs:1:1"]).code(1).err("no such file"),
+        case("code lsp install", &["code", "lsp", "install", "nosuch"]).code(1).err("valid ids"),
+        case("code lsp remove", &["code", "lsp", "remove", "pyright"]).code(1).err("not installed"),
         case("code lsp list", &["code", "lsp", "list"]).out("rust-analyzer"),
         case("code lsp status", &["code", "lsp", "status"]).out("workspace trust"),
         case( "sanitize commit-msg", &["sanitize", "commit-msg", "{ROOT}/m.txt"], ).file("m.txt", "feat: add a thing\n"),

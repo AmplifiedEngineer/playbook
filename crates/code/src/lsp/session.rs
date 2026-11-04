@@ -24,6 +24,8 @@ use std::time::Duration;
 pub struct Options<'a> {
     pub settings: &'a LspSettings,
     pub path_dirs: &'a [PathBuf],
+    /// Where managed servers are installed, if they may be used.
+    pub lsp_root: Option<&'a Path>,
     /// Where the per-workspace lock file lives.
     pub lock_dir: &'a Path,
     pub probe_timeout: Duration,
@@ -165,9 +167,10 @@ impl Session {
         let spec = registry::for_extension(extension)
             .ok_or_else(|| Unavailable::NoServerFor(extension.to_string()))?;
         let lock = WorkspaceLock::acquire(options.lock_dir)?;
-        let found = discover::find(
+        let found = discover::find_with(
             spec,
             options.settings,
+            options.lsp_root,
             options.path_dirs,
             options.probe_timeout,
         )
@@ -175,7 +178,9 @@ impl Session {
         .ok_or(Unavailable::NotInstalled(spec.id))?;
         let launch = Launch {
             program: found.path,
-            args: spec.args.iter().map(OsString::from).collect(),
+            args: found
+                .args
+                .unwrap_or_else(|| spec.args.iter().map(OsString::from).collect()),
             cwd: root.to_path_buf(),
             config: ClientConfig {
                 request_timeout: options.timeout.unwrap_or(spec.request_timeout),
@@ -198,7 +203,10 @@ impl Session {
             client.set_configuration_reply(python_configuration(path));
         }
         client
-            .initialize(&uri::from_path(root), initialization_options(spec, root))
+            .initialize(
+                &uri::from_path(root),
+                initialization_options(spec, root, found.tsserver.as_deref()),
+            )
             .map_err(Unavailable::Failed)?;
         Ok(Self {
             client,
@@ -272,10 +280,15 @@ fn python_configuration(interpreter: &Path) -> ConfigurationReply {
 
 /// Options sent at `initialize`. The TypeScript server uses the repo's own
 /// TypeScript when it has one.
-fn initialization_options(spec: &ServerSpec, root: &Path) -> Value {
+fn initialization_options(spec: &ServerSpec, root: &Path, managed: Option<&Path>) -> Value {
     if spec.id == "typescript-language-server" {
-        let tsserver = root.join("node_modules/typescript/lib/tsserver.js");
-        if tsserver.is_file() {
+        let workspace = root.join("node_modules/typescript/lib/tsserver.js");
+        let chosen = if workspace.is_file() {
+            Some(workspace.as_path())
+        } else {
+            managed
+        };
+        if let Some(tsserver) = chosen {
             return json!({"tsserver": {"path": tsserver.display().to_string()}});
         }
     }
@@ -499,5 +512,52 @@ mod tests {
 
         // Assert
         assert_eq!(python, None);
+    }
+
+    #[test]
+    fn a_managed_typescript_server_passes_its_companion_unless_the_workspace_has_typescript() {
+        for (workspace_has, tag) in [(false, "sess-managed-ts"), (true, "sess-managed-ts-ws")] {
+            // Arrange
+            let s = setup(tag);
+            let pin = crate::lsp::manifest::pin_for("typescript-language-server").unwrap();
+            let lsp_root = scratch(&format!("{tag}-lsp"));
+            let installed = crate::lsp::install::version_dir(&lsp_root, pin);
+            std::fs::create_dir_all(&installed).unwrap();
+            std::fs::write(installed.join("install.json"), "{}").unwrap();
+            let node_dir = scratch(&format!("{tag}-node"));
+            crate::lsp::testkit::install_server(&node_dir, "node");
+            let workspace_ts = s.root.join("node_modules/typescript/lib/tsserver.js");
+            if workspace_has {
+                std::fs::create_dir_all(workspace_ts.parent().unwrap()).unwrap();
+                std::fs::write(&workspace_ts, "").unwrap();
+            }
+            let (client_side, server) = pipe_pair().unwrap();
+            let fake = Fake::spawn(server, initialize_script(json!({})));
+            let launcher = FakeLauncher::new(Some(client_side));
+            let settings = trusted();
+            let dirs = [node_dir];
+            let mut opts = options(&s, &settings, &dirs);
+            opts.lsp_root = Some(&lsp_root);
+
+            // Act
+            let session = Session::for_file(&s.root, &s.file, &opts, &launcher).unwrap();
+            drop(session);
+            let log = fake.finish();
+
+            // Assert
+            let path = log[0]["params"]["initializationOptions"]["tsserver"]["path"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            if workspace_has {
+                assert_eq!(path, workspace_ts.display().to_string());
+            } else {
+                assert!(
+                    path.ends_with("typescript/package/lib/tsserver.js"),
+                    "{path}"
+                );
+                assert!(path.starts_with(&lsp_root.display().to_string()), "{path}");
+            }
+        }
     }
 }

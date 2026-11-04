@@ -273,6 +273,31 @@ pub enum LspCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Download and install a language server
+    ///
+    /// Checks the download against a hash built into this program before
+    /// anything is unpacked. Installs under the playbook folder, needs no
+    /// administrator rights and uses no package manager. `gopls` is not
+    /// installed this way: use `go install`.
+    ///
+    /// Example: `playbook code lsp install pyright`
+    Install {
+        /// Server to install: typescript-language-server, rust-analyzer or pyright
+        id: String,
+        /// Replace an install that is already there
+        #[arg(long)]
+        force: bool,
+    },
+    /// Remove an installed language server
+    ///
+    /// Deletes every installed version of the server. Only folders inside the
+    /// playbook install folder are removed.
+    ///
+    /// Example: `playbook code lsp remove pyright`
+    Remove {
+        /// Server to remove
+        id: String,
+    },
 }
 
 fn parse_range_arg(spec: &str) -> Result<(usize, usize), String> {
@@ -283,6 +308,8 @@ fn parse_range_arg(spec: &str) -> Result<(usize, usize), String> {
 pub struct Env {
     pub cwd: PathBuf,
     pub lsp: LspSettings,
+    /// How `lsp install` downloads. Without one, install says it cannot.
+    pub fetch: Option<Box<dyn host::Fetch>>,
 }
 
 impl Env {
@@ -291,6 +318,7 @@ impl Env {
         Self {
             cwd: std::env::current_dir().unwrap_or_default(),
             lsp: LspSettings::default(),
+            fetch: None,
         }
     }
 }
@@ -374,7 +402,7 @@ pub fn run(sub: CodeCommand, env: &Env) -> Result<String, String> {
             python: python.as_deref(),
             json,
         }),
-        CodeCommand::Lsp { sub } => Ok(render_lsp(sub, env)),
+        CodeCommand::Lsp { sub } => render_lsp(sub, env),
         CodeCommand::Symbol {
             name,
             kind,
@@ -808,7 +836,7 @@ fn render_read(
     Ok(text)
 }
 
-fn render_lsp(sub: LspCommand, env: &Env) -> String {
+fn render_lsp(sub: LspCommand, env: &Env) -> Result<String, String> {
     let (command, json, text, results) = match sub {
         LspCommand::List { json } => (
             "lsp list",
@@ -825,11 +853,38 @@ fn render_lsp(sub: LspCommand, env: &Env) -> String {
                 lsp::status::status_json(&env.lsp, &statuses),
             )
         }
+        LspCommand::Install { id, force } => return render_install(env, &id, force),
+        LspCommand::Remove { id } => {
+            let dir = lsp::install::remove(&id, &host::lsp_root()).map_err(|e| e.to_string())?;
+            return Ok(format!("removed {}\n", dir.display()));
+        }
     };
     if json {
-        Envelope::new(command, IndexState::NotUsed, String::new(), results).to_json()
+        Ok(Envelope::new(command, IndexState::NotUsed, String::new(), results).to_json())
     } else {
-        text
+        Ok(text)
+    }
+}
+
+fn render_install(env: &Env, id: &str, force: bool) -> Result<String, String> {
+    let fetch = env.fetch.as_deref().ok_or(
+        "this build cannot download; install the server yourself and set code.lsp.<server>.path",
+    )?;
+    let options = lsp::install::Options {
+        root: &host::lsp_root(),
+        target: &lsp::manifest::current_target(),
+        force,
+        now: std::time::SystemTime::now(),
+        starts: &lsp::install::starts_with_version_probe,
+    };
+    match lsp::install::install(id, fetch, &options).map_err(|e| e.to_string())? {
+        lsp::install::Installed::Done { dir } => {
+            Ok(format!("installed {id} in {}\n", dir.display()))
+        }
+        lsp::install::Installed::AlreadyInstalled { dir } => Ok(format!(
+            "{id} is already installed in {}; use --force to replace it\n",
+            dir.display()
+        )),
     }
 }
 

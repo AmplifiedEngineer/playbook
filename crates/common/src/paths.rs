@@ -21,6 +21,13 @@ pub fn playbook_root_from(home: &Path) -> PathBuf {
     home.join(".config").join("playbook")
 }
 
+/// `$HOME/.config/playbook/lsp`: language servers installed by
+/// `playbook code lsp install`. Not under the data folder, which holds
+/// databases only.
+pub fn lsp_root() -> PathBuf {
+    playbook_root().join("lsp")
+}
+
 /// `$HOME/.config/playbook/memory`: saved memory facts. The graph built from
 /// them is `data/memory.db`.
 pub fn memory_dir() -> PathBuf {
