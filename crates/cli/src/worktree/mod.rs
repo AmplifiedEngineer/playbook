@@ -219,8 +219,8 @@ pub fn review_worktree_landed(
     // the lock to also be older than a real TTL, not just the short
     // never-locked grace window, keeps an active review (which can run for
     // minutes, e.g. a full check-suite run) from being reaped the instant a
-    // sweep happens to run. `REVIEW_LOCK_TTL_SECS` matches
-    // `review::setup`'s own `REVIEW_WT_TTL_SECONDS` default.
+    // sweep happens to run. Review setup and the daily sweep both use
+    // `REVIEW_LOCK_TTL_SECS`.
     let stale_enough = lock_age_secs >= REVIEW_LOCK_TTL_SECS;
     match lock_owner_pid {
         Some(pid) => !pid_is_alive(pid) && stale_enough,
@@ -228,8 +228,7 @@ pub fn review_worktree_landed(
     }
 }
 
-/// Matches `review::setup`'s own `REVIEW_WT_TTL_SECONDS` default (24
-/// hours): the floor a locked review worktree's lock age must clear before
+/// 24 hours, the one limit for review setup and the daily sweep: the floor a locked review worktree's lock age must clear before
 /// [`review_worktree_landed`] treats it as safe to reap, since a dead lock
 /// pid is not itself a safe signal for this convention.
 pub const REVIEW_LOCK_TTL_SECS: i64 = 86_400;

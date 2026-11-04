@@ -60,7 +60,12 @@ fn run_locked(
 ) -> Result<SweepRun, String> {
     let gc_dir = playbook_root_from(home).join(GC_DIR);
     let ran = with_run_lock(&gc_dir, Duration::ZERO, clock, &NoHook, |guard| {
+        // Judging waits on `git` and `gh`, and a removal can be slow, so
+        // refresh the lock before the sweep and before every removal. A long
+        // sweep then never reads as a crashed run that another can take over.
+        let _ = guard.touch();
         let remove = |path: &Path, force_twice: bool| {
+            let _ = guard.touch();
             checked_swept_worktree_remove(guard, (home, repo_root), path, force_twice)
                 .map_err(|err| err.to_string())
         };

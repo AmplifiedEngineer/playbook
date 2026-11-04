@@ -340,7 +340,7 @@ fn gh_login() -> String {
 /// the same way it always has: that reaper is the pre-`gh-366` port, kept
 /// only for the tests that still exercise it directly, and is not this
 /// binary's active stale-worktree path any more. The real cleanup now runs
-/// through [`crate::worktree::sweep`] instead, called separately below with
+/// through [`crate::gc::worktrees::sweep_locked`] instead, called separately below with
 /// its own classification-and-landed-signal logic and its own
 /// `worktreeCleanup.*` config gate, in-process rather than as a subprocess.
 fn run_housekeep(repo_root: &Path, worktree_path: &Path, branch: &str, no_push: bool) {

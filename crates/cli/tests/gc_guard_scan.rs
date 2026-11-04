@@ -119,12 +119,37 @@ fn only_the_adapter_and_the_dry_run_doctor_reach_the_old_sweep() {
             !allowed.iter().any(|ok| rel.starts_with(ok))
         })
         .filter(|(_, text)| {
-            text.contains("crate::worktree::sweep") || text.contains("crate::worktree::{")
+            // Any path prefix counts (`crate::`, `playbook::`, a bare `worktree::`);
+            // only the report-only dry run may be named.
+            let rest = text
+                .replace("worktree::sweep_dry_run", "")
+                .replace("cc::worktree::", "");
+            rest.contains("worktree::sweep")
+                || rest.contains("worktree::{")
+                || rest.contains("worktree::*")
         })
         .map(|(path, _)| path.display().to_string())
         .collect();
 
     assert!(found.is_empty(), "unlocked worktree sweep: {found:#?}");
+}
+
+#[test]
+fn the_locked_sweep_refreshes_the_lock_before_each_removal() {
+    let (_, text) = gc_sources()
+        .into_iter()
+        .find(|(name, _)| name == "worktrees.rs")
+        .unwrap();
+    let body: String = code_lines(&text)
+        .map(|(_, line)| line)
+        .take_while(|line| !line.contains("mod tests"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        body.matches("guard.touch()").count() >= 2,
+        "the sweep must touch the lock at the start and inside the remover"
+    );
 }
 
 #[test]
