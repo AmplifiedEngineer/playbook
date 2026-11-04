@@ -126,7 +126,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 21] = [
+const PROBES: [Probe; 22] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -153,6 +153,7 @@ const PROBES: [Probe; 21] = [
     update_rows,
     |env| vec![policy_guard_row(env)],
     doc_rows,
+    |env| gc_rows(env, &crate::gc::space::RealProbe),
     completion_rows,
 ];
 
@@ -795,7 +796,7 @@ fn worktree_rows(env: &Env) -> Vec<Row> {
         )];
     };
     let now = crate::common::time::now_secs();
-    match crate::worktree::sweep(root, &env.home, env.repo_slug.as_deref(), true, now) {
+    match crate::worktree::sweep_dry_run(root, &env.home, env.repo_slug.as_deref(), now) {
         Ok(lines) if lines.is_empty() => {
             vec![Row::new("-", Level::Info, "no stale worktrees found")]
         }
@@ -1206,6 +1207,68 @@ fn daemon_row(paths: &crate::usage::run::Paths, port: u16) -> Row {
 
 /// One row for the data folder: path, files, sizes and any `*.migrated`
 /// leftovers from a finished migration.
+/// What playbook's own state takes on disk, how many tombstones gc keeps, and a
+/// warning when the volume is low on free space (under either gc limit). The
+/// build output store is left out of the sizes: its scan walks worktrees, which
+/// is too slow for a check.
+fn gc_rows(env: &Env, probe: &dyn crate::gc::space::SpaceProbe) -> Vec<Row> {
+    use crate::gc::{index, report, space};
+    let registry = crate::gc::registry(&env.home);
+    let limits = registry
+        .stores()
+        .iter()
+        .find(|store| store.name == "build output")
+        .map(|store| store.limits)
+        .unwrap_or_default();
+    let sized = registry
+        .stores()
+        .iter()
+        .filter(|store| store.name != "build output")
+        .cloned()
+        .fold(
+            crate::gc::Registry::new(registry.gc_dir().to_path_buf()),
+            crate::gc::Registry::with_store,
+        );
+    let summary = report::report(&sized, crate::common::time::now_secs());
+    let kept = index::latest(index::read(&index::index_path(registry.gc_dir())))
+        .iter()
+        .filter(|rec| rec.state == index::State::Done)
+        .count();
+    let items: usize = summary.stores.iter().map(|store| store.items).sum();
+    let mut rows = vec![Row::new(
+        "-",
+        Level::Info,
+        format!(
+            "gc: {} in {items} items across {} stores, {kept} tombstones kept",
+            report::human_bytes(summary.total_bytes()),
+            summary.stores.len()
+        ),
+    )];
+    rows.push(match probe.space(&env.home) {
+        Ok(free) if space::under_pressure(&free, limits.warn_gib, limits.warn_percent) => Row::new(
+            "-",
+            Level::Warn,
+            format!(
+                "free disk space is low: {} of {}",
+                report::human_bytes(free.free_bytes),
+                report::human_bytes(free.total_bytes)
+            ),
+        )
+        .hint("run: playbook gc"),
+        Ok(free) => Row::new(
+            "-",
+            Level::Pass,
+            format!("free disk space: {}", report::human_bytes(free.free_bytes)),
+        ),
+        Err(_) => Row::new(
+            "-",
+            Level::Info,
+            "free disk space is unknown on this system",
+        ),
+    });
+    rows
+}
+
 fn data_rows(env: &Env) -> Vec<Row> {
     let dir = crate::common::data::data_dir_from(&env.home);
     let files = crate::common::data::migrate::list_files(&dir);
@@ -1539,7 +1602,7 @@ pub fn failed(rows: &[Row]) -> bool {
 mod tests {
     use super::*;
 
-    const PROBE_COUNT: usize = 21;
+    const PROBE_COUNT: usize = 22;
     const COMPLETION_PROBE_AT: usize = PROBE_COUNT - 1;
 
     fn env_for(home: &Path) -> Env {
@@ -1673,5 +1736,61 @@ mod tests {
         // Assert
         assert_eq!(row.level, Level::Info);
         assert_eq!(row.message, DOCTOR_ROW_NONE);
+    }
+
+    use crate::gc::space::{Space, SpaceProbe};
+
+    struct FakeProbe(Option<Space>);
+
+    impl SpaceProbe for FakeProbe {
+        fn space(&self, _path: &Path) -> std::io::Result<Space> {
+            self.0.ok_or_else(|| std::io::Error::other("no reading"))
+        }
+    }
+
+    const GIB: u64 = 1024 * 1024 * 1024;
+
+    fn space_row(free_bytes: u64, total_bytes: u64) -> Row {
+        let home = crate::common::test_support::scratch_dir("doctor-gc");
+        gc_rows(
+            &env_for(&home),
+            &FakeProbe(Some(Space {
+                free_bytes,
+                total_bytes,
+            })),
+        )
+        .pop()
+        .unwrap()
+    }
+
+    #[test]
+    fn doctor_warns_under_gib_limit() {
+        let row = space_row(10 * GIB - 1, 10_000 * GIB);
+
+        assert_eq!(row.level, Level::Warn);
+        assert_eq!(row.hint.as_deref(), Some("run: playbook gc"));
+    }
+
+    #[test]
+    fn doctor_warns_under_percent_limit() {
+        // 100 GiB free of 4000 GiB: over the 10 GiB limit, under 5 percent.
+        assert_eq!(space_row(100 * GIB, 4_000 * GIB).level, Level::Warn);
+    }
+
+    #[test]
+    fn doctor_ok_at_both_limits() {
+        // Exactly 10 GiB free, and exactly 5 percent of 200 GiB.
+        assert_eq!(space_row(10 * GIB, 200 * GIB).level, Level::Pass);
+    }
+
+    #[test]
+    fn doctor_info_when_space_unknown() {
+        let home = crate::common::test_support::scratch_dir("doctor-gc-unknown");
+
+        let rows = gc_rows(&env_for(&home), &FakeProbe(None));
+
+        assert_eq!(rows.last().unwrap().level, Level::Info);
+        assert_eq!(rows[0].level, Level::Info);
+        assert!(rows[0].message.contains("tombstones kept"), "{rows:?}");
     }
 }

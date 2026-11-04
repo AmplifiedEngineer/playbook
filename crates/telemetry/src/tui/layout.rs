@@ -7,6 +7,8 @@
 //! that does not parse falls back to the default layout, so a bad value never
 //! stops pbtop from starting.
 
+use super::app::{ProjectsView, SpendView};
+
 /// A panel that can be placed on a tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PanelId {
@@ -19,10 +21,20 @@ pub enum PanelId {
     Budget,
     Projection,
     Burnup,
+    /// Spend pinned to one view; `Spend` is the panel whose view `v` switches.
+    SpendTotal,
+    SpendModel,
+    SpendDaily,
+    /// Breakdown pinned to one view; `Breakdown` is the switcher.
+    BreakdownProjects,
+    BreakdownAgents,
+    BreakdownSkills,
+    BreakdownTools,
+    BreakdownHealth,
 }
 
 /// Every panel, in the order the layout editor lists them.
-pub const ALL: [PanelId; 9] = [
+pub const ALL: [PanelId; 17] = [
     PanelId::Spend,
     PanelId::Tokens,
     PanelId::Models,
@@ -32,6 +44,14 @@ pub const ALL: [PanelId; 9] = [
     PanelId::Budget,
     PanelId::Projection,
     PanelId::Burnup,
+    PanelId::SpendTotal,
+    PanelId::SpendModel,
+    PanelId::SpendDaily,
+    PanelId::BreakdownProjects,
+    PanelId::BreakdownAgents,
+    PanelId::BreakdownSkills,
+    PanelId::BreakdownTools,
+    PanelId::BreakdownHealth,
 ];
 
 impl PanelId {
@@ -47,6 +67,14 @@ impl PanelId {
             PanelId::Budget => "budget",
             PanelId::Projection => "projection",
             PanelId::Burnup => "burnup",
+            PanelId::SpendTotal => "spend.total",
+            PanelId::SpendModel => "spend.model",
+            PanelId::SpendDaily => "spend.daily",
+            PanelId::BreakdownProjects => "breakdown.projects",
+            PanelId::BreakdownAgents => "breakdown.agents",
+            PanelId::BreakdownSkills => "breakdown.skills",
+            PanelId::BreakdownTools => "breakdown.tools",
+            PanelId::BreakdownHealth => "breakdown.health",
         }
     }
 
@@ -62,6 +90,14 @@ impl PanelId {
             PanelId::Budget => "limits and how fast you are using them",
             PanelId::Projection => "when each limit is reached at the current pace",
             PanelId::Burnup => "how much of a limit is used over its period, with a projection",
+            PanelId::SpendTotal => "total cost per day as a chart, always this view",
+            PanelId::SpendModel => "cost per model per day as a chart, always this view",
+            PanelId::SpendDaily => "cost per day as a table, always this view",
+            PanelId::BreakdownProjects => "cost per project, always this view",
+            PanelId::BreakdownAgents => "cost per agent, always this view",
+            PanelId::BreakdownSkills => "cost per skill, always this view",
+            PanelId::BreakdownTools => "latency and errors per tool, always this view",
+            PanelId::BreakdownHealth => "API errors, retries and cache hits, always this view",
         }
     }
 
@@ -69,14 +105,50 @@ impl PanelId {
     pub fn panel(self) -> Option<super::sort::Panel> {
         use super::sort::Panel;
         match self {
-            PanelId::Spend => Some(Panel::Spend),
+            PanelId::Spend | PanelId::SpendTotal | PanelId::SpendModel | PanelId::SpendDaily => {
+                Some(Panel::Spend)
+            }
             PanelId::Tokens => Some(Panel::Tokens),
             PanelId::Models => Some(Panel::Models),
-            PanelId::Breakdown => Some(Panel::Projects),
+            PanelId::Breakdown
+            | PanelId::BreakdownProjects
+            | PanelId::BreakdownAgents
+            | PanelId::BreakdownSkills
+            | PanelId::BreakdownTools
+            | PanelId::BreakdownHealth => Some(Panel::Projects),
             PanelId::Live => Some(Panel::Live),
             PanelId::Sessions => Some(Panel::Sessions),
             PanelId::Budget | PanelId::Projection | PanelId::Burnup => None,
         }
+    }
+
+    /// The Spend view this id is pinned to, `None` for the switcher and for
+    /// every other panel.
+    pub fn spend_view(self) -> Option<SpendView> {
+        match self {
+            PanelId::SpendTotal => Some(SpendView::Total),
+            PanelId::SpendModel => Some(SpendView::ByModel),
+            PanelId::SpendDaily => Some(SpendView::Daily),
+            _ => None,
+        }
+    }
+
+    /// The Breakdown view this id is pinned to, `None` for the switcher and
+    /// for every other panel.
+    pub fn projects_view(self) -> Option<ProjectsView> {
+        match self {
+            PanelId::BreakdownProjects => Some(ProjectsView::Projects),
+            PanelId::BreakdownAgents => Some(ProjectsView::Agents),
+            PanelId::BreakdownSkills => Some(ProjectsView::Skills),
+            PanelId::BreakdownTools => Some(ProjectsView::Tools),
+            PanelId::BreakdownHealth => Some(ProjectsView::Health),
+            _ => None,
+        }
+    }
+
+    /// True for the ids that pin a view, which the classic screen never holds.
+    pub fn is_pinned(self) -> bool {
+        self.spend_view().is_some() || self.projects_view().is_some()
     }
 
     pub fn parse(word: &str) -> Option<PanelId> {
@@ -85,15 +157,39 @@ impl PanelId {
     }
 }
 
-/// One tab: a name and its panels, top left to bottom right.
+/// One tab: a name and its panels, top left to bottom right. `rows` holds the
+/// panel count of each row (1 or 2) for a tab the user arranged, and is `None`
+/// for an automatic tab whose grid is picked from the panel count.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tab {
     pub name: String,
     pub panels: Vec<PanelId>,
+    pub rows: Option<Vec<u8>>,
 }
 
-/// The most tabs, so each has a function key and the tab bar fits.
-pub const MAX_TABS: usize = 9;
+/// The panel count of each row of the automatic grid for `n` panels, which
+/// `view::grid` draws.
+pub fn auto_rows(n: usize) -> Vec<u8> {
+    match n {
+        0 => Vec::new(),
+        1 => vec![1],
+        2 => vec![1, 1],
+        _ => (0..n.div_ceil(2))
+            .map(|i| if i * 2 + 1 < n { 2 } else { 1 })
+            .collect(),
+    }
+}
+
+/// The most tabs, so the tab bar fits and each has a number key.
+pub const MAX_TABS: usize = 12;
+/// The most panels in one row of an arranged tab.
+pub const MAX_ROW_PANELS: usize = 2;
+/// The most rows in an arranged tab.
+pub const MAX_ROWS: usize = 4;
+/// The most panels in an arranged tab.
+pub const MAX_ARRANGED_PANELS: usize = 8;
+/// Separates the rows of an arranged tab in the config value.
+const ROW_SEPARATOR: char = '|';
 /// The longest tab name, in characters.
 pub const MAX_NAME: usize = 16;
 
@@ -107,13 +203,25 @@ impl Default for Layout {
         let tab = |name: &str, panels: &[PanelId]| Tab {
             name: name.to_string(),
             panels: panels.to_vec(),
+            rows: None,
+        };
+        // Cost per day and cost per model side by side, tokens and the
+        // burn-up each across the full width.
+        let charts = Tab {
+            rows: Some(vec![2, 1, 1]),
+            ..tab(
+                "Charts",
+                &[
+                    PanelId::SpendTotal,
+                    PanelId::SpendModel,
+                    PanelId::Tokens,
+                    PanelId::Burnup,
+                ],
+            )
         };
         Layout {
             tabs: vec![
-                tab(
-                    "Charts",
-                    &[PanelId::Spend, PanelId::Tokens, PanelId::Burnup],
-                ),
+                charts,
                 tab(
                     "Numbers",
                     &[
@@ -129,9 +237,99 @@ impl Default for Layout {
     }
 }
 
+impl Tab {
+    /// The panel list of the config value: commas for an automatic tab, rows
+    /// separated by `|` for an arranged one.
+    fn panel_text(&self) -> String {
+        let words = self.panels.iter().map(|p| p.word());
+        let Some(rows) = &self.rows else {
+            return words.collect::<Vec<_>>().join(",");
+        };
+        let mut words = words;
+        let text = rows
+            .iter()
+            .map(|n| {
+                words
+                    .by_ref()
+                    .take(usize::from(*n))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .collect::<Vec<_>>()
+            .join(&ROW_SEPARATOR.to_string());
+        // One row of two has no `|` inside it, and without a mark it would read
+        // back as the automatic grid, which stacks two panels.
+        if rows.as_slice() == [2] {
+            format!("{text}{ROW_SEPARATOR}")
+        } else {
+            text
+        }
+    }
+}
+
+/// Reads the part after `=` of one tab into panels and, when it holds `|`, the
+/// size of each row.
+fn parse_rows(name: &str, list: &str) -> Result<(Vec<PanelId>, Option<Vec<u8>>), String> {
+    // A `|` at the end marks an arranged tab of one row.
+    let (body, marked) = match list.trim_end().strip_suffix(ROW_SEPARATOR) {
+        Some(body) => (body, true),
+        None => (list, false),
+    };
+    let lines: Vec<&str> = body.split(ROW_SEPARATOR).collect();
+    let arranged = lines.len() > 1 || marked;
+    let mut panels: Vec<PanelId> = Vec::new();
+    let mut rows: Vec<u8> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let before = panels.len();
+        for word in line.split(',').filter(|w| !w.trim().is_empty()) {
+            let panel = PanelId::parse(word).ok_or_else(|| {
+                format!(
+                    "{:?} is not a panel; use {}",
+                    word.trim(),
+                    ALL.map(PanelId::word).join(", ")
+                )
+            })?;
+            if panels.contains(&panel) {
+                return Err(format!(
+                    "the panel `{}` appears twice in `{name}`",
+                    panel.word()
+                ));
+            }
+            panels.push(panel);
+        }
+        let count = panels.len() - before;
+        if arranged && count == 0 {
+            return Err(format!("row {} of `{name}` is empty", i + 1));
+        }
+        if arranged && count > MAX_ROW_PANELS {
+            return Err(format!(
+                "row {} of `{name}` has {count} panels, use at most {MAX_ROW_PANELS}",
+                i + 1
+            ));
+        }
+        rows.push(
+            u8::try_from(count).map_err(|_| format!("row {} of `{name}` is too long", i + 1))?,
+        );
+    }
+    if panels.is_empty() {
+        return Err(format!("the tab `{name}` has no panels"));
+    }
+    if !arranged {
+        return Ok((panels, None));
+    }
+    if rows.len() > MAX_ROWS || panels.len() > MAX_ARRANGED_PANELS {
+        return Err(format!(
+            "`{name}` has {} panels in {} rows, use at most {MAX_ARRANGED_PANELS} panels in {MAX_ROWS} rows",
+            panels.len(),
+            rows.len()
+        ));
+    }
+    Ok((panels, Some(rows)))
+}
+
 impl Layout {
     /// One tab with the panels of the single screen pbtop had before tabs, which
-    /// is every panel except Projection and Burnup.
+    /// is every panel except Projection, Burnup and the pinned view words.
     pub fn classic() -> Layout {
         Layout {
             tabs: vec![Tab {
@@ -139,13 +337,18 @@ impl Layout {
                 panels: ALL
                     .iter()
                     .copied()
-                    .filter(|p| !matches!(p, PanelId::Projection | PanelId::Burnup))
+                    .filter(|p| {
+                        !p.is_pinned() && !matches!(p, PanelId::Projection | PanelId::Burnup)
+                    })
                     .collect(),
+                rows: None,
             }],
         }
     }
 
-    /// Reads `Name=panel,panel;Name=panel`. The error says what is wrong.
+    /// Reads `Name=panel,panel;Name=panel`. A `|` in the panel list starts a
+    /// new row of one or two panels: `Name=spend,tokens|burnup`. The error says
+    /// what is wrong.
     pub fn parse(text: &str) -> Result<Layout, String> {
         let mut tabs: Vec<Tab> = Vec::new();
         for part in text.split(';').filter(|p| !p.trim().is_empty()) {
@@ -162,29 +365,11 @@ impl Layout {
             if tabs.iter().any(|t| t.name.eq_ignore_ascii_case(name)) {
                 return Err(format!("the tab `{name}` appears twice"));
             }
-            let mut panels = Vec::new();
-            for word in list.split(',').filter(|w| !w.trim().is_empty()) {
-                let panel = PanelId::parse(word).ok_or_else(|| {
-                    format!(
-                        "{:?} is not a panel; use {}",
-                        word.trim(),
-                        ALL.map(PanelId::word).join(", ")
-                    )
-                })?;
-                if panels.contains(&panel) {
-                    return Err(format!(
-                        "the panel `{}` appears twice in `{name}`",
-                        panel.word()
-                    ));
-                }
-                panels.push(panel);
-            }
-            if panels.is_empty() {
-                return Err(format!("the tab `{name}` has no panels"));
-            }
+            let (panels, rows) = parse_rows(name, list)?;
             tabs.push(Tab {
                 name: name.to_string(),
                 panels,
+                rows,
             });
         }
         if tabs.is_empty() {
@@ -200,10 +385,7 @@ impl Layout {
     pub fn to_text(&self) -> String {
         self.tabs
             .iter()
-            .map(|t| {
-                let words: Vec<&str> = t.panels.iter().map(|p| p.word()).collect();
-                format!("{}={}", t.name, words.join(","))
-            })
+            .map(|t| format!("{}={}", t.name, t.panel_text()))
             .collect::<Vec<_>>()
             .join(";")
     }
@@ -227,6 +409,85 @@ impl Layout {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dotted_word_pins_one_view_and_the_plain_words_stay_switchers() {
+        // Arrange
+        let text = "A=spend.model,breakdown.agents;B=spend,breakdown";
+
+        // Act
+        let layout = Layout::parse(text).unwrap();
+
+        // Assert
+        assert_eq!(
+            layout.tabs[0].panels,
+            [PanelId::SpendModel, PanelId::BreakdownAgents]
+        );
+        assert_eq!(layout.tabs[1].panels, [PanelId::Spend, PanelId::Breakdown]);
+        assert_eq!(PanelId::SpendModel.spend_view(), Some(SpendView::ByModel));
+        assert_eq!(PanelId::Spend.spend_view(), None);
+        assert_eq!(
+            PanelId::BreakdownHealth.projects_view(),
+            Some(ProjectsView::Health)
+        );
+        assert_eq!(layout.to_text(), text);
+    }
+
+    #[test]
+    fn every_pinned_word_parses_back_and_maps_to_the_focusable_panel_of_its_switcher() {
+        for id in ALL.into_iter().filter(|id| id.is_pinned()) {
+            let base = if id.spend_view().is_some() {
+                PanelId::Spend
+            } else {
+                PanelId::Breakdown
+            };
+            assert_eq!(id.panel(), base.panel(), "{}", id.word());
+            assert_eq!(PanelId::parse(id.word()), Some(id));
+        }
+    }
+
+    #[test]
+    fn an_unknown_view_word_is_refused_with_the_list_of_words() {
+        let why = Layout::parse("A=spend.nope").unwrap_err();
+
+        assert!(why.contains("spend.nope"), "{why}");
+        assert!(why.contains("spend.total"), "{why}");
+    }
+
+    #[test]
+    fn each_view_word_may_appear_once_and_beside_its_switcher() {
+        assert!(Layout::parse("A=spend,spend.total,spend.model").is_ok());
+        let why = Layout::parse("A=spend.total,spend.total").unwrap_err();
+        assert!(why.contains("spend.total"), "{why}");
+    }
+
+    #[test]
+    fn the_classic_layout_keeps_the_original_seven_panels() {
+        let classic = Layout::classic();
+
+        assert_eq!(
+            classic.tabs[0].panels,
+            [
+                PanelId::Spend,
+                PanelId::Tokens,
+                PanelId::Models,
+                PanelId::Breakdown,
+                PanelId::Live,
+                PanelId::Sessions,
+                PanelId::Budget,
+            ]
+        );
+    }
+
+    #[test]
+    fn every_panel_has_a_distinct_word_and_a_description() {
+        let mut words: Vec<&str> = ALL.iter().map(|p| p.word()).collect();
+        words.sort_unstable();
+        words.dedup();
+
+        assert_eq!(words.len(), ALL.len());
+        assert!(ALL.iter().all(|p| !p.describe().is_empty()));
+    }
 
     #[test]
     fn the_default_layout_has_the_charts_numbers_and_sessions_tabs() {
@@ -272,10 +533,146 @@ mod tests {
     }
 
     #[test]
-    fn more_than_nine_tabs_are_refused() {
-        let text: Vec<String> = (0..10).map(|i| format!("T{i}=spend")).collect();
+    fn twelve_tabs_are_accepted_and_thirteen_refused() {
+        let tabs = |n: usize| -> String {
+            (0..n)
+                .map(|i| format!("T{i}=spend"))
+                .collect::<Vec<_>>()
+                .join(";")
+        };
 
-        assert!(Layout::parse(&text.join(";")).is_err());
+        assert_eq!(Layout::parse(&tabs(12)).unwrap().tabs.len(), 12);
+        assert!(Layout::parse(&tabs(13)).unwrap_err().contains("at most 12"));
+    }
+
+    #[test]
+    fn a_tab_without_a_bar_stays_automatic() {
+        let layout = Layout::parse("Charts=spend,tokens,burnup").unwrap();
+
+        assert_eq!(layout.tabs[0].rows, None);
+        assert_eq!(layout.to_text(), "Charts=spend,tokens,burnup");
+    }
+
+    #[test]
+    fn a_bar_starts_a_new_row_and_sets_the_row_sizes() {
+        let layout = Layout::parse("A=spend,tokens|burnup").unwrap();
+
+        assert_eq!(
+            layout.tabs[0].panels,
+            [PanelId::Spend, PanelId::Tokens, PanelId::Burnup]
+        );
+        assert_eq!(layout.tabs[0].rows, Some(vec![2, 1]));
+    }
+
+    #[test]
+    fn a_tab_with_rows_round_trips() {
+        let text = "A=spend,tokens|burnup|models,live;B=budget";
+
+        let layout = Layout::parse(text).unwrap();
+
+        assert_eq!(layout.to_text(), text);
+        assert_eq!(Layout::parse(&layout.to_text()).unwrap(), layout);
+    }
+
+    #[test]
+    fn one_row_of_two_panels_survives_saving_and_reading() {
+        // Arrange
+        let layout = Layout {
+            tabs: vec![Tab {
+                name: "A".to_string(),
+                panels: vec![PanelId::Spend, PanelId::Tokens],
+                rows: Some(vec![2]),
+            }],
+        };
+
+        // Act
+        let text = layout.to_text();
+
+        // Assert
+        assert_eq!(text, "A=spend,tokens|");
+        assert_eq!(Layout::parse(&text).unwrap(), layout);
+    }
+
+    #[test]
+    fn rows_that_are_too_big_or_empty_are_refused_with_the_row_named() {
+        for (bad, hint) in [
+            ("Charts=spend|tokens,models,live", "row 2 of `Charts` has 3"),
+            ("Charts=spend||tokens", "row 2 of `Charts` is empty"),
+            ("Charts=spend||", "row 2 of `Charts` is empty"),
+            ("Charts=|spend", "row 1 of `Charts` is empty"),
+            ("Charts=spend|spend", "appears twice"),
+        ] {
+            let why = Layout::parse(bad).unwrap_err();
+
+            assert!(why.contains(hint), "{bad}: {why}");
+        }
+    }
+
+    #[test]
+    fn an_arranged_tab_holds_at_most_eight_panels_and_four_rows() {
+        let eight = "A=spend,tokens|models,live|sessions,budget|projection,burnup";
+        let five_rows = "A=spend|tokens|models|live|sessions";
+        let nine = "A=spend,tokens|models,live|sessions,budget|projection,burnup|breakdown";
+
+        assert!(Layout::parse(eight).is_ok());
+        assert!(Layout::parse(five_rows).unwrap_err().contains("4 rows"));
+        assert!(Layout::parse(nine).unwrap_err().contains("4 rows"));
+    }
+
+    #[test]
+    fn an_old_stored_name_that_holds_a_bar_still_loads() {
+        let layout = Layout::parse("a|b=spend,tokens").unwrap();
+
+        assert_eq!(layout.tabs[0].name, "a|b");
+        assert_eq!(layout.tabs[0].rows, None);
+        assert_eq!(layout.to_text(), "a|b=spend,tokens");
+    }
+
+    #[test]
+    fn every_old_layout_string_loads_unchanged() {
+        for old in [
+            "Charts=spend,tokens",
+            "Money=budget,models;Live=live",
+            "Charts=spend,tokens;Numbers=models,breakdown,budget,projection;Sessions=live,sessions",
+            "T0=spend;T1=spend;T2=spend;T3=spend;T4=spend;T5=spend;T6=spend;T7=spend;T8=spend",
+            "Charts=spend,tokens,burnup;Numbers=models,breakdown,budget,projection;Sessions=live,sessions",
+        ] {
+            let layout = Layout::parse(old).unwrap();
+
+            assert!(layout.tabs.iter().all(|t| t.rows.is_none()), "{old}");
+            assert_eq!(layout.to_text(), old);
+        }
+        let spaced = Layout::parse("Money = budget , models ; Live=live").unwrap();
+        assert_eq!(spaced.to_text(), "Money=budget,models;Live=live");
+    }
+
+    #[test]
+    fn the_default_charts_tab_splits_spend_and_arranges_the_rows() {
+        // Arrange
+        let layout = Layout::default();
+
+        // Act
+        let charts = &layout.tabs[0];
+        let text = layout.to_text();
+
+        // Assert
+        assert_eq!(charts.rows, Some(vec![2, 1, 1]));
+        assert_eq!(
+            charts.panels[..2],
+            [PanelId::SpendTotal, PanelId::SpendModel]
+        );
+        assert!(
+            text.starts_with("Charts=spend.total,spend.model|tokens|burnup;"),
+            "{text}"
+        );
+        assert_eq!(Layout::parse(&text).unwrap(), layout);
+    }
+
+    #[test]
+    fn a_stored_spend_word_keeps_the_switcher() {
+        let layout = Layout::parse("Charts=spend,tokens").unwrap();
+
+        assert_eq!(layout.tabs[0].panels[0], PanelId::Spend);
     }
 
     #[test]

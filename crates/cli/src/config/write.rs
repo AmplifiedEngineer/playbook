@@ -119,7 +119,7 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
             return Err(ConfigError::OutOfRange {
                 key: key.to_string(),
                 value: value.to_string(),
-                constraint: "tabs like Charts=spend,tokens;Numbers=models (1 to 9 tabs; panels: spend, tokens, models, breakdown, live, sessions, budget, projection; a name is 1 to 16 characters)",
+                constraint: "tabs like Charts=spend,tokens;Numbers=models (1 to 12 tabs; panels: spend, tokens, models, breakdown, live, sessions, budget, projection; | starts a row of up to 2 panels; a name is 1 to 16 characters)",
             });
         }
     }
@@ -217,6 +217,9 @@ fn usd(cents: i64) -> String {
 /// The most `docs.maxBytes` may be: the converter's own input ceiling.
 const DOCS_MAX_BYTES_CEILING: i64 = keys::HARD_MAX_INPUT_BYTES as i64;
 
+/// Every `gc.*` number has its own range; the config keys page lists them.
+const GC_RANGE_HINT: &str = "a whole number inside the range on the config keys page";
+
 const DOCS_DISPLAY_CHARS_MIN: i64 = 1_000;
 const DOCS_DISPLAY_CHARS_MAX: i64 = 120_000;
 
@@ -228,6 +231,16 @@ const DOCS_DISPLAY_CHARS_MAX: i64 = 120_000;
 /// numeric key 0 or more.
 fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
     let whole = value.as_i64();
+    if let Some(entry) = keys::gc_number(key) {
+        if whole.is_some_and(|n| (entry.min..=entry.max).contains(&n)) {
+            return Ok(());
+        }
+        return Err(ConfigError::OutOfRange {
+            key: key.to_string(),
+            value: value.to_string(),
+            constraint: GC_RANGE_HINT,
+        });
+    }
     let (valid, constraint) = match key {
         "auto.budgetUsd" | "auto.agentBudgetUsd" => (
             value.as_f64().is_some_and(|n| n.is_finite() && n >= 0.01),
@@ -260,6 +273,10 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
         "watch.maxCatchupHours" => (
             whole.is_some_and(|n| (1..=720).contains(&n)),
             "a whole number between 1 and 720",
+        ),
+        "gate.maxRounds" => (
+            whole.is_some_and(keys::gate_max_rounds_in_range),
+            "a whole number from 1 to 20",
         ),
         "sessions.staleAfterDays" | "sessions.recentDays" => {
             (whole.is_some_and(|n| n >= 1), "a positive integer")

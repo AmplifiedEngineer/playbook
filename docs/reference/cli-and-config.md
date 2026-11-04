@@ -43,6 +43,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `auto.agentBudgetUsd` | `50` | a number, see the config keys page for the range |
 | `auto.sessionCeilingUsd` | `0` | a number, see the config keys page for the range |
 | `auto.warnPct` | `70` | a number, see the config keys page for the range |
+| `gate.maxRounds` | `5` | a number, see the config keys page for the range |
 | `fix.maxFiles` | `3` | a number, see the config keys page for the range |
 | `fix.maxLines` | `500` | a number, see the config keys page for the range |
 | `review.stackMaxPrs` | `6` | a number, see the config keys page for the range |
@@ -95,6 +96,19 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `watch.tokenEnv` | empty | see the config keys page |
 | `watch.limits.actionsPerDay` | `50` | a number, see the config keys page for the range |
 | `watch.limits.usdPerDay` | `5` | a number, see the config keys page for the range |
+| `gc.enabled` | `true` | `true`, `false` |
+| `gc.graceDays` | `7` | a number, see the config keys page for the range |
+| `gc.handoffGraceDays` | `14` | a number, see the config keys page for the range |
+| `gc.sessionDirIdleDays` | `14` | a number, see the config keys page for the range |
+| `gc.logMaxDays` | `30` | a number, see the config keys page for the range |
+| `gc.logMaxMiB` | `5` | a number, see the config keys page for the range |
+| `gc.leftoverDays` | `90` | a number, see the config keys page for the range |
+| `gc.gateDbIdleDays` | `30` | a number, see the config keys page for the range |
+| `gc.buildOutputIdleDays` | `7` | a number, see the config keys page for the range |
+| `gc.buildOutputPressureIdleDays` | `1` | a number, see the config keys page for the range |
+| `gc.buildOutputActiveMinutes` | `15` | a number, see the config keys page for the range |
+| `gc.freeSpaceWarnGiB` | `10` | a number, see the config keys page for the range |
+| `gc.freeSpaceWarnPercent` | `5` | a number, see the config keys page for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 | `watch.rule.<id>` | empty | one rule as JSON text |
 
@@ -104,13 +118,13 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 
 Configure and support Claude Code from the command line.
 
-playbook installs hooks and a session launcher, shows the Agent Budget Dashboard, and helps with pull requests, reviews, worktrees and session handoffs.
+playbook installs hooks and a session launcher, shows the Agent Budget Dashboard, and helps with PRs, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `completions`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `watch`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `completions`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `gc`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `watch`, `worktree`
 
 ### `playbook adr`
 
-ADR helpers
+Work with ADRs, such as the next free record number
 
 Subcommands: `next`
 
@@ -149,13 +163,13 @@ Example: `playbook agents variants --ceiling medium`
 
 ### `playbook atlassian`
 
-Checks for the `playbook:atlassian` skill
+Check the Atlassian tools the `playbook:atlassian` skill uses
 
 Subcommands: `check`
 
 ### `playbook atlassian check`
 
-Check that `acli` meets the minimum version and whether `twg` is installed
+Check the `acli` version and whether `twg` is installed
 
 Prints one line for `acli` (`ok`, `too old` with the `brew upgrade atlassian/acli/acli` hint, `version unreadable` or `missing`) and one for `twg`. Exits 0 when `acli` is usable and 1 otherwise, so the skill can fall back to the next route. Whether the Atlassian MCP tools are connected is left to the skill.
 
@@ -177,13 +191,17 @@ Clear caches that would freeze old settings into a session
 
 ### `playbook cc clean`
 
-Mode of the `playbook cc` launcher: clean up and resume (no action by itself)
+Clean up and resume a session
+
+Clones the session named for this directory with its settings overrides stripped, then resumes the clone in `claude`, so settings, plugins and hooks reload from the current config. Starts a fresh session when none matches. The same as `playbook cc --clean`.
 
 - `<ARGS>`: Arguments passed through to claude
 
 ### `playbook cc fresh`
 
-Mode of the `playbook cc` launcher: start a fresh session (no action by itself)
+Start a fresh session
+
+Starts a new `claude` session without resuming an earlier one, with the current settings applied. The same as `playbook cc --fresh`.
 
 - `<ARGS>`: Arguments passed through to claude
 
@@ -204,9 +222,9 @@ Remove stale runtime state
 
 ### `playbook cc raw`
 
-Mode of the `playbook cc` launcher: resume a session as it was (no action by itself)
+Resume a session as it was
 
-The launcher handles these modes. Running this command directly does nothing and exits 0.
+Resumes a session in `claude` as it was, with no fork and its settings overrides kept. Starts a fresh session when none matches. The same as `playbook cc --raw`.
 
 - `<ARGS>`: Session id to resume (default: the most recent), then arguments for claude
 
@@ -216,8 +234,10 @@ Create a git worktree for a branch and print its path
 
 Prints only the path, so a shell can run `cd "$(playbook cc worktree my-branch)"`.
 
+Example: `playbook cc worktree my-branch`
+
 - `<BRANCH>`: Branch to create the worktree for
-- `<ENV_BASE>`: Folder (relative to the repo root) holding the `.env` to copy in
+- `<ENV_BASE>`: Directory (relative to the repo root) holding the `.env` to copy in
 
 ### `playbook ccd`
 
@@ -355,12 +375,12 @@ Built from this binary's own command tree, so it lists only the commands the bin
 
 Example: `playbook commands pr`
 
-- `<GROUP>`: A command or group, such as `pr` or `worktree review`
+- `<GROUP>`: Command or group to list, such as `pr` or `worktree review`
 - `--json`: Print a JSON array with one object per command: command, purpose, access, args, subcommands, intents
 
 ### `playbook commit`
 
-The git steps of `/playbook:commit-and-push`
+Run the git steps of `/playbook:commit-and-push`
 
 Subcommands: `prepare`, `run`
 
@@ -369,6 +389,8 @@ Subcommands: `prepare`, `run`
 Stage, format, and print what a commit message is drafted from
 
 Refuses the repo's default branch. Prints `NO_STAGED_CHANGES` when there is nothing to commit, else `BRANCH=`, the changed files and the diff.
+
+Example: `playbook commit prepare -A`
 
 - `-A`: Stage everything first (`git add -A`)
 - `-u`: Stage tracked changes first (`git add -u`)
@@ -380,12 +402,14 @@ Commit, rebase when behind, and push
 
 Reads the message from stdin, or from `--message-file`. Adds a sign-off per `commit.signOff` and signs when `user.signingkey` is set. A rejected push is never forced. Exits 1 on any failure.
 
+Example: `playbook commit run --message-file /tmp/msg.txt`
+
 - `--message-file <MESSAGE_FILE>`: File with the commit message (default: read stdin)
 - `-a`: Replace the last commit
 - `--auto`: Auto mode: never force a push
 - `--no-signoff`: Leave the sign-off trailer off
-- `--no-type-check`: Skip the check that the commit type fits the files (a docs-only change is not `feat`, a lock-file bump is not `fix`)
-- `--no-prose-check`: Skip the prose check (a dash, a curly quote, a banned word or a contrast phrase in the message)
+- `--no-type-check`: Skip the check that the commit type fits the files. A docs-only change is not `feat`, and a lock-file bump is not `fix`
+- `--no-prose-check`: Skip the prose check. It flags a dash, a curly quote, a banned word or a contrast phrase in the message
 
 ### `playbook completions`
 
@@ -393,11 +417,11 @@ Print a shell completion script for bash, zsh or fish
 
 Example: `playbook completions zsh`
 
-- `<SHELL>`: The shell to print the script for (one of `bash`, `zsh`, `fish`)
+- `<SHELL>`: Shell to print the script for (one of `bash`, `zsh`, `fish`)
 
 ### `playbook config`
 
-Read and change playbook settings
+Read and change playbook settings in any tier
 
 Settings come from tiers, highest first: repo, org, global, then the built-in default. `get` and `list` show which tier supplied a value.
 
@@ -417,6 +441,8 @@ Example: `playbook config export > playbook-config.json`
 
 Show a setting's value and which tier it came from
 
+Example: `playbook config get autoReview.enabled`
+
 - `<KEY>`: Dotted setting name, such as `autoReview.enabled`
 
 ### `playbook config import`
@@ -427,7 +453,7 @@ Every key and value is checked first, and nothing is stored if any is invalid. U
 
 Example: `playbook config import playbook-config.json`
 
-- `<FILE>`: The JSON file to read, or `-` for standard input
+- `<FILE>`: JSON file to read, or `-` for standard input
 
 ### `playbook config list`
 
@@ -439,6 +465,8 @@ Change a setting
 
 Writes to the repo tier unless you pass `--org` or `--global`. The per-user `update.*` keys go to the global tier, and `--org` is refused for them.
 
+Example: `playbook config set autoReview.enabled true`
+
 - `<KEY>`: Dotted setting name, such as `autoReview.enabled`
 - `<VALUE>`: New value; it is read as the type the setting expects
 - `--org`: Write to the org tier instead of the repo tier
@@ -446,7 +474,7 @@ Writes to the repo tier unless you pass `--org` or `--global`. The per-user `upd
 
 ### `playbook deliver`
 
-Commit, push and open or update a pull request from any worktree
+Commit, push and open or update a PR from any worktree
 
 Stages per flag, commits when something is staged (message from `--message` or `--message-file`), rebases onto the base, pushes, then opens or updates the PR through `gh`. Refuses the default or a protected branch and a detached HEAD, never skips hooks or signing, and only force-pushes with a lease after its own rebase. Exit codes: 0 delivered, 3 refused, 4 rebase conflict, 5 a git or gh call failed, 6 PR closed or a required check failed, 7 wait timed out, 8 auto-merge did not queue, 9 nothing to do.
 
@@ -483,9 +511,13 @@ Subcommands: `ensure`
 
 ### `playbook deps ensure`
 
-Keep each tool on PATH and install only the missing ones with Homebrew, from the `brew` and `tap` lines of a Brewfile
+Install missing Brewfile tools with Homebrew
 
-- `<BREWFILE>`: Brewfile to read; defaults to `Brewfile` in the current directory
+Leaves each tool already on PATH alone, and reads the `brew` and `tap` lines of the Brewfile.
+
+Example: `playbook deps ensure --builtin`
+
+- `<BREWFILE>`: Brewfile to read, `Brewfile` in the current directory by default
 - `--builtin`: Read the Brewfile built into this binary instead of a file
 
 ### `playbook doc`
@@ -504,7 +536,9 @@ Print a document as Markdown, framed as untrusted content
 
 Supports pdf, docx, doc, odt, rtf, epub, pptx, ppt, odp, xlsx, ods and csv. A scanned PDF with no text layer reports that it needs OCR.
 
-- `<FILE>`: The document to read
+Example: `playbook doc read report.pdf --section 2`
+
+- `<FILE>`: Document to read
 - `--json`: Print one JSON object instead of the framed text
 - `--offset <OFFSET>`: Character offset to start the slice at (default 0)
 - `--limit <LIMIT>`: Most characters to print, capped at docs.displayChars
@@ -516,13 +550,13 @@ Say which document converter is in use, or that none was found
 
 ### `playbook doctor`
 
-Read single facts that the health check uses
+Check the playbook setup, or read one fact the check uses
 
-The full health check is the `/playbook:doctor` command inside Claude Code. These subcommands print one fact each, such as pending migrations, plugin version or hook wiring, and help when a layer reports a miss.
-
-Example: `playbook doctor pending-migrations`
+`playbook doctor check` runs the full health check, the same one the `/playbook:doctor` command uses. The other subcommands print one fact each, such as pending migrations, plugin version or hook wiring, and help when a layer reports a miss.
 
 `playbook doctor --fix` repairs playbook's own files after an upgrade and prints the list of what still needs you, the same as `playbook migrate`. At a terminal it first asks whether to turn attribution OFF, the default, by adding the missing `attribution` keys; that yes is the only Claude Code setting it writes. A no stores attribution ON.
+
+Example: `playbook doctor pending-migrations`
 
 - `--fix`: Run the safe migrations for playbook's own files, then list what needs you
 
@@ -542,7 +576,9 @@ List every hook command in a settings.json, one per line
 
 Prints nothing if the file is unreadable, invalid, or has no hooks.
 
-- `<PATH>`: settings.json to read
+Example: `playbook doctor hook-commands settings.json`
+
+- `<PATH>`: Path of the settings.json to read
 
 ### `playbook doctor hook-commands-for-event`
 
@@ -550,7 +586,9 @@ Count the commands wired to each named guard for one event
 
 Prints one `guard=count` line per guard.
 
-- `<PATH>`: settings.json to read
+Example: `playbook doctor hook-commands-for-event settings.json PreToolUse rm-workspace-guard`
+
+- `<PATH>`: Path of the settings.json to read
 - `<EVENT>`: Event name, such as `PreToolUse`
 - `<GUARDS>`: Guard names, such as `rm-workspace-guard`
 
@@ -560,9 +598,11 @@ Count hook commands that match a pattern
 
 Counts across every event, or only one if you name it.
 
-- `<PATH>`: settings.json to read
+Example: `playbook doctor hook-commands-matching settings.json guard`
+
+- `<PATH>`: Path of the settings.json to read
 - `<PATTERN>`: Regex to look for anywhere in a command
-- `<EVENT>`: Only count this event (default: every event)
+- `<EVENT>`: Event to count, every event when left out
 
 ### `playbook doctor models`
 
@@ -574,7 +614,7 @@ Also says whether your own fallback replaces playbook's, and when the effort in 
 
 ### `playbook doctor pending-migrations`
 
-List files you edited after playbook placed them
+List the manual migration findings that need you
 
 Prints one line per finding, or nothing when none is pending.
 
@@ -584,7 +624,9 @@ Print the version from a plugin manifest
 
 Prints an empty line if the file is missing, unreadable, or has no version.
 
-- `<PATH>`: Plugin manifest to read
+Example: `playbook doctor plugin-version plugin.json`
+
+- `<PATH>`: Path of the plugin manifest to read
 
 ### `playbook doctor statusline-command`
 
@@ -592,7 +634,9 @@ Print the status line command from a settings.json
 
 Prints an empty line if the file is missing, unreadable, or has none.
 
-- `<PATH>`: settings.json to read
+Example: `playbook doctor statusline-command settings.json`
+
+- `<PATH>`: Path of the settings.json to read
 
 ### `playbook effort`
 
@@ -606,7 +650,7 @@ The ceiling caps the agent variants the launcher renders, the default effort it 
 
 Example: `playbook effort xhigh`
 
-- `<LEVEL>`: auto, low, medium, high, xhigh or max
+- `<LEVEL>`: One of auto, low, medium, high, xhigh or max
 - `--json`: Print the status as JSON (with no level)
 
 Subcommands: `apply`, `choose`, `list`, `log`, `reset`, `resolve`, `suggest`
@@ -619,24 +663,24 @@ Builds the same patch as `suggest --patch`, shows it, and asks `y/N`. `--yes` ap
 
 Example: `playbook effort apply --range 90d`
 
-- `--range <RANGE>`: 30d, 60d, 90d, month or all
+- `--range <RANGE>`: One of 30d, 60d, 90d, month or all
 - `--yes`: Approve without asking
 
 ### `playbook effort choose`
 
-Choose an effort for one dispatch from the diff, when `effort.auto` allows
+Choose an effort for one dispatch from its diff
 
 Does nothing while `effort.auto` is `off` (the default). With `suggest` it logs what it would pick and the dispatch keeps the default. With `on` it names the `subagent_type` to spawn: an existing variant, picked strictly between the agent's quality floor and every ceiling, raised for risky or large diffs and lowered only for small clean ones. An agent marked costly to miss is never lowered. Any error gives the default. Every choice is appended to a local log (`playbook effort log`).
 
 Example: `playbook effort choose reviewer --base origin/main --json`
 
-- `<AGENT>`: The agent, such as `reviewer`
+- `<AGENT>`: Agent name, such as `reviewer`
 - `--base <BASE>`: Read the diff shape from `git diff --numstat <ref>`
 - `--lines <LINES>`: Changed lines, when not using --base
 - `--files <FILES>`: Changed files, when not using --base
 - `--bytes <BYTES>`: Diff size in bytes
-- `--path <PATHS>`: A touched path (repeat for several), when not using --base
-- `--lens <LENS>`: The review lens, such as `security`
+- `--path <PATHS>`: Touched path, repeated for several, when not using --base
+- `--lens <LENS>`: Review lens, such as `security`
 - `--json`: Print JSON
 
 ### `playbook effort list`
@@ -676,9 +720,9 @@ For an agent it also names the file to dispatch and every file allowed under the
 
 Example: `playbook effort resolve agents reviewer --cap medium --json`
 
-- `<KIND>`: agents, commands or skills
-- `<NAME>`: The component name, such as `reviewer` or `deep-review`
-- `--cap <CAP>`: An extra ceiling from the caller: low, medium, high, xhigh or max
+- `<KIND>`: One of agents, commands or skills
+- `<NAME>`: Component name, such as `reviewer` or `deep-review`
+- `--cap <CAP>`: Extra ceiling from the caller: low, medium, high, xhigh or max
 - `--json`: Print JSON
 
 ### `playbook effort suggest`
@@ -689,15 +733,15 @@ Reads the local usage store and the quality floor table and prints, for each age
 
 Example: `playbook effort suggest --range 90d --json`
 
-- `--range <RANGE>`: 30d, 60d, 90d, month or all
+- `--range <RANGE>`: One of 30d, 60d, 90d, month or all
 - `--json`: Print JSON
 - `--patch`: Print a proposed config patch instead (still read only)
 
 ### `playbook eval`
 
-Check how well the review triage classifier sorts real pull requests
+Check how well the review triage classifier sorts real PRs
 
-Each case is a pull request with a known answer per review lens. Costs one `gh pr diff` fetch and one live `claude` call per case, so run it by hand or on a schedule.
+Each case is a PR with a known answer per review lens. Costs one `gh pr diff` fetch and one live `claude` call per case, so run it by hand or on a schedule.
 
 Example: `playbook eval review-triage`
 
@@ -723,13 +767,13 @@ Example: `playbook eval bench --role fact-checker --model haiku,sonnet --effort 
 - `--jobs <JOBS>`: Calls in flight at once
 - `--json`: Print JSON instead of a table
 - `--list`: List the cases and exit
-- `--strategy <STRATEGY>`: Run the `tdd_repo` implementer cases with tools in a scratch git repo, one dispatch per TDD step (`per-step`) or one per Work Unit (`per-wu`)
+- `--strategy <STRATEGY>`: Run the `tdd_repo` implementer cases with tools in a scratch git repo. Use one dispatch per TDD step (`per-step`) or one per Work Unit (`per-wu`)
 
 ### `playbook eval review-triage`
 
-Run the review triage classifier on each case and compare with the known answers
+Run the review triage classifier on each case
 
-Needs network access, a logged-in `gh`, and a working `claude` with a live API key. Exits 0 when no lens was wrongly skipped and no case errored, and 1 otherwise. Re-run it whenever the triage prompt changes.
+Compares each result with the known answer. Needs network access, a logged-in `gh`, and a working `claude` with a live API key. Exits 0 when no lens was wrongly skipped and no case errored, and 1 otherwise. Re-run it whenever the triage prompt changes.
 
 Example: `playbook eval review-triage`
 
@@ -750,10 +794,12 @@ Check that recorded phase verdicts still pass
 
 Exits 0 only if every named phase is PASS or WARN and its source is unchanged. Exits 1 on any other verdict, a stale one, or no phases.
 
+Example: `playbook gate check my-plan plan adversarial test-review`
+
 - `<PLAN_SLUG>`: Plan slug to check
 - `<COMMAND>`: Command running this check
 - `<PHASES>`: Phase names to check
-- `--source <SOURCE>`: File with the current source content, compared against what each verdict saw; defaults to the shared draft, `<plans>/<slug>.gate-source.md`
+- `--source <SOURCE>`: File with the current source content, compared against what each verdict saw. Defaults to the shared draft, `<plans>/<slug>.gate-source.md`
 - `--json`: Print one JSON object instead of text (exit codes stay the same)
 
 ### `playbook gate record`
@@ -762,12 +808,14 @@ Save a phase verdict for a plan
 
 Reads a phase agent's output, finds its `VERDICT:` line, and stores it.
 
+Example: `playbook gate record my-plan plan adversarial out.md`
+
 - `<PLAN_SLUG>`: Plan slug the phase belongs to
 - `<COMMAND>`: Command that produced this verdict
 - `<PHASE>`: Which phase this verdict is for
 - `<INPUT>`: File with the phase agent's output, or "-" to read stdin
-- `--source <SOURCE>`: File with the source content the verdict covers, used to spot a stale verdict later; defaults to the phase's snapshot, `<plans>/<slug>.gate-source.<phase>.md`
-- `--stuck`: Store a FAIL report as STUCK: the revise and re-run loop stopped because the blocking findings made no progress. Refused for any other verdict
+- `--source <SOURCE>`: File with the source content the verdict covers. Used to spot a stale verdict later. Defaults to the phase's snapshot, `<plans>/<slug>.gate-source.<phase>.md`
+- `--stuck`: Store a FAIL report as STUCK. Use it when the revise and re-run loop stopped because the blocking findings made no progress. Refused for any other verdict
 
 ### `playbook gate snapshot`
 
@@ -780,9 +828,20 @@ Example: `playbook gate snapshot my-plan adversarial test-review`
 - `<PLAN_SLUG>`: Plan slug
 - `<PHASES>`: Phase names to snapshot for
 
+### `playbook gc`
+
+Show what playbook state takes space on disk, or clean it up
+
+Lists each store of on-disk state with its size, item count, age and the action a cleanup would take. It changes nothing and takes no lock. With `--yes` it repairs interrupted moves, tombstones items past their limit and deletes tombstones past their grace period. With `--restore` it puts a tombstoned item back where it came from.
+
+Example: `playbook gc`
+
+- `--yes`: Apply the cleanup
+- `--restore <ID>`: Restore a tombstoned item by id
+
 ### `playbook glossary`
 
-Append to the repo's `GLOSSARY.md`
+Append entries to the repo's `GLOSSARY.md` file
 
 Subcommands: `add`
 
@@ -790,11 +849,13 @@ Subcommands: `add`
 
 Append one entry line to `GLOSSARY.md` at the repo root
 
-- `<ENTRY>`: The entry text
+Example: `playbook glossary add "WU: Work Unit"`
+
+- `<ENTRY>`: Entry text to append
 
 ### `playbook handoff`
 
-Save and show notes that carry a session over to the next one
+Save and show notes that carry over to the next session
 
 A handoff is a markdown note for one directory. The next session started there loads it when the SessionStart hook is installed and runs, and `/playbook:session-start` loads it on demand.
 
@@ -846,15 +907,15 @@ Lists the hooks setup adds to settings.json, grouped by purpose. Changes nothing
 
 ### `playbook learn`
 
-Helpers for `/playbook:learn-project`
+Gather the repo facts that `/playbook:learn-project` reads
 
 Subcommands: `collect`, `preflight`
 
 ### `playbook learn collect`
 
-Count the git history or the repo layout for the learn-project collectors
+Count the git history or the repo layout
 
-`git` prints contributors, churn hotspots, commit types, remote branch prefixes, recent tags and commits per month. `structure` prints the top level, languages, entry points, build manifests with their scripts and targets, test and lint config, Dockerfiles, CI, infrastructure as code, migrations, model files and `scripts/`. Both print one JSON object, read only through `git`, with every count capped.
+Feeds the `/playbook:learn-project` collectors. `git` prints contributors, churn hotspots, commit types, remote branch prefixes, recent tags and commits per month. `structure` prints the top level, languages, entry points, build manifests with their scripts and targets, test and lint config, Dockerfiles, CI, infrastructure as code, migrations, model files and `scripts/`. Both print one JSON object, read only through `git`, with every count capped.
 
 Example: `playbook learn collect git structure`
 
@@ -886,7 +947,9 @@ Subcommands: `context`, `export`, `import-claude`, `rebuild`, `stats`
 
 ### `playbook memory context`
 
-Print the repo-scoped markdown slice of the memory graph (facts in scope, typed edges, anchor index). When there is nothing to show it prints one `Memory context: none (<reason>)` line, exit 0. A missing default graph is rebuilt from the fact files first
+Print the repo's slice of the memory graph as markdown
+
+Shows the facts in scope, typed edges and the anchor index. When there is nothing to show it prints one `Memory context: none (<reason>)` line and exits 0. A missing default graph is rebuilt from the fact files first.
 
 - `--repo <REPO>`: Repo slug (`owner/name`); defaults to the origin remote's slug
 - `--graph <GRAPH>`: Graph JSON file; defaults to the graph in `~/.config/playbook/data/memory.db`
@@ -940,7 +1003,7 @@ Exit codes: 0 when it finished or had nothing to do, 1 when the record could not
 
 Example: `playbook migrate --status`
 
-- `--status`: List each migration with the release that ships it, its scope and state, the recorded and running versions, and what needs you, writing nothing
+- `--status`: List each migration with its release, scope and state, writing nothing
 - `--dry-run`: Show the migrations a run would start and what needs you, writing nothing
 - `--json`: Print JSON for tools
 - `--no-plugin`: Leave the playbook plugin in Claude Code as it is. By default a run updates it with `claude plugin update`, unless the config key `update.plugin` is `off`
@@ -972,32 +1035,34 @@ Show the current mode and where it came from
 
 ### `playbook path`
 
-Print the path of one of this repo's playbook storage folders, or of the plugin
+Print the path of a playbook storage directory
 
-First moves any legacy folders from the old repo-local location. `plugin-root` prints the installed playbook plugin folder instead. It looks at `PLAYBOOK_PLUGIN_DIR`, then the `installPath` Claude Code recorded, then `CLAUDE_PLUGIN_ROOT`, then the newest plugin cache folder. When none is usable it prints one line naming each place tried and exits 1. `--create` does not apply to it.
+Prints one of this repo's storage directories. For those kinds it first moves any legacy directories from the old repo-local location. `data` and `plugin-root` skip that move. `plugin-root` prints the installed playbook plugin directory instead. It looks at `PLAYBOOK_PLUGIN_DIR`, then the `installPath` Claude Code recorded, then `CLAUDE_PLUGIN_ROOT`, then the newest plugin cache directory. When none is usable it prints one line naming each place tried and exits 1. `--create` does not apply to it.
 
-- `<KIND>`: Which folder to print (one of `plans`, `implement`, `worktrees`, `handoff`, `data`, `plugin-root`)
-- `--create`: Create the folder when it does not exist
+Example: `playbook path plans`
+
+- `<KIND>`: Which directory to print (one of `plans`, `implement`, `worktrees`, `handoff`, `data`, `plugin-root`)
+- `--create`: Create the directory when it does not exist
 
 ### `playbook plan`
 
-Helpers for `/playbook:plan`
+Save plan checkpoints, write Work Unit briefs, clear scratch files
 
 Subcommands: `brief`, `checkpoint`, `cleanup`
 
 ### `playbook plan brief`
 
-Write the per-Work-Unit brief files `/playbook:implement` gives its subagents
+Write the brief file for each Work Unit
 
-Each `<OUT>/<wu-id>.brief.md` holds a short header (plan, worktree, scoped verify), the Work Unit's own section of the plan verbatim, and a "Relevant memory" list of the facts anchored to its files or matching its title. Every id is checked first: a missing one writes nothing and exits 1. Prints the paths written, one per line.
+`/playbook:implement` gives these files to its subagents. Each `<OUT>/<wu-id>.brief.md` holds a short header (plan, worktree, scoped verify), the Work Unit's own section of the plan verbatim, and a "Relevant memory" list of the facts anchored to its files or matching its title. Every id is checked first: a missing one writes nothing and exits 1. Prints the paths written, one per line.
 
 Example: `playbook plan brief docs/plan.md WU-1 WU-2 --out /tmp/briefs --verify 'cargo test {tests}'`
 
-- `<PLAN>`: The plan or blueprint file
+- `<PLAN>`: Plan or blueprint file
 - `<WUS>`: Work Unit ids, such as `WU-1`
-- `--out <OUT>`: Folder to write the briefs into
+- `--out <OUT>`: Directory to write the briefs into
 - `--worktree <WORKTREE>`: One worktree path for every brief
-- `--worktree-base <WORKTREE_BASE>`: Folder holding one worktree per Work Unit, named by its lower case id
+- `--worktree-base <WORKTREE_BASE>`: Directory holding one worktree per Work Unit, named by its lower case id
 - `--verify <VERIFY>`: Scoped verify command; `{tests}` and `{files}` become the Work Unit's paths
 - `--repo <REPO>`: Repo slug (`owner/name`) for the memory scope; defaults to the origin remote's
 - `--graph <GRAPH>`: Graph JSON file; defaults to the graph in `~/.config/playbook/data/memory.db`
@@ -1006,16 +1071,18 @@ Example: `playbook plan brief docs/plan.md WU-1 WU-2 --out /tmp/briefs --verify 
 
 Print a topic's checkpoint path, or save the checkpoint
 
-Without `--write` it creates the plans folder and prints the path, then `found` or `not-found`. With `--write` it replaces the checkpoint with stdin under a directory lock. A failed save prints a one-line notice and still exits 0, so planning continues without resume safety.
+Without `--write` it creates the plans directory and prints the path, then `found` or `not-found`. With `--write` it replaces the checkpoint with stdin under a directory lock. A failed save prints a one-line notice and still exits 0, so planning continues without resume safety.
+
+Example: `playbook plan checkpoint my-topic`
 
 - `<SLUG>`: Kebab-case topic slug, or the ticket id in lower case
 - `--write`: Replace the checkpoint with stdin
 
 ### `playbook plan cleanup`
 
-Remove the scratch files a finished plan leaves in the plans folder
+Remove the scratch files a finished plan leaves in the plans directory
 
-Removes exactly `<slug>.checkpoint.md`, `<slug>.checkpoint.md.lock` and `<slug>.gate-source*.md` from `playbook path plans`, never the final plan or its quality report. Prints the removed file names, one per line. Safe to repeat: nothing to remove exits 0. Exit 1 for a bad slug or flags, 2 when a symlink leaves the folder or a removal fails (nothing removed after a refusal). `--stale` lists leftovers of every slug that already has a final plan and deletes them only with `--yes`.
+Removes exactly `<slug>.checkpoint.md`, `<slug>.checkpoint.md.lock` and `<slug>.gate-source*.md` from `playbook path plans`, never the final plan or its quality report. Prints the removed file names, one per line. Safe to repeat: nothing to remove exits 0. Exit 1 for a bad slug or flags, 2 when a symlink leaves the directory or a removal fails (nothing removed after a refusal). `--stale` lists leftovers of every slug that already has a final plan and deletes them only with `--yes`.
 
 Example: `playbook plan cleanup my-topic --dry-run`
 
@@ -1023,7 +1090,7 @@ Example: `playbook plan cleanup my-topic --dry-run`
 - `--dry-run`: Only list what would be removed
 - `--json`: Print the result as JSON
 - `--stale`: Clear leftovers for every slug that already has a final plan; dry run unless `--yes`
-- `--older-than <OLDER_THAN>`: With `--stale`, only files at least this many days old (default 1, so a plan being re-planned today is left alone)
+- `--older-than <OLDER_THAN>`: Only clear files at least this many days old. Needs `--stale`. By default a plan being re-planned today is left alone, because files under one day old are kept
 - `--yes`: With `--stale`, actually delete
 
 ### `playbook plans`
@@ -1036,7 +1103,7 @@ Prints `path<TAB>[status]<TAB>title` per file, or `NO_PLANS`.
 
 ### `playbook pr`
 
-Prepare and open pull requests, and pick a review depth
+Prepare and open PRs, and pick a review depth
 
 These are the mechanical steps behind `/playbook:create-pull-request`.
 
@@ -1050,6 +1117,8 @@ Wait for a PR's required checks to finish
 
 Prints a `checks total=.. pending=.. fail=.. cancel=..` line per read, then `CI_VERDICT=` one of NONE, FAIL, CANCELLED, PASS or TIMEOUT.
 
+Example: `playbook pr ci-wait 12 --timeout 600`
+
 - `<PR>`: PR number
 - `--timeout <TIMEOUT>`: Give up after this many seconds
 - `--interval <INTERVAL>`: Seconds between reads
@@ -1062,13 +1131,15 @@ Resolve a PR and fetch its review threads and comments
 
 Takes the command's arguments as one string (`#12 --bots --dry-run -y`). Prints the PR, head SHA, your login and the flags, and writes the threads and issue comments as JSON under `/tmp`.
 
-- `<ARGS>`: The command's arguments, as one string
+- `<ARGS>`: Command arguments as one string, such as `#12 --bots`
 
 ### `playbook pr create`
 
 Push the branch and open a PR from a drafted title and body
 
 Opens a draft unless the `pr.draft` setting is `false`.
+
+Example: `playbook pr create --title "fix(x): y" --body-file /tmp/body.md`
 
 - `--title <TITLE>`: PR title, at most 72 characters
 - `--body-file <BODY_FILE>`: File holding the PR body
@@ -1083,6 +1154,8 @@ Wait for a PR to merge or hit a gate
 
 Prints a status line per read (state, merge state, review, auto-merge), then `LAND_VERDICT=` one of MERGED, REVIEW_GATE, CHANGES_REQUESTED, RESTATE or TIMEOUT.
 
+Example: `playbook pr land-wait 12`
+
 - `<PR>`: PR number
 - `--timeout <TIMEOUT>`: Give up after this many seconds
 - `--interval <INTERVAL>`: Seconds between reads
@@ -1092,6 +1165,8 @@ Prints a status line per read (state, merge state, review, auto-merge), then `LA
 Merge a PR with auto-merge, or as an admin squash
 
 Prints `merge_rc=<code>` (or `admin_rc=`) and then what `gh` said. Always exits 0, so the caller reads the code.
+
+Example: `playbook pr merge 12 --admin`
 
 - `<PR>`: PR number
 - `--admin`: Squash with admin rights instead of arming auto-merge
@@ -1103,21 +1178,23 @@ Run pre-flight checks and gather what a PR draft needs
 
 Finds the branch and base, checks the repo is ready, writes the diff to a scratch file, and prints labeled lines for the PR drafter.
 
+Example: `playbook pr prepare --base main`
+
 - `--base <BASE>`: Base branch for the PR (default: the repo's default branch)
 - `--ticket <TICKET>`: Ticket id to cite (default: one found in the branch name)
 - `--dir <DIR>`: Work in this directory instead of the current one
 
 ### `playbook pr reply`
 
-Post one reply on a pull request, from a file
+Post one reply on a PR, from a file
 
-`--thread ID` replies in a review thread (ID is the `databaseId` of the thread's first comment, as `pr comments` writes it); `--issue` comments on the pull request itself. The body is read from `--body-file`, so quotes, backticks and newlines need no shell escaping. It refuses an empty body, an em or en dash, and AI attribution. Prints `Posted: <url>` and the body.
+`--thread ID` replies in a review thread (ID is the `databaseId` of the thread's first comment, as `pr comments` writes it); `--issue` comments on the PR itself. The body is read from `--body-file`, so quotes, backticks and newlines need no shell escaping. It refuses an empty body, an em or en dash, and AI attribution. Prints `Posted: <url>` and the body.
 
 Example: `playbook pr reply --pr 12 --thread 345 --body-file /tmp/reply.md`
 
-- `--pr <PR>`: The pull request number
+- `--pr <PR>`: PR number
 - `--thread <THREAD>`: Reply in the review thread whose first comment has this `databaseId`
-- `--issue`: Comment on the pull request itself
+- `--issue`: Comment on the PR itself
 - `--body-file <BODY_FILE>`: File holding the reply text
 - `--repo <REPO>`: `owner/name`; defaults to the current repo
 
@@ -1126,6 +1203,8 @@ Example: `playbook pr reply --pr 12 --thread 345 --body-file /tmp/reply.md`
 Choose a quick or deep self-review for a PR
 
 Asks a small model three times. Anything but a unanimous `quick` becomes `deep`.
+
+Example: `playbook pr review-triage --pr 12`
 
 - `--pr <PR>`: PR number (default: the current branch against its base)
 - `--base <BASE>`: Base branch when no PR number is given (default: the repo's default branch)
@@ -1142,11 +1221,11 @@ Reads the writing-style and engineering-standards skills from the plugin root (`
 
 ### `playbook pr stack`
 
-Find the pull requests stacked with a PR
+Find the PRs stacked with a PR
 
 Reads the GitHub stack API, then falls back to the branch chain. Takes the arguments as one string (`#12 --json --max-prs 6 --max-lines 3000`). Prints a summary, or JSON with `--json`. `--context` writes one shared review context under `/tmp/pr-stack-<pr>`. `map --stack <file> --findings <file>` gives each finding to the PR whose diff holds the line.
 
-- `<ARGS>`: The command's arguments, as one string
+- `<ARGS>`: Command arguments as one string, such as `#12 --json`
 
 ### `playbook prose`
 
@@ -1160,12 +1239,14 @@ Lint files for banned phrases, structures and em or en dashes
 
 Prints `path:line: finding` for each problem. Fenced code, inline code, URLs, file paths and quoted lines are skipped. Exits 0 unless `--strict` is given and a hard finding exists, or a file cannot be read. With `GITHUB_ACTIONS=true` it prints annotations.
 
+Example: `playbook prose check README.md`
+
 - `<FILES>`: Files to check
 - `--strict`: Exit 1 when a hard finding exists
 
 ### `playbook review`
 
-Setup for the review commands
+Run the mechanical steps behind the review commands
 
 Subcommands: `checks`, `prepare`, `size`, `suggest`, `triage-merge`
 
@@ -1175,7 +1256,9 @@ Run a project's own type check, lint and tests in a directory
 
 Prints their output. A failing check is output, not an error.
 
-- `<DIR>`: The review worktree to run in
+Example: `playbook review checks /tmp/review-wt`
+
+- `<DIR>`: Review worktree to run in
 
 ### `playbook review prepare`
 
@@ -1186,7 +1269,7 @@ Takes the raw arguments of the review command as one string. Prints `KEY=value` 
 Example: `playbook review prepare deep "#4265 --self"`
 
 - `<KIND>`: Which review: `quick` or `deep` (one of `quick`, `deep`)
-- `<ARGS>`: The review command's arguments, as one string
+- `<ARGS>`: Review command arguments as one string, such as `#12 --self`
 - `--auto`: Accepted for compatibility; auto mode does not skip the post question
 
 ### `playbook review size`
@@ -1197,10 +1280,10 @@ Counts the changed lines of `BASE...HEAD` and prints `lines=N files=M path=singl
 
 Example: `playbook review size --base main`
 
-- `--base <BASE>`: The ref the diff starts from
-- `--head <HEAD>`: The ref the diff ends at
+- `--base <BASE>`: Ref the diff starts from
+- `--head <HEAD>`: Ref the diff ends at
 - `--all-lenses`: Always take the swarm path
-- `--dir <DIR>`: The repository to measure in; defaults to the current directory
+- `--dir <DIR>`: Repo directory to measure in. Defaults to the current directory
 
 ### `playbook review suggest`
 
@@ -1211,7 +1294,7 @@ Reads the changed files from git (the branch against the default branch, no netw
 Example: `playbook review suggest 4265 --json`
 
 - `<PR>`: PR number (default: the current branch against the default branch)
-- `--base <BASE>`: Base branch when no PR number is given (default: the repo's default branch; pass the parent branch for a stacked change)
+- `--base <BASE>`: Base branch when no PR number is given. Defaults to the repo's default branch; pass the parent branch for a stacked change
 - `--dir <DIR>`: Work in this directory instead of the current one
 - `--json`: Print JSON instead of text lines
 
@@ -1235,21 +1318,21 @@ One routing table for every command that dispatches agents. Kinds: mechanical, c
 
 Example: `playbook route implement --tier medium --json`
 
-- `<KIND>`: mechanical, classify, check, review, implement or design
-- `--tier <TIER>`: low, medium or high (implement only)
+- `<KIND>`: One of mechanical, classify, check, review, implement or design
+- `--tier <TIER>`: One of low, medium or high. Only `implement` reads it
 - `--failures <FAILURES>`: How many times this task already failed
 - `--json`: Print the decision as JSON
 
 ### `playbook run-context`
 
-Read the run mode and effort ceiling a command's Step 0 needs, in one call
+Read the run mode and effort ceiling
 
-Reads `--auto` and `--ask` from the command's arguments (exit 2 when both are present), and prints one JSON object: `mode`, `source`, `hook_mode`, `warning`, and `ceiling` when `--command` names the command. `ceiling` is the highest effort the user allows, or null.
+Gives a command's Step 0 the mode and the ceiling in one call. Reads `--auto` and `--ask` from the command's arguments (exit 2 when both are present), and prints one JSON object: `mode`, `source`, `hook_mode`, `warning`, and `ceiling` when `--command` names the command. `ceiling` is the highest effort the user allows, or null.
 
 Example: `playbook run-context --command implement --args "--auto"`
 
-- `--command <COMMAND>`: The command's name, such as `implement`; adds the effort ceiling
-- `--args <ARGS>`: The command's raw arguments, as one string
+- `--command <COMMAND>`: Command name, such as `implement`. Adds the effort ceiling
+- `--args <ARGS>`: Raw arguments of the command, as one string
 
 ### `playbook sanitize`
 
@@ -1279,7 +1362,7 @@ Example: `playbook sanitize pr-text /tmp/body.md`
 
 ### `playbook segment`
 
-The git recipes `/playbook:implement` runs for a Segment
+Run the git recipes `/playbook:implement` uses for a Segment
 
 Subcommands: `branch`, `resplit`, `size`
 
@@ -1292,14 +1375,14 @@ Names the branch `<type>/<plan-slug>-s<N>-<title>` and creates it from the right
 Example: `playbook segment branch --type feat --plan-slug my-plan --n 2 --title "Parser core" --topology stacked --prev-branch feat/my-plan-s1-schema`
 
 - `--type <KIND>`: Conventional commit type for the branch name, such as feat
-- `--plan-slug <PLAN_SLUG>`: The plan slug
-- `--n <N>`: The Segment number
-- `--title <TITLE>`: The Segment title, kebab-cased and truncated into the branch name
-- `--default-branch <DEFAULT_BRANCH>`: The repository's default branch
-- `--dir <DIR>`: The repository to run in; defaults to the current directory
-- `--topology <TOPOLOGY>`: stacked, independent or single (one of `stacked`, `independent`, `single`)
-- `--prev-branch <PREV_BRANCH>`: The previous Segment's branch, for a stacked Segment past the first
-- `--land`: The land boundary: branch off the fetched origin default branch
+- `--plan-slug <PLAN_SLUG>`: Plan slug
+- `--n <N>`: Segment number
+- `--title <TITLE>`: Segment title, kebab-cased and truncated into the branch name
+- `--default-branch <DEFAULT_BRANCH>`: Default branch of the repo
+- `--dir <DIR>`: Repo directory to run in. Defaults to the current directory
+- `--topology <TOPOLOGY>`: How the plan's Segments are delivered (one of `stacked`, `independent`, `single`)
+- `--prev-branch <PREV_BRANCH>`: Previous Segment's branch, for a stacked Segment past the first
+- `--land`: Branch off the fetched origin default branch, at the land boundary
 
 ### `playbook segment resplit`
 
@@ -1310,12 +1393,12 @@ Finds the last commit that keeps `BASE...commit` within the limit, renames the c
 Example: `playbook segment resplit --base main --type feat --plan-slug my-plan --n 2 --title "Parser core"`
 
 - `--type <KIND>`: Conventional commit type for the branch name, such as feat
-- `--plan-slug <PLAN_SLUG>`: The plan slug
-- `--n <N>`: The Segment number
-- `--title <TITLE>`: The Segment title, kebab-cased and truncated into the branch name
-- `--default-branch <DEFAULT_BRANCH>`: The repository's default branch
-- `--dir <DIR>`: The repository to run in; defaults to the current directory
-- `--base <BASE>`: The Segment's base ref
+- `--plan-slug <PLAN_SLUG>`: Plan slug
+- `--n <N>`: Segment number
+- `--title <TITLE>`: Segment title, kebab-cased and truncated into the branch name
+- `--default-branch <DEFAULT_BRANCH>`: Default branch of the repo
+- `--dir <DIR>`: Repo directory to run in. Defaults to the current directory
+- `--base <BASE>`: Base ref of the Segment
 - `--limit <LIMIT>`: Changed lines at which a Segment is over budget
 
 ### `playbook segment size`
@@ -1326,15 +1409,15 @@ Prints `lines=N files=M over=true|false` for `BASE...HEAD`; `over` is true past 
 
 Example: `playbook segment size --base main`
 
-- `--base <BASE>`: The Segment's base ref
+- `--base <BASE>`: Base ref of the Segment
 - `--limit <LIMIT>`: Changed lines at which a Segment is over budget
-- `--dir <DIR>`: The repository to run in; defaults to the current directory
+- `--dir <DIR>`: Repo directory to run in. Defaults to the current directory
 
 ### `playbook sessions`
 
-List recent agent sessions with repo, branch, worktree, linked PR, state, context size and cost
+List recent agent sessions and their state
 
-Read only. A session is done when the pull request of its branch is merged or closed, and stale after `sessions.staleAfterDays` without activity. Suggestions are printed, never acted on, and a worktree with uncommitted changes is flagged, never removed.
+Shows the repo, branch, worktree, linked PR, state, context size and cost of each session. Read only. A session is done when the PR of its branch is merged or closed, and stale after `sessions.staleAfterDays` without activity. Suggestions are printed, never acted on, and a worktree with uncommitted changes is flagged, never removed.
 
 Example: `playbook sessions --json`
 
@@ -1402,23 +1485,23 @@ Example: `playbook setup --no-hooks --system-prompt`
 - `--no-hooks`: Add no playbook hook entries, including the guards in the shared settings
 - `--statusline`: Use the playbook status line (sets statusLine.command to `playbook statusline`)
 - `--no-statusline`: Do not set or change statusLine in settings.json
-- `--security`: Also apply the security defaults (permissions rules); off unless asked or `security.defaults` is true
+- `--security`: Also apply the security defaults (permissions rules). Off unless asked or `security.defaults` is true
 - `--no-security`: Do not apply the security defaults, even when `security.defaults` is true
 - `--path`: Put the playbook binary on PATH for every shell start
 - `--no-path`: Do not edit shell files for PATH
 - `--system-prompt`: Install the playbook system prompt (an existing copy is refreshed either way)
-- `--no-system-prompt`: Do not install the system prompt, and store `systemPrompt.enabled` false so `pb cc` starts with Claude Code's own
-- `--telemetry`: Answer yes to the telemetry question: write the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry`
+- `--no-system-prompt`: Do not install the system prompt. It stores `systemPrompt.enabled` false so `pb cc` starts with Claude Code's own
+- `--telemetry`: Answer yes to the telemetry question. Writes the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry`
 - `--no-telemetry`: Do not write telemetry variables into settings.json
-- `--short-name`: Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free
+- `--short-name`: Add `pb` as a short name for `playbook`. Makes a `pb -> playbook` symlink in the install directory, only when `pb` is free
 - `--no-short-name`: Do not add the `pb` short name
 - `--completions`: Install tab completion for `playbook` and `pb` in the shell named by `$SHELL`
 - `--no-completions`: Do not install shell completion
-- `--policy-guard`: Turn the policy guard on (`hooks.policyGuard.enabled`): it denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes and settings.json edits
+- `--policy-guard`: Turn the policy guard on (`hooks.policyGuard.enabled`). It denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes and settings.json edits
 - `--no-policy-guard`: Do not turn the policy guard on; it is off by default and a stored choice is not changed
 - `--attribution`: Attribution ON: Claude Code adds its Co-Authored-By trailer, generated-by line and session link. Removes each `attribution` key in settings.json that holds exactly the off value playbook writes, and stores `attribution.enabled` true
-- `--no-attribution`: Attribution OFF, the default: Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values
-- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON
+- `--no-attribution`: Attribution OFF. Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values. Setup applies this when you choose nothing and have not chosen ON before
+- `--only <PART>`: Run only these parts and ask nothing. Parts, comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution. Everything else stays untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing
@@ -1435,9 +1518,11 @@ Subcommands: `sync`
 
 ### `playbook skills sync`
 
-Copy the playbook skills into another agent's skill folder
+Copy the playbook skills into another agent's skill directory
 
 Without `--agent`, every agent found on this machine is synced. A second run with nothing new changes nothing.
+
+Example: `playbook skills sync --agent codex`
 
 - `--agent <AGENT>`: Sync only this agent (one of `codex`)
 - `--dry-run`: Show what would change and write nothing
@@ -1485,6 +1570,8 @@ Mark a directory as trusted in Claude Code
 
 Writes to `~/.claude.json` so Claude Code's first-launch trust prompt does not block `playbook cc` or `playbook ccd`. Always exits 0, even on failure, so a script can call it without checking.
 
+Example: `playbook trust /Users/me/project`
+
 - `<PATH>`: Absolute path of the directory to trust
 
 ### `playbook uninstall`
@@ -1523,9 +1610,9 @@ Example: `playbook usage --range today`
 
 - `--json`: Print the totals, groupings and live view as JSON
 - `--summary`: Print the text summary and exit (every recorded session unless `--range` is given)
-- `--range <RANGE>`: Date range (days in the chosen time zone): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
-- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
-- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--range <RANGE>`: Date range, counted in days of the chosen time zone. One of today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
 Subcommands: `collect`, `doctor`, `prune`, `status`, `stop`
 
@@ -1537,10 +1624,10 @@ Listens on 127.0.0.1 only (default port 47318, chosen once and then kept; a free
 
 Example: `playbook usage collect --idle-seconds 1800`
 
-- `--port <PORT>`: Port to listen on (an error when busy). Default: the recorded port, chosen once (47318, or a free one when that is taken) and kept. A port given here also replaces the recorded one; run `playbook setup --only telemetry` afterwards (older versions: `playbook init --only telemetry`)
+- `--port <PORT>`: Port to listen on. It is an error when the port is busy. Defaults to the recorded port, chosen once (47318, or a free one when that is taken) and kept. A port given here also replaces the recorded one; run `playbook setup --only telemetry` afterwards (older versions: `playbook init --only telemetry`)
 - `--idle-seconds <IDLE_SECONDS>`: Stop after this many seconds with no request; 0 means never
-- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
-- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
 ### `playbook usage doctor`
 
@@ -1551,8 +1638,8 @@ Lists which sources exist: the plan fields and cached usage numbers in the Claud
 Example: `playbook usage doctor --raw`
 
 - `--raw`: Also print the plan field values and the cached spend limit
-- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
-- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
 ### `playbook usage prune`
 
@@ -1563,8 +1650,8 @@ Removes telemetry rows older than `usage.telemetryRetentionDays` (default 90, 0 
 Example: `playbook usage prune --dry-run`
 
 - `--dry-run`: Say what would be removed without deleting anything
-- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
-- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
 ### `playbook usage status`
 
@@ -1575,8 +1662,8 @@ Prints how telemetry is configured (on with the collector running, off because y
 Example: `playbook usage status --json`
 
 - `--json`: Print the status as JSON
-- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
-- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
 ### `playbook usage stop`
 
@@ -1586,8 +1673,8 @@ Asks the collector that holds the lock to stop through its authenticated shutdow
 
 Example: `playbook usage stop`
 
-- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
-- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
 ### `playbook version`
 
@@ -1713,24 +1800,36 @@ Subcommands: `remove`, `review`, `sweep`
 
 Remove one worktree if it has landed and is not in use
 
+Example: `playbook worktree remove ../.worktrees/my-repo/my-branch`
+
 - `<PATH>`: Worktree path, as shown by `git worktree list`
 
 ### `playbook worktree review`
 
-Create or remove the locked review worktrees `/playbook:quick-review` and `/playbook:deep-review` run in
+Create or remove the locked review worktrees
+
+`/playbook:quick-review` and `/playbook:deep-review` run in them.
 
 Subcommands: `setup`, `teardown`
 
 ### `playbook worktree review setup`
 
-Fetch a PR head, add a locked detached worktree for it, and print its absolute path on stdout (warnings go to stderr)
+Add a locked worktree for a PR head and print its path
 
-- `<PR>`: Pull request number
-- `<HEAD_SHA>`: Head commit the review was resolved against
+Fetches the PR head, adds a locked detached worktree for it, and prints its absolute path on stdout. Warnings go to stderr.
+
+Example: `playbook worktree review setup 12 0123456789abcdef0123456789abcdef01234567`
+
+- `<PR>`: PR number
+- `<HEAD_SHA>`: Full head commit sha the review was resolved against
 
 ### `playbook worktree review teardown`
 
-Remove a review worktree, even a dirty one. Always exits 0
+Remove a review worktree, even a dirty one
+
+Always exits 0, and skips any path outside the review worktrees.
+
+Example: `playbook worktree review teardown .git/review-worktrees/12-0123456`
 
 - `<PATH>`: Worktree path printed by `setup`
 

@@ -26,6 +26,17 @@ const _: () = assert!(
         && AUTO_BUDGET_USD * AUTO_CEILING_FACTOR > AUTO_AGENT_BUDGET_USD
 );
 
+/// The default `gate.maxRounds`, the most rounds one quality-gate phase runs.
+pub const GATE_MAX_ROUNDS_DEFAULT: i64 = 5;
+/// The most `gate.maxRounds` may be.
+pub const GATE_MAX_ROUNDS_CEILING: i64 = 20;
+
+/// Whether `n` is a legal `gate.maxRounds`, 1 to the ceiling. Writes and reads
+/// both use it, so a hand-edited value cannot widen the cap.
+pub fn gate_max_rounds_in_range(n: i64) -> bool {
+    (1..=GATE_MAX_ROUNDS_CEILING).contains(&n)
+}
+
 /// The largest input a document converter opens, whatever `docs.maxBytes`
 /// says. The bundled `pbdoc` keeps its own copy because it must not depend on
 /// this crate; a test in `doc::converter` keeps the two equal.
@@ -64,6 +75,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "auto.agentBudgetUsd",
     "auto.sessionCeilingUsd",
     "auto.warnPct",
+    "gate.maxRounds",
     "fix.maxFiles",
     "fix.maxLines",
     "review.stackMaxPrs",
@@ -116,7 +128,88 @@ pub const KNOWN_KEYS: &[&str] = &[
     "watch.tokenEnv",
     "watch.limits.actionsPerDay",
     "watch.limits.usdPerDay",
+    "gc.enabled",
+    "gc.graceDays",
+    "gc.handoffGraceDays",
+    "gc.sessionDirIdleDays",
+    "gc.logMaxDays",
+    "gc.logMaxMiB",
+    "gc.leftoverDays",
+    "gc.gateDbIdleDays",
+    "gc.buildOutputIdleDays",
+    "gc.buildOutputPressureIdleDays",
+    "gc.buildOutputActiveMinutes",
+    "gc.freeSpaceWarnGiB",
+    "gc.freeSpaceWarnPercent",
 ];
+
+/// A numeric `gc.*` key: its name, default, and the inclusive range a value
+/// must lie in. A value outside the range falls back to the default.
+pub struct GcNumber {
+    pub key: &'static str,
+    pub default: i64,
+    pub min: i64,
+    pub max: i64,
+}
+
+/// The key `gc.buildOutputPressureIdleDays` may not exceed.
+pub const GC_PRESSURE_CAP_KEY: &str = "gc.buildOutputIdleDays";
+/// The pressure key, which is also bounded by [`GC_PRESSURE_CAP_KEY`].
+pub const GC_PRESSURE_KEY: &str = "gc.buildOutputPressureIdleDays";
+
+const fn gc_entry(key: &'static str, default: i64, min: i64, max: i64) -> GcNumber {
+    GcNumber {
+        key,
+        default,
+        min,
+        max,
+    }
+}
+
+/// Every numeric `gc.*` key with its default and range.
+pub const GC_NUMBERS: &[GcNumber] = &[
+    gc_entry("gc.graceDays", 7, 1, 365),
+    gc_entry("gc.handoffGraceDays", 14, 1, 365),
+    gc_entry("gc.sessionDirIdleDays", 14, 1, 365),
+    gc_entry("gc.logMaxDays", 30, 1, 365),
+    gc_entry("gc.logMaxMiB", 5, 1, 1024),
+    gc_entry("gc.leftoverDays", 90, 1, 730),
+    gc_entry("gc.gateDbIdleDays", 30, 1, 365),
+    gc_entry("gc.buildOutputIdleDays", 7, 1, 365),
+    gc_entry(GC_PRESSURE_KEY, 1, 1, 30),
+    gc_entry("gc.buildOutputActiveMinutes", 15, 1, 1440),
+    gc_entry("gc.freeSpaceWarnGiB", 10, 1, 1024),
+    gc_entry("gc.freeSpaceWarnPercent", 5, 1, 50),
+];
+
+/// The numeric `gc.*` entry for `key`, or `None` for any other key.
+pub fn gc_number(key: &str) -> Option<&'static GcNumber> {
+    GC_NUMBERS.iter().find(|entry| entry.key == key)
+}
+
+/// `value` when it is a whole number inside the range of the `gc.*` key
+/// `key`, else the key's default. `None` for a key that is not numeric `gc.*`.
+/// The pressure key's upper bound also depends on the idle key, which
+/// [`gc_pressure_within_idle`] checks.
+pub fn gc_number_or_default(key: &str, value: &Value) -> Option<i64> {
+    let entry = gc_number(key)?;
+    Some(
+        value
+            .as_i64()
+            .filter(|n| (entry.min..=entry.max).contains(n))
+            .unwrap_or(entry.default),
+    )
+}
+
+/// The pressure idle days to use: `pressure` unless it exceeds `idle`, then
+/// the pressure default.
+pub fn gc_pressure_within_idle(pressure: i64, idle: i64) -> i64 {
+    if pressure > idle {
+        gc_number(GC_PRESSURE_KEY).map_or(pressure, |entry| entry.default)
+    } else {
+        pressure
+    }
+}
 
 /// Known keys that no code reads. `launcher.claudeOverride` was written by
 /// releases up to 0.36.0 when a user chose the `claude` shell function (ADR
@@ -218,6 +311,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "auto.agentBudgetUsd" => Some(Value::Number(AUTO_AGENT_BUDGET_USD.into())),
         "auto.sessionCeilingUsd" => Some(Value::Number(0.into())),
         "auto.warnPct" => Some(Value::Number(70.into())),
+        "gate.maxRounds" => Some(Value::Number(GATE_MAX_ROUNDS_DEFAULT.into())),
         "fix.maxFiles" => Some(Value::Number(3.into())),
         "fix.maxLines" => Some(Value::Number(500.into())),
         "review.stackMaxPrs" => Some(Value::Number(6.into())),
@@ -266,7 +360,8 @@ pub fn default_value(key: &str) -> Option<Value> {
         "watch.tokenEnv" => Some(Value::String(String::new())),
         "watch.limits.actionsPerDay" => Some(Value::Number(50.into())),
         "watch.limits.usdPerDay" => Some(Value::Number(5.into())),
-        _ => None,
+        "gc.enabled" => Some(Value::Bool(true)),
+        _ => gc_number(key).map(|entry| Value::Number(entry.default.into())),
     }
 }
 
@@ -585,6 +680,47 @@ mod tests {
             assert!(known, "{key} must be listed in KNOWN_KEYS");
             assert_eq!(allowed, None, "{key}");
         }
+    }
+
+    #[test]
+    fn gc_keys_fall_back_on_bad_values() {
+        for entry in GC_NUMBERS {
+            let at = |n: i64| gc_number_or_default(entry.key, &Value::from(n));
+            assert_eq!(at(entry.min), Some(entry.min), "{} min", entry.key);
+            assert_eq!(at(entry.max), Some(entry.max), "{} max", entry.key);
+            assert_eq!(
+                at(entry.min - 1),
+                Some(entry.default),
+                "{} under",
+                entry.key
+            );
+            assert_eq!(at(entry.max + 1), Some(entry.default), "{} over", entry.key);
+            let wrong = gc_number_or_default(entry.key, &Value::from("ten"));
+            assert_eq!(wrong, Some(entry.default), "{} type", entry.key);
+            assert_eq!(default_value(entry.key), Some(Value::from(entry.default)));
+        }
+        assert_eq!(gc_number_or_default("mode", &Value::from(3)), None);
+    }
+
+    #[test]
+    fn gc_enabled_is_a_boolean_defaulting_to_true() {
+        assert!(KNOWN_KEYS.contains(&"gc.enabled"));
+        assert_eq!(default_value("gc.enabled"), Some(Value::Bool(true)));
+    }
+
+    #[test]
+    fn every_gc_number_is_a_known_key() {
+        for entry in GC_NUMBERS {
+            assert!(KNOWN_KEYS.contains(&entry.key), "{}", entry.key);
+        }
+    }
+
+    #[test]
+    fn pressure_idle_not_above_idle() {
+        let default = gc_number(GC_PRESSURE_KEY).unwrap().default;
+        assert_eq!(gc_pressure_within_idle(3, 3), 3);
+        assert_eq!(gc_pressure_within_idle(4, 3), default);
+        assert_eq!(gc_pressure_within_idle(1, 7), 1);
     }
 
     #[test]

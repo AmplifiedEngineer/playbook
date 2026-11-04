@@ -34,7 +34,7 @@ pub enum UsageCommand {
     ///
     /// Example: `playbook usage collect --idle-seconds 1800`
     Collect {
-        /// Port to listen on (an error when busy). Default: the recorded port, chosen once (47318, or a free one when that is taken) and kept. A port given here also replaces the recorded one; run `playbook setup --only telemetry` afterwards (older versions: `playbook init --only telemetry`).
+        /// Port to listen on. It is an error when the port is busy. Defaults to the recorded port, chosen once (47318, or a free one when that is taken) and kept. A port given here also replaces the recorded one; run `playbook setup --only telemetry` afterwards (older versions: `playbook init --only telemetry`).
         #[arg(long)]
         port: Option<u16>,
         /// Stop after this many seconds with no request; 0 means never

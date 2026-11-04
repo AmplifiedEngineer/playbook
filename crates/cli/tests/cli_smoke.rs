@@ -518,6 +518,8 @@ fn table() -> Vec<Case> {
             .pre(&["config", "set", "docs.anydocPath", "{ROOT}/missing-anydoc"])
             .code(1)
             .out("anydoc: not found. docs.anydocPath is set to"),
+        // what takes space on disk
+        case("gc", &["gc"]).plain(),
         // health facts
         case("doctor check", &["doctor", "check"]).out("FAIL").plain().writes(),
         case("doctor models", &["doctor", "models"]).out("haiku").plain(),
@@ -606,9 +608,9 @@ fn table() -> Vec<Case> {
         case( "pr land-wait", &["pr", "land-wait", "1", "--timeout", "1", "--interval", "1"], ).out("LAND_VERDICT=TIMEOUT"),
         case("pr merge", &["pr", "merge", "1"]).out("merge_rc=-1"),
         // worktrees and memory
-        case("worktree sweep", &["worktree", "sweep"]),
+        case("worktree sweep", &["worktree", "sweep"]).writes(),
         case("worktree remove", &["worktree", "remove", "{ROOT}/none"]).code(1).err("not a registered git worktree"),
-        case( "worktree review setup", &["worktree", "review", "setup", "1", "abc123"], ).code(1).err("failed to resolve repo URL"),
+        case( "worktree review setup", &["worktree", "review", "setup", "1", "abc123"], ).code(1).err("failed to resolve repo URL").writes(),
         case( "worktree review teardown", &["worktree", "review", "teardown", "{ROOT}/none"], ),
         case("memory rebuild", &["memory", "rebuild"]).out("rebuilt").grows(),
         case("memory stats", &["memory", "stats"]).out("database:"),
