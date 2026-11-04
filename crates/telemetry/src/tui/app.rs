@@ -667,7 +667,7 @@ impl App {
     /// Finishes a reset once the stored layout and setup were cleared. On
     /// success the layout, tab, range, views, sorts and filter go back to the
     /// defaults and the editor closes. On a failure nothing changes here.
-    pub fn reset_done(&mut self, cleared: Result<bool, String>) -> Effect {
+    pub fn reset_done(&mut self, cleared: Result<(), String>) -> Effect {
         if let Err(why) = cleared {
             self.note = Some(format!("Reset failed: {why}"));
             return Effect::None;
