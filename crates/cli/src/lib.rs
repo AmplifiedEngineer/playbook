@@ -528,19 +528,19 @@ pub enum Command {
         #[arg(long)]
         no_plugin: bool,
     },
-    /// Read the run mode and effort ceiling a command's Step 0 needs, in one call
+    /// Read the run mode and effort ceiling
     ///
-    /// Reads `--auto` and `--ask` from the command's arguments (exit 2 when
+    /// Gives a command's Step 0 both in one call. Reads `--auto` and `--ask` from the command's arguments (exit 2 when
     /// both are present), and prints one JSON object: `mode`, `source`,
     /// `hook_mode`, `warning`, and `ceiling` when `--command` names the
     /// command. `ceiling` is the highest effort the user allows, or null.
     ///
     /// Example: `playbook run-context --command implement --args "--auto"`
     RunContext {
-        /// The command's name, such as `implement`; adds the effort ceiling
+        /// Command name, such as `implement`. Adds the effort ceiling
         #[arg(long)]
         command: Option<String>,
-        /// The command's raw arguments, as one string
+        /// Raw arguments of the command, as one string
         #[arg(long, default_value = "", allow_hyphen_values = true)]
         args: String,
     },
@@ -634,9 +634,9 @@ pub enum Command {
     ///
     /// Example: `playbook route implement --tier medium --json`
     Route {
-        /// mechanical, classify, check, review, implement or design
+        /// One of mechanical, classify, check, review, implement or design
         kind: String,
-        /// low, medium or high (implement only)
+        /// One of low, medium or high. Only `implement` reads it
         #[arg(long, default_value = "low")]
         tier: String,
         /// How many times this task already failed
@@ -724,9 +724,9 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Check how well the review triage classifier sorts real pull requests
+    /// Check how well the review triage classifier sorts real PRs
     ///
-    /// Each case is a pull request with a known answer per review lens. Costs
+    /// Each case is a PR with a known answer per review lens. Costs
     /// one `gh pr diff` fetch and one live `claude` call per case, so run it
     /// by hand or on a schedule.
     ///
@@ -838,18 +838,21 @@ pub enum Command {
         #[arg(long)]
         dir: Option<String>,
     },
-    /// Print the path of one of this repo's playbook storage folders, or of the plugin
+    /// Print the path of a playbook storage directory
     ///
-    /// First moves any legacy folders from the old repo-local location.
-    /// `plugin-root` prints the installed playbook plugin folder instead. It
+    /// Prints one of this repo's storage directories, or the plugin's. First
+    /// moves any legacy directories from the old repo-local location.
+    /// `plugin-root` prints the installed playbook plugin directory instead. It
     /// looks at `PLAYBOOK_PLUGIN_DIR`, then the `installPath` Claude Code
     /// recorded, then `CLAUDE_PLUGIN_ROOT`, then the newest plugin cache
-    /// folder. When none is usable it prints one line naming each place tried
+    /// directory. When none is usable it prints one line naming each place tried
     /// and exits 1. `--create` does not apply to it.
+    ///
+    /// Example: `playbook path plans`
     Path {
-        /// Which folder to print
+        /// Which directory to print
         kind: PathKind,
-        /// Create the folder when it does not exist
+        /// Create the directory when it does not exist
         #[arg(long)]
         create: bool,
     },
@@ -1064,9 +1067,9 @@ impl Command {
 /// `playbook eval` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum EvalCommand {
-    /// Run the review triage classifier on each case and compare with the known answers
+    /// Run the review triage classifier on each case
     ///
-    /// Needs network access, a logged-in `gh`, and a working `claude` with a
+    /// Compares each result with the known answer. Needs network access, a logged-in `gh`, and a working `claude` with a
     /// live API key. Exits 0 when no lens was wrongly skipped and no case
     /// errored, and 1 otherwise. Re-run it whenever the triage prompt changes.
     ///
@@ -1122,8 +1125,8 @@ pub enum EvalCommand {
         /// List the cases and exit
         #[arg(long)]
         list: bool,
-        /// Run the `tdd_repo` implementer cases with tools in a scratch git repo, one
-        /// dispatch per TDD step (`per-step`) or one per Work Unit (`per-wu`)
+        /// Run the `tdd_repo` implementer cases with tools in a scratch git repo.
+        /// Use one dispatch per TDD step (`per-step`) or one per Work Unit (`per-wu`)
         #[arg(long, value_delimiter = ',')]
         strategy: Vec<String>,
     },
@@ -1199,9 +1202,9 @@ pub enum PathKind {
     Worktrees,
     /// Where session handoffs for this repo are saved
     Handoff,
-    /// The shared data folder holding every database (not tied to a repo)
+    /// The shared data directory holding every database (not tied to a repo)
     Data,
-    /// The installed playbook plugin folder, for skills and agents that need
+    /// The installed playbook plugin directory, for skills and agents that need
     /// a plugin file (not tied to a repo)
     PluginRoot,
 }
@@ -2052,8 +2055,10 @@ pub enum DocCommand {
     ///
     /// Supports pdf, docx, doc, odt, rtf, epub, pptx, ppt, odp, xlsx, ods
     /// and csv. A scanned PDF with no text layer reports that it needs OCR.
+    ///
+    /// Example: `playbook doc read report.pdf --section 2`
     Read {
-        /// The document to read
+        /// Document to read
         file: PathBuf,
         /// Print one JSON object instead of the framed text
         #[arg(long)]
