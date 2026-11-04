@@ -420,13 +420,22 @@ fn render_tabbar(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
         .enumerate()
         .map(|(i, t)| format!(" F{} {} ", i + 1, t.name).chars().count())
         .sum();
-    // When the names do not fit, only the selected tab keeps its name.
+    // When the names do not fit, only the selected tab keeps its name, cut to
+    // the width the numbered tabs leave over.
     let names = full <= usize::from(area.width);
+    let numbered: usize = (0..app.layout.tabs.len())
+        .filter(|&i| i != app.tab)
+        .map(|i| format!(" F{} ", i + 1).chars().count())
+        .sum();
     let mut spans = Vec::new();
     for (i, tab) in app.layout.tabs.iter().enumerate() {
         let style = if i == app.tab { chosen } else { plain };
-        let text = if names || i == app.tab {
+        let text = if names {
             format!(" F{} {} ", i + 1, tab.name)
+        } else if i == app.tab {
+            let room = usize::from(area.width).saturating_sub(numbered);
+            let whole = format!(" F{} {} ", i + 1, tab.name);
+            whole.chars().take(room).collect()
         } else {
             format!(" F{} ", i + 1)
         };
@@ -1456,6 +1465,46 @@ mod tests {
         assert_eq!(second, 1);
         assert_eq!(wrapped, 2);
         assert_eq!(app.tab, 1);
+    }
+
+    #[test]
+    fn f10_to_f12_select_the_last_tabs_and_a_missing_tab_changes_nothing() {
+        let mut app = tabbed_app();
+        app.layout = Layout::parse(&twelve_tabs()).unwrap();
+
+        app.key(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
+        let twelfth = app.tab;
+        app.key(KeyEvent::new(KeyCode::F(10), KeyModifiers::NONE));
+        let tenth = app.tab;
+        app.layout = Layout::parse("A=spend;B=tokens;C=live;D=models;E=sessions").unwrap();
+        app.key(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
+
+        assert_eq!((twelfth, tenth, app.tab), (11, 9, 9));
+    }
+
+    #[test]
+    fn twelve_long_tab_names_fit_80_columns_and_keep_the_selected_name_visible() {
+        let mut app = tabbed_app();
+        let long = "N".repeat(16);
+        let text = (1..=12)
+            .map(|i| format!("{}{i:02}=spend", &long[..14]))
+            .collect::<Vec<_>>()
+            .join(";");
+        app.layout = Layout::parse(&text).unwrap();
+        app.go_tab(11);
+
+        let screen = screen(&app, 80, 24);
+
+        let bar = screen.lines().find(|l| l.contains(" F1 ")).unwrap();
+        assert!(bar.chars().count() <= 80, "{bar}");
+        assert!(bar.contains("F12 NNNN"), "{bar}");
+    }
+
+    fn twelve_tabs() -> String {
+        (1..=12)
+            .map(|i| format!("T{i}=spend"))
+            .collect::<Vec<_>>()
+            .join(";")
     }
 
     #[test]
