@@ -24,6 +24,8 @@ name: rust-ci
 
 on:
   pull_request:
+    # ready_for_review starts the lanes that draft pull requests skip.
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
   push:
     branches: [main]
@@ -612,7 +614,7 @@ jobs:
     needs: changes
     # Already ran on the PR head; the queue re-runs Linux build-test only. A
     # release gate runs macOS only.
-    if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group' && !inputs.ref
+    if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group' && !inputs.ref && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: windows-latest
     timeout-minutes: 5
     permissions:
@@ -664,7 +666,7 @@ jobs:
   # Every step runs in a scratch profile so nothing touches the runner home.
   windows-smoke:
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group' && !inputs.ref
+    if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group' && !inputs.ref && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: windows-latest
     timeout-minutes: 10
     permissions:
@@ -802,7 +804,7 @@ jobs:
     needs: changes
     # Already ran on the PR head; the queue re-runs Linux build-test only. A
     # release gate runs macOS only.
-    if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group' && !inputs.ref
+    if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group' && !inputs.ref && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     strategy:
       fail-fast: false
       matrix:
