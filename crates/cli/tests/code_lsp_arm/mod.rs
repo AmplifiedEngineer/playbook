@@ -59,9 +59,20 @@ pub struct Client {
 
 impl Client {
     pub fn spawn(program: &Path, args: &[&str], cwd: &Path) -> std::io::Result<Self> {
+        Self::spawn_env(program, args, cwd, &[])
+    }
+
+    /// Like `spawn`, with extra environment variables for the server.
+    pub fn spawn_env(
+        program: &Path,
+        args: &[&str],
+        cwd: &Path,
+        env: &[(String, String)],
+    ) -> std::io::Result<Self> {
         let mut child = Command::new(program)
             .args(args)
             .current_dir(cwd)
+            .envs(env.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -83,6 +94,15 @@ impl Client {
             rx,
             next_id: 1,
         })
+    }
+
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    /// False once the server process has exited.
+    pub fn is_alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
     }
 
     fn send(&mut self, message: &Value) {
@@ -133,6 +153,7 @@ impl Client {
                 "textDocument": {
                     "definition": {},
                     "references": {},
+                    "documentSymbol": {"hierarchicalDocumentSymbolSupport": true},
                     "synchronization": {},
                 },
             },

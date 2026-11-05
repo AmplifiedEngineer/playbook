@@ -8,6 +8,7 @@
 
 mod code_fixture;
 mod code_lsp_arm;
+mod code_real_repos;
 
 use std::fs;
 use std::path::PathBuf;
@@ -429,6 +430,20 @@ fn report_entry(
 #[ignore = "timing benchmark, run with `just bench-code`"]
 fn bench_code() {
     assert!(which("rg").is_some(), "the benchmark needs rg installed");
+    if let Ok(manifest) = std::env::var("BENCH_CODE_REAL_MANIFEST") {
+        let report = code_real_repos::run_manifest(
+            std::path::Path::new(&manifest),
+            std::path::Path::new(env!("CARGO_BIN_EXE_playbook")),
+        );
+        let text = serde_json::to_string_pretty(&report).expect("json");
+        let path = std::env::var("BENCH_CODE_REPORT").map_or_else(
+            |_| std::env::temp_dir().join("playbook-code-real.json"),
+            PathBuf::from,
+        );
+        fs::write(&path, &text).expect("report");
+        println!("{text}\nreport written to {}", path.display());
+        return;
+    }
     let sizes = std::env::var("BENCH_CODE_SIZES").unwrap_or_else(|_| DEFAULT_SIZES.to_string());
     let runs: Vec<Value> = sizes
         .split(',')

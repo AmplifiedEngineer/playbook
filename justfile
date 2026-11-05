@@ -97,7 +97,7 @@ stress-collector:
 
 # Time `playbook code` against rg on generated repos and write a JSON report with a verdict.
 #
-# Needs rg on PATH. BENCH_CODE_LSP=1 adds the language server arm (servers from PATH, nothing is installed). Set BENCH_CODE_SIZES (default 100,5000,50000) and BENCH_CODE_REPORT to change the run.
+# Needs rg on PATH. BENCH_CODE_LSP=1 adds the language server arm (servers from PATH, nothing is installed). Set BENCH_CODE_SIZES (default 100,5000,50000) and BENCH_CODE_REPORT to change the run. BENCH_CODE_REAL_MANIFEST=<file> switches to real repositories, see crates/cli/tests/code_real_repos/manifest.example.json.
 bench-code:
     cargo test --release -p playbook --test code_bench -- --ignored --nocapture
 

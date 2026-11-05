@@ -1,0 +1,24 @@
+{
+  "limit_s": 120,
+  "home": "/tmp/pb-lsp-real/home",
+  "repos": [
+    {
+      "name": "trpc",
+      "lang": "ts",
+      "path": "/tmp/pb-lsp-real/repos/trpc",
+      "tasks": "trpc.json",
+      "sha": "pin the commit you cloned",
+      "source_files": 1203
+    }
+  ],
+  "servers": [
+    {
+      "name": "typescript-language-server+tsserver",
+      "version": "record the exact versions",
+      "lang": "ts",
+      "program": "/tmp/pb-lsp-real/ts6/node_modules/.bin/typescript-language-server",
+      "args": ["--stdio"],
+      "options": {}
+    }
+  ]
+}
