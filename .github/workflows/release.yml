@@ -253,7 +253,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && needs.plan.outputs.build == 'true' }}
     permissions:
       contents: read
-    uses: $/.github/workflows/rust-ci.yml
+    uses: ./.github/workflows/rust-ci.yml
     with:
       # In order: the merged release pull request, the release commit the
       # plan found (tag state), the existing tag (publish state), and the
