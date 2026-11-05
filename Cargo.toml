@@ -6,7 +6,7 @@ resolver = "2"
 members = ["crates/cli", "crates/code", "crates/common", "crates/data", "crates/pbdoc", "crates/plugin-checks", "crates/telemetry"]
 
 [workspace.package]
-version = "0.39.0"
+version = "0.40.0"
 edition = "2021"
 license = "Apache-2.0"
 

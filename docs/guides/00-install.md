@@ -103,7 +103,7 @@ Pass `--yes` to say yes to every question, including `playbook setup`. Flags go 
 Pin a version with `PLAYBOOK_REF`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | PLAYBOOK_REF=v0.39.0 bash
+curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | PLAYBOOK_REF=v0.40.0 bash
 ```
 
 A release tag installs that release. A branch or commit is refused, because it has no published binary.
@@ -207,7 +207,7 @@ curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/in
 
 The Homebrew route needs tap trust. The full name trusts only `pbtop`. See [Homebrew tap trust](#homebrew-tap-trust).
 
-`install-pbtop.sh` needs `bash` and `curl`. It downloads `install.sh` from `main` and runs it in its pbtop mode, which checks the archive like the `playbook` binary (its line in `SHA256SUMS`, the build attestation when `gh` can check it, and `pbtop --version`), installs `pbtop` into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`) and puts that folder on `PATH`. It runs nothing else. To pin a release, set `PLAYBOOK_REF` for `sh`, as in `curl -fsSL .../install-pbtop.sh | PLAYBOOK_REF=v0.39.0 sh`. On a release before 0.35.0 it stops, because those have no `pbtop` archive. The old `install.sh --pbtop` still works for one more release and points to `install-pbtop.sh`.
+`install-pbtop.sh` needs `bash` and `curl`. It downloads `install.sh` from `main` and runs it in its pbtop mode, which checks the archive like the `playbook` binary (its line in `SHA256SUMS`, the build attestation when `gh` can check it, and `pbtop --version`), installs `pbtop` into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`) and puts that folder on `PATH`. It runs nothing else. To pin a release, set `PLAYBOOK_REF` for `sh`, as in `curl -fsSL .../install-pbtop.sh | PLAYBOOK_REF=v0.40.0 sh`. On a release before 0.35.0 it stops, because those have no `pbtop` archive. The old `install.sh --pbtop` still works for one more release and points to `install-pbtop.sh`.
 
 Type `pbtop`, `pbtop --summary`, `pbtop --json` or `pbtop --range 30d`. The [crate README](../../crates/telemetry/README.md) covers `cargo` builds. The `playbook-telemetry` command and formula are retired ([ADR 0041](../adr/0041-retire-playbook-telemetry.md)): with Homebrew, run `brew uninstall playbook-telemetry && brew install pragmatic-engineer/tap/pbtop`, and change a script that calls `playbook-telemetry` to call `pbtop` with the same arguments. Everything stays on your machine.
 

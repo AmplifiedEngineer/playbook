@@ -2,6 +2,140 @@
 
 Release notes for playbook: the binary and the plugin in `plugins/playbook`. From 0.34.0 they ship together as one `vX.Y.Z` release with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). Each release has a section named `## playbook <version>`, newest first, which the release pull request adds from the notes that `scripts/release-notes.sh` builds. The sections from 0.33.0 down are plugin releases from before the two lines joined. The binary skips 0.27 to 0.33: it goes from 0.26 to 0.34.0.
 
+## playbook 0.40.0
+
+### Breaking changes
+
+- **data**: the code index now lives in one shared store per repo, so after upgrading delete the old per-worktree index files at \~/.config/playbook/data/code/\<owner\>/\<repo\>/\<worktree-id\>.db (playbook setup also removes them). They are a cache, and the next `playbook code index` rebuilds into store-v\<N\>.sqlite3. ([#1526](https://github.com/pragmatic-engineer/playbook/pull/1526))
+
+### Features
+
+- **code**: rank core declarations above tests and docs in context ([#1302](https://github.com/pragmatic-engineer/playbook/pull/1302))
+- **release**: AUR package template and renderer ([#1306](https://github.com/pragmatic-engineer/playbook/pull/1306))
+- **release**: scoop manifest template and renderer ([#1311](https://github.com/pragmatic-engineer/playbook/pull/1311))
+- **code**: index Go files with the tree-sitter-go grammar ([#1305](https://github.com/pragmatic-engineer/playbook/pull/1305))
+- **cli**: print help when a required argument is missing ([#1317](https://github.com/pragmatic-engineer/playbook/pull/1317))
+- **cli**: group root help into user and agent commands ([#1318](https://github.com/pragmatic-engineer/playbook/pull/1318))
+- **cli**: add playbook completions for bash, zsh and fish ([#1319](https://github.com/pragmatic-engineer/playbook/pull/1319))
+- **cli**: add completion stub writer for bash, zsh and fish ([#1324](https://github.com/pragmatic-engineer/playbook/pull/1324))
+- **cli**: report and remove shell completions in doctor and uninstall ([#1331](https://github.com/pragmatic-engineer/playbook/pull/1331))
+- **cli**: snapshot flag attributes to verify help rewrites ([#1334](https://github.com/pragmatic-engineer/playbook/pull/1334))
+- **cli**: install shell completions during setup ([#1335](https://github.com/pragmatic-engineer/playbook/pull/1335))
+- **config**: add the sessions.autoClose key ([#1366](https://github.com/pragmatic-engineer/playbook/pull/1366))
+- **hooks**: record turn and waiting state per session ([#1371](https://github.com/pragmatic-engineer/playbook/pull/1371))
+- **sessions**: add a dry run sweep for finished sessions ([#1375](https://github.com/pragmatic-engineer/playbook/pull/1375))
+- **plugin**: route code questions through playbook code ([#1377](https://github.com/pragmatic-engineer/playbook/pull/1377))
+- **handoff**: load the saved handoff after /compact ([#1391](https://github.com/pragmatic-engineer/playbook/pull/1391))
+- **code**: add parser key and extractor digest test ([#1397](https://github.com/pragmatic-engineer/playbook/pull/1397))
+- **code**: write worktree, content and manifest rows beside files ([#1398](https://github.com/pragmatic-engineer/playbook/pull/1398))
+- **system-prompt**: add autonomy rule for failures ([#1409](https://github.com/pragmatic-engineer/playbook/pull/1409))
+- **config**: add gate.maxRounds for the gate loops ([#1429](https://github.com/pragmatic-engineer/playbook/pull/1429))
+- **statusline**: add a budget line for the 7 day and 5 hour caps ([#1417](https://github.com/pragmatic-engineer/playbook/pull/1417))
+- **telemetry**: rework pbtop with an accessible palette, row layouts and a map editor ([#1473](https://github.com/pragmatic-engineer/playbook/pull/1473))
+- **gc**: add playbook gc with tombstones, guarded sweeps and build output cleanup ([#1475](https://github.com/pragmatic-engineer/playbook/pull/1475))
+- **memory**: recall candidates from an FTS5 index over fact bodies ([#1517](https://github.com/pragmatic-engineer/playbook/pull/1517))
+- **review**: make the review stack aware ([#1413](https://github.com/pragmatic-engineer/playbook/pull/1413))
+- **worktree**: clone the main target folder into new worktrees and report it in doctor ([#1447](https://github.com/pragmatic-engineer/playbook/pull/1447))
+- **code**: index every worktree of a repo into one shared store ([#1479](https://github.com/pragmatic-engineer/playbook/pull/1479))
+- **setup**: register the Bash guards in Codex and report them in doctor ([#1449](https://github.com/pragmatic-engineer/playbook/pull/1449))
+- **usage**: decide the monthly dollar figure and explain it in doctor ([#1520](https://github.com/pragmatic-engineer/playbook/pull/1520))
+- **statusline**: show the monthly dollar figure on line 4 ([#1523](https://github.com/pragmatic-engineer/playbook/pull/1523))
+- **watch**: add watch mode for GitHub events ([#1516](https://github.com/pragmatic-engineer/playbook/pull/1516))
+- **pbtop**: tag local spend as this machine, show Claude's report ([#1524](https://github.com/pragmatic-engineer/playbook/pull/1524))
+
+### Fixes
+
+- **windows**: run on an 8 MiB stack thread ([#1309](https://github.com/pragmatic-engineer/playbook/pull/1309))
+- **telemetry**: prefer a detected monthly limit over the manual budget ([#1328](https://github.com/pragmatic-engineer/playbook/pull/1328))
+- **code**: make the context token budget cover the whole text output ([#1308](https://github.com/pragmatic-engineer/playbook/pull/1308))
+- **cli**: keep the zsh loader silent when compinit fails ([#1360](https://github.com/pragmatic-engineer/playbook/pull/1360))
+- **doc**: report the same memory reason from both watchdogs ([#1373](https://github.com/pragmatic-engineer/playbook/pull/1373))
+- **usage**: keep the newest plan limit reading across sessions ([#1376](https://github.com/pragmatic-engineer/playbook/pull/1376))
+- **telemetry**: say used is this machine only when stale ([#1394](https://github.com/pragmatic-engineer/playbook/pull/1394))
+- **handoff**: keep the handoff file when the move to used/ fails ([#1396](https://github.com/pragmatic-engineer/playbook/pull/1396))
+- **worktree**: let the sweep read the pull request state of a branch
+- unblock main by fixing the help example and adding ADR 0057 ([#1455](https://github.com/pragmatic-engineer/playbook/pull/1455))
+- **worktree**: keep open PR worktrees, count only default branch merges ([#1444](https://github.com/pragmatic-engineer/playbook/pull/1444))
+- **config**: list the dotted view words in the usage.ui.layout error ([#1518](https://github.com/pragmatic-engineer/playbook/pull/1518))
+- **watch**: audit a stale event once ([#1530](https://github.com/pragmatic-engineer/playbook/pull/1530))
+- **config**: accept fractional dollars for watch.limits.usdPerDay ([#1522](https://github.com/pragmatic-engineer/playbook/pull/1522))
+
+### Performance
+
+- **config**: read a ready settings store without the full open ([#1367](https://github.com/pragmatic-engineer/playbook/pull/1367))
+- **code**: stop allocating per word and per line in index and search ([#1369](https://github.com/pragmatic-engineer/playbook/pull/1369))
+
+### Other changes
+
+- ci(shell): add a CI job for the shell completion tests ([#1320](https://github.com/pragmatic-engineer/playbook/pull/1320))
+- test(cli): replace the commands golden with a structural test ([#1322](https://github.com/pragmatic-engineer/playbook/pull/1322))
+- refactor(usage): rename the dashboard title to Agent Budget Dashboard ([#1329](https://github.com/pragmatic-engineer/playbook/pull/1329))
+- test(cli): lint command help against allowlists that only shrink ([#1332](https://github.com/pragmatic-engineer/playbook/pull/1332))
+- refactor(plugin): merge the cli skill into playbook-usage ([#1330](https://github.com/pragmatic-engineer/playbook/pull/1330))
+- docs(cli): add a style guide for command help text ([#1339](https://github.com/pragmatic-engineer/playbook/pull/1339))
+- refactor(cli): wire zsh completion through a loader file ([#1341](https://github.com/pragmatic-engineer/playbook/pull/1341))
+- refactor(test): drop dead\_code allows from hook and parity test support ([#1352](https://github.com/pragmatic-engineer/playbook/pull/1352))
+- test(cli): split shared test helpers into smaller modules ([#1351](https://github.com/pragmatic-engineer/playbook/pull/1351))
+- refactor: share duplicate helpers across the crates ([#1359](https://github.com/pragmatic-engineer/playbook/pull/1359))
+- refactor: share duplicate helpers inside code and telemetry ([#1361](https://github.com/pragmatic-engineer/playbook/pull/1361))
+- docs(config): mark launcher.claudeOverride retired and date the retired flags ([#1355](https://github.com/pragmatic-engineer/playbook/pull/1355))
+- refactor(init): rename shim.rs to rcfile.rs and date the launcher cleanup ([#1357](https://github.com/pragmatic-engineer/playbook/pull/1357))
+- refactor(pbdoc): narrow pub items to pub(crate) ([#1343](https://github.com/pragmatic-engineer/playbook/pull/1343))
+- refactor(cli): narrow update and auto cost items to pub(crate) ([#1348](https://github.com/pragmatic-engineer/playbook/pull/1348))
+- build(deps): remove unused ratatui dependency ([#1342](https://github.com/pragmatic-engineer/playbook/pull/1342))
+- refactor(telemetry): narrow tz helpers to pub(crate) ([#1344](https://github.com/pragmatic-engineer/playbook/pull/1344))
+- refactor(code): narrow testkit and walker items to pub(crate) ([#1345](https://github.com/pragmatic-engineer/playbook/pull/1345))
+- refactor(cli): narrow test support items to pub(crate) ([#1349](https://github.com/pragmatic-engineer/playbook/pull/1349))
+- refactor(cli): narrow statusline items to pub(crate) ([#1346](https://github.com/pragmatic-engineer/playbook/pull/1346))
+- refactor: remove redundant clones and by-value arguments ([#1358](https://github.com/pragmatic-engineer/playbook/pull/1358))
+- refactor: remove dead code and gate test-only helpers ([#1353](https://github.com/pragmatic-engineer/playbook/pull/1353))
+- test(cli): stop the collector daemon tests from failing under load ([#1362](https://github.com/pragmatic-engineer/playbook/pull/1362))
+- refactor(init): remove the no-op shell-init-rc-line migration ([#1354](https://github.com/pragmatic-engineer/playbook/pull/1354))
+- ci(windows): fail the Windows check on warnings ([#1356](https://github.com/pragmatic-engineer/playbook/pull/1356))
+- refactor(cli): narrow commit message sanitizer items to pub(crate) ([#1347](https://github.com/pragmatic-engineer/playbook/pull/1347))
+- build: enable the unreachable\_pub lint workspace-wide ([#1350](https://github.com/pragmatic-engineer/playbook/pull/1350))
+- refactor(cli): remove unsafe code from the playbook sources ([#1368](https://github.com/pragmatic-engineer/playbook/pull/1368))
+- refactor(pbdoc): drop the unsafe counting allocator and libc calls ([#1365](https://github.com/pragmatic-engineer/playbook/pull/1365))
+- refactor: replace unsafe libc calls with rustix ([#1364](https://github.com/pragmatic-engineer/playbook/pull/1364))
+- refactor(cli): remove unsafe code from the integration tests ([#1370](https://github.com/pragmatic-engineer/playbook/pull/1370))
+- build: forbid unsafe code in the workspace ([#1374](https://github.com/pragmatic-engineer/playbook/pull/1374))
+- chore(deps): bump zip from 8.6.0 to 9.0.5 ([#1383](https://github.com/pragmatic-engineer/playbook/pull/1383))
+- docs(cli): rewrite help text for the everyday commands
+- docs(cli): rewrite setup help text and clear its lint allowlist
+- docs(cli): rewrite help text for the launcher and usage commands
+- docs(cli): reword help text for config, effort and memory
+- docs(cli): reword help text for PR and commit commands
+- docs(cli): reword help text for review and gate commands
+- docs(cli): reword help text for the plan and segment commands
+- docs(cli): tighten help wording and restore deps ensure index entry
+- docs(cli): reword help text for code, agents and sanitize
+- docs(cli): reword help text for the path and route commands
+- docs(cli): wrap and tighten the utility help text
+- docs(cli): state the topology flag help once
+- docs(cli): make worktree help examples runnable
+- docs(cli): fix settings examples and finish help wording
+- test(cli): stop the help leak check matching .sh inside .shared
+- docs(cli): correct the --no-attribution default and match the --only list by id
+- docs(cli): describe what cc clean, fresh and raw do
+- docs(cli): tighten the config and effort help wording
+- docs(cli): match the prose check help to the type check help
+- docs(cli): keep the settings examples free of source file names
+- docs(cli): drop index summaries that repeat the help text
+- docs(cli): keep file extensions out of help examples
+- docs(cli): fix help examples and wording found in deep review
+- docs(cli): align path wording with directory in index and error
+- test(watch): record real GitHub list responses as fixtures ([#1481](https://github.com/pragmatic-engineer/playbook/pull/1481))
+- test(telemetry): fix three tests that flake under parallel load ([#1476](https://github.com/pragmatic-engineer/playbook/pull/1476))
+- docs(cli): say PR in the remaining help text and keep main's help leak test
+- docs(adr): drop the unbuilt dispatch hook from ADR 0011 ([#1433](https://github.com/pragmatic-engineer/playbook/pull/1433))
+- test(memory): add the synthetic recall fixture and its loader ([#1405](https://github.com/pragmatic-engineer/playbook/pull/1405))
+- test(usage): pin the Codex continuation, two-session and compressed rollout cases ([#1451](https://github.com/pragmatic-engineer/playbook/pull/1451))
+- docs(pbtop): generate pbtop-month.svg from the real theme ([#1519](https://github.com/pragmatic-engineer/playbook/pull/1519))
+- test: harden flaky collector, handover and install backup tests ([#1525](https://github.com/pragmatic-engineer/playbook/pull/1525))
+- test: stop the two-hooks test waiting on a notice a hook may take ([#1533](https://github.com/pragmatic-engineer/playbook/pull/1533))
+- test(doctor): leave the free disk space row out of the order comparison ([#1534](https://github.com/pragmatic-engineer/playbook/pull/1534))
+- test: keep three tests green when a release fills in the migration since ([#1536](https://github.com/pragmatic-engineer/playbook/pull/1536))
+
 ## playbook 0.39.0
 
 ### Breaking changes
