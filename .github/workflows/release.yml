@@ -86,6 +86,7 @@ concurrency:
 
 jobs:
   plan:
+    name: plan
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -100,7 +101,7 @@ jobs:
       dry_run: ${{ steps.plan.outputs.dry_run }}
       build: ${{ steps.plan.outputs.build }}
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -162,6 +163,7 @@ jobs:
   # Opens the release pull request and waits for the merge queue to land it.
   # A pull request that is already open or merged is reused.
   prepare:
+    name: prepare
     needs: plan
     if: needs.plan.outputs.state == 'prepare'
     runs-on: ubuntu-latest
@@ -172,7 +174,7 @@ jobs:
     outputs:
       sha: ${{ steps.land.outputs.sha }}
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -249,6 +251,7 @@ jobs:
   # tagged or built. `tag` and `draft` fail unless it passed on the same
   # commit.
   macos:
+    name: macos
     needs: [plan, prepare]
     if: ${{ !cancelled() && !failure() && needs.plan.outputs.build == 'true' }}
     permissions:
@@ -266,6 +269,7 @@ jobs:
   # Creates vX.Y.Z on the commit that carries the version. When GitHub
   # refuses, the run stops with the command a maintainer runs instead.
   tag:
+    name: tag
     needs: [plan, prepare, macos]
     if: ${{ !cancelled() && !failure() && (needs.plan.outputs.state == 'prepare' || needs.plan.outputs.state == 'tag') }}
     runs-on: ubuntu-latest
@@ -273,7 +277,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -358,6 +362,7 @@ jobs:
   # The draft release holds the assets until every check passes. A draft
   # left by a failed run is reused.
   draft:
+    name: draft
     needs: [plan, macos, tag]
     if: ${{ !cancelled() && !failure() && needs.plan.outputs.build == 'true' && needs.plan.outputs.dry_run != 'true' }}
     runs-on: ubuntu-latest
@@ -365,7 +370,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -411,6 +416,7 @@ jobs:
           gh release upload "$TAG" release-notes.json --clobber
 
   build:
+    name: build
     needs: [plan, macos, draft]
     if: ${{ !cancelled() && !failure() && needs.plan.outputs.build == 'true' }}
     strategy:
@@ -439,7 +445,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         # Linux-only action; it skips itself elsewhere.
         if: runner.os == 'Linux'
         with:
@@ -658,6 +664,7 @@ jobs:
   # SHA256SUMS, attestation and publish. The sums list every asset of the
   # release, and the release turns public only after they are attached.
   publish:
+    name: publish
     needs: [plan, build]
     if: ${{ !cancelled() && !failure() && needs.plan.outputs.build == 'true' && needs.plan.outputs.dry_run != 'true' }}
     runs-on: ubuntu-latest
@@ -667,7 +674,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -767,6 +774,7 @@ jobs:
 
   # Downloads the published release the way users do and checks it.
   verify:
+    name: verify
     needs: [plan, publish]
     if: ${{ !cancelled() && !failure() && needs.plan.outputs.dry_run != 'true' }}
     runs-on: ubuntu-latest
@@ -775,7 +783,7 @@ jobs:
       contents: read
       attestations: read
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -841,6 +849,7 @@ jobs:
   # from reasoning and not from a run (including port 22 and the traffic of
   # the container): when the first release blocks a host, add it here.
   aur:
+    name: aur
     needs: [plan, verify]
     if: >-
       ${{ !cancelled()
@@ -861,7 +870,7 @@ jobs:
       # archlinux:base-devel, pinned by digest.
       AUR_IMAGE: archlinux@sha256:3cbf69d2d5958d6a294f3722c5668e6187c4df8e00fa27f72352f0bf83e495e1
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -1067,6 +1076,7 @@ jobs:
   # on x86_64. A release published before the packages existed has none, and
   # the job says so and stops.
   verify-packages:
+    name: verify-packages
     needs: [plan, verify]
     if: ${{ !cancelled() && needs.verify.result == 'success' && needs.plan.outputs.dry_run != 'true' }}
     runs-on: ubuntu-latest
@@ -1075,7 +1085,7 @@ jobs:
       contents: read
       attestations: read
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -1142,6 +1152,7 @@ jobs:
   # shell-ci: apt mirrors rotate per runner, and whether block mode covers
   # container traffic is decided by the first real run.
   package-repo-sign:
+    name: package-repo-sign
     needs: [plan, verify]
     if: >-
       ${{ !cancelled()
@@ -1170,7 +1181,7 @@ jobs:
       SOURCE_REF: refs/heads/${{ github.event.repository.default_branch }}
       DRY_RUN: ${{ needs.plan.outputs.dry_run }}
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: audit
 
@@ -1263,6 +1274,7 @@ jobs:
   # permissions and no key. The check after the deploy reads the public URL
   # with the published key and retries while Pages catches up.
   package-repo-deploy:
+    name: package-repo-deploy
     needs: [plan, package-repo-sign]
     if: ${{ !cancelled() && needs.plan.outputs.dry_run != 'true' && needs.package-repo-sign.outputs.built == 'true' }}
     runs-on: ubuntu-latest
@@ -1275,7 +1287,7 @@ jobs:
       pages: write
       id-token: write
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: audit
 
@@ -1314,6 +1326,7 @@ jobs:
   # 9). This job has no secrets, so code from the tap never runs next to an
   # app token. The formulas go to `downstream` as job outputs.
   formulas:
+    name: formulas
     needs: [plan, build, verify]
     if: >-
       ${{ !cancelled()
@@ -1333,7 +1346,7 @@ jobs:
       VERSION: ${{ needs.plan.outputs.version }}
       DRY_RUN: ${{ needs.plan.outputs.dry_run }}
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -1388,6 +1401,7 @@ jobs:
   # released version, which proves the job and its egress list without
   # publishing anything.
   verify-installers:
+    name: verify-installers
     needs: [plan, verify]
     if: >-
       ${{ !cancelled()
@@ -1400,7 +1414,7 @@ jobs:
       contents: read
       attestations: read
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -1453,6 +1467,7 @@ jobs:
   # playbook release published: the job fails with the commands to finish by
   # hand. A dry run prints the changes and opens nothing.
   downstream:
+    name: downstream
     needs: [plan, formulas]
     if: >-
       ${{ !cancelled()
@@ -1473,7 +1488,7 @@ jobs:
       TAG: ${{ needs.plan.outputs.tag }}
       DRY_RUN: ${{ needs.plan.outputs.dry_run }}
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -1725,6 +1740,7 @@ jobs:
   # wrong URL or checksum shows here and not in a user report. A dry run
   # publishes nothing to install, so it is skipped.
   verify-homebrew-linux:
+    name: verify-homebrew-linux
     needs: [plan, downstream]
     if: >-
       ${{ !cancelled()
@@ -1741,7 +1757,7 @@ jobs:
       # The list is written from reasoning and not from a run (the tap clone
       # and the release asset downloads), like the other jobs. When the first
       # release blocks a host, add that host here.
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -1796,6 +1812,7 @@ jobs:
   # it with the same -f version. A dry run renders from a stand-in
   # SHA256SUMS, prints the diff and opens nothing.
   nix:
+    name: nix
     needs: [plan, verify]
     if: >-
       ${{ !cancelled()
@@ -1816,7 +1833,7 @@ jobs:
       TAG: ${{ needs.plan.outputs.tag }}
       DRY_RUN: ${{ needs.plan.outputs.dry_run }}
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -1976,6 +1993,7 @@ jobs:
   # job. The host list is written from reasoning and not from a run: when the
   # first release blocks a host, add it here.
   verify-nix-linux:
+    name: verify-nix-linux
     needs: [plan, nix]
     if: ${{ !cancelled() && needs.plan.outputs.dry_run != 'true' && needs.nix.result == 'success' && needs.nix.outputs.sha != '' }}
     runs-on: ubuntu-latest
@@ -1987,7 +2005,7 @@ jobs:
       VERSION: ${{ needs.plan.outputs.version }}
       SHA: ${{ needs.nix.outputs.sha }}
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -2033,6 +2051,7 @@ jobs:
   # their ad-hoc signature by not stripping or patching them. harden-runner
   # does not run on macOS runners.
   verify-nix-macos:
+    name: verify-nix-macos
     needs: [plan, nix]
     if: ${{ !cancelled() && needs.plan.outputs.dry_run != 'true' && needs.nix.result == 'success' && needs.nix.outputs.sha != '' }}
     runs-on: macos-latest
@@ -2064,6 +2083,7 @@ jobs:
   # when the app is not installed on the bucket repository, it warns and
   # passes. A dry run renders from a stand-in SHA256SUMS and opens nothing.
   scoop:
+    name: scoop
     needs: [plan, verify]
     if: >-
       ${{ !cancelled()
@@ -2087,7 +2107,7 @@ jobs:
       TAG: ${{ needs.plan.outputs.tag }}
       DRY_RUN: ${{ needs.plan.outputs.dry_run }}
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -2261,6 +2281,7 @@ jobs:
   # in a dry run (see StepSecurity's note that block mode now covers Windows
   # runners), so a block list written from reasoning could fail a release.
   verify-scoop:
+    name: verify-scoop
     needs: [plan, scoop]
     if: ${{ !cancelled() && needs.plan.outputs.dry_run != 'true' && needs.scoop.result == 'success' && needs.scoop.outputs.manifest != '' }}
     runs-on: windows-latest
@@ -2278,7 +2299,7 @@ jobs:
       SCOOP_INSTALLER_SHA: 1e2f334083d609986d8c8bc9e31ae8e87c39fab4
       SCOOP_INSTALLER_SHA256: 94f983b190438311e006b957db7c8422709e0ba62a6c2ac04e278164108f2512
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: audit
 
@@ -2350,6 +2371,7 @@ jobs:
   # verify-scoop: a Windows block list written from reasoning could fail a
   # release.
   winget:
+    name: winget
     needs: [plan, verify]
     if: >-
       ${{ !cancelled()
@@ -2377,7 +2399,7 @@ jobs:
       WINGETCREATE_VERSION: v1.12.13.0
       WINGETCREATE_SHA256: 24042bd37915805615e6cf969ac57c6439124c3fe85823327f5f3fb24bd9ffea
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: audit
 

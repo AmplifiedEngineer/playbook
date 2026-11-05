@@ -76,6 +76,7 @@ jobs:
   # under docs/. seed/, hooks/ and .github/ are never docs-only: tests
   # read them.
   changes:
+    name: changes
     runs-on: ubuntu-latest
     # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
     timeout-minutes: 5
@@ -90,7 +91,7 @@ jobs:
       # whole workspace, and so does any error.
       pkgs: ${{ steps.classify.outputs.pkgs }}
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -160,6 +161,7 @@ jobs:
   # runner, so it costs no macOS runner. The check name comes from the matrix
   # value, never the runner. A release gate runs the macOS leg alone.
   build-test:
+    name: build-test
     strategy:
       fail-fast: false
       matrix:
@@ -190,7 +192,7 @@ jobs:
       # below, so they can't drift apart. Bump deliberately, not implicitly.
       CARGO_AUDIT_VERSION: "0.22.2"
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         # Linux-only action; it self-skips on macOS with a confusing warning
         # (same convention as shell-ci.yml).
         if: runner.os == 'Linux' && env.LANE == 'true'
@@ -456,6 +458,7 @@ jobs:
   # design, and skipped in a release gate (`!inputs.ref`) so a flaky or newly
   # broken shell test can never stop a release.
   shell-tests:
+    name: shell-tests
     needs: changes
     if: ${{ !cancelled() && !inputs.ref }}
     runs-on: ubuntu-latest
@@ -469,7 +472,7 @@ jobs:
       # tests, so a deleted or renamed test cannot pass silently.
       EXPECTED_SHELL_TESTS: "10"
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         if: env.LANE == 'true'
         with:
           # On audit, not block, for the same reason as shell-ci.yml:98-105:
@@ -543,6 +546,7 @@ jobs:
   # links, the policy table, the PR-flow wording). Runs only when the heavy
   # lanes are skipped.
   docs-checks:
+    name: docs-checks
     needs: changes
     if: needs.changes.outputs.docs_only == 'true'
     runs-on: ubuntu-latest
@@ -550,7 +554,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -611,6 +615,7 @@ jobs:
   # release.yml is for. Tests are excluded on purpose; several still use
   # unix-only APIs and making them portable is separate work.
   windows-check:
+    name: windows-check
     needs: changes
     # Already ran on the PR head; the queue re-runs Linux build-test only. A
     # release gate runs macOS only.
@@ -665,6 +670,7 @@ jobs:
   #     when a later decision brings them into scope.
   # Every step runs in a scratch profile so nothing touches the runner home.
   windows-smoke:
+    name: windows-smoke
     needs: changes
     if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group' && !inputs.ref && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: windows-latest
@@ -801,6 +807,7 @@ jobs:
   # (identical musl-tools technique, same matrix pattern) only runs on a
   # pushed tag or workflow_dispatch, never on a pull request.
   container-smoke:
+    name: container-smoke
     needs: changes
     # Already ran on the PR head; the queue re-runs Linux build-test only. A
     # release gate runs macOS only.
@@ -818,7 +825,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           # audit, not block: this job pulls the debian:stable-slim base
           # image and apt-get installs git INSIDE that container, both
