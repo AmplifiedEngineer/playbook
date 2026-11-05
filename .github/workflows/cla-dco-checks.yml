@@ -1,0 +1,132 @@
+# SPDX-License-Identifier: Apache-2.0
+name: CLA & DCO checks (reusable)
+
+# The DCO and CLA checks for a pull request. A contributor signs the CLA by
+# adding a row to the signatures file in a commit of their own, so the record
+# lives in git history and moves with the repository to any host. See
+# docs/internals/18-cla-and-dco-checks.md.
+#
+# SAFETY: runs on plain pull_request with read-only permissions and no
+# secrets. The checkout drops its credentials. The script reads git objects and
+# one list of commits from the REST API. No value from the pull request reaches
+# a script through an expression: every one goes through `env`.
+#
+# A caller names its job `cla-dco`, so the required checks read
+# `cla-dco / dco` and `cla-dco / cla-check`. To reuse this in another repo,
+# copy the workflow and scripts/cla-check.sh, or call it by commit from the
+# organization's .github repository.
+on:
+  workflow_call:
+    inputs:
+      signatures-file:
+        description: Path of the signatures file, relative to the repository root.
+        type: string
+        default: .github/CONTRIBUTORS.md
+      cla-path:
+        description: Path of the CLA text, shown in the failure message.
+        type: string
+        default: .github/ICLA.md
+      statement:
+        description: Sentence a signing commit message must contain.
+        type: string
+        default: I have read the CLA Document and I hereby sign the CLA.
+      extra-bots:
+        description: Extra bot logins or emails to skip, comma separated.
+        type: string
+        default: ""
+      script:
+        description: Path of the check script in the caller repository.
+        type: string
+        default: scripts/cla-check.sh
+
+permissions: {}
+
+jobs:
+  # Job keys are unique across the workflow set so check-run names stay
+  # unambiguous.
+  dco:
+    name: dco
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
+    timeout-minutes: 5
+    permissions:
+      contents: read # fetch the pull request commits
+      pull-requests: read # list the commits with their account logins
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: List commit accounts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/commits" \
+            --jq '.[] | [.sha, (.author.login // ""), (.author.type // ""), (.committer.login // ""), (.committer.type // "")] | @tsv' \
+            >"$RUNNER_TEMP/commit-accounts.tsv"
+      - name: Check DCO (Signed-off-by on every commit)
+        env:
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SCRIPT: ${{ inputs.script }}
+          EXTRA_BOTS: ${{ inputs.extra-bots }}
+        run: |
+          bash "$SCRIPT" dco \
+            --base "origin/$BASE_BRANCH" --head "$HEAD_SHA" \
+            --logins "$RUNNER_TEMP/commit-accounts.tsv" \
+            --bots "$EXTRA_BOTS" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  cla-check:
+    name: cla-check
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # fetch the pull request commits
+      pull-requests: read # list the commits with their account logins
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: List commit accounts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/commits" \
+            --jq '.[] | [.sha, (.author.login // ""), (.author.type // ""), (.committer.login // ""), (.committer.type // "")] | @tsv' \
+            >"$RUNNER_TEMP/commit-accounts.tsv"
+      - name: Check CLA (default branch list plus this pull request)
+        env:
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          CLA_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.event.repository.default_branch }}/${{ inputs.cla-path }}
+          SIGNATURES_FILE: ${{ inputs.signatures-file }}
+          STATEMENT: ${{ inputs.statement }}
+          SCRIPT: ${{ inputs.script }}
+          EXTRA_BOTS: ${{ inputs.extra-bots }}
+        run: |
+          bash "$SCRIPT" cla \
+            --base "origin/$BASE_BRANCH" --head "$HEAD_SHA" \
+            --file "$SIGNATURES_FILE" --pr-author "$PR_AUTHOR" \
+            --logins "$RUNNER_TEMP/commit-accounts.tsv" \
+            --bots "$EXTRA_BOTS" --statement "$STATEMENT" \
+            --cla-url "$CLA_URL" | tee -a "$GITHUB_STEP_SUMMARY"

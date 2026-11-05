@@ -3,6 +3,7 @@
 This project follows the standard igorjs contribution rules. Start here:
 
 - **[.github/CONTRIBUTING-RULES.md](.github/CONTRIBUTING-RULES.md)**: DCO, CLA, commit conventions, PR process, and the code style baseline (SPDX headers, dependency policy, commit signing). These rules are shared across all igorjs repos.
+- **First pull request:** sign the CLA by adding your own row to [.github/CONTRIBUTORS.md](.github/CONTRIBUTORS.md) in a commit you author. The steps are in the rules above, and [the internals note](docs/internals/18-cla-and-dco-checks.md) explains the checks.
 - **[README](README.md)**: project description and install.
 - **[SECURITY.md](SECURITY.md)**: vulnerability disclosure process.
 
