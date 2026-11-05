@@ -390,16 +390,31 @@ fn d5_a_hung_collector_is_replaced_by_the_next_session_start() {
     let hung = home.start_collector(&mut daemon, &[(TEST_HANG_VAR, "1")]);
     let began = Instant::now();
 
-    home.session_start();
-    daemon.reap();
+    // The hook makes one attempt with short waits of its own: a 1 s limit on
+    // the lock to free after a kill and 1.2 s for the new collector. A starved
+    // runner can miss those, and the next session start tries again, so the
+    // test starts sessions until one replaces the collector or the deadline
+    // passes, and keeps what the last one printed.
+    let mut hooks = 0;
+    let mut last = String::new();
     let replaced = within(BEHAVIOUR_BOUND, || {
+        let out = home.session_start();
+        hooks += 1;
+        last = format!(
+            "stdout {:?}, stderr {:?}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        daemon.reap();
         home.holder().is_some_and(|(pid, _)| pid != hung)
     });
 
     assert!(
         replaced,
-        "not replaced within {BEHAVIOUR_BOUND:?} (took {:?}); log: {}",
+        "not replaced within {BEHAVIOUR_BOUND:?} (took {:?}, {hooks} session starts); holder {:?}, stamp {:?}, last hook: {last}; log: {}",
         began.elapsed(),
+        home.holder(),
+        fs::read_to_string(stamp_path(&home.paths())).ok(),
         home.log()
     );
 }

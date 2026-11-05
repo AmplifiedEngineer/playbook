@@ -586,14 +586,28 @@ pub(crate) mod tests {
         thread: Option<std::thread::JoinHandle<Result<String, String>>>,
     }
 
+    /// How many ports `Running::start` tries when another program takes each.
+    const START_PORT_TRIES: u32 = 5;
+
     impl Running {
         pub(crate) fn start(p: &Paths) -> Self {
+            // A port read as free can be taken before the collector binds it
+            // (a probe and a bind are two steps), and the collector then
+            // fails to start at once. Only that failure picks another port.
+            let mut last = String::new();
+            for _ in 0..START_PORT_TRIES {
+                match Self::start_on(p, free_port()) {
+                    Ok(running) => return running,
+                    Err(e) if e.contains("cannot listen on") => last = e,
+                    Err(e) => panic!("{e}"),
+                }
+            }
+            panic!("no collector came up in {START_PORT_TRIES} ports: {last}");
+        }
+
+        fn start_on(p: &Paths, port: u16) -> Result<Self, String> {
             let stop = Arc::new(AtomicBool::new(false));
             let (paths, flag) = (p.clone(), Arc::clone(&stop));
-            // A port from `free_port`, not 0: a port the system picks is free again
-            // the moment this collector lets go, and a sibling test that binds
-            // port 0 can be handed it before the successor test binds it.
-            let port = free_port();
             let thread = std::thread::spawn(move || run_collect(&paths, Some(port), 0, &flag));
             let mut me = Self {
                 stop,
@@ -604,7 +618,11 @@ pub(crate) mod tests {
             loop {
                 if let Some(s) = read_state(&state_path(p)).filter(|s| s.pid != 0) {
                     me.port = s.port;
-                    return me;
+                    return Ok(me);
+                }
+                if me.thread.as_ref().is_some_and(|t| t.is_finished()) {
+                    let ended = me.thread.take().unwrap().join().unwrap();
+                    return Err(format!("the collector ended at once: {ended:?}"));
                 }
                 assert!(
                     std::time::Instant::now() < deadline,
@@ -690,7 +708,21 @@ pub(crate) mod tests {
         running.finish().unwrap();
 
         assert!(crate::util::wait_unlocked(&crate::daemon::lock_path(&p)));
-        bind(port).expect("the port is free with no retry");
+        // `run_collect` has returned, so its listener is closed and the port
+        // is free unless another program took it in the moment since. A probe
+        // or a collector of another test holds it for a moment or for good and
+        // answers when asked. A listener this collector leaked would hold it
+        // for good and never answer, so the port counts as taken only when the
+        // bind keeps failing and something answers there.
+        let free = crate::util::within(Duration::from_secs(2), || bind(port).is_ok());
+        if !free {
+            let answer = probe(port);
+            assert_ne!(
+                answer,
+                Probe::Silent,
+                "port {port} stays busy after the stop and nothing answers there"
+            );
+        }
         assert_eq!(read_state(&state_path(&p)).unwrap().pid, 0);
     }
 
