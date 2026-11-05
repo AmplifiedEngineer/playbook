@@ -41,4 +41,4 @@ A pull request that edits the workflow or the script runs its own copy. The `.gi
 
 ## Reuse in another repository
 
-Copy `cla-dco-checks.yml`, `cla-dco.yml` and `scripts/cla-check.sh`, or call the workflow by commit from the organization `.github` repository. Inputs: `signatures-file`, `cla-path`, `statement`, `extra-bots` and `script`.
+Copy `cla-dco-checks.yml`, `cla-dco.yml` and `scripts/cla-check.sh`, or call the workflow by commit from the organization `.github` repository. Inputs: `signatures-file`, `cla-path`, `statement`, `extra-bots`, `script`, `tooling-repository` and `tooling-ref`. When a caller sets `tooling-ref` to a full commit SHA, the script is fetched from the tooling repository at that commit, so a pull request cannot change the checker it runs under. Without it the script is read from the caller repository, as here.

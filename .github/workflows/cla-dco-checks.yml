@@ -14,7 +14,9 @@ name: CLA & DCO checks (reusable)
 # A caller names its job `cla-dco`, so the required checks read
 # `cla-dco / dco` and `cla-dco / cla-check`. To reuse this in another repo,
 # copy the workflow and scripts/cla-check.sh, or call it by commit from the
-# organization's .github repository.
+# organization's .github repository and set `tooling-ref` to that same commit,
+# so the script is fetched at a pinned revision and not read from the pull
+# request.
 on:
   workflow_call:
     inputs:
@@ -35,9 +37,17 @@ on:
         type: string
         default: ""
       script:
-        description: Path of the check script in the caller repository.
+        description: Path of the check script, relative to the caller repository, or to the tooling repository when tooling-ref is set.
         type: string
         default: scripts/cla-check.sh
+      tooling-repository:
+        description: Repository that holds the check script when tooling-ref is set.
+        type: string
+        default: pragmatic-engineer/.github
+      tooling-ref:
+        description: Full commit SHA of the tooling repository. When set, the script is fetched from there at that commit instead of being read from the caller repository.
+        type: string
+        default: ""
 
 permissions: {}
 
@@ -64,6 +74,26 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Check the tooling pin
+        if: inputs.tooling-ref != ''
+        env:
+          TOOLING_REF: ${{ inputs.tooling-ref }}
+        run: |
+          case "$TOOLING_REF" in
+            *[!0-9a-f]*) echo "tooling-ref must be a full lowercase commit SHA" >&2; exit 1 ;;
+          esac
+          if [ "${#TOOLING_REF}" -ne 40 ]; then
+            echo "tooling-ref must be a full lowercase commit SHA" >&2
+            exit 1
+          fi
+      - name: Fetch the pinned tooling
+        if: inputs.tooling-ref != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.tooling-repository }}
+          ref: ${{ inputs.tooling-ref }}
+          path: .cla-tooling
+          persist-credentials: false
       - name: List commit accounts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -77,7 +107,7 @@ jobs:
         env:
           BASE_BRANCH: ${{ github.event.repository.default_branch }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          SCRIPT: ${{ inputs.script }}
+          SCRIPT: ${{ inputs.tooling-ref != '' && format('.cla-tooling/{0}', inputs.script) || inputs.script }}
           EXTRA_BOTS: ${{ inputs.extra-bots }}
         run: |
           bash "$SCRIPT" dco \
@@ -104,6 +134,26 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Check the tooling pin
+        if: inputs.tooling-ref != ''
+        env:
+          TOOLING_REF: ${{ inputs.tooling-ref }}
+        run: |
+          case "$TOOLING_REF" in
+            *[!0-9a-f]*) echo "tooling-ref must be a full lowercase commit SHA" >&2; exit 1 ;;
+          esac
+          if [ "${#TOOLING_REF}" -ne 40 ]; then
+            echo "tooling-ref must be a full lowercase commit SHA" >&2
+            exit 1
+          fi
+      - name: Fetch the pinned tooling
+        if: inputs.tooling-ref != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.tooling-repository }}
+          ref: ${{ inputs.tooling-ref }}
+          path: .cla-tooling
+          persist-credentials: false
       - name: List commit accounts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -121,7 +171,7 @@ jobs:
           CLA_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.event.repository.default_branch }}/${{ inputs.cla-path }}
           SIGNATURES_FILE: ${{ inputs.signatures-file }}
           STATEMENT: ${{ inputs.statement }}
-          SCRIPT: ${{ inputs.script }}
+          SCRIPT: ${{ inputs.tooling-ref != '' && format('.cla-tooling/{0}', inputs.script) || inputs.script }}
           EXTRA_BOTS: ${{ inputs.extra-bots }}
         run: |
           bash "$SCRIPT" cla \
