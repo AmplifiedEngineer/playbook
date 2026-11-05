@@ -6,6 +6,7 @@
 #
 # Usage:
 #   package-repo.sh build <site-dir> <assets-root> <yanked.txt>
+#   package-repo.sh versions <rpm-dir>
 #
 # <assets-root> holds one folder per release, named X.Y.Z, with that release's
 # SHA256SUMS and packages. Attestations are checked by the caller, before this
@@ -187,7 +188,26 @@ build() {
   for f in $(cat "$work/kept"); do log "published $f"; done
 }
 
+# versions <rpm-dir>: prints version=<newest> and previous=<next newest> from
+# the playbook-<version>.x86_64.rpm files in <rpm-dir>. previous is empty when
+# only one release is packaged. It counts the lines and never indexes from the
+# end, which bash rejects on a short array.
+versions() {
+  local dir="${1:-}" list count
+  [ -d "$dir" ] || fail "usage: package-repo.sh versions <rpm-dir>"
+  list="$(find "$dir" -name '*.rpm' -exec basename {} \; | sed -n 's/^playbook-\(.*\)\.x86_64\.rpm$/\1/p' | sort -V)"
+  [ -n "$list" ] || fail "no x86_64 rpm found in $dir"
+  count="$(printf '%s\n' "$list" | wc -l | tr -d ' ')"
+  printf 'version=%s\n' "$(printf '%s\n' "$list" | tail -n 1)"
+  if [ "$count" -ge 2 ]; then
+    printf 'previous=%s\n' "$(printf '%s\n' "$list" | tail -n 2 | head -n 1)"
+  else
+    printf 'previous=\n'
+  fi
+}
+
 case "${1:-}" in
   build) shift; build "$@" ;;
-  *) fail "usage: package-repo.sh build <site-dir> <assets-root> <yanked.txt>" ;;
+  versions) shift; versions "$@" ;;
+  *) fail "usage: package-repo.sh build <site-dir> <assets-root> <yanked.txt> | versions <rpm-dir>" ;;
 esac
