@@ -1828,6 +1828,14 @@ mod tests {
         rows
     }
 
+    /// The rows without the index cleanup. Its `since` is `next` until a
+    /// release fills it in, so whether it is recorded depends on that.
+    fn rows_without_the_index_cleanup(home: &Path) -> Vec<String> {
+        let mut rows = rows(home);
+        rows.retain(|r| !r.contains(CODE_INDEX_FILES_MIGRATION));
+        rows
+    }
+
     fn set_budget(home: &Path, usd: f64) {
         crate::config::write::set(
             crate::config::write::Tier::Global,
@@ -1864,7 +1872,7 @@ mod tests {
 
         // Act
         let first = run_owned(&ctx(&h), 0, None);
-        let after_first = rows(&h);
+        let after_first = rows_without_the_index_cleanup(&h);
         let second = run_owned(&ctx(&h), 0, None);
 
         // Assert
@@ -1881,7 +1889,11 @@ mod tests {
                 "migrations/shipped/system-prompt=abc",
             ]
         );
-        assert_eq!(rows(&h), after_first, "the conversion runs once");
+        assert_eq!(
+            rows_without_the_index_cleanup(&h),
+            after_first,
+            "the conversion runs once"
+        );
         assert_eq!(budget(&h), "5.0", "an applied migration does not run again");
     }
 
