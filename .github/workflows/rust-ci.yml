@@ -754,10 +754,13 @@ jobs:
 
       - name: Summary
         if: always()
+        env:
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          HOOK_OUTCOME: ${{ steps.hook.outcome }}
         run: |
           "### Windows smoke (experimental, ADR 0053)" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
-          "- setup, doctor check, uninstall: ${{ steps.setup.outcome }}" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
-          "- hook session-init: ${{ steps.hook.outcome }}" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          "- setup, doctor check, uninstall: $env:SETUP_OUTCOME" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          "- hook session-init: $env:HOOK_OUTCOME" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
 
       - name: Save cargo registry and build output (windows-smoke)
         if: success() && github.event_name == 'push' && steps.cargo.outputs.cache-hit != 'true'
@@ -876,7 +879,9 @@ jobs:
 
       - name: Add the musl target
         if: steps.bin.outputs.cache-hit != 'true'
-        run: rustup target add ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: rustup target add "$TARGET"
 
       - name: Install the musl C cross-compiler
         # rusqlite's `bundled` feature compiles SQLite's C source (via
@@ -905,15 +910,17 @@ jobs:
         # uppercased with underscores, cc-rs's CC_* wants it lowercased with
         # underscores, and hand-listing both per target is exactly the
         # duplication this job merge is removing.
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          tu="$(echo '${{ matrix.target }}' | tr 'a-z-' 'A-Z_')"
-          tc="$(echo '${{ matrix.target }}' | tr '-' '_')"
+          tu="$(echo "$TARGET" | tr 'a-z-' 'A-Z_')"
+          tc="$(echo "$TARGET" | tr '-' '_')"
           export "CARGO_TARGET_${tu}_LINKER=rust-lld"
           export "CC_${tc}=musl-gcc"
-          cargo build --release -p playbook --target ${{ matrix.target }}
+          cargo build --release -p playbook --target "$TARGET"
           mkdir -p smoke-bin
-          cp target/${{ matrix.target }}/release/playbook smoke-bin/playbook
+          cp "target/$TARGET/release/playbook" smoke-bin/playbook
 
       # The daily run skips the restore, so it has no key to save under.
       - name: Save the smoke binary
@@ -988,6 +995,8 @@ jobs:
         # container, not that rusqlite's bundled SQLite actually works at
         # runtime on this target. Round-trip a real verdict through the
         # real CLI to prove that separately.
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
           bin="$PWD/smoke-bin/playbook"
@@ -996,4 +1005,4 @@ jobs:
           echo "VERDICT: PASS" > "$work/source.txt"
           echo "VERDICT: PASS" | (cd "$work" && "$bin" gate record smoke-test ci fact-check - --source "$work/source.txt")
           (cd "$work" && "$bin" gate check smoke-test ci fact-check --source "$work/source.txt")
-          echo "gate record/check round-tripped a real PASS through rusqlite on ${{ matrix.target }}"
+          echo "gate record/check round-tripped a real PASS through rusqlite on $TARGET"
