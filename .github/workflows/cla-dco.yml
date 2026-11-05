@@ -24,13 +24,13 @@ jobs:
   cla-dco:
     if: github.event_name != 'issue_comment'
     permissions:
-      contents: read
-      pull-requests: read
+      contents: read # read the commits to check the sign-off
+      pull-requests: read # list the commits and authors of the PR
     uses: pragmatic-engineer/.github/.github/workflows/dco-cla.yml@2ca0eee10318bdfc1fbc44cc26fad9875c0ed79b # main
 
   cla-sign:
     if: github.event_name == 'issue_comment'
     permissions:
-      contents: write
-      pull-requests: write
+      contents: write # commit the signature to the cla-signatures branch
+      pull-requests: write # post the thank-you comment on the PR
     uses: pragmatic-engineer/.github/.github/workflows/cla-sign.yml@2ca0eee10318bdfc1fbc44cc26fad9875c0ed79b # main
