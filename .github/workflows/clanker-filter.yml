@@ -38,6 +38,10 @@ on:
 # Minimal top-level grant; the single job below requests only what it needs.
 permissions: {}
 
+concurrency:
+  group: clanker-filter-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Unique job key on purpose: cla-dco.yml used to share `check`, and
   # duplicate check-run names make any ruleset context named `check`
