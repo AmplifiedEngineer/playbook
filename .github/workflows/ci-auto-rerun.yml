@@ -6,63 +6,46 @@
 # job hit its timeout) and not from the code. GitHub Actions has no native job
 # retry. scripts/ci-should-rerun.sh holds the rules.
 #
-# Security: `workflow_run` runs the workflow from the default branch with a
-# write token, even for fork PRs. So this workflow never checks out or runs PR
-# code. The checkout below has no `ref`, so it gets the default branch, and it
-# only supplies the decision script. Runs from forks are skipped.
-#
-# This trigger only works once the file is on the default branch, so it cannot
-# be tested on the PR that adds it.
+# The workflow looks for runs on a schedule and does not use the `workflow_run`
+# trigger. That trigger runs with a write token for fork pull requests too, and
+# zizmor rates it as dangerous. A sweep reads the run list through the API,
+# skips runs from forks, and never checks out or runs pull request code: the
+# checkout has no `ref`, so it gets the default branch and only supplies the
+# decision script.
 
 name: ci-auto-rerun
 
 on:
-  workflow_run:
-    # Keep in step with the `name:` of each workflow. Not listed on purpose:
-    # this workflow, release (a publish must not repeat on its own),
-    # auto-update-pr, dependabot-auto-merge, lock, stale and scorecard.
-    workflows:
-      - betterleaks
-      - breaking-changes
-      - CLA & DCO
-      - PR Quality Gate
-      - commit-message-guard
-      - Commit Lint
-      - Dependency Review
-      - docs-links
-      - intents-contract
-      - license
-      - osv-scan
-      - plugin-guards
-      - rust-ci
-      - shell-ci
-      - zizmor
-    types: [completed]
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
 
 permissions: {}
+
+# One sweep at a time. A sweep that overlaps another waits, so one run is not
+# rerun twice.
+concurrency:
+  group: ci-auto-rerun
+  cancel-in-progress: false
 
 jobs:
   rerun:
     name: rerun
-    # One automatic rerun at most: only the first attempt is eligible. Fork
-    # runs are skipped, see the header.
-    if: >-
-      (github.event.workflow_run.conclusion == 'failure' ||
-      github.event.workflow_run.conclusion == 'timed_out') &&
-      github.event.workflow_run.run_attempt == 1 &&
-      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       actions: write # gh run rerun needs write access to Actions
-      contents: read
+      contents: read # the checkout supplies the decision script
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      RUN_ID: ${{ github.event.workflow_run.id }}
-      RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
-      RUN_NAME: ${{ github.event.workflow_run.name }}
-      RUN_URL: ${{ github.event.workflow_run.html_url }}
+      # Keep in step with the `name:` of each workflow. Not listed on purpose:
+      # this workflow, release (a publish must not repeat on its own),
+      # auto-update-pr, dependabot-auto-merge, lock, stale and scorecard.
+      WATCHED: >-
+        betterleaks,breaking-changes,CLA & DCO,PR Quality Gate,commit-message-guard,
+        Commit Lint,Dependency Review,docs-links,intents-contract,license,osv-scan,
+        plugin-guards,rust-ci,shell-ci,zizmor
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
@@ -79,34 +62,52 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_attempt=1
-          case "$RUN_ID" in
-            ''|*[!0-9]*) echo "run id is not numeric" >&2; exit 1 ;;
-          esac
-          if [ "$RUN_ATTEMPT" != "$expected_attempt" ]; then
-            echo "attempt $RUN_ATTEMPT is not the first; no rerun"
+
+          # Only the first attempt is eligible, so a run is rerun at most once.
+          # Runs from forks are skipped, see the header. A run that finished
+          # more than three hours ago is left alone.
+          since="$(date -u -d '3 hours ago' +%Y-%m-%dT%H:%M:%SZ)"
+          watched="$(printf '%s' "$WATCHED" | tr -d '\n' | sed 's/, */,/g')"
+          ids="$(
+            gh api --paginate "repos/$GH_REPO/actions/runs?status=completed&created=>=$since&per_page=100" \
+              --jq ".workflow_runs[]
+                | select(.conclusion == \"failure\" or .conclusion == \"timed_out\")
+                | select(.run_attempt == 1)
+                | select(.head_repository.full_name == \"$GH_REPO\")
+                | select(.name as \$n | \"$watched\" | split(\",\") | index(\$n))
+                | .id"
+          )"
+
+          if [ -z "$ids" ]; then
+            echo "No first-attempt failures to look at." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
-          jobs_file="$RUNNER_TEMP/jobs.json"
-          gh run view "$RUN_ID" --json jobs > "$jobs_file"
+          for id in $ids; do
+            case "$id" in
+              ''|*[!0-9]*) echo "run id is not numeric" >&2; exit 1 ;;
+            esac
+            url="https://github.com/$GH_REPO/actions/runs/$id"
+            jobs_file="$RUNNER_TEMP/jobs-$id.json"
+            gh run view "$id" --json jobs > "$jobs_file"
 
-          decision=0
-          report="$(bash scripts/ci-should-rerun.sh --json-file "$jobs_file")" || decision=$?
-          {
-            echo "### ${RUN_NAME}: ${RUN_URL}"
-            echo
-            echo '```'
-            echo "$report"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+            decision=0
+            report="$(bash scripts/ci-should-rerun.sh --json-file "$jobs_file")" || decision=$?
+            {
+              echo "### $url"
+              echo
+              echo '```'
+              echo "$report"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "$decision" -eq 0 ]; then
-            gh run rerun "$RUN_ID" --failed
-            echo "Reran the failed jobs of run $RUN_ID once." >> "$GITHUB_STEP_SUMMARY"
-          elif [ "$decision" -eq 1 ]; then
-            echo "No rerun: the failure looks like code, or no failed job was found." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "The decision script failed (exit $decision)." >&2
-            exit "$decision"
-          fi
+            if [ "$decision" -eq 0 ]; then
+              gh run rerun "$id" --failed
+              echo "Reran the failed jobs of run $id once." >> "$GITHUB_STEP_SUMMARY"
+            elif [ "$decision" -eq 1 ]; then
+              echo "No rerun: the failure looks like code, or no failed job was found." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "The decision script failed (exit $decision)." >&2
+              exit "$decision"
+            fi
+          done
