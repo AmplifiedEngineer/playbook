@@ -249,6 +249,10 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
         max_catchup: i64,
     ) -> Result<Vec<i64>, EngineError> {
         let now = self.clock.now();
+        // `since` is inclusive, so the poll after a cursor move returns the
+        // events at the old boundary again. A stale one leaves no work row to
+        // dedupe on, so it is audited only the first time it is seen.
+        let seen_until = self.store.cursor(source)?.map(|c| c.since);
         let mut decisions: Vec<(String, String, &'static str)> = Vec::new();
         let ids = self.store.transaction(|tx| {
             tx.set_cursor(source, cursor)?;
@@ -261,6 +265,9 @@ impl<W: GithubWrite, C: Clock> Engine<'_, W, C> {
                     }
                     let key = format!("{}:{id}", event.key);
                     if now - event.updated_at > max_catchup {
+                        if seen_until.is_some_and(|t| event.updated_at <= t) {
+                            continue;
+                        }
                         decisions.push((id.clone(), key, "stale"));
                         continue;
                     }
@@ -1483,6 +1490,35 @@ mod tests {
         assert_eq!(ids.len(), 1);
         let text = std::fs::read_to_string(f.dir.join("runtime/audit.jsonl")).unwrap();
         assert!(text.contains("stale"));
+    }
+
+    #[test]
+    fn a_stale_event_read_again_at_the_cursor_boundary_is_audited_once() {
+        let mut f = fixture("watch-engine-stale-once");
+        let spy = Spy::default();
+        f.clock.advance(72 * 3600 + 500);
+        let mut old = issue(2, "a");
+        old.updated_at = 999;
+        // `since` is inclusive, so the poll after this one returns the event again.
+        let cursor = Cursor {
+            since: 999,
+            ..Cursor::default()
+        };
+        for _ in 0..2 {
+            let ids = engine(&mut f, &spy)
+                .ingest(
+                    "issues",
+                    &cursor,
+                    std::slice::from_ref(&old),
+                    &rules(LABEL),
+                    Autonomy::Propose,
+                    72 * 3600,
+                )
+                .unwrap();
+            assert!(ids.is_empty());
+        }
+        let text = std::fs::read_to_string(f.dir.join("runtime/audit.jsonl")).unwrap();
+        assert_eq!(text.matches("stale").count(), 1);
     }
 
     #[test]
