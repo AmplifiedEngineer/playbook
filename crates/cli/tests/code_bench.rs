@@ -7,11 +7,12 @@
 //! per fixture size. Bytes stand in for tokens. CI never runs the ignored test.
 
 mod code_fixture;
+mod code_lsp_arm;
 
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use code_fixture::{
     correctness, generate_with, stale_without_flag, verdict, which, Harness, Kind, Numbers, Repo,
@@ -202,6 +203,9 @@ fn measure(files: usize) -> Value {
         Value::Null
     };
 
+    let lsp = std::env::var("BENCH_CODE_LSP").is_ok_and(|v| v == "1");
+    let lsp_entry = lsp.then(|| measure_lsp(&h, &repo, files, [&a, &b, &c, &d]));
+
     let symbol = timings(&h, &["code", "symbol", &repo.declarations[0].1, "--json"]);
     let search = timings(
         &h,
@@ -244,7 +248,147 @@ fn measure(files: usize) -> Value {
     entry["realistic"] = json!(realistic);
     entry["savings_vs_rg_window_pct"] = json!(r_d);
     entry["common_identifier_tasks"] = common;
+    if let Some(lsp_entry) = lsp_entry {
+        entry["lsp"] = lsp_entry;
+    }
     entry
+}
+
+/// Arm e: the same declaration and references tasks answered by real language
+/// servers started once per language. Phrase and common-identifier tasks have
+/// no server request and are left out; the baselines are compared on the same
+/// tasks. Needs the servers on `PATH`; installs nothing.
+fn measure_lsp(h: &Harness, repo: &Repo, files: usize, bytes: [&Vec<f64>; 4]) -> Value {
+    use code_lsp_arm::{
+        declaration, discover, lang_of, prepare_workspace, recall, references, render, start,
+    };
+    let [a, b, c, d] = bytes;
+    prepare_workspace(&h.repo, files);
+    let limit = Duration::from_secs(
+        std::env::var("BENCH_CODE_LSP_START_S")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(600),
+    );
+    let supported: Vec<usize> = (0..repo.tasks.len())
+        .filter(|&i| repo.tasks[i].kind != Kind::Phrase && lang_of(&repo.tasks[i].query).is_some())
+        .collect();
+    let (mut bytes_lsp, mut times, mut idx) = (vec![], vec![], vec![]);
+    let (mut decl_ok, mut decl_n, mut ref_ok, mut ref_n, mut def_ok, mut def_n) =
+        (0, 0, 0, 0, 0, 0);
+    let (mut same_ok, mut same_n) = (0, 0);
+    let mut servers = vec![];
+    for spec in discover() {
+        let mine: Vec<usize> = supported
+            .iter()
+            .copied()
+            .filter(|&i| lang_of(&repo.tasks[i].query).is_some_and(|l| spec.exts.contains(&l)))
+            .collect();
+        // Declarations of this server's languages, for the probe and the
+        // spot checks (the fixture's own tasks may all fall on one language).
+        let own: Vec<&(String, String)> = repo
+            .declarations
+            .iter()
+            .filter(|(path, _)| {
+                std::path::Path::new(path)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| spec.exts.contains(&e))
+            })
+            .collect();
+        // The probe is the last declaration: a server that has loaded only the
+        // opened file would still answer for the first one.
+        let (Some((first_file, _)), Some((_, probe_decl))) = (own.first(), own.last()) else {
+            continue;
+        };
+        let (first_file, probe_decl) = (first_file.clone(), probe_decl.clone());
+        let Some(mut ready) = start(&spec, &h.repo, &first_file, &probe_decl, limit) else {
+            servers
+                .push(json!({"server": spec.name, "started": false, "limit_s": limit.as_secs()}));
+            continue;
+        };
+        let mut entry = json!({"server": spec.name, "started": true, "cold_start_s": ready.cold_s, "tasks": mine.len()});
+        for i in mine {
+            let task = &repo.tasks[i];
+            let answer = if task.kind == Kind::Declaration {
+                declaration(&mut ready, &h.repo, &task.query)
+            } else {
+                references(&mut ready, &h.repo, &task.query, 200)
+            };
+            bytes_lsp.push(render(&answer.places).len() as f64);
+            times.push(answer.ms);
+            idx.push(i);
+            let (hit, total) = recall(&task.expected, &answer.places);
+            if task.kind == Kind::Declaration {
+                decl_n += 1;
+                decl_ok += usize::from(hit == total);
+            } else {
+                ref_n += total;
+                ref_ok += hit;
+                // Callers in other languages cannot resolve to this symbol.
+                let lang = lang_of(&task.query).unwrap_or_default();
+                let same: Vec<(String, usize)> = task
+                    .expected
+                    .iter()
+                    .filter(|(p, _)| p.ends_with(&format!(".{lang}")))
+                    .cloned()
+                    .collect();
+                same_n += same.len();
+                same_ok += recall(&same, &answer.places).0;
+                if let Some(ok) = answer.definition_ok {
+                    def_n += 1;
+                    def_ok += usize::from(ok);
+                }
+            }
+        }
+        // Five spot checks per server on its own languages, outside the 32 tasks.
+        let step = (own.len() / 5).max(1);
+        let spots: Vec<_> = own.iter().step_by(step).take(5).collect();
+        let (mut ok, mut ms) = (0, vec![]);
+        for (path, name) in &spots {
+            let answer = declaration(&mut ready, &h.repo, name);
+            ok += usize::from(recall(&[(path.clone(), 3)], &answer.places).0 == 1);
+            ms.push(answer.ms);
+        }
+        ms.sort_by(f64::total_cmp);
+        entry["spot_checks"] = json!({"n": spots.len(), "hits": ok, "latency": latency_json(&ms)});
+        servers.push(entry);
+        ready.client.stop();
+    }
+    let pick = |v: &Vec<f64>| -> Vec<f64> { idx.iter().map(|&i| v[i]).collect() };
+    let (mut lsp_b, sa, sb, sc, sd) = (bytes_lsp.clone(), pick(a), pick(b), pick(c), pick(d));
+    let pct = |ok: usize, n: usize| 100.0 * ok as f64 / n.max(1) as f64;
+    let mut sorted = times.clone();
+    sorted.sort_by(f64::total_cmp);
+    let colds: Vec<f64> = servers
+        .iter()
+        .filter_map(|s| s["cold_start_s"].as_f64())
+        .collect();
+    json!({
+        "servers": servers,
+        "tasks_answered": idx.len(),
+        "tasks_without_server_request": repo.tasks.len() - supported.len(),
+        "task_set": "declaration and references with a language prefix",
+        "lsp_bytes_median": median(&mut lsp_b),
+        "index_bytes_median_same_tasks": median(&mut sc.clone()),
+        "savings_vs_rg_and_reads_pct": savings(&mut bytes_lsp.clone(), &mut sa.clone()),
+        "savings_vs_rg_context_pct": savings(&mut bytes_lsp.clone(), &mut sb.clone()),
+        "savings_vs_rg_window_pct": savings(&mut bytes_lsp.clone(), &mut sd.clone()),
+        "index_savings_same_tasks_vs_reads_pct": savings(&mut sc.clone(), &mut sa.clone()),
+        "index_savings_same_tasks_vs_window_pct": savings(&mut sc.clone(), &mut sd.clone()),
+        "latency": latency_json(&sorted),
+        "slowest_cold_start_s": colds.iter().copied().fold(0.0, f64::max),
+        "symbol_hit_pct": pct(decl_ok, decl_n),
+        "refs_recall_pct": pct(ref_ok, ref_n),
+        "refs_expected_in_same_language_pct": pct(same_n, ref_n),
+        "refs_recall_same_language_pct": pct(same_ok, same_n),
+        "definition_round_trip_pct": pct(def_ok, def_n),
+        "bars_informational": {
+            "savings_90": savings(&mut bytes_lsp.clone(), &mut sd.clone()) >= 90.0,
+            "savings_25_vs_context": savings(&mut bytes_lsp.clone(), &mut sb.clone()) >= 25.0,
+            "cold_start_5s": colds.iter().copied().fold(0.0, f64::max) <= 5.0,
+        },
+    })
 }
 
 fn report_entry(
@@ -296,7 +440,7 @@ fn bench_code() {
             )
         })
         .collect();
-    let report = json!({"runs": runs, "limits": "bytes stand in for tokens; no server arm"});
+    let report = json!({"runs": runs, "limits": "bytes stand in for tokens; the server arm runs only with BENCH_CODE_LSP=1"});
     let path = std::env::var("BENCH_CODE_REPORT").map_or_else(
         |_| std::env::temp_dir().join("playbook-code-bench.json"),
         PathBuf::from,
