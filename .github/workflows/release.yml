@@ -1251,10 +1251,8 @@ jobs:
           fi
           export PACKAGE_SIGNING_KEY PACKAGE_SIGNING_PASSPHRASE
           scripts/package-repo.sh build "$RUNNER_TEMP/site" "$RUNNER_TEMP/assets" packaging/apt/yanked.txt
-          mapfile -t versions < <(find "$RUNNER_TEMP/site/rpm/x86_64" -name '*.rpm' -printf '%f\n' | sed -n 's/^playbook-\(.*\)\.x86_64\.rpm$/\1/p' | sort -V)
           {
-            echo "version=${versions[-1]}"
-            echo "previous=${versions[-2]:-}"
+            scripts/package-repo.sh versions "$RUNNER_TEMP/site/rpm/x86_64"
             echo "built=true"
             echo "inrelease_sha=$(sha256sum "$RUNNER_TEMP/site/apt/dists/stable/InRelease" | cut -d' ' -f1)"
             echo "repomd_sha=$(sha256sum "$RUNNER_TEMP/site/rpm/x86_64/repodata/repomd.xml" | cut -d' ' -f1)"
