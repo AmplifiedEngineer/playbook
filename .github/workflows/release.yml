@@ -86,6 +86,7 @@ concurrency:
 
 jobs:
   plan:
+    name: plan
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -162,6 +163,7 @@ jobs:
   # Opens the release pull request and waits for the merge queue to land it.
   # A pull request that is already open or merged is reused.
   prepare:
+    name: prepare
     needs: plan
     if: needs.plan.outputs.state == 'prepare'
     runs-on: ubuntu-latest
@@ -249,6 +251,7 @@ jobs:
   # tagged or built. `tag` and `draft` fail unless it passed on the same
   # commit.
   macos:
+    name: macos
     needs: [plan, prepare]
     if: ${{ !cancelled() && !failure() && needs.plan.outputs.build == 'true' }}
     permissions:
@@ -266,6 +269,7 @@ jobs:
   # Creates vX.Y.Z on the commit that carries the version. When GitHub
   # refuses, the run stops with the command a maintainer runs instead.
   tag:
+    name: tag
     needs: [plan, prepare, macos]
     if: ${{ !cancelled() && !failure() && (needs.plan.outputs.state == 'prepare' || needs.plan.outputs.state == 'tag') }}
     runs-on: ubuntu-latest
@@ -358,6 +362,7 @@ jobs:
   # The draft release holds the assets until every check passes. A draft
   # left by a failed run is reused.
   draft:
+    name: draft
     needs: [plan, macos, tag]
     if: ${{ !cancelled() && !failure() && needs.plan.outputs.build == 'true' && needs.plan.outputs.dry_run != 'true' }}
     runs-on: ubuntu-latest
@@ -411,6 +416,7 @@ jobs:
           gh release upload "$TAG" release-notes.json --clobber
 
   build:
+    name: build
     needs: [plan, macos, draft]
     if: ${{ !cancelled() && !failure() && needs.plan.outputs.build == 'true' }}
     strategy:
@@ -658,6 +664,7 @@ jobs:
   # SHA256SUMS, attestation and publish. The sums list every asset of the
   # release, and the release turns public only after they are attached.
   publish:
+    name: publish
     needs: [plan, build]
     if: ${{ !cancelled() && !failure() && needs.plan.outputs.build == 'true' && needs.plan.outputs.dry_run != 'true' }}
     runs-on: ubuntu-latest
@@ -767,6 +774,7 @@ jobs:
 
   # Downloads the published release the way users do and checks it.
   verify:
+    name: verify
     needs: [plan, publish]
     if: ${{ !cancelled() && !failure() && needs.plan.outputs.dry_run != 'true' }}
     runs-on: ubuntu-latest
@@ -841,6 +849,7 @@ jobs:
   # from reasoning and not from a run (including port 22 and the traffic of
   # the container): when the first release blocks a host, add it here.
   aur:
+    name: aur
     needs: [plan, verify]
     if: >-
       ${{ !cancelled()
@@ -1067,6 +1076,7 @@ jobs:
   # on x86_64. A release published before the packages existed has none, and
   # the job says so and stops.
   verify-packages:
+    name: verify-packages
     needs: [plan, verify]
     if: ${{ !cancelled() && needs.verify.result == 'success' && needs.plan.outputs.dry_run != 'true' }}
     runs-on: ubuntu-latest
@@ -1142,6 +1152,7 @@ jobs:
   # shell-ci: apt mirrors rotate per runner, and whether block mode covers
   # container traffic is decided by the first real run.
   package-repo-sign:
+    name: package-repo-sign
     needs: [plan, verify]
     if: >-
       ${{ !cancelled()
@@ -1263,6 +1274,7 @@ jobs:
   # permissions and no key. The check after the deploy reads the public URL
   # with the published key and retries while Pages catches up.
   package-repo-deploy:
+    name: package-repo-deploy
     needs: [plan, package-repo-sign]
     if: ${{ !cancelled() && needs.plan.outputs.dry_run != 'true' && needs.package-repo-sign.outputs.built == 'true' }}
     runs-on: ubuntu-latest
@@ -1314,6 +1326,7 @@ jobs:
   # 9). This job has no secrets, so code from the tap never runs next to an
   # app token. The formulas go to `downstream` as job outputs.
   formulas:
+    name: formulas
     needs: [plan, build, verify]
     if: >-
       ${{ !cancelled()
@@ -1388,6 +1401,7 @@ jobs:
   # released version, which proves the job and its egress list without
   # publishing anything.
   verify-installers:
+    name: verify-installers
     needs: [plan, verify]
     if: >-
       ${{ !cancelled()
@@ -1453,6 +1467,7 @@ jobs:
   # playbook release published: the job fails with the commands to finish by
   # hand. A dry run prints the changes and opens nothing.
   downstream:
+    name: downstream
     needs: [plan, formulas]
     if: >-
       ${{ !cancelled()
@@ -1725,6 +1740,7 @@ jobs:
   # wrong URL or checksum shows here and not in a user report. A dry run
   # publishes nothing to install, so it is skipped.
   verify-homebrew-linux:
+    name: verify-homebrew-linux
     needs: [plan, downstream]
     if: >-
       ${{ !cancelled()
@@ -1796,6 +1812,7 @@ jobs:
   # it with the same -f version. A dry run renders from a stand-in
   # SHA256SUMS, prints the diff and opens nothing.
   nix:
+    name: nix
     needs: [plan, verify]
     if: >-
       ${{ !cancelled()
@@ -1976,6 +1993,7 @@ jobs:
   # job. The host list is written from reasoning and not from a run: when the
   # first release blocks a host, add it here.
   verify-nix-linux:
+    name: verify-nix-linux
     needs: [plan, nix]
     if: ${{ !cancelled() && needs.plan.outputs.dry_run != 'true' && needs.nix.result == 'success' && needs.nix.outputs.sha != '' }}
     runs-on: ubuntu-latest
@@ -2033,6 +2051,7 @@ jobs:
   # their ad-hoc signature by not stripping or patching them. harden-runner
   # does not run on macOS runners.
   verify-nix-macos:
+    name: verify-nix-macos
     needs: [plan, nix]
     if: ${{ !cancelled() && needs.plan.outputs.dry_run != 'true' && needs.nix.result == 'success' && needs.nix.outputs.sha != '' }}
     runs-on: macos-latest
@@ -2064,6 +2083,7 @@ jobs:
   # when the app is not installed on the bucket repository, it warns and
   # passes. A dry run renders from a stand-in SHA256SUMS and opens nothing.
   scoop:
+    name: scoop
     needs: [plan, verify]
     if: >-
       ${{ !cancelled()
@@ -2261,6 +2281,7 @@ jobs:
   # in a dry run (see StepSecurity's note that block mode now covers Windows
   # runners), so a block list written from reasoning could fail a release.
   verify-scoop:
+    name: verify-scoop
     needs: [plan, scoop]
     if: ${{ !cancelled() && needs.plan.outputs.dry_run != 'true' && needs.scoop.result == 'success' && needs.scoop.outputs.manifest != '' }}
     runs-on: windows-latest
@@ -2350,6 +2371,7 @@ jobs:
   # verify-scoop: a Windows block list written from reasoning could fail a
   # release.
   winget:
+    name: winget
     needs: [plan, verify]
     if: >-
       ${{ !cancelled()

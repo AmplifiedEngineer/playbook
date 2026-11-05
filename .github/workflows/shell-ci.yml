@@ -37,6 +37,7 @@ jobs:
   # under docs/. seed/, hooks/ and .github/ are never docs-only: tests
   # read them.
   changes:
+    name: changes
     runs-on: ubuntu-latest
     # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
     timeout-minutes: 5
@@ -85,6 +86,7 @@ jobs:
           echo "docs_only=$docs_only" | tee -a "$GITHUB_OUTPUT"
 
   lint-and-test:
+    name: lint-and-test
     strategy:
       fail-fast: false
       matrix:
