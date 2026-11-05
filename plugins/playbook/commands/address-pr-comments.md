@@ -40,7 +40,7 @@ Forbidden internal monologue and forbidden in draft reply text:
 
 ## Discipline: writing the reply
 
-Invoke the `playbook:writing-style` skill before drafting any reply. It governs voice, banned words, banned openers, reply brevity (`LEN-REPLY`: one sentence ideal, two max, a paragraph is never acceptable), active voice only,, and the GitHub-specific rules (no commit hashes in reply text, no markdown emphasis in inline comments, no em or en dashes). The GitHub-specific rules live in its references: read `github-review-comments`, `github-prohibited`, `review-examples`, `phrases` and `structures` (each is `references/<name>.md` in that skill's folder). Load them once at the start of Step 4 and apply it to every reply in the loop; do not re-derive these rules from memory.
+Invoke the `playbook:writing-style` skill before drafting any reply. It governs voice, banned words, banned openers, reply brevity (`LEN-REPLY`: one sentence ideal, two max, a paragraph is never acceptable), active voice only, and the GitHub-specific rules (no commit hashes in reply text, no markdown emphasis in inline comments, no em or en dashes). The GitHub-specific rules live in its references: read `github-review-comments`, `github-prohibited`, `review-examples`, `phrases` and `structures` (each is `references/<name>.md` in that skill's folder). Load them once at the start of Step 4 and apply it to every reply in the loop; do not re-derive these rules from memory.
 
 Shell-quoting gotcha for `gh api -f body=`: apostrophes in double quotes are literal (`"I don't"` is correct, NEVER escape to `"I don\'t"` which posts as `don'''t`). If the body contains complex quoting, write it to a temp file and use `-F body=@/tmp/reply.txt`.
 
