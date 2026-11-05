@@ -693,7 +693,9 @@ fn an_index_kept_by_an_earlier_version_is_ignored() {
     fx.write("a.rs", "fn a() {}\n");
     let probe = json_of(&fx.playbook(&["code", "index", "--json"]));
     let store = PathBuf::from(probe["index"]["path"].as_str().expect("path"));
-    let old = store_dir(&probe).join("old-worktree.db");
+    // Not a `.db` file: the upgrade migration deletes those, and this one is an
+    // index an earlier store version left.
+    let old = store_dir(&probe).join("store-v0.sqlite3");
     fs::write(&old, vec![b'x'; 4096]).expect("junk");
 
     // Act

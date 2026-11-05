@@ -270,6 +270,17 @@ fn fresh_config_gets_fully_wired() {
             );
             continue;
         }
+        // `code index files` is wired while its migration is still `next` and
+        // skipped once a release fills in `since`: a fresh config has no
+        // per-worktree index files either way.
+        if step.name == "code index files" {
+            assert!(
+                matches!(step.status, StepStatus::Wired | StepStatus::Skipped),
+                "unexpected status for 'code index files': {}",
+                step.detail
+            );
+            continue;
+        }
         assert_eq!(
             step.status,
             StepStatus::Wired,
