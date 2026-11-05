@@ -482,7 +482,9 @@ jobs:
           persist-credentials: false
 
       - name: Add the target
-        run: rustup target add ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: rustup target add "$TARGET"
 
       - name: Install the musl C compiler
         if: matrix.cc == 'musl-gcc'
