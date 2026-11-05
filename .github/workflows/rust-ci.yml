@@ -90,7 +90,7 @@ jobs:
       # whole workspace, and so does any error.
       pkgs: ${{ steps.classify.outputs.pkgs }}
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -190,7 +190,7 @@ jobs:
       # below, so they can't drift apart. Bump deliberately, not implicitly.
       CARGO_AUDIT_VERSION: "0.22.2"
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         # Linux-only action; it self-skips on macOS with a confusing warning
         # (same convention as shell-ci.yml).
         if: runner.os == 'Linux' && env.LANE == 'true'
@@ -469,7 +469,7 @@ jobs:
       # tests, so a deleted or renamed test cannot pass silently.
       EXPECTED_SHELL_TESTS: "10"
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         if: env.LANE == 'true'
         with:
           # On audit, not block, for the same reason as shell-ci.yml:98-105:
@@ -550,7 +550,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -818,7 +818,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           # audit, not block: this job pulls the debian:stable-slim base
           # image and apt-get installs git INSIDE that container, both
