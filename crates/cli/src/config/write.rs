@@ -258,6 +258,12 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
                 .is_some_and(|n| n.is_finite() && (0.0..=1_000_000_000.0).contains(&n)),
             "a number of dollars, 0 (no budget) to 1000000000",
         ),
+        "watch.limits.usdPerDay" => (
+            value
+                .as_f64()
+                .is_some_and(|n| n.is_finite() && (0.0..=1_000_000_000.0).contains(&n)),
+            "a number of dollars, 0 to 1000000000",
+        ),
         "auto.warnPct" => (
             whole.is_some_and(|n| (1..=100).contains(&n)),
             "a whole number between 1 and 100",
