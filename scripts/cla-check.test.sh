@@ -39,6 +39,8 @@ repo() {
   git -C "$REPO" config commit.gpgsign false
   # A global hook that adds Signed-off-by would hide a missing trailer.
   git -C "$REPO" config core.hooksPath /dev/null
+  git -C "$REPO" config user.name "Test Runner"
+  git -C "$REPO" config user.email "runner@example.com"
   {
     echo '# Contributors'
     echo '<!-- CLA-BOT:START - Do not remove this marker -->'

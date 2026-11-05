@@ -3,8 +3,8 @@ name: CLA & DCO checks (reusable)
 
 # The DCO and CLA checks for a pull request. A contributor signs the CLA by
 # adding a row to the signatures file in a commit of their own, so the record
-# lives in git history and moves with the repository to any host. See
-# docs/internals/18-cla-and-dco-checks.md.
+# lives in git history and moves with the repository to any host. The steps for
+# a contributor are in .github/CONTRIBUTING-RULES.md.
 #
 # SAFETY: runs on plain pull_request with read-only permissions and no
 # secrets. The checkout drops its credentials. The script reads git objects and
