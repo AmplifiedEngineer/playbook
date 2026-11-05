@@ -251,7 +251,7 @@ If you catch yourself doing any of these while drafting findings, stop and rewri
 1. **Diff restatement.** "This change moves X into Y so that...". Delete the entire setup sentence and lead with the finding.
 2. **Hedging stack.** "may actually be" + "I'd lean toward" + "that said" in a single comment is a tell.
 3. **Meta-justification.** "since a non-timestamp string in a timestamp column is its own foot-gun". The recommendation is enough; trust the reader.
-4. **Bullet-list explanation inside an inline comment.** Use short prose paragraphs (up to three), not bullets, inside an inline comment. If bullets feel necessary, the finding is too big: split or simplify.
+4. **Bullet-list explanation inside an inline comment.** A comment is the label plus 1 to 2 sentences (`LEN-REVIEW`), with no bullets. If bullets feel necessary, the finding is too big: split or simplify.
 5. **Posting findings in the review body** instead of inline.
 6. **Auto-submitting** without the two-question orchestration.
 

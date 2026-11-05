@@ -12,8 +12,8 @@ Read before writing a commit message, a PR title or a PR body. The dash, plain E
 
 ## When creating PRs
 
-- Be concise: one sentence per reply, two at most.
+- Be concise: one sentence per reply, two at most (`LEN-REPLY`). The other limits are in SKILL.md under `Length limits`.
 - For code changes done in response to feedback: "Done, <what was changed>."
 - For questions: answer directly and briefly.
-- For ticket creation: "Tracked in <TICKET-ID>."
+- For ticket creation: "Tracked in <TICKET-ID>." A ticket description follows `LEN-TICKET`.
 - **Test Plan sections:** only include manual verification steps a reviewer cannot get from CI. Do NOT list CI results, test counts, or generic statements. If there are no manual steps, omit the Test Plan section entirely or write "N/A". Never write filler like "Covered by unit tests".
