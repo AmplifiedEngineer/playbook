@@ -259,7 +259,7 @@ jobs:
       # rust-ci.yml build-test asks for it (help lint reads PR labels). A
       # called job cannot ask for more than the caller grants.
       pull-requests: read # rust-ci build-test reads PR labels; a caller must grant what the called job asks for
-    uses: ./.github/workflows/rust-ci.yml
+    uses: $/.github/workflows/rust-ci.yml
     with:
       # In order: the merged release pull request, the release commit the
       # plan found (tag state), the existing tag (publish state), and the
