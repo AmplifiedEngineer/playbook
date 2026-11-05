@@ -1065,11 +1065,6 @@ mod tests {
         /// The longest a starter may take to find a hung collector, kill it
         /// and spawn a new one.
         const HUNG_BOUND: Duration = Duration::from_secs(5);
-        /// The longest `ensure` may take to give up on a holder that ignores
-        /// the shutdown, without a kill.
-        const IGNORED_BOUND: Duration = Duration::from_millis(600);
-        /// Scheduling slack on top of `IGNORED_BOUND`.
-        const IGNORED_SLACK: Duration = Duration::from_millis(250);
         /// A stop budget an in-process collector meets even on a starved
         /// runner. A stop returns as soon as the lock frees, so a generous
         /// deadline costs nothing when the collector answers.
@@ -1384,7 +1379,13 @@ mod tests {
 
             assert_eq!(ensure_now(&p, opts(false, false), &fakes), Ensured::Down);
             let elapsed = started.elapsed();
-            assert!(elapsed < IGNORED_BOUND + IGNORED_SLACK, "{elapsed:?}");
+            // It waited the stop budget, and a hang or a kill wait would take
+            // far longer. The upper bound only has to tell those apart, so it
+            // carries the slack the other stop tests use: a macOS runner took
+            // 945 ms for a 400 ms budget. That nothing was signalled and the
+            // holder still runs is asserted below.
+            assert!(elapsed >= SHORT_BUDGET, "{elapsed:?}");
+            assert!(elapsed < SHORT_BUDGET + SLACK, "{elapsed:?}");
             // The shutdown was sent: one connect, to the recorded port.
             assert_eq!(fakes.connects(), 1);
             assert!(fakes.process.sent().is_empty());
