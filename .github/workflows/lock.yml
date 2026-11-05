@@ -19,8 +19,8 @@ jobs:
     # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
     timeout-minutes: 6
     permissions:
-      issues: write
-      pull-requests: write
+      issues: write # locks closed issues
+      pull-requests: write # locks closed pull requests
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
