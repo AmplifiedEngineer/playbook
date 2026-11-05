@@ -422,14 +422,14 @@ pub fn registry() -> Vec<Migration> {
         },
         Migration {
             id: CODE_INDEX_FILES_MIGRATION,
-            since: "next",
+            since: "0.40.0",
             kind: Kind::Auto,
             scope: Scope::Owned,
             run: code_index_per_worktree_files,
         },
         Migration {
             id: HANDOFF_USED_MIGRATION,
-            since: "next",
+            since: "0.40.0",
             kind: Kind::Idempotent,
             scope: Scope::Owned,
             run: crate::init::handoff_used::run,
