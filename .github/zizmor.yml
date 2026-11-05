@@ -5,7 +5,7 @@ rules:
   dangerous-triggers:
     ignore:
       # issue_comment is how a contributor signs the CLA. The signing job is a reusable workflow in pragmatic-engineer/.github. It reads and writes only through the REST API, has no checkout, and passes every comment value through env. It is the only job in cla-dco.yml with contents: write.
-      - cla-dco.yml:13
+      - cla-dco.yml:14
   secrets-outside-env:
     ignore:
       # The repo has no deployment environments; these are repo-level secrets by design.
