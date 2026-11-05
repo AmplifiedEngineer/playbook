@@ -214,4 +214,20 @@ for pair in 29:fail 89:warn 91:pass; do
 done
 ok
 
+# Scenario: the newest and previous version of a built site
+# One release has no previous version, and that must not trip set -u or a
+# negative array subscript.
+new_case outputs
+mkdir -p "$CASE/rpm"
+touch "$CASE/rpm/playbook-0.40.0-1.x86_64.rpm"
+out="$(bash "$SCRIPT" versions "$CASE/rpm" 2>&1)" || fail "one release: versions failed: $out"
+[ "$out" = "$(printf 'version=0.40.0-1\nprevious=')" ] || fail "one release: unexpected output: $out"
+ok
+touch "$CASE/rpm/playbook-0.39.0-1.x86_64.rpm" "$CASE/rpm/playbook-0.9.0-1.x86_64.rpm"
+out="$(bash "$SCRIPT" versions "$CASE/rpm" 2>&1)" || fail "three releases: versions failed: $out"
+[ "$out" = "$(printf 'version=0.40.0-1\nprevious=0.39.0-1')" ] || fail "three releases: unexpected output: $out"
+ok
+if bash "$SCRIPT" versions "$CASE/none" > /dev/null 2>&1; then fail "an empty folder printed versions"; fi
+ok
+
 echo "OK package-repo.test.sh: $pass scenarios passed"

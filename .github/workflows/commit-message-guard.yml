@@ -33,12 +33,13 @@ concurrency:
 
 jobs:
   sanitize:
+    name: sanitize
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 7
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: write # gh pr edit rewrites the title and body
     env:
       PR_TITLE: ${{ github.event.pull_request.title }}
       PR_BODY: ${{ github.event.pull_request.body }}

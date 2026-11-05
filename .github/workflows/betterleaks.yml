@@ -28,6 +28,7 @@ jobs:
   # two check runs with the same name make a ruleset's required `scan`
   # context ambiguous (either one satisfies it). Keep this key unique.
   betterleaks:
+    name: betterleaks
     runs-on: ubuntu-latest
     # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
     timeout-minutes: 5

@@ -38,16 +38,21 @@ on:
 # Minimal top-level grant; the single job below requests only what it needs.
 permissions: {}
 
+concurrency:
+  group: clanker-filter-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Unique job key on purpose: cla-dco.yml used to share `check`, and
   # duplicate check-run names make any ruleset context named `check`
   # ambiguous. Keep this key unique across the workflow set.
   clanker-filter:
+    name: clanker-filter
     runs-on: ubuntu-latest
     # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
     timeout-minutes: 5
     permissions:
-      pull-requests: write
+      pull-requests: write # adds labels and posts the rejection comment
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:

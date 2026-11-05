@@ -76,6 +76,7 @@ jobs:
   # under docs/. seed/, hooks/ and .github/ are never docs-only: tests
   # read them.
   changes:
+    name: changes
     runs-on: ubuntu-latest
     # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
     timeout-minutes: 5
@@ -160,6 +161,7 @@ jobs:
   # runner, so it costs no macOS runner. The check name comes from the matrix
   # value, never the runner. A release gate runs the macOS leg alone.
   build-test:
+    name: build-test
     strategy:
       fail-fast: false
       matrix:
@@ -174,7 +176,7 @@ jobs:
     permissions:
       contents: read
       # The help lint step reads the labels of the pull request.
-      pull-requests: read
+      pull-requests: read # the help lint step reads the labels of the pull request
     outputs:
       sha: ${{ steps.head.outputs.sha }}
     env:
@@ -456,6 +458,7 @@ jobs:
   # design, and skipped in a release gate (`!inputs.ref`) so a flaky or newly
   # broken shell test can never stop a release.
   shell-tests:
+    name: shell-tests
     needs: changes
     if: ${{ !cancelled() && !inputs.ref }}
     runs-on: ubuntu-latest
@@ -543,6 +546,7 @@ jobs:
   # links, the policy table, the PR-flow wording). Runs only when the heavy
   # lanes are skipped.
   docs-checks:
+    name: docs-checks
     needs: changes
     if: needs.changes.outputs.docs_only == 'true'
     runs-on: ubuntu-latest
@@ -611,6 +615,7 @@ jobs:
   # release.yml is for. Tests are excluded on purpose; several still use
   # unix-only APIs and making them portable is separate work.
   windows-check:
+    name: windows-check
     needs: changes
     # Already ran on the PR head; the queue re-runs Linux build-test only. A
     # release gate runs macOS only.
@@ -665,6 +670,7 @@ jobs:
   #     when a later decision brings them into scope.
   # Every step runs in a scratch profile so nothing touches the runner home.
   windows-smoke:
+    name: windows-smoke
     needs: changes
     if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group' && !inputs.ref && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: windows-latest
@@ -748,10 +754,13 @@ jobs:
 
       - name: Summary
         if: always()
+        env:
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          HOOK_OUTCOME: ${{ steps.hook.outcome }}
         run: |
           "### Windows smoke (experimental, ADR 0053)" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
-          "- setup, doctor check, uninstall: ${{ steps.setup.outcome }}" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
-          "- hook session-init: ${{ steps.hook.outcome }}" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          "- setup, doctor check, uninstall: $env:SETUP_OUTCOME" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          "- hook session-init: $env:HOOK_OUTCOME" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
 
       - name: Save cargo registry and build output (windows-smoke)
         if: success() && github.event_name == 'push' && steps.cargo.outputs.cache-hit != 'true'
@@ -801,6 +810,7 @@ jobs:
   # (identical musl-tools technique, same matrix pattern) only runs on a
   # pushed tag or workflow_dispatch, never on a pull request.
   container-smoke:
+    name: container-smoke
     needs: changes
     # Already ran on the PR head; the queue re-runs Linux build-test only. A
     # release gate runs macOS only.
@@ -869,7 +879,9 @@ jobs:
 
       - name: Add the musl target
         if: steps.bin.outputs.cache-hit != 'true'
-        run: rustup target add ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: rustup target add "$TARGET"
 
       - name: Install the musl C cross-compiler
         # rusqlite's `bundled` feature compiles SQLite's C source (via
@@ -898,15 +910,17 @@ jobs:
         # uppercased with underscores, cc-rs's CC_* wants it lowercased with
         # underscores, and hand-listing both per target is exactly the
         # duplication this job merge is removing.
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          tu="$(echo '${{ matrix.target }}' | tr 'a-z-' 'A-Z_')"
-          tc="$(echo '${{ matrix.target }}' | tr '-' '_')"
+          tu="$(echo "$TARGET" | tr 'a-z-' 'A-Z_')"
+          tc="$(echo "$TARGET" | tr '-' '_')"
           export "CARGO_TARGET_${tu}_LINKER=rust-lld"
           export "CC_${tc}=musl-gcc"
-          cargo build --release -p playbook --target ${{ matrix.target }}
+          cargo build --release -p playbook --target "$TARGET"
           mkdir -p smoke-bin
-          cp target/${{ matrix.target }}/release/playbook smoke-bin/playbook
+          cp "target/$TARGET/release/playbook" smoke-bin/playbook
 
       # The daily run skips the restore, so it has no key to save under.
       - name: Save the smoke binary
@@ -981,6 +995,8 @@ jobs:
         # container, not that rusqlite's bundled SQLite actually works at
         # runtime on this target. Round-trip a real verdict through the
         # real CLI to prove that separately.
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
           bin="$PWD/smoke-bin/playbook"
@@ -989,4 +1005,4 @@ jobs:
           echo "VERDICT: PASS" > "$work/source.txt"
           echo "VERDICT: PASS" | (cd "$work" && "$bin" gate record smoke-test ci fact-check - --source "$work/source.txt")
           (cd "$work" && "$bin" gate check smoke-test ci fact-check --source "$work/source.txt")
-          echo "gate record/check round-tripped a real PASS through rusqlite on ${{ matrix.target }}"
+          echo "gate record/check round-tripped a real PASS through rusqlite on $TARGET"
