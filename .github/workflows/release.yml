@@ -170,7 +170,7 @@ jobs:
     timeout-minutes: 50
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: read # reads the state of the release pull request
     outputs:
       sha: ${{ steps.land.outputs.sha }}
     steps:
@@ -258,7 +258,7 @@ jobs:
       contents: read
       # rust-ci.yml build-test asks for it (help lint reads PR labels). A
       # called job cannot ask for more than the caller grants.
-      pull-requests: read
+      pull-requests: read # rust-ci build-test reads PR labels; a caller must grant what the called job asks for
     uses: ./.github/workflows/rust-ci.yml
     with:
       # In order: the merged release pull request, the release commit the
@@ -368,7 +368,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: write # creates the draft release
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
@@ -441,9 +441,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
+      contents: write # uploads the archive to the draft release
+      id-token: write # OIDC token for signing the build attestation
+      attestations: write # stores the build attestation
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         # Linux-only action; it skips itself elsewhere.
@@ -670,9 +670,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
+      contents: write # writes SHA256SUMS and publishes the release
+      id-token: write # OIDC token for signing the sums attestation
+      attestations: write # stores the sums attestation
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
@@ -781,7 +781,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      attestations: read
+      attestations: read # gh attestation verify reads the attestations
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
@@ -861,7 +861,7 @@ jobs:
     environment: aur
     permissions:
       contents: read
-      attestations: read
+      attestations: read # gh attestation verify reads the attestations
     env:
       GH_REPO: ${{ github.repository }}
       VERSION: ${{ needs.plan.outputs.version }}
@@ -1083,7 +1083,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      attestations: read
+      attestations: read # gh attestation verify reads the attestations
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
@@ -1168,7 +1168,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
-      attestations: read
+      attestations: read # gh attestation verify reads the attestations
     outputs:
       # true when a signed site was uploaded for package-repo-deploy.
       built: ${{ steps.build.outputs.built }}
@@ -1284,8 +1284,8 @@ jobs:
       group: package-repo
       cancel-in-progress: false
     permissions:
-      pages: write
-      id-token: write
+      pages: write # deploys the package repository to Pages
+      id-token: write # OIDC token that deploy-pages checks
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
@@ -1412,7 +1412,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      attestations: read
+      attestations: read # gh attestation verify reads the attestations
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
@@ -1823,7 +1823,7 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
-      attestations: read
+      attestations: read # gh attestation verify reads the attestations
     outputs:
       # The commit of main that carries the flake of this release, or empty.
       sha: ${{ steps.pr.outputs.sha || steps.render.outputs.sha }}
@@ -2094,7 +2094,7 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
-      attestations: read
+      attestations: read # gh attestation verify reads the attestations
     outputs:
       # The manifest of this release, base64, or empty when the job skipped.
       manifest: ${{ steps.render.outputs.manifest }}
@@ -2383,7 +2383,7 @@ jobs:
     environment: winget
     permissions:
       contents: read
-      attestations: read
+      attestations: read # gh attestation verify reads the attestations
     defaults:
       run:
         shell: pwsh
