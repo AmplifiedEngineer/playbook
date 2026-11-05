@@ -11,7 +11,7 @@ on: pull_request
 # approval avoids the setting entirely, satisfies required-review
 # rules, and leaves a clearer audit trail than github-actions[bot].
 permissions:
-  pull-requests: read
+  pull-requests: read # fetch-metadata reads the pull request
 
 concurrency:
   # The sender is in the key so a branch update by another actor cannot cancel

@@ -176,7 +176,7 @@ jobs:
     permissions:
       contents: read
       # The help lint step reads the labels of the pull request.
-      pull-requests: read
+      pull-requests: read # the help lint step reads the labels of the pull request
     outputs:
       sha: ${{ steps.head.outputs.sha }}
     env:

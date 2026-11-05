@@ -33,10 +33,10 @@ jobs:
       # Required by scorecard-action; scoped per job rather than
       # workflow-wide so the schedule trigger doesn't inherit
       # write access on unrelated runs.
-      security-events: write
-      id-token: write
+      security-events: write # uploads the SARIF results to code scanning
+      id-token: write # publishes the results to the Scorecard API
       contents: read
-      actions: read
+      actions: read # reads workflow runs for the checks
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:

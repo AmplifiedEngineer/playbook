@@ -26,8 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
     timeout-minutes: 5
-    permissions:
-      pull-requests: read
+    # The job only reads the title from the event payload, so it needs no scope.
+    permissions: {}
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
