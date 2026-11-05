@@ -40,6 +40,8 @@ pub fn ensure_data_dir() -> std::io::Result<PathBuf> {
 /// `<data>/<kind>/<owner>/<repo>/<worktree-id>.db`: the file of one database
 /// kind (`gate`, `code`) for one worktree. Per-worktree files keep two
 /// worktrees of the same repo apart, as the old `repos/...` folders did.
+/// Since ADR 0056 the code index no longer uses this layout. Its old
+/// `code/<owner>/<repo>/<worktree-id>.db` files are a cache and can be deleted.
 pub fn scoped_db_in(data: &Path, kind: &str, owner: &str, repo: &str, worktree: &str) -> PathBuf {
     data.join(kind)
         .join(owner)
