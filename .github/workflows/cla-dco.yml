@@ -26,11 +26,11 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    uses: pragmatic-engineer/.github/.github/workflows/dco-cla.yml@b2e9519585cfd55743223f5c42d3696c7cfbcb86 # main
+    uses: pragmatic-engineer/.github/.github/workflows/dco-cla.yml@2ca0eee10318bdfc1fbc44cc26fad9875c0ed79b # main
 
   cla-sign:
     if: github.event_name == 'issue_comment'
     permissions:
       contents: write
       pull-requests: write
-    uses: pragmatic-engineer/.github/.github/workflows/cla-sign.yml@b2e9519585cfd55743223f5c42d3696c7cfbcb86 # main
+    uses: pragmatic-engineer/.github/.github/workflows/cla-sign.yml@2ca0eee10318bdfc1fbc44cc26fad9875c0ed79b # main
