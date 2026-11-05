@@ -195,15 +195,30 @@ impl Fixture {
 
     /// Waits for the detached child to end: it stores its notice last.
     fn wait_for_child(&self) {
+        self.wait_for_child_after(&[]);
+    }
+
+    /// As [`Self::wait_for_child`] when other hooks ran beside the child. A
+    /// hook that starts after the child stored its notice shows it and
+    /// deletes it, so the notice in a hook's output counts as the child's end.
+    fn wait_for_child_after(&self, hooks: &[&Output]) {
         let deadline = std::time::Instant::now() + CHILD_WAIT;
-        while playbook::state::get(&self.root(), NOTICE_KEY)
-            .unwrap()
-            .is_none()
+        let shown = || hooks.iter().any(|o| stdout(o).contains(UPDATED_LINE));
+        while !shown()
+            && playbook::state::get(&self.root(), NOTICE_KEY)
+                .unwrap()
+                .is_none()
         {
             assert!(
                 std::time::Instant::now() < deadline,
-                "the update child did not finish; claude log: {:?}",
-                self.calls()
+                "the update child did not finish; claude log: {:?}; state: {:?}\n{}",
+                self.calls(),
+                playbook::state::list(&self.root(), "").unwrap_or_default(),
+                hooks
+                    .iter()
+                    .map(|o| format!("hook stdout: {}\nhook stderr: {}", stdout(o), stderr(o)))
+                    .collect::<Vec<_>>()
+                    .join("\n")
             );
             std::thread::sleep(POLL_EVERY);
         }
@@ -758,7 +773,9 @@ fn two_hooks_started_together_start_one_update() {
     // Act
     let (a, b) = (spawn(), spawn());
     let (a, b) = (a.wait_with_output().unwrap(), b.wait_with_output().unwrap());
-    f.wait_for_child();
+    // The hook that lost the claim can run after the child stored its notice
+    // and take it, so the notice is not always left in the store.
+    f.wait_for_child_after(&[&a, &b]);
 
     // Assert
     let shown = [a, b]
