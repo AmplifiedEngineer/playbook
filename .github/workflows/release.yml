@@ -1136,9 +1136,9 @@ jobs:
   # Builds the signed apt and dnf repository from the newest attested releases
   # that carry packages, tests it in clean containers, and hands the folder to
   # package-repo-deploy (ADR 0052). This job holds the signing key and has no
-  # other permission. A missing key fails the run on purpose: a silent skip
-  # would leave a stale repository with no signal. A dry run signs with a
-  # throwaway key and deploys nothing. Audit mode for harden-runner, as in
+  # other permission. A missing key skips the job with a warning and a run
+  # summary line, because the release is already published and failing it now
+  # would not undo that. A dry run signs with a throwaway key and deploys nothing. Audit mode for harden-runner, as in
   # shell-ci: apt mirrors rotate per runner, and whether block mode covers
   # container traffic is decided by the first real run.
   package-repo-sign:
@@ -1179,10 +1179,31 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
+      # The key and passphrase are owner-only setup (docs/internals/06-release-channels.md).
+      # Without them a real run skips the rest of this job with a warning and
+      # leaves the repository as it was, so the release is not failed after it
+      # was published. A dry run needs no secrets.
+      - name: Check the signing secrets
+        id: keys
+        env:
+          HAVE_KEY: ${{ secrets.PACKAGE_SIGNING_KEY != '' && secrets.PACKAGE_SIGNING_PASSPHRASE != '' }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = true ] || [ "$HAVE_KEY" = true ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            msg="PACKAGE_SIGNING_KEY or PACKAGE_SIGNING_PASSPHRASE is not set in environment package-repo, so the apt and dnf repository is not updated. See the maintainer steps in docs/internals/06-release-channels.md."
+            echo "::warning::$msg"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Install the repository tools
+        if: ${{ steps.keys.outputs.ready == 'true' }}
         run: sudo apt-get update && sudo apt-get install -y apt-utils createrepo-c
 
       - name: Fetch and verify the packaged releases
+        if: ${{ steps.keys.outputs.ready == 'true' }}
         id: fetch
         run: |
           set -euo pipefail
@@ -1190,6 +1211,7 @@ jobs:
           echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
 
       - name: Build and sign the repository
+        if: ${{ steps.keys.outputs.ready == 'true' }}
         id: build
         env:
           # A dry run signs with a throwaway key, so it never receives the real one.
@@ -1202,14 +1224,14 @@ jobs:
             # A throwaway key: a dry run proves the build, not the real key.
             home="$(mktemp -d)"
             PACKAGE_SIGNING_PASSPHRASE="$(openssl rand -hex 16)"
-            GNUPGHOME="$home" gpg --batch --quiet --pinentry-mode loopback --passphrase "$PACKAGE_SIGNING_PASSPHRASE" \
+            # The build runs at SOURCE_DATE_EPOCH, the publish time of the newest
+            # release. The key is made a day earlier on that clock, or gpg refuses
+            # to sign with a key created in its future.
+            GNUPGHOME="$home" gpg --batch --quiet --faked-system-time "$((SOURCE_DATE_EPOCH - 86400))" \
+              --pinentry-mode loopback --passphrase "$PACKAGE_SIGNING_PASSPHRASE" \
               --quick-generate-key "playbook dry run <dry-run@example.invalid>" rsa4096 sign 1y
             PACKAGE_SIGNING_KEY="$(GNUPGHOME="$home" gpg --batch --pinentry-mode loopback --passphrase "$PACKAGE_SIGNING_PASSPHRASE" --armor --export-secret-keys)"
           else
-            if [ -z "$SECRET_KEY" ] || [ -z "$SECRET_PASSPHRASE" ]; then
-              echo "::error::PACKAGE_SIGNING_KEY or PACKAGE_SIGNING_PASSPHRASE is not set in environment package-repo, so the repository is not updated. See the maintainer steps in docs/internals/06-release-channels.md." >&2
-              exit 1
-            fi
             echo "::add-mask::$SECRET_PASSPHRASE"
             PACKAGE_SIGNING_KEY="$SECRET_KEY"
             PACKAGE_SIGNING_PASSPHRASE="$SECRET_PASSPHRASE"
@@ -1226,13 +1248,14 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Install from the built repository in containers
+        if: ${{ steps.keys.outputs.ready == 'true' }}
         env:
           VERSION: ${{ steps.build.outputs.version }}
           PREVIOUS: ${{ steps.build.outputs.previous }}
         run: scripts/package-repo-verify.sh "$RUNNER_TEMP/site" "$VERSION" "$PREVIOUS"
 
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        if: ${{ needs.plan.outputs.dry_run != 'true' }}
+        if: ${{ needs.plan.outputs.dry_run != 'true' && steps.keys.outputs.ready == 'true' }}
         with:
           path: ${{ runner.temp }}/site
 
