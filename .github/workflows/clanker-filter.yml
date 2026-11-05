@@ -43,6 +43,7 @@ jobs:
   # duplicate check-run names make any ruleset context named `check`
   # ambiguous. Keep this key unique across the workflow set.
   clanker-filter:
+    name: clanker-filter
     runs-on: ubuntu-latest
     # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
     timeout-minutes: 5

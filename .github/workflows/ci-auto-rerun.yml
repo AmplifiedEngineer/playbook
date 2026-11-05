@@ -43,6 +43,7 @@ permissions: {}
 
 jobs:
   rerun:
+    name: rerun
     # One automatic rerun at most: only the first attempt is eligible. Fork
     # runs are skipped, see the header.
     if: >-

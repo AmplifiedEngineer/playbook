@@ -40,6 +40,7 @@ concurrency:
 
 jobs:
   payload-guard:
+    name: payload-guard
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -63,6 +64,7 @@ jobs:
         run: scripts/check-plugin.sh payload
 
   version-sync:
+    name: version-sync
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

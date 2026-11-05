@@ -21,6 +21,7 @@ concurrency:
 
 jobs:
   auto-merge:
+    name: auto-merge
     runs-on: ubuntu-latest
     # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
     timeout-minutes: 5
