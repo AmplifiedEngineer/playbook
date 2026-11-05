@@ -249,6 +249,148 @@ git -C "$REPO" checkout -q pr
 run_cla
 expect "missing file on base" "$EXIT_FAIL" "is missing on the default branch"
 
+# ---- CLA: co-authors
+repo co-unsigned '| @alice | 2026-01-02 | |'
+work
+commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
+
+Co-authored-by: Jane Roe <jane@example.com>"
+run_cla --pr-author alice
+expect "human co-author unsigned" "$EXIT_FAIL" "Jane Roe <jane@example.com> is a co-author of commit"
+case "$OUT" in
+  *"must add their own row"*"in a commit that they author"*) pass=$((pass + 1)) ;;
+  *) fail "co-author message does not say what to do: $OUT" ;;
+esac
+
+repo co-signed '| @alice | 2026-01-02 | |' '| @jane | 2026-01-03 | jane@example.com |'
+work
+commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
+
+Co-authored-by: Jane Roe <JANE@example.com>"
+run_cla --pr-author alice
+expect "human co-author signed (email)" "$EXIT_PASS"
+
+repo co-signed-id '| @alice | 2026-01-02 | |' '| @jane | 2026-01-03 | |'
+work
+commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
+
+Co-authored-by: Jane Roe <55+jane@users.noreply.github.com>"
+run_cla --pr-author alice
+expect "human co-author signed (noreply login)" "$EXIT_PASS"
+
+repo co-signs-here '| @alice | 2026-01-02 | |'
+add_row '| @jane | 2026-11-06 | jane@example.com |'
+commit_as "Jane Roe" "jane@example.com" "docs(cla): sign for jane
+
+$STATEMENT"
+work
+commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
+
+Co-authored-by: Jane Roe <jane@example.com>"
+run_cla --pr-author alice
+expect "co-author signs in the same PR" "$EXIT_PASS"
+
+repo co-ai '| @alice | 2026-01-02 | |'
+work
+commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
+
+Co-authored-by: Claude <noreply@anthropic.com>
+Co-authored-by: Copilot <copilot@github.com>
+Co-authored-by: ChatGPT Codex <codex@example.com>
+Co-authored-by: Gemini <gemini@example.com>
+Co-authored-by: Cursor Agent <cursoragent@cursor.com>
+Co-authored-by: Devin AI <devin@example.com>"
+run_cla --pr-author alice
+expect "AI co-authors ignored" "$EXIT_PASS"
+
+repo co-bot '| @alice | 2026-01-02 | |'
+work
+commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
+
+Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
+Co-authored-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+run_cla --pr-author alice
+expect "bot co-authors ignored" "$EXIT_PASS"
+
+repo co-extra '| @alice | 2026-01-02 | |'
+work
+commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
+
+Co-authored-by: Mystery Tool <mystery@tool.example>"
+run_cla --pr-author alice
+expect "unknown tool fails by default" "$EXIT_FAIL" "Mystery Tool"
+run_cla --pr-author alice --extra-ignored-coauthors 'mystery'
+expect "extra ignore pattern" "$EXIT_PASS"
+run_cla --pr-author alice --ignored-coauthors 'only-this'
+expect "replaced ignore list" "$EXIT_FAIL" "Mystery Tool"
+
+repo co-name-only '| @alice | 2026-01-02 | |'
+work
+commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
+
+Co-authored-by: Jane Roe"
+run_cla --pr-author alice
+expect "malformed trailer fails closed" "$EXIT_FAIL" "not in the form"
+
+repo co-empty '| @alice | 2026-01-02 | |'
+work
+commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
+
+co-authored-by:"
+run_cla --pr-author alice
+expect "empty trailer fails closed" "$EXIT_FAIL" "not in the form"
+
+repo co-ai-no-email '| @alice | 2026-01-02 | |'
+work
+commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
+
+Co-authored-by: Claude"
+run_cla --pr-author alice
+expect "AI trailer without email ignored" "$EXIT_PASS"
+
+repo co-many '| @alice | 2026-01-02 | |' '| @jane | 2026-01-03 | jane@example.com |'
+work
+commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
+
+CO-AUTHORED-BY: Jane Roe <jane@example.com>
+Co-authored-by: Bob Low <bob@example.com>
+Co-authored-by: Cy Dee <cy@example.com>
+Co-authored-by: Claude <noreply@anthropic.com>"
+run_cla --pr-author alice
+expect "many co-authors, two unsigned" "$EXIT_FAIL" "Bob Low <bob@example.com>"
+case "$OUT" in
+  *"Cy Dee <cy@example.com>"*) pass=$((pass + 1)) ;;
+  *) fail "second unsigned co-author not named: $OUT" ;;
+esac
+case "$OUT" in
+  *"Jane Roe"*) fail "signed co-author wrongly named: $OUT" ;;
+  *) pass=$((pass + 1)) ;;
+esac
+
+repo co-same '| @alice | 2026-01-02 | |'
+work
+commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
+
+Co-authored-by: Alice A <1234+alice@users.noreply.github.com>"
+run_cla --pr-author alice
+expect "author is also co-author" "$EXIT_PASS"
+
+repo co-same-unsigned
+work
+commit_as "Bob" "bob@example.com" "feat: a change
+
+Co-authored-by: Bob <bob@example.com>"
+run_cla
+expect "unsigned author listed as co-author" "$EXIT_FAIL" "authored a commit but has not signed"
+
+repo co-on-bot-commit '| @alice | 2026-01-02 | |'
+work
+commit_as "dependabot[bot]" "49699333+dependabot[bot]@users.noreply.github.com" "chore: bump
+
+Co-authored-by: Jane Roe <jane@example.com>"
+run_cla --pr-author alice
+expect "co-author on a bot commit is checked" "$EXIT_FAIL" "Jane Roe"
+
 # ---- usage errors
 repo usage
 run_cla --nope x

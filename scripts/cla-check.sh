@@ -18,8 +18,20 @@
 #                     committer type. Without it the script reads logins from
 #                     GitHub noreply addresses and matches on email.
 #   --bots LIST       extra bot logins or emails, comma separated
+#   --ignored-coauthors LIST
+#                     replaces the built-in list of AI and bot co-author
+#                     patterns (comma separated, see below)
+#   --extra-ignored-coauthors LIST
+#                     adds patterns to the list in use
 #   --statement TEXT  sentence a signing commit message must contain
 #   --cla-url URL     where the CLA text lives, for the failure message
+#
+# Co-authors: every Co-authored-by trailer in a pull request commit names a
+# person who must be signed, like an author. A pattern in the ignore list skips
+# AI tools and bots. A pattern with "@" or "[" is a substring of the email or
+# name ("[bot]", "noreply@anthropic.com"). Any other pattern is a whole word in
+# the name or email ("claude", "copilot"). A trailer that is not
+# "Name <email>" and does not match the list fails.
 #
 # Run it inside a clone. It reads git objects and the optional TSV only; it
 # uses no network and no credentials. Prints a Markdown report. Exit 0 when
@@ -31,6 +43,7 @@ EXIT_FAIL=1
 EXIT_USAGE=2
 DEFAULT_FILE='.github/CONTRIBUTORS.md'
 DEFAULT_STATEMENT='I have read the CLA Document and I hereby sign the CLA.'
+DEFAULT_IGNORED_COAUTHORS='[bot],noreply@anthropic.com,noreply@github.com,github-actions,dependabot,renovate,claude,anthropic,copilot,chatgpt,openai,codex,gemini,cursor,devin,aider,windsurf,codeium,tabnine,sweep'
 US=$'\037'
 TAB=$'\t'
 
@@ -47,6 +60,7 @@ esac
 
 base='' head='' file="$DEFAULT_FILE" pr_author='' logins='' bots=''
 statement="$DEFAULT_STATEMENT" cla_url=''
+ignored_co="$DEFAULT_IGNORED_COAUTHORS" extra_co=''
 while [ "$#" -gt 0 ]; do
   [ "$#" -ge 2 ] || die "$1 needs a value"
   case "$1" in
@@ -58,10 +72,14 @@ while [ "$#" -gt 0 ]; do
     --bots) bots="$2" ;;
     --statement) statement="$2" ;;
     --cla-url) cla_url="$2" ;;
+    --ignored-coauthors) ignored_co="$2" ;;
+    --extra-ignored-coauthors) extra_co="$2" ;;
     *) die "unknown option $1" ;;
   esac
   shift 2
 done
+[ -n "$ignored_co" ] || ignored_co="$DEFAULT_IGNORED_COAUTHORS"
+[ -z "$extra_co" ] || ignored_co="$ignored_co,$extra_co"
 [ -n "$statement" ] || statement="$DEFAULT_STATEMENT"
 [ -n "$file" ] || file="$DEFAULT_FILE"
 [ -n "$base" ] || die "--base is required"
@@ -215,6 +233,7 @@ comm -13 "$TMP/base_rows" "$TMP/head_rows" >"$TMP/added"
 : >"$TMP/valid_rows"
 : >"$TMP/reasons"
 : >"$TMP/people"
+: >"$TMP/author_keys"
 : >"$TMP/base_keys"
 while IFS="$TAB" read -r l d e; do
   [ -n "$l" ] || continue
@@ -232,6 +251,7 @@ for sha in $(commits_in_range); do
   fi
   keys "$al" "$ae" | sort -u >"$TMP/c_keys"
   printf '%s\t%s\t%s\n' "$an" "$ae" "$al" >>"$TMP/people"
+  cat "$TMP/c_keys" >>"$TMP/author_keys"
 
   msg_ok=0
   if git log -1 --format=%B "$sha" | norm_space | tr '[:upper:]' '[:lower:]' | grep -Fq -- "$statement_n"; then
@@ -291,5 +311,56 @@ sort -u "$TMP/people" | while IFS="$TAB" read -r an ae al; do
   fi
 done >>"$TMP/errors.more" || true
 [ ! -s "$TMP/errors.more" ] || cat "$TMP/errors.more" >>"$TMP/errors"
+
+# is_ignored_coauthor NAME EMAIL: true for an AI tool or bot on the ignore list.
+is_ignored_coauthor() {
+  local n e words rest p
+  n="$(lower "$1")"
+  e="$(lower "$2")"
+  words=" $(printf '%s %s' "$n" "$e" | tr -c 'a-z0-9' ' ' | tr -s ' ') "
+  rest="$(lower "$ignored_co")"
+  while [ -n "$rest" ]; do
+    p="${rest%%,*}"
+    if [ "$rest" = "$p" ]; then rest=''; else rest="${rest#*,}"; fi
+    p="$(printf '%s' "$p" | tr -d ' ')"
+    [ -n "$p" ] || continue
+    case "$p" in
+      *@* | *'['*)
+        case "$e" in *"$p"*) return 0 ;; esac
+        case "$n" in *"$p"*) return 0 ;; esac
+        ;;
+      *)
+        case "$words" in *" $p "*) return 0 ;; esac
+        ;;
+    esac
+  done
+  return 1
+}
+
+# Co-authors: each Co-authored-by trailer names a person who must be signed.
+: >"$TMP/co_errors"
+for sha in $(commits_in_range); do
+  short="$(printf '%.7s' "$sha")"
+  git log -1 --format=%B "$sha" | grep -iE '^co-authored-by[[:space:]]*:' >"$TMP/trailers" || true
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    val="$(printf '%s' "$line" | sed -E 's/^[^:]*:[[:space:]]*//; s/[[:space:]]+$//')"
+    cemail="$(printf '%s' "$val" | sed -nE 's/^.*<([^<>[:space:]@]+@[^<>[:space:]@]+)>$/\1/p')"
+    cname="$(printf '%s' "$val" | sed -E 's/[[:space:]]*<[^<>]*>$//')"
+    if [ -z "$cemail" ]; then
+      if is_ignored_coauthor "$val" ''; then continue; fi
+      printf '%s\n' "commit $short has a Co-authored-by trailer that is not in the form \`Co-authored-by: Name <email>\`: \"$val\". Fix the trailer in the commit message, or remove it." >>"$TMP/co_errors"
+      continue
+    fi
+    if is_ignored_coauthor "$cname" "$cemail"; then continue; fi
+    keys '' "$cemail" | sort -u >"$TMP/co_keys"
+    # The same person as an author is checked as an author.
+    if grep -Fxq -f "$TMP/co_keys" "$TMP/author_keys"; then continue; fi
+    if ! grep -Fxq -f "$TMP/co_keys" "$TMP/signed_keys"; then
+      printf '%s\n' "${cname:-$cemail} <$cemail> is a co-author of commit $short and has not signed the CLA. ${cname:-$cemail} must add their own row to $file in a commit that they author (their own pull request is fine), with the sentence in the message: $statement" >>"$TMP/co_errors"
+    fi
+  done <"$TMP/trailers"
+done
+cat "$TMP/co_errors" >>"$TMP/errors"
 
 report_and_exit 'CLA check failed' 'CLA: every author is on the signature list or signs in this pull request'
