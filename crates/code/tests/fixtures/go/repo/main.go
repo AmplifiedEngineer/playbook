@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: Apache-2.0
 package shape
 // Square totals.
 func Total(items []Square) int {

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: Apache-2.0
 import { Square } from "./shapes";
 // Square factory
 export function makeSquare(side: number): Square {

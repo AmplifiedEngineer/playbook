@@ -1,17 +1,17 @@
 # symbol <path> <qualified> <kind> <line>; ref <name> <path> <line>; negative <name> <path> <line>
-symbol src/lib.rs SCALE const 4
-symbol src/lib.rs Point struct 6
-symbol src/lib.rs Axis enum 11
-symbol src/lib.rs area function 16
-symbol src/lib.rs Describe::describe method 23
-symbol src/shape.rs double_area function 11
-ref area src/lib.rs 16
-ref area src/lib.rs 28
-ref area src/shape.rs 13
-ref Point src/lib.rs 6
-ref Point src/lib.rs 26
-ref Point src/shape.rs 7
-ref SCALE src/lib.rs 19
-negative area src/lib.rs 17
-negative area src/lib.rs 18
-negative area src/shape.rs 12
+symbol src/lib.rs SCALE const 6
+symbol src/lib.rs Point struct 8
+symbol src/lib.rs Axis enum 13
+symbol src/lib.rs area function 18
+symbol src/lib.rs Describe::describe method 25
+symbol src/shape.rs double_area function 13
+ref area src/lib.rs 18
+ref area src/lib.rs 30
+ref area src/shape.rs 15
+ref Point src/lib.rs 8
+ref Point src/lib.rs 28
+ref Point src/shape.rs 9
+ref SCALE src/lib.rs 21
+negative area src/lib.rs 19
+negative area src/lib.rs 20
+negative area src/shape.rs 14
