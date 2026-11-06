@@ -9,5 +9,6 @@ pub mod ctags;
 pub mod metrics;
 pub mod oracle;
 pub mod process;
+pub mod runner;
 pub mod tasks;
 pub mod tokenizer;
