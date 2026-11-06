@@ -878,7 +878,7 @@ fn two_worktrees_index_at_the_same_time_once_the_write_lock_frees() {
     let first = json_of(&a.playbook(&["code", "index", "--json"]));
     let store = PathBuf::from(first["index"]["path"].as_str().expect("path"));
     let completed = |worktree_files: &str| -> i64 {
-        rusqlite::Connection::open(&store)
+        playbook_store::Connection::open(&store)
             .expect("probe")
             .query_row(
                 "SELECT COALESCE(MAX(last_run_completed), 0) FROM worktrees WHERE root LIKE ?1",
@@ -894,7 +894,7 @@ fn two_worktrees_index_at_the_same_time_once_the_write_lock_frees() {
         .to_string_lossy()
         .into_owned();
     let a_before = completed(&a_root);
-    let holder = rusqlite::Connection::open(&store).expect("holder");
+    let holder = playbook_store::Connection::open(&store).expect("holder");
     holder.execute_batch("BEGIN IMMEDIATE").expect("hold");
     let limit = std::time::Duration::from_secs(10);
 
@@ -916,7 +916,7 @@ fn two_worktrees_index_at_the_same_time_once_the_write_lock_frees() {
     // Assert
     assert!(run_a.finish(limit).success());
     assert!(run_b.finish(limit).success());
-    let check = rusqlite::Connection::open(&store).expect("check");
+    let check = playbook_store::Connection::open(&store).expect("check");
     let rows: i64 = check
         .query_row("SELECT COUNT(*) FROM worktrees", [], |r| r.get(0))
         .expect("rows");

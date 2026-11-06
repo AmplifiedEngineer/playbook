@@ -117,7 +117,7 @@ fn open_db_against_legacy_six_column_schema_adds_source_hash_column() {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();
     }
-    let legacy_conn = rusqlite::Connection::open(&path).expect("open legacy conn");
+    let legacy_conn = playbook_store::Connection::open(&path).expect("open legacy conn");
     legacy_conn
         .execute_batch(
             "CREATE TABLE IF NOT EXISTS gate_phases (
@@ -176,7 +176,7 @@ fn open_db_rebuilds_an_old_check_constraint_so_stuck_can_be_stored() {
     // Arrange: a database with the four-verdict CHECK and a row to keep.
     let path = scratch_db_path("stuck-migration");
     fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let old = rusqlite::Connection::open(&path).expect("open old conn");
+    let old = playbook_store::Connection::open(&path).expect("open old conn");
     old.execute_batch(
         "CREATE TABLE gate_phases (
     plan_slug TEXT NOT NULL,

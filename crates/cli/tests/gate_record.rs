@@ -613,7 +613,7 @@ fn an_old_schema_state_db_moves_and_keeps_its_rows() {
     let f = Fixture::new("data-old-schema");
     let old = f.old_scoped_dir().join("state.db");
     fs::create_dir_all(old.parent().unwrap()).unwrap();
-    let raw = rusqlite::Connection::open(&old).unwrap();
+    let raw = playbook_store::Connection::open(&old).unwrap();
     raw.execute_batch(
         "CREATE TABLE gate_phases (plan_slug TEXT NOT NULL, phase TEXT NOT NULL,
            verdict TEXT NOT NULL CHECK(verdict IN ('PASS','FAIL','WARN','INCONCLUSIVE')),

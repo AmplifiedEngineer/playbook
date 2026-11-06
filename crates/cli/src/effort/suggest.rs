@@ -548,9 +548,10 @@ pub fn run(
             db_path.display()
         ));
     }
-    let conn = rusqlite::Connection::open_with_flags(
+    let conn = playbook_store::Connection::open_with_flags(
         db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        playbook_store::OpenFlags::SQLITE_OPEN_READ_ONLY
+            | playbook_store::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(|e| format!("failed to open the usage store read only: {e}"))?;
     conn.busy_timeout(std::time::Duration::from_millis(2000))

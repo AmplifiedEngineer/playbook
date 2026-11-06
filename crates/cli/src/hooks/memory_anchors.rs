@@ -2108,7 +2108,7 @@ mod tests {
             let session = session_index(&nodes());
             let missing = db_in(&dir.join("none"));
             let stale = store("fi-stale", &nodes());
-            rusqlite::Connection::open(&stale)
+            playbook_store::Connection::open(&stale)
                 .unwrap()
                 .execute(
                     "UPDATE meta SET value = '99' WHERE key = 'graph_generation'",
@@ -2116,7 +2116,7 @@ mod tests {
                 )
                 .unwrap();
             let no_table = dir.join("no-table.db");
-            rusqlite::Connection::open(&no_table)
+            playbook_store::Connection::open(&no_table)
                 .unwrap()
                 .execute_batch("CREATE TABLE facts_fts (x TEXT);")
                 .unwrap();
@@ -2147,9 +2147,9 @@ mod tests {
             // Arrange
             let db = store("fi-during", &nodes());
             let session = session_index(&nodes());
-            let mut writer = rusqlite::Connection::open(&db).unwrap();
+            let mut writer = playbook_store::Connection::open(&db).unwrap();
             let tx = writer
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .transaction_with_behavior(playbook_store::TransactionBehavior::Immediate)
                 .unwrap();
             tx.execute_batch("DELETE FROM facts_fts; DELETE FROM facts_fts_map;")
                 .unwrap();

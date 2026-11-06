@@ -10,7 +10,7 @@ use std::fs::OpenOptions;
 use std::io;
 use std::path::Path;
 
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use playbook_store::{params, Connection, OptionalExtension, Transaction};
 
 /// The schema this code writes and understands.
 const SCHEMA_VERSION: i64 = 2;
@@ -20,7 +20,7 @@ pub const QUEUE_LIMIT: i64 = 500;
 #[derive(Debug)]
 pub enum StoreError {
     Io(io::Error),
-    Sql(rusqlite::Error),
+    Sql(playbook_store::Error),
     /// The database was written by a newer playbook.
     TooNew {
         found: i64,
@@ -42,8 +42,8 @@ impl fmt::Display for StoreError {
 
 impl std::error::Error for StoreError {}
 
-impl From<rusqlite::Error> for StoreError {
-    fn from(e: rusqlite::Error) -> Self {
+impl From<playbook_store::Error> for StoreError {
+    fn from(e: playbook_store::Error) -> Self {
         Self::Sql(e)
     }
 }

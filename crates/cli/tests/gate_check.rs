@@ -124,7 +124,7 @@ impl Fixture {
                     "INSERT OR REPLACE INTO gate_phases \
                      (plan_slug, phase, verdict, evidence, command, recorded_at) \
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    rusqlite::params![
+                    playbook_store::params![
                         plan_slug,
                         phase,
                         verdict,
