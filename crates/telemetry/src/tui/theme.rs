@@ -8,6 +8,8 @@
 //! color universal design palette on black, so it stays readable with common
 //! color vision differences. Severity is not a green to red gradient: value
 //! ramps run one hue from dark to light, and state is also shown by glyphs.
+//! The opt-in `spectrum` theme is the exception: its usage color runs the
+//! full HSV hue wheel from green to red, on the same black ground.
 //! A two digit hex is a gray (`#cc` is 204, 204, 204), and a graph or meter
 //! colors a value from a start, mid and end color. The palette is a public
 //! scientific one, cited here and not copied from other software.
@@ -128,6 +130,8 @@ impl Usage {
 pub enum Theme {
     #[default]
     Standard,
+    /// The default palette with a green to red usage gradient. Opt-in.
+    Spectrum,
     Dark,
     Light,
     Mono,
@@ -254,9 +258,19 @@ const fn ink(rgb: Rgb) -> Ink {
 }
 
 impl Theme {
+    /// Every theme, in the order `next` visits them.
+    pub const ALL: [Theme; 5] = [
+        Theme::Standard,
+        Theme::Spectrum,
+        Theme::Dark,
+        Theme::Light,
+        Theme::Mono,
+    ];
+
     pub fn next(self) -> Theme {
         match self {
-            Theme::Standard => Theme::Dark,
+            Theme::Standard => Theme::Spectrum,
+            Theme::Spectrum => Theme::Dark,
             Theme::Dark => Theme::Light,
             Theme::Light => Theme::Mono,
             Theme::Mono => Theme::Standard,
@@ -266,6 +280,7 @@ impl Theme {
     pub fn name(self) -> &'static str {
         match self {
             Theme::Standard => "default",
+            Theme::Spectrum => "spectrum",
             Theme::Dark => "dark",
             Theme::Light => "light",
             Theme::Mono => "mono",
@@ -273,9 +288,7 @@ impl Theme {
     }
 
     pub fn parse(name: &str) -> Option<Theme> {
-        [Theme::Standard, Theme::Dark, Theme::Light, Theme::Mono]
-            .into_iter()
-            .find(|t| t.name() == name)
+        Theme::ALL.into_iter().find(|t| t.name() == name)
     }
 
     pub fn palette(self, depth: ColorDepth) -> Palette {
@@ -324,6 +337,21 @@ impl Theme {
                     ink(hex(0xd55e00)),
                     ink(gray(0xbb)),
                 ],
+            },
+            // The default palette with the full hue wheel for severity: green,
+            // yellow, orange, then red. Each stop is bright enough for black.
+            Theme::Spectrum => Palette {
+                live: ink(Hsv::new(130, 85, 75).rgb()),
+                caution: ink(Hsv::new(55, 85, 95).rgb()),
+                warn: ink(Hsv::new(30, 90, 95).rgb()),
+                error: ink(Hsv::new(0, 80, 95).rgb()),
+                usage: Usage::Smooth([
+                    Hsv::new(130, 85, 75),
+                    Hsv::new(55, 85, 95),
+                    Hsv::new(30, 90, 95),
+                    Hsv::new(0, 80, 95),
+                ]),
+                ..Theme::Standard.palette(depth)
             },
             Theme::Dark => Palette {
                 depth,
@@ -516,7 +544,7 @@ mod tests {
     fn next_visits_every_theme_and_wraps() {
         let mut t = Theme::Standard;
         let mut seen = vec![t];
-        for _ in 0..4 {
+        for _ in 0..5 {
             t = t.next();
             seen.push(t);
         }
@@ -524,6 +552,7 @@ mod tests {
             seen,
             [
                 Theme::Standard,
+                Theme::Spectrum,
                 Theme::Dark,
                 Theme::Light,
                 Theme::Mono,
@@ -535,7 +564,7 @@ mod tests {
     #[test]
     fn the_default_theme_is_the_default_and_names_round_trip() {
         assert_eq!(Theme::default(), Theme::Standard);
-        for t in [Theme::Standard, Theme::Dark, Theme::Light, Theme::Mono] {
+        for t in Theme::ALL {
             assert_eq!(Theme::parse(t.name()), Some(t));
         }
         assert_eq!(Theme::parse("solarized"), None);
@@ -673,6 +702,71 @@ mod tests {
             assert_ne!(calm, alarm);
             assert!(!matches!(calm, Color::Rgb(..)));
         }
+    }
+
+    #[test]
+    fn the_spectrum_theme_is_opt_in_and_a_full_cycle_returns_to_the_default() {
+        assert_ne!(Theme::default(), Theme::Spectrum);
+        assert_eq!(Theme::parse("spectrum"), Some(Theme::Spectrum));
+        let mut t = Theme::Spectrum;
+        for _ in 0..Theme::ALL.len() {
+            t = t.next();
+        }
+        assert_eq!(t, Theme::Spectrum);
+        assert_eq!(Theme::Mono.next(), Theme::Standard);
+    }
+
+    #[test]
+    fn the_spectrum_gradient_holds_then_moves_through_each_threshold() {
+        let p = Theme::Spectrum.palette(ColorDepth::True);
+        let Usage::Smooth(stops) = p.usage else {
+            panic!("the spectrum theme blends");
+        };
+        let at = |pct| usage_rgb(&p, pct);
+        assert_eq!(at(49.0), stops[0].rgb());
+        assert_eq!(at(50.0), stops[0].rgb());
+        assert_ne!(at(69.0), stops[1].rgb());
+        assert_eq!(at(70.0), stops[1].rgb());
+        assert_ne!(at(89.0), stops[2].rgb());
+        assert_eq!(at(90.0), stops[2].rgb());
+        assert_eq!(at(100.0), stops[3].rgb());
+        assert_eq!(at(101.0), stops[3].rgb());
+        assert_eq!(at(400.0), stops[3].rgb());
+    }
+
+    #[test]
+    fn the_spectrum_runs_from_green_to_red() {
+        let p = Theme::Spectrum.palette(ColorDepth::True);
+        let calm = usage_rgb(&p, 0.0);
+        let alarm = usage_rgb(&p, 100.0);
+        assert!(calm.1 > calm.0, "calm is green: {calm:?}");
+        assert!(alarm.0 > alarm.1, "alarm is red: {alarm:?}");
+    }
+
+    #[test]
+    fn the_spectrum_stays_readable_on_its_black_ground_and_in_reduced_depths() {
+        use crate::tui::a11y::{contrast, rgb_of, NON_TEXT_CONTRAST};
+        let p = Theme::Spectrum.palette(ColorDepth::True);
+        for pct in [0.0, 50.0, 60.0, 70.0, 80.0, 90.0, 95.0, 100.0] {
+            let ratio = contrast(usage_rgb(&p, pct), rgb_of(p.bg));
+            assert!(ratio >= NON_TEXT_CONTRAST, "{pct}% is {ratio:.2}");
+        }
+        for depth in [ColorDepth::Ansi256, ColorDepth::Ansi16] {
+            let p = Theme::Spectrum.palette(depth);
+            let calm = p.color(p.usage_ink(0.0));
+            let alarm = p.color(p.usage_ink(100.0));
+            assert_ne!(calm, alarm);
+            assert!(!matches!(calm, Color::Rgb(..)));
+        }
+    }
+
+    #[test]
+    fn the_default_theme_keeps_its_safe_usage_hues() {
+        let p = Theme::Standard.palette(ColorDepth::True);
+        let alarm = usage_rgb(&p, 100.0);
+        // The HSV stop (26, 100, 84) rounds to one step off the vermillion hex.
+        assert_eq!(alarm, Rgb(214, 93, 0));
+        assert_eq!(p.error, ink(hex(0xd55e00)));
     }
 
     #[test]

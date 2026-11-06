@@ -90,7 +90,7 @@ Keys:
 | `/` | Type a filter, a case insensitive substring of model, repo, branch or session id. `Enter` applies it, `Esc` cancels, `Backspace` edits. While you type, every key is text, so `q` and `r` do not quit or change the range until you press `Enter` or `Esc`. |
 | `c` | Clear the filter. |
 | `p` | Open the [Sessions management view](09-sessions.md#the-sessions-view), a full screen table of recent sessions with their PR, state and suggestions. |
-| `t` | Cycle the theme: default, dark, light, mono. |
+| `t` | Cycle the theme: default, spectrum, dark, light, mono. Spectrum colors usage from green to red. |
 | `q`, `Esc`, `Ctrl-C` | Quit. |
 
 The view is keyboard only, so the terminal's own text selection and scrolling keep working.
@@ -135,7 +135,7 @@ Each period (`today`, `week`, `month`) is compared with the one before it (yeste
 | `light` | The same with darker colors for a white ground. |
 | `mono` | No color. The selected row is shown in reverse video. |
 
-The theme comes from the `usage.theme` config key (`default`, `dark`, `light`, `mono`; see [config keys](../reference/config-keys.md)) and `t` changes it for the session. `NO_COLOR` set to anything but empty forces `mono` and locks it.
+The theme comes from the `usage.theme` config key (`default`, `spectrum`, `dark`, `light`, `mono`; see [config keys](../reference/config-keys.md)) and `t` changes it for the session. `NO_COLOR` set to anything but empty forces `mono` and locks it.
 
 Colors follow the terminal. With `COLORTERM=truecolor` or `24bit` the `default` values are drawn exactly. Otherwise, when `TERM` names `256color`, each value goes to the nearest of the 256 color cube and gray ramp, and with neither to the nearest of the 16 basic colors. The values come from the Okabe and Ito (2008) color universal design palette, which stays readable with common color vision differences.
 

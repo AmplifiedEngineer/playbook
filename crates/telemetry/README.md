@@ -95,7 +95,7 @@ Settings are playbook's own, from the global tier of its config store (`~/.confi
 
 | Key | Default | Values |
 | --- | --- | --- |
-| `usage.theme` | `default` | `default`, `dark`, `light`, `mono` |
+| `usage.theme` | `default` | `default`, `spectrum`, `dark`, `light`, `mono` |
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
 | `usage.timeZone` | `local` | `local`, `utc` |
 | `usage.refreshSeconds` | `5` | number |

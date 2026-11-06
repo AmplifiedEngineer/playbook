@@ -380,7 +380,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "agents.variants" => Some(&["auto", "all", "off"]),
         "effort.auto" => Some(&["off", "suggest", "on"]),
         "routing.escalate" => Some(&["ask", "auto", "deny"]),
-        "usage.theme" => Some(&["default", "dark", "light", "mono"]),
+        "usage.theme" => Some(&["default", "spectrum", "dark", "light", "mono"]),
         "usage.weekStart" => Some(&["monday", "sunday", "saturday"]),
         "usage.telemetry" => Some(&["auto", "off"]),
         "docs.convert" => Some(&["auto", "off"]),
@@ -491,6 +491,7 @@ mod tests {
     fn the_theme_key_accepts_only_the_current_names() {
         let allowed = allowed_enum_values("usage.theme").unwrap();
         assert!(allowed.contains(&"default") && !allowed.contains(&"solarized"));
+        assert!(allowed.contains(&"spectrum"));
     }
 
     #[test]
