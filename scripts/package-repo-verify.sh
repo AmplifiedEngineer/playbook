@@ -47,8 +47,10 @@ if [ "$kind" = apt ]; then
   if [ -n "$prev" ]; then apt_with /site install -y "playbook=$prev" >/dev/null; seed; fi
   apt_with /site install -y "playbook=$want" >/dev/null
 else
+  # dnf5 skips a repository whose repomd.xml signature is bad and still exits 0,
+  # unless skip_if_unavailable is off, so the tamper check needs it off.
   repo() {
-    printf "[playbook]\nname=playbook\nbaseurl=file://%s/rpm/\$basearch\nenabled=1\nrepo_gpgcheck=1\ngpgcheck=0\ngpgkey=file:///site/playbook.asc\n" "$1" > /etc/yum.repos.d/playbook.repo
+    printf "[playbook]\nname=playbook\nbaseurl=file://%s/rpm/\$basearch\nenabled=1\nrepo_gpgcheck=1\ngpgcheck=0\ngpgkey=file:///site/playbook.asc\nskip_if_unavailable=False\n" "$1" > /etc/yum.repos.d/playbook.repo
   }
   tamper /tmp/bad/rpm/x86_64/repodata/repomd.xml
   repo /tmp/bad
