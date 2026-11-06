@@ -236,6 +236,7 @@ pub const USER_KEYS: &[&str] = &[
     "watch.tokenEnv",
     "watch.limits.actionsPerDay",
     "watch.limits.usdPerDay",
+    "usage.telemetry",
 ];
 
 /// Whether `key` is a per-user setting. `config set` writes it to the global

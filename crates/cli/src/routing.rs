@@ -15,11 +15,12 @@ use serde_json::{json, Value};
 use std::path::Path;
 
 /// The task kinds, in the order `playbook route --help` lists them.
-const KINDS: [&str; 6] = [
+const KINDS: [&str; 7] = [
     "mechanical",
     "classify",
     "check",
     "review",
+    "write",
     "implement",
     "design",
 ];
@@ -63,6 +64,12 @@ pub fn table(kind: &str, tier: &str) -> Option<Route> {
             effort: "medium",
             agent: "reviewer",
             reason: "Opus at medium matched high on the reviewer bench at lower cost",
+        },
+        ("write", _) => Route {
+            model: "haiku",
+            effort: "medium",
+            agent: "writer",
+            reason: "turning decided facts into short text; the orchestrator checks it and fixes it by hand after one resend",
         },
         ("implement", "low") => Route {
             model: "sonnet",
@@ -266,6 +273,17 @@ mod tests {
             assert!(table(k, "low").is_some(), "{k}");
         }
         assert!(table("nope", "low").is_none());
+    }
+
+    #[test]
+    fn writing_goes_to_the_cheap_writer_without_approval() {
+        let d = decide("write", "low", 0, Escalate::Ask, None).unwrap();
+
+        assert_eq!(d.action, "proceed");
+        assert_eq!(
+            (d.route.model, d.route.effort, d.route.agent),
+            ("haiku", "medium", "writer")
+        );
     }
 
     #[test]

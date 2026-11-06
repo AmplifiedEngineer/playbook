@@ -117,6 +117,9 @@ pub struct LimitsView {
     pub cache_age: Option<i64>,
     /// What Claude Code last reported as used this month, as `(read at, USD)`.
     pub reported: Option<(i64, f64)>,
+    /// The manual and the detected monthly budget in dollars, when both are
+    /// set and differ. The detected one applies.
+    pub manual_beside_detected: Option<(f64, f64)>,
     /// Why the 5 hour and weekly windows are missing, when they are.
     pub windows_note: Option<&'static str>,
     pub period: Period,
@@ -154,6 +157,7 @@ impl Default for LimitsView {
             stale: false,
             cache_age: None,
             reported: None,
+            manual_beside_detected: None,
             windows_note: None,
             period: Period::Week(WeekStart::default()),
             burn: Burn::new(0.0, 0),
@@ -210,6 +214,7 @@ impl LimitsView {
             stale: sources.stale(now),
             cache_age,
             reported: limits_source::billed_anchor(sources, now),
+            manual_beside_detected: limits_source::manual_beside_detected(sources, now),
             windows_note,
             period,
             burn,
@@ -239,6 +244,8 @@ pub struct StoreSpan {
 pub struct Data {
     pub now: i64,
     pub range: Range,
+    /// The time zone the days were grouped in.
+    pub zone: crate::tz::Zone,
     pub filter: String,
     pub totals: Totals,
     /// Per day, oldest first. Idle days are absent.
@@ -345,6 +352,8 @@ impl Data {
         range: Range,
         filter: &str,
     ) -> Data {
+        // Read first: a zone switched while this runs makes the snapshot stale.
+        let zone = crate::tz::current();
         let (inside, _) = query::in_range(window, &[], now, range);
         let inside: Vec<UsageEvent> = inside.into_iter().filter(|e| matches(e, filter)).collect();
         let models = group_usage(&inside, Dimension::Model);
@@ -377,6 +386,7 @@ impl Data {
         Data {
             now,
             range,
+            zone,
             filter: filter.to_string(),
             totals: Totals::of(&inside),
             days: group_usage(&inside, Dimension::Day),
@@ -518,6 +528,43 @@ mod tests {
         );
         assert_eq!(opus.totals.messages, 1);
         assert_eq!(opus.models[0].key, "opus");
+    }
+
+    // 2026-09-02 23:46:40 UTC is already 09-03 on a clock five hours east.
+    #[test]
+    fn an_event_near_midnight_lands_on_the_day_of_the_chosen_zone() {
+        use crate::tz::{self, Zone};
+        let events = vec![event(NOW - 7_200, "opus", "a", 1.0)];
+        let first_day = |zone: Zone| {
+            tz::set(zone);
+            let series = day_series(&events, NOW, Range::All);
+            crate::aggregate::date_key(series[0].day)
+        };
+
+        let utc = first_day(Zone::Utc);
+        let east = first_day(Zone::Fixed(5 * 3600));
+        let back = first_day(Zone::Utc);
+
+        assert_eq!(utc, "2026-09-02");
+        assert_eq!(east, "2026-09-03");
+        assert_eq!(
+            back, "2026-09-02",
+            "switching back regroups the same events"
+        );
+    }
+
+    #[test]
+    fn a_snapshot_remembers_the_zone_its_days_were_grouped_in() {
+        use crate::tz::{self, Zone};
+        let events = vec![event(NOW - 60, "opus", "a", 1.0)];
+
+        tz::set(Zone::Fixed(3600));
+        let east = Data::build(&events, LiveView::default(), NOW, Range::All, "");
+        tz::set(Zone::Utc);
+        let utc = Data::build(&events, LiveView::default(), NOW, Range::All, "");
+
+        assert_eq!(east.zone, Zone::Fixed(3600));
+        assert_eq!(utc.zone, Zone::Utc);
     }
 
     #[test]

@@ -27,4 +27,4 @@
 │80% not before the period ends 2026-10-01 00:00:00Z                                               │
 │100% not before the period ends 2026-10-01 00:00:00Z                                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- Tab tab w week m month r range v view / filter h help q quit        updated 01:46:40 UTC, every 5s
+ Tab tab w week m month r range v view / filter ? help q quit        updated 01:46:40 UTC, every 5s

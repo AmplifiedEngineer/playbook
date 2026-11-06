@@ -54,6 +54,13 @@ pub trait Host: Send + Sync {
     /// back to its own default then.
     fn config_value(&self, key: &str, home: &Path) -> Option<Value>;
 
+    /// Stores config key `key` where [`Host::config_value`] reads it back, for
+    /// the user at `home`. A host that cannot write settings keeps this
+    /// default.
+    fn set_config_value(&self, _key: &str, _value: &Value, _home: &Path) -> Result<(), String> {
+        Err("this program cannot change settings".to_string())
+    }
+
     /// The folder holding the usage database under `home`.
     fn state_dir_from(&self, home: &Path) -> PathBuf;
 
@@ -187,6 +194,11 @@ pub fn home_dir() -> PathBuf {
 /// The value of config key `key`, or `None`.
 pub fn config_value(key: &str, home: &Path) -> Option<Value> {
     current().config_value(key, home)
+}
+
+/// Stores config key `key` through the host, for the user at `home`.
+pub fn set_config_value(key: &str, value: &Value, home: &Path) -> Result<(), String> {
+    current().set_config_value(key, value, home)
 }
 
 /// [`config_value`] for the current user's home.

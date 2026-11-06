@@ -70,8 +70,16 @@ fn seeded_repo(tag: &str) -> PathBuf {
 /// Run the real compiled binary with `cwd` and `$HOME` pinned to scratch
 /// locations, so it never resolves against the developer's real config.
 fn run_playbook(cwd: &Path, home: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_playbook"))
-        .args(args)
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
+    // A run inside Claude Code inherits its telemetry variables, which
+    // would count as the user's own setup.
+    for (name, _) in std::env::vars_os() {
+        let name = name.to_string_lossy();
+        if name == "CLAUDE_CODE_ENABLE_TELEMETRY" || name.starts_with("OTEL_") {
+            cmd.env_remove(&*name);
+        }
+    }
+    cmd.args(args)
         .current_dir(cwd)
         .env("HOME", home)
         .output()
@@ -847,5 +855,91 @@ fn a_config_json_that_disagrees_with_the_store_is_left_and_named_in_a_warning() 
     assert!(
         global_config_path(&home).exists(),
         "the file is not touched"
+    );
+}
+
+fn claude_settings(home: &Path) -> PathBuf {
+    home.join(".claude").join("settings.json")
+}
+
+#[test]
+fn setting_telemetry_to_auto_writes_the_claude_keys_and_says_how_to_undo() {
+    // Arrange
+    let repo = seeded_repo("tel-sync-on");
+    let home = scratch_dir("tel-sync-on-home");
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    fs::write(claude_settings(&home), r#"{"env":{"FOO":"1"}}"#).unwrap();
+
+    // Act
+    let out = run_playbook(&repo, &home, &["config", "set", "usage.telemetry", "auto"]);
+
+    // Assert
+    assert!(out.status.success(), "stderr: {}", stderr_of(&out));
+    let stdout = stdout_of(&out);
+    assert!(
+        stdout.contains("+ CLAUDE_CODE_ENABLE_TELEMETRY=1"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("<token>"), "{stdout}");
+    assert!(
+        stdout.contains("OTEL_LOG_TOOL_DETAILS stays off"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("playbook config set usage.telemetry off"),
+        "{stdout}"
+    );
+    let written = fs::read_to_string(claude_settings(&home)).unwrap();
+    assert!(written.contains("\"FOO\""), "{written}");
+    assert!(!written.contains("OTEL_LOG_TOOL_DETAILS"), "{written}");
+}
+
+#[test]
+fn setting_telemetry_to_off_removes_only_the_owned_keys() {
+    // Arrange
+    let repo = seeded_repo("tel-sync-off");
+    let home = scratch_dir("tel-sync-off-home");
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    fs::write(claude_settings(&home), r#"{"env":{"FOO":"1"}}"#).unwrap();
+    let on = run_playbook(&repo, &home, &["config", "set", "usage.telemetry", "auto"]);
+    assert!(on.status.success(), "stderr: {}", stderr_of(&on));
+
+    // Act
+    let out = run_playbook(&repo, &home, &["config", "set", "usage.telemetry", "off"]);
+
+    // Assert
+    assert!(out.status.success(), "stderr: {}", stderr_of(&out));
+    let stdout = stdout_of(&out);
+    assert!(stdout.contains("  - OTEL_LOGS_EXPORTER=otlp"), "{stdout}");
+    assert!(
+        stdout.contains("playbook config set usage.telemetry auto"),
+        "{stdout}"
+    );
+    let root: Value = serde_json::from_str(&fs::read_to_string(claude_settings(&home)).unwrap())
+        .expect("settings stay valid JSON");
+    assert_eq!(root["env"], serde_json::json!({"FOO": "1"}));
+}
+
+#[test]
+fn setting_telemetry_with_a_malformed_claude_file_leaves_it_untouched() {
+    // Arrange
+    let repo = seeded_repo("tel-sync-bad");
+    let home = scratch_dir("tel-sync-bad-home");
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    fs::write(claude_settings(&home), "{ not json").unwrap();
+
+    // Act
+    let out = run_playbook(&repo, &home, &["config", "set", "usage.telemetry", "auto"]);
+
+    // Assert
+    assert!(!out.status.success());
+    assert!(
+        stderr_of(&out).contains("were not changed"),
+        "{}",
+        stderr_of(&out)
+    );
+    assert_eq!(
+        fs::read_to_string(claude_settings(&home)).unwrap(),
+        "{ not json"
     );
 }

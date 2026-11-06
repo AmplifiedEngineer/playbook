@@ -2,6 +2,25 @@
 
 Release notes for playbook: the binary and the plugin in `plugins/playbook`. From 0.34.0 they ship together as one `vX.Y.Z` release with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). Each release has a section named `## playbook <version>`, newest first, which the release pull request adds from the notes that `scripts/release-notes.sh` builds. The sections from 0.33.0 down are plugin releases from before the two lines joined. The binary skips 0.27 to 0.33: it goes from 0.26 to 0.34.0.
 
+## playbook 0.40.1
+
+### Features
+
+- **doctor**: warn on worktree shell refusal in Claude Code 2.1.318 ([#1553](https://github.com/pragmatic-engineer/playbook/pull/1553))
+- **prose**: warn on passive voice and check text against facts ([#1554](https://github.com/pragmatic-engineer/playbook/pull/1554))
+- **agents**: add writer agent that drafts text from facts ([#1565](https://github.com/pragmatic-engineer/playbook/pull/1565))
+
+### Fixes
+
+- **prompt**: recover when Bash is refused in a worktree ([#1555](https://github.com/pragmatic-engineer/playbook/pull/1555))
+- **update**: refresh the placed system prompt after a plugin update ([#1561](https://github.com/pragmatic-engineer/playbook/pull/1561))
+
+### Other changes
+
+- test(telemetry): bound the ignored-holder wait by the stop budget plus slack ([#1548](https://github.com/pragmatic-engineer/playbook/pull/1548))
+- docs(writing-style): add length limits and ban passive voice ([#1552](https://github.com/pragmatic-engineer/playbook/pull/1552))
+- docs(agents): isolate shell agents once a session enters a worktree ([#1559](https://github.com/pragmatic-engineer/playbook/pull/1559))
+
 ## playbook 0.40.0
 
 ### Breaking changes

@@ -21,4 +21,4 @@
 │2026-09-03         $3.05      3.0%                                            │
 │50% not before the period ends 2026-10-01 00:00:00Z                           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- Tab tab w week m month v view / filter h help q quit      updated 01:46:40 UTC
+ Tab tab w week m month v view / filter ? help q quit      updated 01:46:40 UTC
