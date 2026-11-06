@@ -32,6 +32,8 @@ const SPLITMIX_MUL_B: u64 = 0x94d0_49bb_1331_11eb;
 pub enum TaskError {
     #[error("task set does not parse: {0}")]
     Parse(String),
+    #[error("task set does not serialize: {0}")]
+    Serialize(String),
     #[error("task id {0} is listed twice")]
     DuplicateId(String),
     #[error("baseline is version {baseline} and the task set is version {tasks}")]
@@ -160,10 +162,11 @@ impl TaskSet {
     }
 
     /// The file text: pretty JSON with a trailing newline.
-    pub fn to_json(&self) -> String {
-        let mut text = serde_json::to_string_pretty(self).expect("task set serializes");
+    pub fn to_json(&self) -> Result<String, TaskError> {
+        let mut text =
+            serde_json::to_string_pretty(self).map_err(|e| TaskError::Serialize(e.to_string()))?;
         text.push('\n');
-        text
+        Ok(text)
     }
 
     /// Refuses a task set whose version differs from the baseline's.
@@ -230,7 +233,7 @@ mod tests {
         let store = FailingStore(Cell::new(0));
         let a = build(200, 7, &store);
         let b = build(200, 7, &store);
-        assert_eq!(a.to_json(), b.to_json());
+        assert_eq!(a.to_json().unwrap(), b.to_json().unwrap());
         assert_eq!(store.0.get(), 0);
         assert_ne!(a.tasks, build(200, 8, &store).tasks);
     }
@@ -275,14 +278,14 @@ mod tests {
         let mut twice = set.clone();
         twice.tasks.push(set.tasks[0].clone());
         assert!(matches!(
-            TaskSet::parse(&twice.to_json()),
+            TaskSet::parse(&twice.to_json().unwrap()),
             Err(TaskError::DuplicateId(_))
         ));
         assert!(matches!(
             TaskSet::parse("{\"extra\":1}"),
             Err(TaskError::Parse(_))
         ));
-        assert_eq!(TaskSet::parse(&set.to_json()).unwrap(), set);
+        assert_eq!(TaskSet::parse(&set.to_json().unwrap()).unwrap(), set);
     }
 
     #[test]
@@ -303,6 +306,6 @@ mod tests {
                 task_id(&task.repo, task.kind, &task.name, &task.path)
             );
         }
-        assert_eq!(set.to_json(), BUNDLED);
+        assert_eq!(set.to_json().unwrap(), BUNDLED);
     }
 }
