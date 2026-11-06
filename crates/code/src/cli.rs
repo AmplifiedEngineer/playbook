@@ -61,8 +61,8 @@ pub enum CodeCommand {
         /// Only files under this path prefix, for example `lib/payment/`
         #[arg(long)]
         path: Option<String>,
-        /// Only files of this language: rust, typescript, javascript or python
-        #[arg(long, value_parser = ["rust", "typescript", "javascript", "python"])]
+        /// Only files of this language: rust, typescript, javascript, python or go
+        #[arg(long, value_parser = ["rust", "typescript", "javascript", "python", "go"])]
         lang: Option<String>,
         /// Most results to show, from 1 to 200
         #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=200))]
@@ -84,8 +84,8 @@ pub enum CodeCommand {
         /// Only this kind, for example `function`, `class` or `method`
         #[arg(long)]
         kind: Option<String>,
-        /// Only files of this language: rust, typescript, javascript or python
-        #[arg(long, value_parser = ["rust", "typescript", "javascript", "python"])]
+        /// Only files of this language: rust, typescript, javascript, python or go
+        #[arg(long, value_parser = ["rust", "typescript", "javascript", "python", "go"])]
         lang: Option<String>,
         /// Only files under this path prefix, for example `lib/payment/`
         #[arg(long)]

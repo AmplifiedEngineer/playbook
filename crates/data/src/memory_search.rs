@@ -10,7 +10,7 @@ use crate::memory::{self};
 /// A recall hook runs on every prompt, so it waits only briefly for a busy
 /// database and then falls back to the scan.
 const READ_BUSY: std::time::Duration = std::time::Duration::from_millis(200);
-use rusqlite::{Connection, OpenFlags};
+use playbook_store::{Connection, OpenFlags};
 use std::path::Path;
 
 /// Candidates a caller gets by default: four times the 3 facts one prompt may
@@ -96,7 +96,7 @@ pub fn search_facts(
         .map_err(failed)?;
     let limit = i64::try_from(limit).unwrap_or(i64::MAX);
     let rows = stmt
-        .query_map(rusqlite::params![expression, org, repo, limit], |r| {
+        .query_map(playbook_store::params![expression, org, repo, limit], |r| {
             Ok(FactHit {
                 fact_id: r.get(0)?,
                 name: r.get(1)?,
@@ -109,11 +109,11 @@ pub fn search_facts(
     rows.collect::<Result<Vec<_>, _>>().map_err(failed)
 }
 
-fn failed(error: rusqlite::Error) -> SearchError {
+fn failed(error: playbook_store::Error) -> SearchError {
     match error.sqlite_error_code() {
-        Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) => {
-            SearchError::Busy
-        }
+        Some(
+            playbook_store::ErrorCode::DatabaseBusy | playbook_store::ErrorCode::DatabaseLocked,
+        ) => SearchError::Busy,
         _ => SearchError::Failed(error.to_string()),
     }
 }
@@ -460,8 +460,8 @@ mod tests {
     #[test]
     fn a_busy_or_locked_database_is_reported_as_busy() {
         // Arrange
-        let busy = rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(5), None);
-        let locked = rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(6), None);
+        let busy = playbook_store::Error::SqliteFailure(playbook_store::ffi::Error::new(5), None);
+        let locked = playbook_store::Error::SqliteFailure(playbook_store::ffi::Error::new(6), None);
 
         // Act, Assert
         assert_eq!(failed(busy), SearchError::Busy);

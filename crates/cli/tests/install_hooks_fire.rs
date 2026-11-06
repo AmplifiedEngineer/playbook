@@ -341,7 +341,7 @@ fn fires(f: &Fire, name: &str) -> bool {
                 "{{\"session_id\":\"fire-clear\",\"reason\":\"clear\",\"transcript_path\":{}}}",
                 json_str(&transcript.display().to_string())
             );
-            run_hook(
+            let (exited_ok, out) = run_hook(
                 &f.playbook,
                 name,
                 &payload,
@@ -351,11 +351,19 @@ fn fires(f: &Fire, name: &str) -> bool {
                 &[],
             );
             let saved = home.join(".config/playbook/runtime/handoff");
-            fs::read_dir(saved).is_ok_and(|entries| {
+            let found = fs::read_dir(&saved).is_ok_and(|entries| {
                 entries
                     .flatten()
                     .any(|e| e.file_name().to_string_lossy().ends_with("_fireclear.md"))
-            })
+            });
+            if !found {
+                // A hook that dies on a signal reports a failed exit, so say so.
+                eprintln!(
+                    "handoff-on-clear saved nothing: exited ok={exited_ok}, stdout={out:?}, saved dir={:?}",
+                    fs::read_dir(&saved).map(|d| d.flatten().map(|e| e.file_name()).collect::<Vec<_>>())
+                );
+            }
+            found
         }
         "usage-warm" => {
             let home = scratch(f, "h-usage-warm");

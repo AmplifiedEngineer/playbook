@@ -134,13 +134,14 @@ jobs:
           # cli (playbook) depends on common, code, data and telemetry; code and
           # telemetry depend on data; common is depended on by everything.
           pkgs="--workspace"
-          if [ -n "${files:-}" ] && ! echo "$files" | grep -qvE '^crates/(cli|code|common|data|telemetry)/'; then
+          if [ -n "${files:-}" ] && ! echo "$files" | grep -qvE '^crates/(cli|code|common|data|store|telemetry)/'; then
             sel=""
             add() { case " $sel " in *" $1 "*) ;; *) sel="$sel $1" ;; esac; }
             for c in $(echo "$files" | sed -E 's#^crates/([^/]+)/.*#\1#' | sort -u); do
               case "$c" in
                 common) sel=""; pkgs="--workspace"; break ;;
                 cli) add playbook ;;
+                store) add playbook-store ;;
                 code) add playbook-code; add playbook ;;
                 telemetry) add playbook-telemetry; add playbook ;;
                 data) add playbook-data; add playbook-code; add playbook-telemetry; add playbook ;;

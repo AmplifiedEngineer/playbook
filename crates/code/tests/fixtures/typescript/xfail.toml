@@ -1,0 +1,4 @@
+["src/shapes.ts"]
+name = "interface properties and class fields are not extracted yet"
+Horizontal = "enum members are not extracted yet"
+Vertical = "enum members are not extracted yet"

@@ -140,6 +140,7 @@ pub fn run(
             super::collector::run_collect(paths, port, idle_seconds, &stop)
         }
         Some(UsageCommand::Account { command, .. }) => super::account_cmd::run(paths, &command),
+        Some(UsageCommand::Machine { name }) => super::machine::run(paths, name.as_deref()),
         Some(UsageCommand::Prune { dry_run }) => super::collector::run_prune(paths, dry_run),
         Some(UsageCommand::Status { json }) => {
             let status = super::collector::status(paths, super::collector::configured_retention())?;
