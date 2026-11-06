@@ -107,9 +107,11 @@ A match is strong in any of these cases. Every other match is weak, such as one 
 - The word before `crate` or `crates` in the prompt names the crate folder the fact is anchored to ("auth crate" reaches a fact anchored to `crates/auth/`).
 - The fact is anchored to a file touched this session.
 
-The anchor index builds once per session and is not rebuilt within it. A fact written mid-session will not surface via anchor or prompt matching until the next session starts.
+Prompt recall first asks a full text index over fact names, descriptions and bodies in `memory.db` for the best 12 candidates. The hook then scores them with the rules above. If the index is missing, stale or busy, it scans the session index instead.
 
-**Across a session boundary**, `/playbook:session-handoff` saves a handoff document with `playbook handoff save`. When the `SessionStart` hook is installed and Claude Code runs it, `session-init` loads the handoff at the next start, including after `/clear` (`playbook doctor` checks the install), and tombstones it for `gc.handoffGraceDays` (14 by default), so `playbook handoff show` can still print it. `/clear` no longer discards what the session had figured out. If the automatic load does not appear, run `/playbook:session-start` to read it on demand. `playbook handoff status` shows whether the hook fired at all.
+The anchor index builds once per session and is not rebuilt within it. A fact written mid-session does not surface on edits until the next session starts. Prompt recall reads the live full text index, so it can surface such a fact, matched by name, description and body only.
+
+**Across a session boundary**, `/playbook:session-handoff` saves a handoff document with `playbook handoff save`. When the `SessionStart` hook is installed and Claude Code runs it, `session-init` loads the handoff at the next start, including after `/clear` and `/compact` (`playbook doctor` checks the install), and tombstones it for `gc.handoffGraceDays` (14 by default), so `playbook handoff show` can still print it. `/clear` no longer discards what the session had figured out. If the automatic load does not appear, run `/playbook:session-start` to read it on demand. `playbook handoff status` shows whether the hook fired at all.
 
 The `memory-capture` hook fires once per context-usage threshold crossing during a session (a `Stop` hook, not a `SessionEnd` one). It prompts you to write down durable facts and, since ADR 0008, to run a handoff too, in case the session runs long enough to approach compaction.
 
