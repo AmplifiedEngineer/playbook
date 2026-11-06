@@ -122,7 +122,7 @@ pub enum UsageCommand {
 pub enum AccountCommand {
     /// List the accounts with their events, cost and time span
     List,
-    /// Print the account key that CLAUDE_CODE_OAUTH_TOKEN gets in this shell
+    /// Print the account key for CLAUDE_CODE_OAUTH_TOKEN in this shell
     ///
     /// A session started with that variable set is recorded under a key like
     /// `token:ab12cd34`, made from the token with a one way hash. This prints
