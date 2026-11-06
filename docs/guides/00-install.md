@@ -47,7 +47,9 @@ brew install pragmatic-engineer/tap/playbook
 playbook setup
 ```
 
-`playbook setup` asks before it adds the hooks to `settings.json`, and writes the `PATH` block so hook shells find the binary even when Homebrew's directory is not on their `PATH`. Homebrew ships only the binary, so `setup` seeds the settings template and the system prompt from copies compiled into it (written to `~/.config/playbook/embedded/`) when no Claude Code plugin is installed. An installed plugin, even an older version, takes precedence. Homebrew on Linux works the same way: install [Homebrew](https://brew.sh) for Linux, then run the same two commands. The formula picks the static musl build for x86_64 or arm64, so it needs no system libraries. Brew installs under its own prefix (`/home/linuxbrew/.linuxbrew` by default) and playbook never asks for `sudo`. Each release installs `playbook` this way on an x86_64 Ubuntu runner after the tap is updated, and fails the release run when that breaks. Homebrew installs update with `brew upgrade playbook` once the formula is trusted, and `playbook update` refuses a Homebrew install and tells you to use brew.
+`playbook setup` asks before it adds the hooks to `settings.json`, and writes the `PATH` block so hook shells find the binary even when Homebrew's directory is not on their `PATH`. Homebrew ships only the binary, so `setup` seeds the settings template and the system prompt from copies compiled into it (written to `~/.config/playbook/embedded/`) when no Claude Code plugin is installed. An installed plugin, even an older version, takes precedence. Homebrew on Linux works the same way: install [Homebrew](https://brew.sh) for Linux, then run the same two commands. The formula picks the static musl build for x86_64 or arm64, so it needs no system libraries. Brew installs under its own prefix (`/home/linuxbrew/.linuxbrew` by default) and playbook never asks for `sudo`. The formula also links `pbtop` to `playbook`, so `pbtop` always has the version of `playbook` and one `brew upgrade playbook` updates both. Each release installs `playbook` this way on an x86_64 Ubuntu runner after the tap is updated, checks the `pbtop` link, and fails the release run when that breaks. Homebrew installs update with `brew upgrade playbook` once the formula is trusted, and `playbook update` refuses a Homebrew install and tells you to use brew.
+
+If you installed the separate `pbtop` formula before, remove it once: `brew uninstall pbtop`, then `brew reinstall playbook`. The two formulas conflict, because both own the `pbtop` file, and Homebrew prints this command in its conflict message. See [Optional: pbtop alone](#optional-pbtop-alone).
 
 ### Homebrew tap trust
 
@@ -67,7 +69,7 @@ brew trust --formula pragmatic-engineer/tap/playbook
 brew install playbook
 ```
 
-The separate `pbtop` formula needs its own trust: `brew trust --formula pragmatic-engineer/tap/pbtop`.
+The `pbtop` link comes with the `playbook` formula, so it needs no trust of its own. The separate `pbtop` formula is for a machine without `playbook`. Trust it on its own: `brew trust --formula pragmatic-engineer/tap/pbtop`.
 
 To trust the whole tap, run `brew trust pragmatic-engineer/tap`. This covers every current and future formula in the tap. It is broader, so prefer per-formula trust.
 
@@ -120,7 +122,7 @@ The flake lives in [pragmatic-engineer/nix](https://github.com/pragmatic-enginee
 
 ### Optional: pbtop alone
 
-You do not need this if you have `playbook`. `playbook usage` runs the same code, because playbook embeds the `playbook-telemetry` crate. The Nix flake has a `pbtop` output. Install `pbtop`, the Agent Budget Dashboard, only on a machine that has no `playbook`. From release 0.35.0 each `vX.Y.Z` release has `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone, and there are two ways to install it:
+You do not need this if you have `playbook`. `playbook usage` runs the same code, because playbook embeds the `playbook-telemetry` crate. The Homebrew formula of `playbook` also links `pbtop` to `playbook`, and the Nix flake has a `pbtop` output. Install `pbtop`, the Agent Budget Dashboard, only on a machine that has no `playbook`. From release 0.35.0 each `vX.Y.Z` release has `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone, and there are two ways to install it:
 
 ```bash
 brew install pragmatic-engineer/tap/pbtop
@@ -128,6 +130,8 @@ curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/in
 ```
 
 The Homebrew route needs tap trust. The full name trusts only `pbtop`. See [Homebrew tap trust](#homebrew-tap-trust).
+
+The `pbtop` formula conflicts with the `playbook` formula, because `playbook` owns the `pbtop` file. Homebrew refuses to install one while the other is installed, and the message names the command to run. If you add `playbook` later, run `brew uninstall pbtop` first. If you have both formulas from before the change, run `brew uninstall pbtop` once, then `brew reinstall playbook`. A machine with only the `pbtop` formula keeps using it and updates it with `brew upgrade pbtop`. Your usage data stays where it is.
 
 A `pbtop` from another source can fall behind `playbook`, for example the install script or an older install next to a newer `playbook`. `playbook doctor` then prints a WARN row with the version, the path and the command that fixes it. The first command after an upgrade by Homebrew, the install script or a manual download adds the same hint under the `playbook updated from A to B` line, once. When a Claude Code session starts first, its hook takes that line and only `playbook doctor` shows the hint. The check runs `pbtop --version`, and only in those two places: never in a hook or the status line.
 
