@@ -24,7 +24,7 @@
 │live  alph│M          Show last month                          all panels              │     $1.25│
 │          │a          Show all time                            all panels              │     $1.25│
 │          │r          Switch between today and this week       all panels              │     $0.55│
-│          │                                                                            │     $0.80│
-│          │Views                                                                       │     $0.95│
+│          │z          Switch between local time and UTC        all panels              │     $0.80│
+│          │                                                                            │     $0.95│
 ╰──────────╰┤ ↑/↓ j/k scroll, any other key closes ├────────────────────────────────────╯──────────╯
  d day w week m month ←/→ day r range v view / filter ? help q quit  updated 01:46:40 UTC, every 5s
