@@ -59,28 +59,63 @@ pub struct Moved {
     pub cost_usd: f64,
 }
 
-/// The events in `[from, to)` that are not on `target`, and are on `was` when
-/// given.
-fn selection(table: &str) -> String {
+/// What a move covers: the events whose own time is in `[from, to)`, or all
+/// events of the sessions whose first event is in `[from, to)`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Scope {
+    pub from: i64,
+    pub to: i64,
+    pub by_session: bool,
+}
+
+impl Scope {
+    pub fn time(from: i64, to: i64) -> Scope {
+        Scope {
+            from,
+            to,
+            by_session: false,
+        }
+    }
+
+    pub fn sessions(from: i64, to: i64) -> Scope {
+        Scope {
+            from,
+            to,
+            by_session: true,
+        }
+    }
+
+    fn clause(self) -> &'static str {
+        if self.by_session {
+            "session_id IN (SELECT session_id FROM usage_events GROUP BY session_id
+                HAVING MIN(timestamp) >= :from AND MIN(timestamp) < :to)"
+        } else {
+            "timestamp >= :from AND timestamp < :to"
+        }
+    }
+}
+
+/// The rows of `scope` that are not on `target`, and are on `was` when given.
+fn selection(table: &str, scope: Scope) -> String {
     format!(
-        "FROM {table} WHERE timestamp >= :from AND timestamp < :to AND account <> :target
-         AND (:was IS NULL OR account = :was)"
+        "FROM {table} WHERE {} AND account <> :target AND (:was IS NULL OR account = :was)",
+        scope.clause()
     )
 }
 
 /// Counts what `assign` would move. Changes nothing.
 pub fn plan(
     conn: &Connection,
-    from: i64,
-    to: i64,
+    scope: Scope,
     target: &str,
     was: Option<&str>,
 ) -> Result<Moved, String> {
+    let (from, to) = (scope.from, scope.to);
     let (events, cost_usd): (i64, f64) = conn
         .query_row(
             &format!(
                 "SELECT COUNT(*), COALESCE(SUM(cost_usd), 0) {}",
-                selection("usage_events")
+                selection("usage_events", scope)
             ),
             named_params! {":from": from, ":to": to, ":target": target, ":was": was},
             |r| Ok((r.get(0)?, r.get(1)?)),
@@ -88,7 +123,10 @@ pub fn plan(
         .map_err(|e| err("count the events", e))?;
     let tool_events = conn
         .query_row(
-            &format!("SELECT COUNT(*) {}", selection("tool_invocation_events")),
+            &format!(
+                "SELECT COUNT(*) {}",
+                selection("tool_invocation_events", scope)
+            ),
             named_params! {":from": from, ":to": to, ":target": target, ":was": was},
             |r| r.get(0),
         )
@@ -100,19 +138,19 @@ pub fn plan(
     })
 }
 
-/// Moves the events of `[from, to)` to `target` and records the old labels.
+/// Moves the rows of `scope` to `target` and records the old labels.
 /// Returns the id of the move, or `None` when nothing needed to move.
 pub fn assign(
     conn: &Connection,
-    from: i64,
-    to: i64,
+    scope: Scope,
     target: &str,
     was: Option<&str>,
     now: i64,
 ) -> Result<Option<(i64, Moved)>, String> {
+    let (from, to) = (scope.from, scope.to);
     let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
         .map_err(|e| err("begin the move", e))?;
-    let moved = plan(&tx, from, to, target, was)?;
+    let moved = plan(&tx, scope, target, was)?;
     if moved.events + moved.tool_events == 0 {
         return Ok(None);
     }
@@ -127,7 +165,7 @@ pub fn assign(
             &format!(
                 "INSERT INTO account_assignment_rows (assignment_id, kind, event_id, previous)
                  SELECT :id, :kind, event_id, account {}",
-                selection(table)
+                selection(table, scope)
             ),
             named_params! {":id": id, ":kind": kind, ":from": from, ":to": to, ":target": target, ":was": was},
         )
@@ -204,7 +242,7 @@ mod tests {
     #[test]
     fn a_dry_run_counts_the_events_and_the_cost_and_changes_nothing() {
         let conn = store();
-        let m = plan(&conn, 100, 300, "personal", None).unwrap();
+        let m = plan(&conn, Scope::time(100, 300), "personal", None).unwrap();
         assert_eq!((m.events, m.tool_events), (2, 1));
         assert!((m.cost_usd - 3.0).abs() < 1e-9);
         assert_eq!(labels(&conn)[0], "work@x.com");
@@ -213,7 +251,7 @@ mod tests {
     #[test]
     fn apply_moves_the_half_open_range_and_the_tool_events() {
         let conn = store();
-        let (_, m) = assign(&conn, 100, 300, "personal", None, 1)
+        let (_, m) = assign(&conn, Scope::time(100, 300), "personal", None, 1)
             .unwrap()
             .unwrap();
         assert_eq!(m.events, 2);
@@ -232,10 +270,10 @@ mod tests {
     #[test]
     fn applying_the_same_move_twice_moves_nothing_the_second_time() {
         let conn = store();
-        assert!(assign(&conn, 100, 300, "personal", None, 1)
+        assert!(assign(&conn, Scope::time(100, 300), "personal", None, 1)
             .unwrap()
             .is_some());
-        assert!(assign(&conn, 100, 300, "personal", None, 2)
+        assert!(assign(&conn, Scope::time(100, 300), "personal", None, 2)
             .unwrap()
             .is_none());
         let n: i64 = conn
@@ -247,10 +285,16 @@ mod tests {
     #[test]
     fn the_was_filter_leaves_other_accounts_alone() {
         let conn = store();
-        let m = assign(&conn, 0, 1000, "personal", Some("other@x.com"), 1)
-            .unwrap()
-            .unwrap()
-            .1;
+        let m = assign(
+            &conn,
+            Scope::time(0, 1000),
+            "personal",
+            Some("other@x.com"),
+            1,
+        )
+        .unwrap()
+        .unwrap()
+        .1;
         assert_eq!((m.events, m.tool_events), (1, 0));
         assert_eq!(labels(&conn)[0], "work@x.com");
     }
@@ -259,7 +303,7 @@ mod tests {
     fn undo_restores_every_previous_label_once() {
         let conn = store();
         let before = labels(&conn);
-        assign(&conn, 0, 1000, "personal", None, 1).unwrap();
+        assign(&conn, Scope::time(0, 1000), "personal", None, 1).unwrap();
         assert!(labels(&conn).iter().all(|l| l == "personal"));
         let (_, restored) = undo(&conn, None).unwrap().unwrap();
         assert_eq!(restored, 5);
@@ -270,7 +314,7 @@ mod tests {
     #[test]
     fn undo_skips_a_row_relabeled_after_the_move() {
         let conn = store();
-        assign(&conn, 0, 1000, "personal", None, 1).unwrap();
+        assign(&conn, Scope::time(0, 1000), "personal", None, 1).unwrap();
         conn.execute(
             "UPDATE usage_events SET account = 'later' WHERE event_id = 'a'",
             [],
