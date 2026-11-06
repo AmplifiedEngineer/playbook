@@ -89,6 +89,9 @@ pub enum ConfigError {
     GlobalOnly(String),
     /// A `watch.rule.<id>` value that is not a valid rule. `reason` says why.
     InvalidRule { key: String, reason: String },
+    /// The config database was written by a newer build, or its stored schema
+    /// version is not a whole number. Holds the full message.
+    SchemaRefused(String),
 }
 
 impl std::fmt::Display for ConfigError {
@@ -148,6 +151,7 @@ impl std::fmt::Display for ConfigError {
                 "config directory could not be created or written into: {}",
                 path.display()
             ),
+            ConfigError::SchemaRefused(message) => f.write_str(message),
         }
     }
 }

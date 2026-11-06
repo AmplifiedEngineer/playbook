@@ -12,6 +12,10 @@ use playbook_store::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::time::Duration;
 
+/// The usage database layout this build writes. A database without the row
+/// counts as version 0 and is stamped on open.
+pub const SCHEMA_VERSION: i64 = 1;
+
 const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS usage_events (
     event_id TEXT PRIMARY KEY,
@@ -117,6 +121,9 @@ fn open_prepared(path: &Path) -> Result<Connection, String> {
         BUSY_TIMEOUT,
     )
     .map_err(|e| format!("failed to set journal_mode=WAL: {e}"))?;
+    // Before any table is created, so a newer database is left untouched.
+    playbook_store::schema::check_and_stamp(&conn, "usage.db", SCHEMA_VERSION)
+        .map_err(|e| e.to_string())?;
     retry_busy(|| conn.execute_batch(SCHEMA_SQL), BUSY_TIMEOUT)
         .map_err(|e| format!("failed to create usage schema: {e}"))?;
     ensure_cache_1h_column(&conn)?;
@@ -537,6 +544,76 @@ mod tests {
         let _ = fs::remove_dir_all(dir.parent().unwrap());
     }
 
+    fn stored_schema_version(path: &Path) -> Option<String> {
+        let conn = Connection::open(path).unwrap();
+        conn.query_row(
+            "SELECT value FROM meta WHERE key = 'schema_version'",
+            [],
+            |r| r.get(0),
+        )
+        .ok()
+    }
+
+    #[test]
+    fn a_fresh_database_is_stamped_with_the_current_schema_version() {
+        // Arrange
+        let path = scratch_dir("usage-schema-fresh").join("usage.db");
+
+        // Act
+        drop(open_db(&path).unwrap());
+
+        // Assert
+        assert_eq!(
+            stored_schema_version(&path),
+            Some(SCHEMA_VERSION.to_string())
+        );
+    }
+
+    #[test]
+    fn a_database_without_the_version_row_opens_and_is_stamped() {
+        // Arrange: a database from before the row existed.
+        let path = scratch_dir("usage-schema-old").join("usage.db");
+        drop(open_db(&path).unwrap());
+        Connection::open(&path)
+            .unwrap()
+            .execute("DROP TABLE meta", [])
+            .unwrap();
+
+        // Act
+        let result = open_db(&path);
+
+        // Assert
+        assert!(result.is_ok());
+        assert_eq!(
+            stored_schema_version(&path),
+            Some(SCHEMA_VERSION.to_string())
+        );
+    }
+
+    #[test]
+    fn a_newer_database_is_refused_naming_both_versions_and_stays_as_it_was() {
+        // Arrange
+        let path = scratch_dir("usage-schema-newer").join("usage.db");
+        drop(open_db(&path).unwrap());
+        let newer = (SCHEMA_VERSION + 1).to_string();
+        Connection::open(&path)
+            .unwrap()
+            .execute("UPDATE meta SET value = ?1", [&newer])
+            .unwrap();
+
+        // Act
+        let err = open_db(&path).unwrap_err();
+
+        // Assert
+        assert!(err.contains(&format!("version {newer}")), "{err}");
+        assert!(
+            err.contains(&format!("understands {SCHEMA_VERSION}")),
+            "{err}"
+        );
+        assert!(err.contains("playbook update"), "{err}");
+        assert_eq!(stored_schema_version(&path), Some(newer));
+    }
+
     #[test]
     fn a_reset_empties_the_history_and_the_read_progress_but_keeps_the_rest() {
         // Arrange
@@ -641,6 +718,7 @@ mod tests {
                 "account_assignment_rows",
                 "account_assignments",
                 "account_names",
+                "meta",
                 "session_accounts",
                 "session_reconcile",
                 "session_sources",

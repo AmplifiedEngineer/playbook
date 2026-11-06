@@ -7,6 +7,7 @@
 #![allow(clippy::disallowed_types)]
 
 mod retry;
+pub mod schema;
 
 pub use retry::{retry_busy_only, retry_busy_or_locked, retry_with_pause, BUSY_PAUSE, OPEN_BUDGET};
 

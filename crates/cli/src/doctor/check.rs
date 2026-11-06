@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// How a row reads in the status table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
     Pass,
     Info,
@@ -126,7 +126,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 25] = [
+const PROBES: [Probe; 26] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -139,6 +139,7 @@ const PROBES: [Probe; 25] = [
     worktree_rows,
     migration_rows,
     data_rows,
+    store_schema_rows,
     hooks_rows,
     atlassian_rows,
     old_launcher_rows,
@@ -1523,6 +1524,79 @@ fn update_rows(env: &Env) -> Vec<Row> {
     rows
 }
 
+/// What the schema probe found in one database file.
+enum StoreSchema {
+    Missing,
+    Unreadable,
+    /// `None` when the file has no version row yet.
+    Version(Option<i64>),
+    NotAnInteger,
+}
+
+fn read_store_schema(path: &Path, name: &str) -> StoreSchema {
+    if !path.is_file() {
+        return StoreSchema::Missing;
+    }
+    let Ok(conn) = crate::state::open_read_only(path) else {
+        return StoreSchema::Unreadable;
+    };
+    match playbook_store::schema::stored_version(&conn, name) {
+        Ok(found) => StoreSchema::Version(found),
+        Err(playbook_store::schema::SchemaError::NotAnInteger { .. }) => StoreSchema::NotAnInteger,
+        Err(_) => StoreSchema::Unreadable,
+    }
+}
+
+/// The schema version each database was stamped with, against the one this
+/// build writes. A newer database makes every write to it fail, so it is a
+/// failure with the update command.
+fn store_schema_rows(env: &Env) -> Vec<Row> {
+    let root = crate::common::paths::playbook_root_from(&env.home);
+    let stores = [
+        (
+            "usage.db",
+            crate::usage::data::usage_db(&env.home),
+            crate::usage::db::SCHEMA_VERSION,
+        ),
+        (
+            "config.db",
+            config::store::db_path(&root),
+            config::store::SCHEMA_VERSION,
+        ),
+    ];
+    let mut level = Level::Pass;
+    let mut parts = Vec::new();
+    for (name, path, ours) in stores {
+        match read_store_schema(&path, name) {
+            StoreSchema::Missing => {
+                level = level.max(Level::Info);
+                parts.push(format!("{name} not created yet"));
+            }
+            StoreSchema::Unreadable => {
+                level = level.max(Level::Warn);
+                parts.push(format!("{name} unreadable"));
+            }
+            StoreSchema::NotAnInteger => {
+                level = level.max(Level::Warn);
+                parts.push(format!("{name} has a schema_version that is not a number"));
+            }
+            StoreSchema::Version(found) => {
+                let found = found.unwrap_or(0);
+                if found > ours {
+                    level = Level::Fail;
+                }
+                parts.push(format!("{name} {found} (this build writes {ours})"));
+            }
+        }
+    }
+    let row = Row::new("-", level, format!("store schema: {}", parts.join(", ")));
+    vec![if level == Level::Fail {
+        row.hint("run: playbook update")
+    } else {
+        row
+    }]
+}
+
 fn migration_rows(env: &Env) -> Vec<Row> {
     let ctx = crate::init::migrate::Ctx {
         home: env.home.clone(),
@@ -1777,7 +1851,7 @@ pub fn failed(rows: &[Row]) -> bool {
 mod tests {
     use super::*;
 
-    const PROBE_COUNT: usize = 25;
+    const PROBE_COUNT: usize = 26;
     const COMPLETION_PROBE_AT: usize = PROBE_COUNT - 2;
 
     fn env_for(home: &Path) -> Env {
@@ -1887,6 +1961,70 @@ mod tests {
             "Codex found, the playbook guards are in ~/.codex/hooks.json"
         );
         assert!(registered.hint.unwrap().contains("/hooks"));
+    }
+
+    fn open_stores(home: &Path) {
+        drop(crate::usage::db::open_db(&crate::usage::data::usage_db(home)).unwrap());
+        drop(config::store::open(&crate::common::paths::playbook_root_from(home)).unwrap());
+    }
+
+    fn set_version(db: &Path, value: &str) {
+        playbook_store::Connection::open(db)
+            .unwrap()
+            .execute(
+                "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+                [value],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn the_store_schema_row_passes_and_shows_both_versions() {
+        // Arrange
+        let home = crate::common::test_support::scratch_dir("doctor-schema-ok");
+        open_stores(&home);
+
+        // Act
+        let rows = store_schema_rows(&env_for(&home));
+
+        // Assert
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].level, Level::Pass);
+        assert!(rows[0].message.contains("usage.db 1"), "{rows:?}");
+        assert!(rows[0].message.contains("config.db 1"), "{rows:?}");
+    }
+
+    #[test]
+    fn the_store_schema_row_fails_with_the_update_command_for_a_newer_database() {
+        // Arrange
+        let home = crate::common::test_support::scratch_dir("doctor-schema-newer");
+        open_stores(&home);
+        set_version(&crate::usage::data::usage_db(&home), "99");
+
+        // Act
+        let rows = store_schema_rows(&env_for(&home));
+
+        // Assert
+        assert_eq!(rows[0].level, Level::Fail);
+        assert!(rows[0].message.contains("usage.db 99"), "{rows:?}");
+        assert_eq!(rows[0].hint.as_deref(), Some("run: playbook update"));
+    }
+
+    #[test]
+    fn the_store_schema_row_says_so_when_no_database_exists_yet() {
+        // Arrange
+        let home = crate::common::test_support::scratch_dir("doctor-schema-none");
+        fs::create_dir_all(&home).unwrap();
+
+        // Act
+        let rows = store_schema_rows(&env_for(&home));
+
+        // Assert
+        assert_eq!(rows[0].level, Level::Info);
+        assert!(
+            rows[0].message.contains("usage.db not created yet"),
+            "{rows:?}"
+        );
     }
 
     #[test]
