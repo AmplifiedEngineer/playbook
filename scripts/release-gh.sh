@@ -22,7 +22,11 @@
 #   release-gh.sh wait <repo> <pr> <seconds>
 #     Waits until the pull request merges, then prints sha=<merge commit>.
 #     Fails when it closes without a merge or the time runs out. A failed
-#     poll is retried.
+#     poll is retried. With RELEASE_GH_UPDATE_BRANCH=1, a pull request whose
+#     mergeStateStatus is BEHIND gets `gh pr update-branch`, at most once
+#     every RELEASE_GH_UPDATE_EVERY seconds (default 240), because strict
+#     checks keep a pull request that fell behind from merging. Leave it
+#     unset for a repository with a merge queue.
 #
 #   release-gh.sh tag <repo> <tag> <sha>
 #     Creates the lightweight tag <tag>, a vX.Y.Z, on <sha>. A tag that
@@ -163,18 +167,26 @@ pr() {
 
 wait_merged() {
   [ "$#" -eq 3 ] || usage
-  local repo="$1" number="$2" seconds="$3" end state sha
+  local repo="$1" number="$2" seconds="$3" end state sha behind next=0 now
   [[ "$number" =~ ^[0-9]+$ ]] || usage
   [[ "$seconds" =~ ^[0-9]+$ ]] || usage
   end=$(( $(date +%s) + seconds ))
   while :; do
-    state="" sha=""
-    read -r state sha < <(gh pr view "$number" --repo "$repo" --json state,mergeCommit \
-      --jq '"\(.state) \(.mergeCommit.oid // "")"' 2>/dev/null) || true
+    state="" behind="" sha=""
+    read -r state behind sha < <(gh pr view "$number" --repo "$repo" --json state,mergeStateStatus,mergeCommit \
+      --jq '"\(.state) \(.mergeStateStatus) \(.mergeCommit.oid // "")"' 2>/dev/null) || true
     case "$state" in
       MERGED)
         if [[ "$sha" =~ $SHA ]]; then printf 'sha=%s\n' "$sha"; return 0; fi ;;
       CLOSED) fail "pull request $repo#$number was closed without a merge" ;;
+      OPEN)
+        now="$(date +%s)"
+        if [ "${RELEASE_GH_UPDATE_BRANCH:-}" = 1 ] && [ "$behind" = BEHIND ] && [ "$now" -ge "$next" ]; then
+          # A failed update is not fatal: the next round looks again.
+          gh pr update-branch "$number" --repo "$repo" >/dev/null 2>&1 \
+            || echo "could not update the branch of $repo#$number" >&2
+          next=$(( now + ${RELEASE_GH_UPDATE_EVERY:-240} ))
+        fi ;;
     esac
     [ "$(date +%s)" -lt "$end" ] || fail "pull request $repo#$number did not merge within $seconds seconds"
     sleep "${RELEASE_GH_POLL:-20}"

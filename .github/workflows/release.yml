@@ -1043,6 +1043,7 @@ jobs:
         env:
           TAP_TOKEN: ${{ steps.tap-app.outputs.token }}
           MARKETPLACE_TOKEN: ${{ steps.marketplace-app.outputs.token }}
+          RELEASE_GH_UPDATE_BRANCH: '1'
         run: |
           set -euo pipefail
           end=$(( $(date +%s) + 1800 ))
@@ -1434,6 +1435,7 @@ jobs:
           && steps.bot.outputs.configured == 'true' && needs.plan.outputs.dry_run != 'true'
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
+          RELEASE_GH_UPDATE_BRANCH: '1'
         run: |
           set -euo pipefail
           title="chore(release): nix flake $VERSION"

@@ -76,7 +76,7 @@ The flake lives in [pragmatic-engineer/nix](https://github.com/pragmatic-enginee
 
 1. It checks `SHA256SUMS` and the four Nix assets against their attestation.
 2. `scripts/render-flake.sh` rewrites the `releases` block of `flake.nix` in a checkout of that repository (the version and one SRI hash per system).
-3. The job opens `release/nix-vX.Y.Z` there titled `chore(release): nix flake X.Y.Z` with the app token, auto-merge on, and waits up to 30 minutes for the merge.
+3. The job opens `release/nix-vX.Y.Z` there titled `chore(release): nix flake X.Y.Z` with the app token, auto-merge on, and waits up to 30 minutes for the merge. Strict status checks hold back a pull request that fell behind `main`, so while it waits, `scripts/release-gh.sh wait` runs `gh pr update-branch` when its `mergeStateStatus` is `BEHIND`, at most once every four minutes. The `downstream` job does the same for the tap and marketplace pull requests. The wait for the release pull request in this repository does not, because that repository has a merge queue.
 
 - `scripts/release-notes.sh` still leaves such a commit out of the notes, for the history from before the flake moved.
 - The job skips when the release is not the latest or the flake is already ahead, so a backport does not move the flake back. Without the app secrets it warns and passes.
