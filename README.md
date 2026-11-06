@@ -45,7 +45,7 @@ Pick the first route that fits. Each one installs the `playbook` binary. Then ru
 
 For the best result, install the binary first and the plugin after it. Nix, Windows (experimental, with scoop), a pinned version and a route with no `curl | bash` are in the [install guide](docs/guides/00-install.md). To see what `playbook setup` changes before you agree, read [What setup installs](docs/guides/05-what-setup-installs.md).
 
-Pin a version of the install script with `PLAYBOOK_REF=v0.40.0`. Update with `brew upgrade playbook` on Homebrew, or `playbook update` on the other routes. On a brew install, `playbook update` stops and tells you to run `brew upgrade playbook`. Run `playbook doctor check` to see what is in place, or `/playbook:doctor` in a Claude Code session.
+Pin a version of the install script with `PLAYBOOK_REF=v0.40.1`. Update with `brew upgrade playbook` on Homebrew, or `playbook update` on the other routes. On a brew install, `playbook update` stops and tells you to run `brew upgrade playbook`. Run `playbook doctor check` to see what is in place, or `/playbook:doctor` in a Claude Code session.
 
 ### Homebrew tap trust
 

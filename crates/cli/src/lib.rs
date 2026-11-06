@@ -649,7 +649,7 @@ pub enum Command {
     /// Say which model, effort and agent a kind of task goes to
     ///
     /// One routing table for every command that dispatches agents. Kinds:
-    /// mechanical, classify, check, review, implement, design. Only
+    /// mechanical, classify, check, review, write, implement, design. Only
     /// `implement` reads `--tier` (low, medium or high). The answer includes
     /// whether the user must approve first (the top model, the high tier, or a
     /// task that failed twice). `routing.escalate` decides what happens then:
@@ -659,7 +659,7 @@ pub enum Command {
     ///
     /// Example: `playbook route implement --tier medium --json`
     Route {
-        /// One of mechanical, classify, check, review, implement or design
+        /// One of mechanical, classify, check, review, write, implement or design
         kind: String,
         /// One of low, medium or high. Only `implement` reads it
         #[arg(long, default_value = "low")]

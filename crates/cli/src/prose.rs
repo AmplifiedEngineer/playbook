@@ -4,7 +4,13 @@
 //! `playbook prose check <files>`: the prose lint of the writing-style skill
 //! run on files, for docs and ADRs. The same table backs the
 //! `commit-message-sanitizer` hook.
+//!
+//! A file `<file>.facts` next to a checked file adds two checks: every
+//! number, identifier, path and reference in the text must appear in the
+//! facts, and the text must fit the length limit of the `kind:` named on the
+//! first line of the facts (see `common::prose_ground`).
 
+use crate::common::prose_ground;
 use crate::common::prose_lint::{has_hard, lint, Finding};
 use std::fs;
 use std::path::Path;
@@ -50,7 +56,16 @@ pub fn check(files: &[std::path::PathBuf], github: bool) -> Result<Report, Strin
     for path in files {
         let text = fs::read_to_string(path)
             .map_err(|e| format!("could not read {}: {e}", path.display()))?;
-        let findings = lint(&text);
+        let mut findings = lint(&text);
+        // A sibling `<file>.facts` turns on the grounding and length checks.
+        let mut facts_name = path.as_os_str().to_os_string();
+        facts_name.push(".facts");
+        if let Ok(facts) = fs::read_to_string(&facts_name) {
+            findings.extend(
+                prose_ground::check(&text, &facts)
+                    .map_err(|e| format!("{}: {e}", Path::new(&facts_name).display()))?,
+            );
+        }
         report.total += findings.len();
         if has_hard(&findings) {
             report.hard += findings.iter().filter(|f| f.class.hard()).count();
@@ -126,6 +141,31 @@ mod tests {
         let report = check(&[path], false).unwrap();
 
         assert_eq!((report.total, report.hard), (1, 0));
+    }
+
+    #[test]
+    fn a_facts_file_next_to_the_text_turns_on_the_grounding_check() {
+        let path = file("prose-facts", "Fixed. The cap is 9.\n");
+        let mut facts = path.clone().into_os_string();
+        facts.push(".facts");
+        fs::write(&facts, "kind: reply\nThe cap is 3.\n").unwrap();
+
+        let report = check(&[path], false).unwrap();
+
+        assert_eq!(report.hard, 1, "{:?}", report.lines);
+        assert!(report.lines[0].contains("token not in the facts \"9\""));
+    }
+
+    #[test]
+    fn a_bad_kind_in_the_facts_file_is_an_error() {
+        let path = file("prose-facts-bad", "Fixed.\n");
+        let mut facts = path.clone().into_os_string();
+        facts.push(".facts");
+        fs::write(&facts, "kind: essay\n").unwrap();
+
+        let err = check(&[path], false).err();
+
+        assert!(err.is_some_and(|e| e.contains("unknown kind")));
     }
 
     #[test]

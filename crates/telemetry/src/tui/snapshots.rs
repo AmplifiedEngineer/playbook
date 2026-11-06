@@ -1131,7 +1131,7 @@ fn enterprise_sources(cache_age: i64) -> Sources {
     use crate::plan::{Account, Plan, SpendLimit, UsageCache};
     Sources {
         account: Account {
-            plan: Plan::EnterpriseOrUnknown,
+            plan: Plan::Unknown,
             cache: Some(UsageCache {
                 fetched_at: NOW - cache_age,
                 five_hour: None,

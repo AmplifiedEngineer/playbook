@@ -48,3 +48,30 @@ fn a_soft_finding_exits_zero_even_with_strict() {
     assert_eq!(code, 0);
     assert!(out.contains("absolute word"), "{out}");
 }
+
+#[test]
+fn passive_voice_warns_and_never_fails_strict() {
+    let (code, out) = run("d", "The retry was added.\n", true);
+
+    assert_eq!(code, 0);
+    assert!(out.contains("passive voice"), "{out}");
+}
+
+#[test]
+fn a_facts_file_makes_an_invented_number_a_hard_finding() {
+    let dir = std::env::temp_dir().join(format!("prose-cli-{}-e", playbook::testing::run_id()));
+    fs::create_dir_all(&dir).expect("scratch dir");
+    let file = dir.join("a.md");
+    fs::write(&file, "Fixed in 9 places.\n").expect("text");
+    fs::write(dir.join("a.md.facts"), "kind: reply\nFixed in 3 places.\n").expect("facts");
+
+    let out = isolated::playbook()
+        .args(["prose", "check", "--strict"])
+        .env_remove("GITHUB_ACTIONS")
+        .arg(&file)
+        .output()
+        .expect("playbook runs");
+
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("token not in the facts \"9\""));
+}
