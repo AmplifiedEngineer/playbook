@@ -1,14 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
 # Config for zizmor (CI: .github/workflows/zizmor.yml, local: `just zizmor`).
-# Every ignore is narrow: one rule, one workflow file, with the reason.
-rules:
-  dangerous-triggers:
-    ignore:
-      # issue_comment is how a contributor signs the CLA. The signing job is a reusable workflow in pragmatic-engineer/.github. It reads and writes only through the REST API, has no checkout, and passes every comment value through env. It is the only job in cla-dco.yml with contents: write.
-      - cla-dco.yml:14
-  secrets-outside-env:
-    ignore:
-      # The repo has no deployment environments; these are repo-level secrets by design.
-      - auto-update-pr.yml
-      - dependabot-auto-merge.yml
-      - release.yml
+# No findings are ignored. Fix the cause of each finding instead of adding an ignore here.
+rules: {}

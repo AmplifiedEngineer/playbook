@@ -19,6 +19,7 @@ pub use playbook_common::{atomic, git, gitfacts, hash, payload, proc, repo, sess
 pub use playbook_data as data;
 pub mod plugin_state;
 pub mod prose;
+pub mod prose_ground;
 pub mod prose_lint;
 pub mod re;
 pub mod real_home;

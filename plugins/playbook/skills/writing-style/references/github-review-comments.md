@@ -4,7 +4,7 @@ Read before posting a review comment, a reply to review feedback, or an issue or
 
 ## Review findings
 
-- Review findings MUST default to one sentence, two at most (the problem, then what breaks). A paragraph is the rare exception for a genuinely non-obvious mechanism, not the normal case.
+- Review findings MUST follow `LEN-REVIEW` in SKILL.md: one sentence, two at most (the problem, then what breaks). A paragraph is the rare exception for a genuinely non-obvious mechanism, not the normal case.
 - Use "we" and "this" in code review comments instead of "you", to stay non-confrontational.
 
 ## When reviewing (posting as a reviewer)
@@ -31,7 +31,7 @@ Read before posting a review comment, a reply to review feedback, or an issue or
 
 Reply drafts must read like a human typed them quickly in a code review thread.
 
-- **One sentence is ideal. Two max.** Three is too many. A paragraph is never acceptable in a code review reply. If you need two sentences, the second adds a fact, not a justification.
+- **One sentence is ideal. Two max (`LEN-REPLY`).** Three is too many. A paragraph is never acceptable in a code review reply. If you need two sentences, the second adds a fact, not a justification.
 - **Skip the opener.** Go straight to substance. "Behind a feature flag for now." not "Good point. I'll put it behind a feature flag for now." Most replies need no acknowledgement at all. Praise-style openers in particular are immediate AI tells: NEVER lead with "Good catch.", "Nice catch.", "Great catch.", "You're right.", "Great point.", "Good point.", "Valid point."
 - **Never paraphrase the reviewer's point back.** They just said it. Repeating it wastes space and sounds like a chatbot confirming receipt.
 - **Code-change replies are especially terse.** When the reply is paired with a fix in the same push, the diff is the explanation. Default to one short sentence: "Fixed.", "Done.", "Ok, done." A brief locator tag is fine when it adds value ("Done, added (v || null) normalisation for notes."). NEVER rationalise the fix. NEVER restate the reviewer's finding before saying "fixed".

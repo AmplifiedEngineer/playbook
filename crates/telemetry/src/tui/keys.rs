@@ -43,6 +43,7 @@ pub enum Cmd {
     EditLayout,
     Help,
     Refresh,
+    Zone,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -246,9 +247,9 @@ pub const BINDINGS: &[Binding] = &[
     },
     Binding {
         cmd: Cmd::CursorLeft,
-        keys: &[KeyCode::Left],
+        keys: &[KeyCode::Left, c('h')],
         ctrl: false,
-        shown: "Left",
+        shown: "Left, h",
         group: Group::Navigation,
         panels: "charts",
         text: "Move the chart cursor one bar back",
@@ -256,9 +257,9 @@ pub const BINDINGS: &[Binding] = &[
     },
     Binding {
         cmd: Cmd::CursorRight,
-        keys: &[KeyCode::Right],
+        keys: &[KeyCode::Right, c('l')],
         ctrl: false,
-        shown: "Right",
+        shown: "Right, l",
         group: Group::Navigation,
         panels: "charts",
         text: "Move the chart cursor one bar forward",
@@ -355,6 +356,16 @@ pub const BINDINGS: &[Binding] = &[
         hint: hint("t", "theme", 12, 2),
     },
     Binding {
+        cmd: Cmd::Zone,
+        keys: &[c('z')],
+        ctrl: false,
+        shown: "z",
+        group: Group::Periods,
+        panels: ALL_PANELS,
+        text: "Switch between local time and UTC",
+        hint: None,
+    },
+    Binding {
         cmd: Cmd::Sessions,
         keys: &[c('p')],
         ctrl: false,
@@ -376,13 +387,13 @@ pub const BINDINGS: &[Binding] = &[
     },
     Binding {
         cmd: Cmd::Help,
-        keys: &[c('h'), c('?')],
+        keys: &[c('?')],
         ctrl: false,
-        shown: "h, ?",
+        shown: "?",
         group: Group::Views,
         panels: ALL_PANELS,
         text: "Show this help",
-        hint: hint("h", "help", 13, 0),
+        hint: hint("?", "help", 13, 0),
     },
     Binding {
         cmd: Cmd::Sort,
