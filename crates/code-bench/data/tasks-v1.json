@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "seed": 20261106,
+  "source": "hand-checked against the pinned commits; replace by the universal-ctags 6.2.0 generation",
+  "tasks": [
+    {
+      "id": "cobra/function/ExactArgs@args.go",
+      "repo": "cobra",
+      "kind": "function",
+      "name": "ExactArgs",
+      "path": "args.go",
+      "line": 94
+    },
+    {
+      "id": "cobra/function/MarkFlagRequired@shell_completions.go",
+      "repo": "cobra",
+      "kind": "function",
+      "name": "MarkFlagRequired",
+      "path": "shell_completions.go",
+      "line": 38
+    },
+    {
+      "id": "cobra/function/NoArgs@args.go",
+      "repo": "cobra",
+      "kind": "function",
+      "name": "NoArgs",
+      "path": "args.go",
+      "line": 42
+    },
+    {
+      "id": "cobra/function/OnlyValidArgs@args.go",
+      "repo": "cobra",
+      "kind": "function",
+      "name": "OnlyValidArgs",
+      "path": "args.go",
+      "line": 51
+    },
+    {
+      "id": "cobra/method/AddCommand@command.go",
+      "repo": "cobra",
+      "kind": "method",
+      "name": "AddCommand",
+      "path": "command.go",
+      "line": 1337
+    },
+    {
+      "id": "cobra/method/Execute@command.go",
+      "repo": "cobra",
+      "kind": "method",
+      "name": "Execute",
+      "path": "command.go",
+      "line": 1070
+    },
+    {
+      "id": "cobra/struct/Command@command.go",
+      "repo": "cobra",
+      "kind": "struct",
+      "name": "Command",
+      "path": "command.go",
+      "line": 54
+    },
+    {
+      "id": "cobra/struct/Group@command.go",
+      "repo": "cobra",
+      "kind": "struct",
+      "name": "Group",
+      "path": "command.go",
+      "line": 45
+    },
+    {
+      "id": "cobra/type/PositionalArgs@args.go",
+      "repo": "cobra",
+      "kind": "type",
+      "name": "PositionalArgs",
+      "path": "args.go",
+      "line": 22
+    },
+    {
+      "id": "express/function/createApplication@lib/express.js",
+      "repo": "express",
+      "kind": "function",
+      "name": "createApplication",
+      "path": "lib/express.js",
+      "line": 36
+    },
+    {
+      "id": "express/function/defineGetter@lib/request.js",
+      "repo": "express",
+      "kind": "function",
+      "name": "defineGetter",
+      "path": "lib/request.js",
+      "line": 509
+    },
+    {
+      "id": "express/function/logerror@lib/application.js",
+      "repo": "express",
+      "kind": "function",
+      "name": "logerror",
+      "path": "lib/application.js",
+      "line": 615
+    },
+    {
+      "id": "express/function/sendfile@lib/response.js",
+      "repo": "express",
+      "kind": "function",
+      "name": "sendfile",
+      "path": "lib/response.js",
+      "line": 913
+    },
+    {
+      "id": "express/function/tryRender@lib/application.js",
+      "repo": "express",
+      "kind": "function",
+      "name": "tryRender",
+      "path": "lib/application.js",
+      "line": 625
+    },
+    {
+      "id": "express/function/tryStat@lib/view.js",
+      "repo": "express",
+      "kind": "function",
+      "name": "tryStat",
+      "path": "lib/view.js",
+      "line": 197
+    },
+    {
+      "id": "ripgrep/method/search_path@crates/searcher/src/searcher/mod.rs",
+      "repo": "ripgrep",
+      "kind": "method",
+      "name": "search_path",
+      "path": "crates/searcher/src/searcher/mod.rs",
+      "line": 623
+    },
+    {
+      "id": "ripgrep/struct/Searcher@crates/searcher/src/searcher/mod.rs",
+      "repo": "ripgrep",
+      "kind": "struct",
+      "name": "Searcher",
+      "path": "crates/searcher/src/searcher/mod.rs",
+      "line": 577
+    },
+    {
+      "id": "ripgrep/struct/SearcherBuilder@crates/searcher/src/searcher/mod.rs",
+      "repo": "ripgrep",
+      "kind": "struct",
+      "name": "SearcherBuilder",
+      "path": "crates/searcher/src/searcher/mod.rs",
+      "line": 295
+    },
+    {
+      "id": "ripgrep/trait/Matcher@crates/matcher/src/lib.rs",
+      "repo": "ripgrep",
+      "kind": "trait",
+      "name": "Matcher",
+      "path": "crates/matcher/src/lib.rs",
+      "line": 537
+    },
+    {
+      "id": "ripgrep/trait/Sink@crates/searcher/src/sink.rs",
+      "repo": "ripgrep",
+      "kind": "trait",
+      "name": "Sink",
+      "path": "crates/searcher/src/sink.rs",
+      "line": 102
+    }
+  ]
+}

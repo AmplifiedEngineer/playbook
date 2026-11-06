@@ -8,4 +8,5 @@ pub mod corpus;
 pub mod ctags;
 pub mod metrics;
 pub mod process;
+pub mod tasks;
 pub mod tokenizer;
