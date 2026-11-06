@@ -122,6 +122,15 @@ pub enum UsageCommand {
 pub enum AccountCommand {
     /// List the accounts with their events, cost and time span
     List,
+    /// Print the account key for CLAUDE_CODE_OAUTH_TOKEN in this shell
+    ///
+    /// A session started with that variable set is recorded under a key like
+    /// `token:ab12cd34`, made from the token with a one way hash. This prints
+    /// the key and never the token. Run it in a shell that has the variable
+    /// set, then use the key with `account name` and `account assign`.
+    ///
+    /// Example: `playbook usage account fingerprint`
+    Fingerprint,
     /// Give an account key a display name, or clear it with an empty name
     ///
     /// Example: `playbook usage account name you@example.com Company`

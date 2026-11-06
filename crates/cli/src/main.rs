@@ -129,9 +129,15 @@ fn main() {
 
 fn real_main() {
     restore_sigpipe();
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    // The `pbtop` link of the Homebrew formula is the standalone dashboard,
+    // without playbook's host, as the separate `pbtop` binary runs.
+    if playbook::fastpath::invoked_as_pbtop(&args) {
+        playbook::usage::cli::main();
+        return;
+    }
     playbook::usage_host::install();
     // Hot paths skip building the clap tree. See `fastpath`.
-    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
     match playbook::fastpath::classify(&args) {
         Some(playbook::fastpath::Fast::Hook(name)) => {
             run_hook(name);

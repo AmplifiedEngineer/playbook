@@ -49,6 +49,20 @@ pub fn classify(args: &[OsString]) -> Option<Fast> {
     }
 }
 
+/// The name the Homebrew formula links to this binary so that it runs as the
+/// standalone dashboard (ADR 0041).
+pub const PBTOP_PROGRAM: &str = "pbtop";
+
+/// Whether the binary was started under the name `pbtop`, from the file name
+/// of the program in `args` (the full argv). A link keeps the name it was
+/// started by, so a `pbtop` link to `playbook` is told apart from `playbook`.
+pub fn invoked_as_pbtop(args: &[OsString]) -> bool {
+    args.first()
+        .map(std::path::Path::new)
+        .and_then(std::path::Path::file_stem)
+        .is_some_and(|stem| stem == PBTOP_PROGRAM)
+}
+
 /// What `playbook --version` prints, the same text clap renders.
 pub fn version_text() -> String {
     format!("playbook {}\n", env!("CARGO_PKG_VERSION"))
@@ -114,6 +128,31 @@ mod tests {
         ] {
             assert!(classify(&argv(parts)).is_none(), "{parts:?}");
         }
+    }
+
+    #[test]
+    fn a_program_named_pbtop_is_recognised_by_its_file_name() {
+        for program in ["pbtop", "/opt/homebrew/bin/pbtop", "./pbtop", "pbtop.exe"] {
+            assert!(
+                invoked_as_pbtop(&argv(&[program, "--version"])),
+                "{program}"
+            );
+        }
+    }
+
+    #[test]
+    fn other_program_names_are_not_pbtop() {
+        for program in [
+            "playbook",
+            "pb",
+            "pbtop-old",
+            "mypbtop",
+            "/opt/pbtop/playbook",
+            "",
+        ] {
+            assert!(!invoked_as_pbtop(&argv(&[program])), "{program:?}");
+        }
+        assert!(!invoked_as_pbtop(&[]));
     }
 
     #[test]

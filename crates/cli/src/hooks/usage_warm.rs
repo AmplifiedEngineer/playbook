@@ -14,11 +14,22 @@ pub fn run(payload: &Payload) {
     if payload.field(".session_id").is_empty() {
         return;
     }
+    let dir = crate::common::paths::usage_db_dir();
+    // Only a session start sees the credential the session begins with. The
+    // token itself is hashed here and never leaves this call.
+    if payload.field(".hook_event_name") == "SessionStart" {
+        let _ = std::fs::create_dir_all(&dir);
+        crate::usage::session_account::record(
+            &dir,
+            &payload.field(".session_id"),
+            crate::usage::session_account::env_fingerprint().as_deref(),
+        );
+    }
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
     let home = crate::common::home_dir();
     let mut paths = Paths::from_home(&home);
-    paths.db = crate::common::paths::usage_db_dir().join("usage.db");
+    paths.db = dir.join("usage.db");
     crate::usage::warm::maybe_spawn(&home, &paths, &exe);
 }

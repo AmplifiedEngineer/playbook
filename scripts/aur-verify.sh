@@ -78,6 +78,9 @@ case "$1" in
     [ "${out##* }" = "$version" ] || fail "playbook --version says '$out', not $version"
     echo "installed: $out"
     pacman -Qo /usr/bin/playbook | grep -q 'playbook-bin' || fail "pacman does not own /usr/bin/playbook as playbook-bin"
+    top="$(pbtop --version)"
+    [ "${top##* }" = "$version" ] || fail "pbtop --version says '$top', not $version"
+    pacman -Qo /usr/bin/pbtop | grep -q 'playbook-bin' || fail "pacman does not own /usr/bin/pbtop as playbook-bin"
     if [ -f "$2/.SRCINFO" ]; then
       as_builder "$work" makepkg --printsrcinfo | cmp -s - "$2/.SRCINFO" || fail ".SRCINFO does not match the PKGBUILD"
     fi
