@@ -69,6 +69,10 @@ Then it deletes the branch only if its name starts with `worktree-` (so a launch
 
 The base is `--base`, then the open PR's base, then the nearest open PR branch that is an ancestor of HEAD (a stacked PR), then the default branch.
 
+## Claude Code 2.1.318
+
+`playbook doctor` warns when Claude Code 2.1.318 runs in a linked worktree. That release can refuse shell commands there. If one is refused, call ExitWorktree with action `keep`, then continue from the original directory.
+
 ## See also
 
 - [Launcher and hooks](01-launcher-and-hooks.md): the `playbook cc` launcher that sets up the worktree.
