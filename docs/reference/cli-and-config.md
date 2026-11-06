@@ -54,7 +54,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `review.suggest.packageSpan` | `3` | a number, see the config keys page for the range |
 | `review.suggest.untestedLines` | `150` | a number, see the config keys page for the range |
 | `security.defaults` | `false` | `true`, `false` |
-| `usage.theme` | `default` | `default`, `dark`, `light`, `mono` |
+| `usage.theme` | `default` | `default`, `spectrum`, `dark`, `light`, `mono` |
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
 | `usage.refreshSeconds` | `5` | a number, see the config keys page for the range |
 | `usage.telemetry` | `auto` | `auto`, `off` |

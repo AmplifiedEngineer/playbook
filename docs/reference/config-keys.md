@@ -75,7 +75,7 @@ Older versions kept `config.json` files. The first run imports them and renames 
 | `docs.anydocPath` | empty | a path, or empty | An `anydoc` program to run instead of the bundled converter. It wins over the bundled one, and playbook does not check that it works offline. Empty means the bundled `pbdoc`, then the first `anydoc` on PATH. |
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` | The first day of the week for the `week` and `last-week` ranges of `playbook usage` (view, `--json`, `--summary`). Days are in the chosen time zone, local unless `usage.timeZone` says `utc`. |
 | `usage.refreshSeconds` | `5` | whole number, 1 to 3600 | How often the `playbook usage` terminal view reads new history and redraws, in seconds. |
-| `usage.theme` | `default` | `default`, `dark`, `light`, `mono` | The color theme `playbook usage` starts with. `t` cycles the themes inside the view. `NO_COLOR` forces `mono`. |
+| `usage.theme` | `default` | `default`, `spectrum`, `dark`, `light`, `mono` | The color theme `playbook usage` starts with. `t` cycles the themes inside the view. `NO_COLOR` forces `mono`. |
 | `sessions.staleAfterDays` | `3` | whole number, 1 or more | Days without activity after which `playbook sessions` calls an unfinished session stale. |
 | `sessions.recentDays` | `7` | whole number, 1 or more | How far back `playbook sessions` looks for sessions. |
 | `sessions.autoClose` | `off` | `off`, `propose` | How much of the session lifecycle may be suggested for a finished or stale session. `off` suggests nothing. `propose` is for the session sweep hint. Nothing reads it yet. No level closes, removes or stops anything, and an `auto` level is not built. |

@@ -1060,6 +1060,8 @@ mod tests {
         let mut app = App::new(Range::All);
         assert_eq!(app.theme, Theme::Standard);
         app.key(press(KeyCode::Char('t')));
+        assert_eq!(app.theme, Theme::Spectrum);
+        app.key(press(KeyCode::Char('t')));
         assert_eq!(app.theme, Theme::Dark);
     }
 
