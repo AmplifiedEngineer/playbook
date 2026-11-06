@@ -13,6 +13,7 @@ pub mod rules;
 pub mod shared;
 pub mod stack;
 pub mod stack_context;
+pub mod stack_digest;
 pub mod stack_map;
 pub mod triage;
 pub mod wait;

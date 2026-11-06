@@ -175,6 +175,7 @@ impl Stack {
                     "additions": p.additions,
                     "deletions": p.deletions,
                     "changed_files": p.changed_files,
+                    "over_line_budget": p.lines() > limits.max_lines,
                     "author": p.author,
                     "url": p.url,
                 })
@@ -456,6 +457,7 @@ pub struct Parsed {
     pub max_prs: Option<u64>,
     pub max_lines: Option<u64>,
     pub context: bool,
+    pub digest: bool,
     pub warnings: Vec<String>,
 }
 
@@ -466,6 +468,7 @@ pub fn parse(args: &str) -> Parsed {
         match tok {
             "--json" => p.json = true,
             "--context" => p.context = true,
+            "--digest" => p.digest = true,
             "--max-prs" => p.max_prs = toks.next().and_then(|v| v.parse().ok()),
             "--max-lines" => p.max_lines = toks.next().and_then(|v| v.parse().ok()),
             "--auto" | "--ask" => {}
@@ -490,6 +493,9 @@ pub fn run(args: &str) -> Result<String, String> {
     let parsed = parse(args);
     for w in &parsed.warnings {
         eprintln!("{w}");
+    }
+    if parsed.digest {
+        return super::stack_digest::run(parsed.pr);
     }
     let limits = Limits {
         max_prs: parsed.max_prs.unwrap_or(DEFAULT_MAX_PRS),
