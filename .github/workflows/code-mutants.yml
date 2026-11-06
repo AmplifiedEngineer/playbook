@@ -1,0 +1,98 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+#
+# Nightly mutation run of the code index crate. cargo-mutants records the
+# outcomes, then `code-bench mutants` compares the score with the floor in
+# crates/code-bench/data/floor.json, in integer basis points. Runs on a
+# schedule and on demand only, never on a pull request, and stays off until
+# the repository variable CODE_CI_PILOT_GATE_RAN is "true". The owner sets it
+# after the benchmark pilot gate has run once, then commits the first score
+# as the floor.
+
+name: code-mutants
+
+on:
+  schedule:
+    - cron: "53 4 * * 0"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: code-mutants-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: "0"
+  MUTANTS_OUT: ${{ github.workspace }}/mutants-report
+  MUTANT_TIMEOUT_SECONDS: "120"
+
+jobs:
+  mutants:
+    name: mutants
+    if: vars.CODE_CI_PILOT_GATE_RAN == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            crates.io:443
+            github.com:443
+            index.crates.io:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            static.crates.io:443
+            static.rust-lang.org:443
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Cache cargo registry and build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: code-mutants-cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            code-mutants-cargo-v1-${{ runner.os }}-
+
+      - name: Install cargo-mutants
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-mutants@27.1.0
+
+      - name: Build the score tool
+        run: cargo build --release -p code-bench
+
+      # Exit code 2 means some mutants survived and 3 means some timed out.
+      # The score step below judges both against the floor.
+      - name: Run cargo-mutants
+        run: |
+          set +e
+          cargo mutants --package playbook-code --no-shuffle \
+            --timeout "$MUTANT_TIMEOUT_SECONDS" --output "$MUTANTS_OUT"
+          code=$?
+          case "$code" in
+            0|2|3) exit 0 ;;
+            *) exit "$code" ;;
+          esac
+
+      - name: Check the score against the floor
+        run: target/release/code-bench mutants "$MUTANTS_OUT/mutants.out/outcomes.json"
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: code-mutants-report
+          path: ${{ env.MUTANTS_OUT }}
+          if-no-files-found: warn
+          retention-days: 30

@@ -85,10 +85,14 @@ pub struct FloorCell {
 }
 
 /// `floor.json`: the lowest accepted values.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Floor {
     pub cells: Vec<FloorCell>,
+    /// The lowest accepted mutation score. Absent until the first measured
+    /// score is committed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mutation_floor_bps: Option<BasisPoints>,
 }
 
 impl Floor {
@@ -209,6 +213,9 @@ pub struct Inputs<'a> {
     pub run_date: &'a str,
     pub prior_task_ids: &'a BTreeSet<String>,
     pub task_ids: &'a BTreeSet<String>,
+    /// Fewest tasks a measured cell needs. Production passes
+    /// [`MIN_TASKS_PER_CELL`].
+    pub min_tasks_per_cell: u32,
 }
 
 fn waived(i: &Inputs<'_>, repo: &str, kind: Option<QueryKind>) -> bool {
@@ -330,7 +337,7 @@ fn repo_failures(i: &Inputs<'_>, repo: &RepoReport) -> Vec<Failure> {
     }
     let mut found = Vec::new();
     for cell in &repo.cells {
-        if cell.tasks >= MIN_TASKS_PER_CELL {
+        if cell.tasks >= i.min_tasks_per_cell {
             found.extend(cell_failures(i, &repo.repo, cell));
         } else if !waived(i, &repo.repo, Some(cell.kind)) {
             found.push(Failure::Unmeasured {
@@ -431,12 +438,13 @@ mod tests {
             run_date: RUN_DATE,
             prior_task_ids: &ids,
             task_ids: &ids,
+            min_tasks_per_cell: MIN_TASKS_PER_CELL,
         };
         evaluate(&inputs)
     }
 
     fn no_floor() -> Floor {
-        Floor { cells: Vec::new() }
+        Floor::default()
     }
 
     /// One cell of `r` against a baseline of 8000, 6000 and 10,000 bytes.
@@ -583,6 +591,7 @@ mod tests {
                 precision_bps: 7900,
                 recall_bps: 6000,
             }],
+            ..Floor::default()
         };
         let base = baseline(
             vec![repo("r", vec![cell(KIND, 10, 7900, 6000, 10_000)])],
@@ -615,6 +624,7 @@ mod tests {
                 run_date: RUN_DATE,
                 prior_task_ids: &prior,
                 task_ids: &now,
+                min_tasks_per_cell: MIN_TASKS_PER_CELL,
             };
             evaluate(&inputs)
         };

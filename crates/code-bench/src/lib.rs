@@ -6,11 +6,14 @@
 
 pub mod corpus;
 pub mod ctags;
+pub mod fixtures;
 pub mod gate;
 pub mod merge_base;
 pub mod metrics;
+pub mod mutants;
 pub mod oracle;
 pub mod process;
 pub mod runner;
+pub mod scope;
 pub mod tasks;
 pub mod tokenizer;

@@ -475,14 +475,18 @@ fn render_refs(env: &Env, target: &str, limit: usize, json: bool) -> Result<Stri
             .refs
             .iter()
             .map(|r| {
-                json!({
+                let mut row = json!({
                     "path": r.path,
                     "line": r.line,
                     "column": r.column,
                     "role": r.role,
                     "text": r.text,
                     "confidence": "candidate",
-                })
+                });
+                if let (Some(label), Some(map)) = (r.label, row.as_object_mut()) {
+                    map.insert("scope".into(), json!(label));
+                }
+                row
             })
             .collect();
         let mut envelope = Envelope::new(
@@ -503,11 +507,12 @@ fn render_refs(env: &Env, target: &str, limit: usize, json: bool) -> Result<Stri
     let mut text = String::new();
     for r in &out.result.refs {
         text.push_str(&format!(
-            "{}:{}:{}  {} (candidate)  {}\n",
+            "{}:{}:{}  {} (candidate{})  {}\n",
             r.path,
             r.line,
             r.column,
             r.role,
+            r.label.map(|l| format!(", {l}")).unwrap_or_default(),
             visible(&r.text)
         ));
     }

@@ -50,6 +50,8 @@ pub enum SkipReason {
     TooLarge,
     Binary,
     NonUtf8Path,
+    TooDeep,
+    ParseTimeout,
 }
 
 impl SkipReason {
@@ -62,8 +64,26 @@ impl SkipReason {
             SkipReason::TooLarge => "too_large",
             SkipReason::Binary => "binary",
             SkipReason::NonUtf8Path => "non_utf8_path",
+            SkipReason::TooDeep => "too_deep",
+            SkipReason::ParseTimeout => "parse_timeout",
         }
     }
+}
+
+pub const GUARD_SEPARATOR: char = '@';
+
+/// The reason part of a stored `error` value, without any guard fingerprint.
+pub fn reason_of(stored: &str) -> &str {
+    stored
+        .split_once(GUARD_SEPARATOR)
+        .map_or(stored, |(r, _)| r)
+}
+
+/// Whether a stored `error` value names a parse guard reason.
+pub fn is_guard_reason(stored: &str) -> bool {
+    [SkipReason::TooDeep, SkipReason::ParseTimeout]
+        .iter()
+        .any(|r| r.as_str() == reason_of(stored))
 }
 
 /// A listed file that is not indexed, with the stat facts the freshness check
