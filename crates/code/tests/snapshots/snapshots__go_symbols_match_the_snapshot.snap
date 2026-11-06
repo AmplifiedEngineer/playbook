@@ -1,0 +1,12 @@
+---
+source: crates/code/tests/snapshots.rs
+expression: "render(LANGS[4])"
+---
+main.go function Total 5-12 exported
+main.go function Demo 14-16 exported
+shape.go const Scale 5-5 exported
+shape.go interface Shape 7-9 exported
+shape.go method Shape.Area 8-8 exported
+shape.go struct Square 11-13 exported
+shape.go method Square.Area 16-18 exported
+shape.go function NewSquare 20-22 exported

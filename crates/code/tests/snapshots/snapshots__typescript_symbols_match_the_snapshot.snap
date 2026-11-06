@@ -1,0 +1,14 @@
+---
+source: crates/code/tests/snapshots.rs
+expression: "render(LANGS[1])"
+---
+src/main.ts function makeSquare 5-8 exported
+src/main.ts function total 10-12 exported
+src/shapes.ts const SCALE 3-3 exported
+src/shapes.ts interface Shape 5-8 exported
+src/shapes.ts method Shape.area 7-7 exported
+src/shapes.ts enum Axis 10-13 exported
+src/shapes.ts class Square 15-22 exported
+src/shapes.ts method Square.constructor 17-17 exported
+src/shapes.ts method Square.area 19-21 exported
+src/shapes.ts type_alias Id 24-24 exported

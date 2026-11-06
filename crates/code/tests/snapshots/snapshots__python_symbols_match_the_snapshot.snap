@@ -1,0 +1,11 @@
+---
+source: crates/code/tests/snapshots.rs
+expression: "render(LANGS[3])"
+---
+pkg/main.py function total 6-8 exported
+pkg/main.py function demo 11-12 exported
+pkg/shapes.py variable SCALE 3-3 exported
+pkg/shapes.py class Square 6-12 exported
+pkg/shapes.py method Square.__init__ 7-8
+pkg/shapes.py method Square.area 10-12 exported
+pkg/shapes.py function make_square 15-16 exported
