@@ -1273,10 +1273,9 @@ fn a_cache_is_paced_from_its_fetch_time_not_from_now() {
 
 /// The file the local month total is kept in, under the statusline cache.
 const LOCAL_TOTAL_FILE: &str = "monthly-local-total";
-/// Seconds a stored local total is trusted.
-const LOCAL_TOTAL_TTL: i64 = 10;
+use playbook::usage::local_total::LOCAL_TOTAL_CACHE_SECONDS as LOCAL_TOTAL_TTL;
 
-/// A home with `usage.monthlyUsd` 1000 and one usage event 1 hour before
+/// A home with `usage.budget.monthlyUsd` 1000 and one usage event 1 hour before
 /// `FETCHED + HOUR_SECS`, in the current month at that time.
 fn local_home(db: bool) -> (Scratch, f64) {
     let s = Scratch::new();
@@ -1356,7 +1355,7 @@ fn the_gateway_reading_keeps_priority_over_local_spend() {
 }
 
 #[test]
-fn the_local_total_is_reused_for_ten_seconds_without_reading_the_database() {
+fn the_local_total_is_reused_within_its_ttl_without_reading_the_database() {
     let (s, cost) = local_home(true);
     let now = FETCHED + HOUR_SECS;
     let want = format!("${cost:.0}/$1000 mo budget (local)");

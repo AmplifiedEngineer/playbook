@@ -45,7 +45,8 @@ pub struct MonthlyUse {
     pub limit: Limit,
     pub source: Source,
     /// The limit Claude reports, before the manual budget is considered.
-    pub reported_usd: f64,
+    /// `None` when Claude reports no limit and the manual budget stands alone.
+    pub reported_usd: Option<f64>,
     /// The manual budget is lower than the reported limit and is the one in
     /// force.
     pub own_budget: bool,
@@ -116,7 +117,7 @@ pub fn monthly_use(
     Some(MonthlyUse {
         limit,
         source,
-        reported_usd,
+        reported_usd: Some(reported_usd),
         own_budget: own.is_some(),
     })
 }
@@ -140,8 +141,8 @@ fn local(
             WeekStart::default(),
         ),
         source: Source::Local,
-        reported_usd: *budget,
-        own_budget: true,
+        reported_usd: None,
+        own_budget: false,
     })
 }
 
@@ -259,7 +260,8 @@ mod tests {
             .unwrap();
         assert_eq!(used_of(&m), (412.0, 1000.0));
         assert_eq!(m.source, Source::Local);
-        assert!(m.own_budget);
+        assert!(!m.own_budget);
+        assert_eq!(m.reported_usd, None);
         assert_eq!(m.limit.origin, Origin::Manual);
         let (start, end) = LimitPeriod::Monthly.containing(FETCHED, WeekStart::default());
         assert_eq!((m.limit.start, m.limit.end), (start, end));
@@ -307,7 +309,7 @@ mod tests {
         let m = monthly_use(None, &account(), &budgets, FETCHED + HOUR).unwrap();
         assert_eq!(used_of(&m), (986.4, 1000.0));
         assert!(m.own_budget);
-        assert_eq!(m.reported_usd, 1500.0);
+        assert_eq!(m.reported_usd, Some(1500.0));
     }
 
     #[test]

@@ -634,20 +634,17 @@ fn budget_lines(s: &limits_source::Sources, usage_dir: &Path, now: i64, raw: boo
             let in_force = limits_source::amount(Unit::Dollars, m.limit.limit);
             out.push(if m.source == monthly_use::Source::Local {
                 format!("  limit in force: {in_force}, your usage.budget.monthlyUsd")
-            } else if m.own_budget {
+            } else if let (true, Some(reported)) = (m.own_budget, m.reported_usd) {
                 format!(
                     "  limit in force: {in_force}, your usage.budget.monthlyUsd, which is lower than the {} Claude reports",
-                    limits_source::amount(Unit::Dollars, m.reported_usd)
+                    limits_source::amount(Unit::Dollars, reported)
                 )
             } else {
                 format!("  limit in force: {in_force} as Claude reports it")
             });
         }
     }
-    if figure
-        .as_ref()
-        .is_some_and(|m| m.own_budget && m.source != monthly_use::Source::Local)
-    {
+    if figure.as_ref().is_some_and(|m| m.own_budget) {
         out.push("  your usage.budget.monthlyUsd is lower than that limit: pbtop keeps the Claude limit and the statusline budget line uses yours".to_string());
     }
     if figure.is_some() {
@@ -670,9 +667,12 @@ fn budget_lines(s: &limits_source::Sources, usage_dir: &Path, now: i64, raw: boo
             .iter()
             .find(|(p, _)| *p == LimitPeriod::Monthly)
             .map_or("none".to_string(), |(_, usd)| format!("${usd:.2}"));
+        let reported = m
+            .reported_usd
+            .map_or("none".to_string(), |usd| format!("${usd:.2}"));
         out.push(format!(
-            "    raw: monthly used ${:.2} of reported limit ${:.2}, own budget {own}, limit in force ${:.2}",
-            m.limit.used, m.reported_usd, m.limit.limit
+            "    raw: monthly used ${:.2} of reported limit {reported}, own budget {own}, limit in force ${:.2}",
+            m.limit.used, m.limit.limit
         ));
     }
     out
