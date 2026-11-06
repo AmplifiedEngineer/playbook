@@ -3,7 +3,9 @@
 
 //! Syntax references: identifiers in code whose text equals the target.
 //! Comments and strings are skipped because they hold no identifier nodes. Every
-//! result is a candidate, since no scope or type analysis runs.
+//! result is a candidate. When a name is declared in several files, scope and
+//! import hints pick the declaring file a reference binds to. A reference that
+//! cannot be bound, or a lookup that names no module, is kept and labelled.
 
 use super::lang::{self, Lang};
 use super::search::{load, Loaded};
@@ -42,6 +44,155 @@ pub struct Ref {
     /// `declaration`, `import` or `use`.
     pub role: &'static str,
     pub text: String,
+    /// Set only when the name is declared in several files and scope cannot
+    /// say which declaration this reference means.
+    pub label: Option<&'static str>,
+}
+
+/// The label for a reference whose declaration scope cannot decide.
+pub const CANNOT_KNOW: &str = "cannot know";
+/// File stems that stand for their parent directory as a module name.
+const ENTRY_STEMS: [&str; 3] = ["mod", "index", "__init__"];
+/// File stems that stand for the crate root.
+const CRATE_ROOT_STEMS: [&str; 2] = ["lib", "main"];
+/// The module word that names the crate root in a Rust path.
+const CRATE_WORD: &str = "crate";
+/// Declarations in at least this many files make a name ambiguous.
+const AMBIGUOUS_DECLARATIONS: usize = 2;
+
+/// A found reference with the hints scope resolution needs.
+struct Found {
+    r: Ref,
+    qualifier: Option<String>,
+    import_words: Vec<String>,
+}
+
+struct FileScan {
+    path: String,
+    found: Vec<Found>,
+}
+
+fn is_word_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80
+}
+
+/// Module names a file answers to in paths and import statements.
+fn module_names(path: &str) -> Vec<String> {
+    let p = Path::new(path);
+    let stem = p
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let dir = p
+        .parent()
+        .and_then(|d| d.file_name())
+        .and_then(|d| d.to_str())
+        .map(str::to_string);
+    let mut names = Vec::new();
+    if ENTRY_STEMS.contains(&stem.as_str()) {
+        names.extend(dir.clone());
+    } else {
+        names.push(stem.clone());
+    }
+    if CRATE_ROOT_STEMS.contains(&stem.as_str()) {
+        names.push(CRATE_WORD.to_string());
+    }
+    if Lang::for_path(path) == Some(Lang::Go) {
+        names.extend(dir);
+    }
+    names
+}
+
+/// The module segment written before the name in a target such as `a::run`.
+fn target_qualifier(target: &str) -> Option<String> {
+    let parts: Vec<&str> = target
+        .trim()
+        .split([':', '.', '/'])
+        .filter(|s| !s.is_empty())
+        .collect();
+    parts
+        .len()
+        .checked_sub(2)
+        .and_then(|i| parts.get(i))
+        .map(|s| s.to_string())
+}
+
+/// The identifier written right before the name, as in `a::name` or `a.name`.
+fn textual_qualifier(line: &str, byte_col: usize) -> Option<String> {
+    let before = line.get(..byte_col)?;
+    let before = before
+        .strip_suffix("::")
+        .or_else(|| before.strip_suffix('.'))?;
+    let word: String = before
+        .chars()
+        .rev()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    (!word.is_empty()).then_some(word)
+}
+
+/// Splits `statement` into identifier words.
+fn words_of(statement: &[u8]) -> Vec<String> {
+    statement
+        .split(|b| !is_word_byte(*b))
+        .filter(|w| !w.is_empty())
+        .map(|w| String::from_utf8_lossy(w).into_owned())
+        .collect()
+}
+
+/// Narrows references when the name is declared in several files.
+fn resolve_scope(files: Vec<FileScan>, target: &str) -> Vec<Ref> {
+    let declaring: Vec<(String, Vec<String>)> = files
+        .iter()
+        .filter(|f| f.found.iter().any(|x| x.r.role == "declaration"))
+        .map(|f| (f.path.clone(), module_names(&f.path)))
+        .collect();
+    if declaring.len() < AMBIGUOUS_DECLARATIONS {
+        return files
+            .into_iter()
+            .flat_map(|f| f.found.into_iter().map(|x| x.r))
+            .collect();
+    }
+    let only_match = |words: &[String]| -> Option<String> {
+        let hits: Vec<&String> = declaring
+            .iter()
+            .filter(|(_, mods)| mods.iter().any(|m| words.contains(m)))
+            .map(|(p, _)| p)
+            .collect();
+        (hits.len() == 1).then(|| hits[0].clone())
+    };
+    let selected = target_qualifier(target).and_then(|q| only_match(&[q]));
+    let mut out = Vec::new();
+    for file in files {
+        let declares = declaring.iter().any(|(p, _)| *p == file.path);
+        let imported: Vec<String> = file
+            .found
+            .iter()
+            .flat_map(|x| x.import_words.iter().cloned())
+            .collect();
+        let via_import = only_match(&imported);
+        for mut x in file.found {
+            let bound = if x.r.role == "declaration" || declares {
+                Some(file.path.clone())
+            } else {
+                x.qualifier
+                    .as_ref()
+                    .and_then(|q| only_match(std::slice::from_ref(q)))
+                    .or_else(|| via_import.clone())
+            };
+            match (&selected, bound) {
+                (Some(s), Some(b)) if *s != b => continue,
+                (Some(_), Some(_)) => {}
+                _ => x.r.label = Some(CANNOT_KNOW),
+            }
+            out.push(x.r);
+        }
+    }
+    out
 }
 
 #[derive(Debug, Default)]
@@ -106,7 +257,7 @@ pub fn find_refs(conn: &Connection, root: &Path, opts: &RefsOptions) -> Result<R
     let name = target_name(&opts.target);
     let mut result = RefsResult::default();
     let files = candidate_files(conn, name, CANDIDATE_LIMIT)?;
-    let mut total = 0usize;
+    let mut scans = Vec::new();
     for path in files {
         let Some(language) = Lang::for_path(&path) else {
             continue;
@@ -124,11 +275,14 @@ pub fn find_refs(conn: &Connection, root: &Path, opts: &RefsOptions) -> Result<R
             break;
         }
         result.files_scanned += 1;
-        for found in scan_file(language, &loaded, &path, name) {
-            total += 1;
-            if result.refs.len() < opts.limit {
-                result.refs.push(found);
-            }
+        let found = scan_file(language, &loaded, &path, name);
+        scans.push(FileScan { path, found });
+    }
+    let mut total = 0usize;
+    for found in resolve_scope(scans, &opts.target) {
+        total += 1;
+        if result.refs.len() < opts.limit {
+            result.refs.push(found);
         }
     }
     result.omitted = total.saturating_sub(result.refs.len());
@@ -137,7 +291,7 @@ pub fn find_refs(conn: &Connection, root: &Path, opts: &RefsOptions) -> Result<R
 }
 
 /// Identifier matches in one parsed file, in source order.
-fn scan_file(language: Lang, loaded: &Loaded, path: &str, name: &str) -> Vec<Ref> {
+fn scan_file(language: Lang, loaded: &Loaded, path: &str, name: &str) -> Vec<Found> {
     let Ok(parsed) = lang::parse(language, loaded.bytes()) else {
         return Vec::new();
     };
@@ -168,12 +322,22 @@ fn scan_file(language: Lang, loaded: &Loaded, path: &str, name: &str) -> Vec<Ref
                 };
                 char_column(l, start.column.saturating_sub(skipped))
             });
-            out.push(Ref {
-                path: path.to_string(),
-                line: start.row + 1,
-                column,
-                role,
-                text,
+            let qualifier = line_text.and_then(|l| textual_qualifier(l, start.column));
+            let import_words = match import_statement(node, imports) {
+                Some(stmt) => words_of(bytes.get(stmt.byte_range()).unwrap_or_default()),
+                None => Vec::new(),
+            };
+            out.push(Found {
+                r: Ref {
+                    path: path.to_string(),
+                    line: start.row + 1,
+                    column,
+                    role,
+                    text,
+                    label: None,
+                },
+                qualifier,
+                import_words,
             });
         }
         if cursor.goto_first_child() {
@@ -200,18 +364,29 @@ fn char_column(line: &str, byte_col: usize) -> usize {
     line[..end].chars().count() + 1
 }
 
-fn role_of(node: tree_sitter::Node, imports: &[&str], decls: &[&str]) -> &'static str {
+/// The import statement that holds `node`, found within a few hops.
+fn import_statement<'t>(
+    node: tree_sitter::Node<'t>,
+    imports: &[&str],
+) -> Option<tree_sitter::Node<'t>> {
     let mut up = node.parent();
     let mut hops = 0;
     while let Some(parent) = up {
         if imports.contains(&parent.kind()) {
-            return "import";
+            return Some(parent);
         }
         hops += 1;
         if hops > 32 {
             break;
         }
         up = parent.parent();
+    }
+    None
+}
+
+fn role_of(node: tree_sitter::Node, imports: &[&str], decls: &[&str]) -> &'static str {
+    if import_statement(node, imports).is_some() {
+        return "import";
     }
     match node.parent() {
         Some(p) if decls.contains(&p.kind()) && p.child_by_field_name("name") == Some(node) => {
@@ -492,5 +667,97 @@ mod tests {
         found.sort_unstable();
         found.dedup();
         assert_eq!(found, vec!["again.rs", "shared.rs"]);
+    }
+
+    /// `run` is declared in `a.rs` and `b.rs`. `c.rs` imports it from `a`.
+    /// `d.rs` calls a `run` that nothing in the file says where it comes from.
+    fn same_name_fixture(tag: &str) -> Fx {
+        let f = fx(tag);
+        f.write("a.rs", "pub fn run() {}\nfn go() { run(); }\n");
+        f.write("b.rs", "pub fn run() {}\nfn go() { run(); }\n");
+        f.write("c.rs", "use crate::a::run;\nfn go() { run(); }\n");
+        f.write("d.rs", "fn go() { run(); }\n");
+        f.run();
+        f
+    }
+
+    fn files_of(r: &RefsResult) -> Vec<&str> {
+        r.refs.iter().map(|x| x.path.as_str()).collect()
+    }
+
+    #[test]
+    fn same_name_in_another_module_is_dropped_and_oracle_negatives_fall_from_3_to_1() {
+        let _g = pinned();
+        // Arrange: the oracle says a.rs and c.rs hold the true references.
+        let f = same_name_fixture("rf-same-name");
+        let negatives = |r: &RefsResult| {
+            r.refs
+                .iter()
+                .filter(|x| !matches!(x.path.as_str(), "a.rs" | "c.rs"))
+                .count()
+        };
+
+        // Act
+        let baseline = refs(&f, "run");
+        let scoped = refs(&f, "a::run");
+
+        // Assert
+        assert_eq!(negatives(&baseline), 3);
+        assert_eq!(negatives(&scoped), 1);
+        assert_eq!(
+            files_of(&scoped),
+            vec!["a.rs", "a.rs", "c.rs", "c.rs", "d.rs"]
+        );
+        assert_eq!(scoped.refs.iter().filter(|x| x.label.is_some()).count(), 1);
+        assert_eq!(scoped.refs[4].label, Some(CANNOT_KNOW));
+    }
+
+    #[test]
+    fn a_name_that_scope_resolves_has_no_label() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("rf-resolved");
+        f.write("a.ts", "export function run() {}\n");
+        f.write("b.ts", "export function run() {}\n");
+        f.write("c.ts", "import { run } from './b';\nrun();\n");
+        f.run();
+
+        // Act
+        let got = refs(&f, "b.run");
+
+        // Assert
+        assert_eq!(files_of(&got), vec!["b.ts", "c.ts", "c.ts"]);
+        assert!(got.refs.iter().all(|x| x.label.is_none()));
+    }
+
+    #[test]
+    fn an_unambiguous_name_has_no_label() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("rf-unambiguous");
+        f.write("a.rs", "pub fn run() {}\n");
+        f.write("d.rs", "fn go() { run(); }\n");
+        f.run();
+
+        // Act
+        let got = refs(&f, "run");
+
+        // Assert
+        assert_eq!(got.refs.len(), 2);
+        assert!(got.refs.iter().all(|x| x.label.is_none()));
+    }
+
+    #[test]
+    fn an_ambiguous_name_with_no_module_in_the_target_keeps_every_reference_labelled() {
+        let _g = pinned();
+        // Arrange
+        let f = same_name_fixture("rf-ambiguous");
+
+        // Act
+        let got = refs(&f, "run");
+
+        // Assert
+        assert_eq!(got.refs.len(), 7);
+        assert!(got.refs.iter().all(|x| x.label == Some(CANNOT_KNOW)));
     }
 }
