@@ -1632,7 +1632,7 @@ Example: `playbook usage account list`
 - `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 - `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
-Subcommands: `assign`, `list`, `name`, `sessions`, `undo`
+Subcommands: `assign`, `list`, `name`, `reconcile`, `sessions`, `undo`
 
 ### `playbook usage account assign`
 
@@ -1668,6 +1668,21 @@ Example: `playbook usage account name igor@getdigital.com.br Company`
 
 - `<KEY>`: Account key shown by `account list`
 - `<NAME>`: Display name to show; empty clears it
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+
+### `playbook usage account reconcile`
+
+Compare cost on each side of session boundaries with a dashboard
+
+Give the daily totals you read from the Claude web dashboard of the account that owns the later sessions, as `YYYY-MM-DD=amount`. For each session that starts in the window, taken as the boundary, it prints the local cost per listed day before it and from it on, and how far the later side is from the dashboard. The closest boundaries print first. Days are on your local clock; add `--utc` for UTC.
+
+Example: `playbook usage account reconcile --from 2026-10-30 --to 2026-11-04 --dashboard 2026-11-03=285.03`
+
+- `--from <FROM>`: Start of the window, like 2026-10-30
+- `--to <TO>`: End of the window (not included)
+- `--dashboard <DAY=AMOUNT>`: Dashboard daily total, like 2026-11-03=285.03; repeat for more days
+- `--top <TOP>`: Print this many results, closest boundary first; 0 prints all
 - `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 - `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 

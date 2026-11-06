@@ -148,7 +148,7 @@ pub enum AccountCommand {
         #[arg(long)]
         to: Option<String>,
     },
-    /// Compare the cost on each side of every session boundary with a dashboard
+    /// Compare cost on each side of session boundaries with a dashboard
     ///
     /// Give the daily totals you read from the Claude web dashboard of the
     /// account that owns the later sessions, as `YYYY-MM-DD=amount`. For each
@@ -165,10 +165,10 @@ pub enum AccountCommand {
         /// End of the window (not included)
         #[arg(long)]
         to: String,
-        /// A dashboard daily total, like 2026-11-03=285.03; repeat for more days
+        /// Dashboard daily total, like 2026-11-03=285.03; repeat for more days
         #[arg(long, required = true, value_name = "DAY=AMOUNT")]
         dashboard: Vec<String>,
-        /// Print this many closest boundaries; 0 prints all
+        /// Print this many results, closest boundary first; 0 prints all
         #[arg(long, default_value_t = 5)]
         top: usize,
     },
