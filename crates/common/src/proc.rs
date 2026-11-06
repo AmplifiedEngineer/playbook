@@ -118,19 +118,48 @@ fn stop(child: &mut Child) {
     let _ = child.wait();
 }
 
+/// What a pipe holds before a write to it blocks, at the smallest size Linux
+/// and macOS use.
+const PIPE_CAPACITY: usize = 64 * 1024;
+
 fn run_bounded(command: &mut Command, input: Option<Vec<u8>>, timeout: Duration) -> Option<Output> {
-    let stdin = if input.is_some() {
-        Stdio::piped()
-    } else {
-        Stdio::null()
-    };
+    // The `playbook` binary restores the default SIGPIPE action so that
+    // `| head` ends quietly. A child that exits before the writer thread runs,
+    // or never reads its input, would then make a plain write end this whole
+    // process. Input that fits the pipe goes through a pipe whose read end this
+    // side keeps open until the write is done, so that write cannot hit
+    // `EPIPE`. Larger input uses the child's own pipe, where the child has to
+    // read it.
+    let mut kept = None;
+    let mut plain = None;
+    match input {
+        None => {
+            command.stdin(Stdio::null());
+        }
+        Some(bytes) if bytes.len() <= PIPE_CAPACITY => {
+            let (reader, writer) = std::io::pipe().ok()?;
+            command.stdin(Stdio::from(reader.try_clone().ok()?));
+            kept = Some((reader, writer, bytes));
+        }
+        Some(bytes) => {
+            command.stdin(Stdio::piped());
+            plain = Some(bytes);
+        }
+    }
     let mut child = command
-        .stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .ok()?;
-    if let (Some(bytes), Some(mut pipe)) = (input, child.stdin.take()) {
+    // Drop the command's own copy of the child's read end.
+    command.stdin(Stdio::null());
+    if let Some((reader, mut writer, bytes)) = kept {
+        std::thread::spawn(move || {
+            let _ = writer.write_all(&bytes);
+            drop(writer);
+            drop(reader);
+        });
+    } else if let (Some(bytes), Some(mut pipe)) = (plain, child.stdin.take()) {
         std::thread::spawn(move || {
             let _ = pipe.write_all(&bytes);
         });

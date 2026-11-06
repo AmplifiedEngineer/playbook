@@ -1320,7 +1320,7 @@ dependencies = [
 name = "playbook-common"
 version = "0.1.0"
 dependencies = [
- "rusqlite",
+ "playbook-store",
  "rustix",
  "serde_json",
  "sha2",
@@ -1331,7 +1331,7 @@ name = "playbook-data"
 version = "0.1.0"
 dependencies = [
  "playbook-common",
- "rusqlite",
+ "playbook-store",
 ]
 
 [[package]]
@@ -1339,6 +1339,13 @@ name = "playbook-plugin-checks"
 version = "0.0.0"
 dependencies = [
  "regex",
+]
+
+[[package]]
+name = "playbook-store"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
 ]
 
 [[package]]

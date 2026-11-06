@@ -16,7 +16,7 @@
 //! caller applies its own default when it returns `None`. The schema is the
 //! one the former `playbook.db` had, so a table copy needs no conversion.
 
-use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use playbook_store::{Connection, OpenFlags, OptionalExtension};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -68,7 +68,7 @@ pub fn get_in(
     key: &str,
     repo_slug: Option<&str>,
     app: Option<&str>,
-) -> rusqlite::Result<Option<String>> {
+) -> playbook_store::Result<Option<String>> {
     if !db.is_file() {
         return Ok(None);
     }
@@ -95,7 +95,9 @@ pub fn get_in(
     match found {
         Ok(v) => Ok(v),
         // The file exists but was never initialised.
-        Err(rusqlite::Error::SqliteFailure(_, Some(m))) if m.contains("no such table") => Ok(None),
+        Err(playbook_store::Error::SqliteFailure(_, Some(m))) if m.contains("no such table") => {
+            Ok(None)
+        }
         Err(e) => Err(e),
     }
 }
@@ -110,7 +112,7 @@ pub fn set_app_in(
     app: &str,
     value_json: &str,
     now: i64,
-) -> rusqlite::Result<bool> {
+) -> playbook_store::Result<bool> {
     if !db.is_file() {
         return Ok(false);
     }
@@ -127,7 +129,9 @@ pub fn set_app_in(
     );
     match result {
         Ok(_) => Ok(true),
-        Err(rusqlite::Error::SqliteFailure(_, Some(m))) if m.contains("no such table") => Ok(false),
+        Err(playbook_store::Error::SqliteFailure(_, Some(m))) if m.contains("no such table") => {
+            Ok(false)
+        }
         Err(e) => Err(e),
     }
 }
