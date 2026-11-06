@@ -5,6 +5,7 @@
 //! range and a filter. Built by the same query layer the web JSON uses
 //! (`usage::query`), so both views report the same numbers.
 
+use super::account::{self, AccountSel, AccountsView};
 use super::theme::SERIES;
 use crate::aggregate::{group_usage, unpriced_models, Dimension, Group};
 use crate::burnup::{burnups_for, spend_only, Burnup};
@@ -275,6 +276,8 @@ pub struct Data {
     pub limits: LimitsView,
     /// The whole store, set by `load`.
     pub store: StoreSpan,
+    /// The account shown and the accounts to pick from, set by `load`.
+    pub accounts: AccountsView,
 }
 
 /// Days charted for today, since a single bar says nothing.
@@ -400,6 +403,7 @@ impl Data {
             health: query::HealthView::default(),
             limits: LimitsView::default(),
             store: StoreSpan::default(),
+            accounts: AccountsView::default(),
         }
     }
 }
@@ -420,11 +424,19 @@ fn window_start(range: Range, now: i64) -> Option<i64> {
 }
 
 /// Reads the store and builds the snapshot.
-pub fn load(conn: &Connection, range: Range, filter: &str, now: i64) -> Result<Data, String> {
-    let window = match window_start(range, now) {
+pub fn load(
+    conn: &Connection,
+    range: Range,
+    filter: &str,
+    sel: &AccountSel,
+    now: i64,
+) -> Result<Data, String> {
+    let accounts = account::view(conn, sel)?;
+    let mut window = match window_start(range, now) {
         Some(since) => db::load_usage_events_since(conn, since)?,
         None => db::load_usage_events(conn)?,
     };
+    account::keep(&mut window, accounts.key.as_deref());
     let live = query::load_live(conn, now)?;
     let mut data = Data::build(&window, live, now, range, filter);
     data.agents = query::load_agents(conn, range, now)?;
@@ -433,6 +445,7 @@ pub fn load(conn: &Connection, range: Range, filter: &str, now: i64) -> Result<D
     data.telemetry_rows =
         (!data.agents.is_empty() && !data.agents.from_transcripts) || !data.health.now.is_empty();
     data.store = crate::db::usage_span(conn)?;
+    data.accounts = accounts;
     Ok(data)
 }
 
@@ -442,11 +455,13 @@ pub fn load_limits(
     conn: &Connection,
     paths: &Paths,
     range: Range,
+    account: Option<&str>,
     now: i64,
 ) -> Result<LimitsView, String> {
     let week = crate::entry::configured_week_start();
     let since = limits_source::events_since(now, week);
-    let events = db::load_usage_events_since(conn, since)?;
+    let mut events = db::load_usage_events_since(conn, since)?;
+    account::keep(&mut events, account);
     let sources = crate::run::limit_sources(paths, conn, since, now);
     Ok(LimitsView::build(&sources, &events, now, week, range))
 }
@@ -470,6 +485,58 @@ mod tests {
             cost_usd: cost,
             ..UsageEvent::default()
         }
+    }
+
+    /// Two accounts: `work` is the newer, `home` has the larger total.
+    fn two_accounts() -> Connection {
+        let conn = db::open_db(&crate::util::scratch_dir("data-accounts").join("u.db")).unwrap();
+        for (ts, account, cost) in [
+            (NOW - 300, "home", 4.0),
+            (NOW - 200, "home", 8.0),
+            (NOW - 100, "work", 2.0),
+        ] {
+            let mut e = event(ts, "claude-opus-5", "alpha", cost);
+            e.account = account.to_string();
+            e.input_tokens = 1_000_000;
+            db::upsert_usage_event(&conn, &e).unwrap();
+        }
+        conn
+    }
+
+    #[test]
+    fn totals_follow_the_account_picked_and_default_to_the_newest() {
+        let conn = two_accounts();
+        crate::account_store::set_name(&conn, "work", "Company").unwrap();
+        let range = Range::LastDays(30);
+        let shown = |sel: &AccountSel| {
+            let d = load(&conn, range, "", sel, NOW).unwrap();
+            (d.totals.messages, d.accounts.shown.clone())
+        };
+
+        assert_eq!(shown(&AccountSel::Latest), (1, "Company".to_string()));
+        assert_eq!(
+            shown(&AccountSel::Key("home".into())),
+            (2, "home".to_string())
+        );
+        assert_eq!(shown(&AccountSel::All), (3, "all accounts".to_string()));
+        let d = load(&conn, range, "", &AccountSel::Latest, NOW).unwrap();
+        assert_eq!(d.accounts.choices.len(), 2);
+        assert_eq!(d.accounts.choices[0].0, "work");
+    }
+
+    #[test]
+    fn the_burn_rate_uses_only_the_picked_account() {
+        let conn = two_accounts();
+        let paths = crate::util::scratch_paths("data-accounts-limits");
+        let recent = |account: Option<&str>| {
+            load_limits(&conn, &paths, Range::LastDays(30), account, NOW)
+                .unwrap()
+                .recent_cost_24h
+        };
+
+        let (work, home, all) = (recent(Some("work")), recent(Some("home")), recent(None));
+        assert!(work > 0.0 && home > work, "{work} {home}");
+        assert!((all - (work + home)).abs() < 1e-9, "{work} {home} {all}");
     }
 
     #[test]

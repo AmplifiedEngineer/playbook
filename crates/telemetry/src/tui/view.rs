@@ -744,11 +744,15 @@ fn header_lines(d: &Data, pal: &Palette, room: usize) -> Vec<Line<'static>> {
 
 /// The time zone note in the header border. Weeks say which day they start on.
 fn zone_note(app: &App) -> String {
-    match app.range {
+    let zone = match app.range {
         Range::ThisWeek(w) | Range::LastWeek(w) => {
             format!("{}, weeks start {}", crate::tz::label(), w.short())
         }
         _ => crate::tz::label().to_string(),
+    };
+    match app.data.as_ref().map(|d| d.accounts.shown.as_str()) {
+        Some(account) if !account.is_empty() => format!("{zone}, {account}"),
+        _ => zone,
     }
 }
 
@@ -1056,7 +1060,7 @@ mod tests {
             first: Some(NOW - 90_000),
             last: Some(NOW - 80_000),
         };
-        for (w, h) in [(80, 24), (100, 30), (160, 50)] {
+        for (w, h) in [(80, 24), (100, 30), (160, 52)] {
             let text = screen(&app, w, h);
             assert!(text.contains("The store has 3 messages from"), "{text}");
             assert!(text.contains("Press a to show all time"), "{text}");
@@ -1107,7 +1111,7 @@ mod tests {
 
     #[test]
     fn the_help_window_fits_every_supported_size_and_names_the_panels() {
-        for (w, h) in [(80, 24), (100, 30), (160, 50)] {
+        for (w, h) in [(80, 24), (100, 30), (160, 52)] {
             let mut app = app_with(&[event("claude-opus-5", "alpha", 1.0)]);
             app.help = Some(0);
             let text = screen(&app, w, h);

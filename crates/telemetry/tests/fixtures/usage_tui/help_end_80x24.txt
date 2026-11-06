@@ -1,15 +1,15 @@
 ╭─┤Agent Budget Dashboard├──┤UTC├──────────────────────────────────────────────╮
 │╭┤ Help: keys by group ├─────────────────────────────────────────────────────╮│
-││t          Next color theme (off with NO_COLOR)     all panels              ││
 ││p          Open the full screen Sessions list       all panels              ││
 ││e          Edit the tabs and the panels on each     all panels              ││
-╰│?          Show this help                           all panels              │╯
-╭│                                                                            │╮
-││Sorting                                                                     ││
+││?          Show this help                           all panels              ││
+╰│                                                                            │╯
+╭│Sorting                                                                     │╮
 ││s          Sort by the next column                  tables                  ││
 ││S          Reverse the sort order                   tables                  ││
 ││                                                                            ││
 ││Filtering                                                                   ││
+││u, U       Next account; U shows all, or the newest all panels              ││
 ╰│/          Type a filter on any field               all panels              │╯
 ╭│Enter      Filter to selected row; again to undo    tables 3-6              │╮
 ││c          Clear the filter                         all panels              ││
