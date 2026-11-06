@@ -254,14 +254,19 @@ fn event_loop(
 
 /// Stores the manual monthly budget and says what happened.
 fn save_budget(home: &std::path::Path, usd: f64) -> String {
-    let value = serde_json::Value::from(usd);
-    match crate::config::save_app(home, budget_popup::KEY, &value) {
-        Ok(true) if usd > 0.0 => format!("Manual monthly budget set to {}", fmt::money(usd)),
-        Ok(true) => "Manual monthly budget cleared".to_string(),
-        Ok(false) => {
-            "No config store yet: run playbook config set --global usage.budget.monthlyUsd <usd>"
-                .to_string()
-        }
+    save_budget_with(usd, |value| {
+        crate::host::set_config_value(budget_popup::KEY, value, home)
+    })
+}
+
+/// [`save_budget`] with the write given, so the words can be tested.
+fn save_budget_with(
+    usd: f64,
+    write: impl FnOnce(&serde_json::Value) -> Result<(), String>,
+) -> String {
+    match write(&serde_json::Value::from(usd)) {
+        Ok(()) if usd > 0.0 => format!("Manual monthly budget set to {}", fmt::money(usd)),
+        Ok(()) => "Manual monthly budget cleared".to_string(),
         Err(why) => format!("Budget not saved: {why}"),
     }
 }
@@ -358,21 +363,14 @@ mod tests {
     }
 
     #[test]
-    fn the_budget_is_stored_in_the_app_tier_and_a_zero_clears_it() {
-        let home = crate::util::scratch_dir("tui-save-budget");
-        let data = crate::config::root(&home).join("data");
-        std::fs::create_dir_all(&data).unwrap();
-        let conn = rusqlite::Connection::open(playbook_data::config::db_in(&data)).unwrap();
-        conn.execute_batch(playbook_data::config::SCHEMA_SQL)
-            .unwrap();
+    fn the_budget_note_says_set_cleared_or_not_saved() {
+        let set = save_budget_with(1000.0, |_| Ok(()));
+        let cleared = save_budget_with(0.0, |_| Ok(()));
+        let failed = save_budget_with(5.0, |_| Err("no config store yet".to_string()));
 
-        let said = save_budget(&home, 1000.0);
-        let stored = crate::config::resolve(&home, budget_popup::KEY);
-        let cleared = save_budget(&home, 0.0);
-
-        assert_eq!(said, "Manual monthly budget set to $1,000.00");
-        assert_eq!(stored, Some(serde_json::Value::from(1000.0)));
+        assert_eq!(set, "Manual monthly budget set to $1,000.00");
         assert_eq!(cleared, "Manual monthly budget cleared");
+        assert_eq!(failed, "Budget not saved: no config store yet");
     }
 
     #[test]
