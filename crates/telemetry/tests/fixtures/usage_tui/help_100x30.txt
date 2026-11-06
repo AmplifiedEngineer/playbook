@@ -26,5 +26,5 @@
 │          │r          Switch between today and this week       all panels              │     $0.55│
 │          │                                                                            │     $0.80│
 │          │Views                                                                       │     $0.95│
-╰──────────╰┤ ↑/↓ scroll, any other key closes ├────────────────────────────────────────╯──────────╯
+╰──────────╰┤ ↑/↓ j/k scroll, any other key closes ├────────────────────────────────────╯──────────╯
  d day w week m month ←/→ day r range v view / filter ? help q quit  updated 01:46:40 UTC, every 5s

@@ -708,7 +708,7 @@ impl App {
         self.go_tab(tab as isize);
     }
 
-    /// Keys while the help window is open: the arrows scroll it, Ctrl-C quits
+    /// Keys while the help window is open: the arrows and j and k scroll it, Ctrl-C quits
     /// and any other key closes it. The data keeps refreshing underneath.
     fn help_key(&mut self, code: KeyCode, ctrl: bool) -> Effect {
         let at = self.help.unwrap_or(0);

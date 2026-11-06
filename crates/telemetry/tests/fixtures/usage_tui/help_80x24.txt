@@ -20,5 +20,5 @@
 ││d          Show today                               all panels              ││
 ││w          Show this week                           all panels              ││
 ││W          Show last week                           all panels              ││
-╰╰┤ ↑/↓ scroll, any other key closes ├────────────────────────────────────────╯╯
+╰╰┤ ↑/↓ j/k scroll, any other key closes ├────────────────────────────────────╯╯
  w week m month r range v view / filter ? help q quit      updated 01:46:40 UTC

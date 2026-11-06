@@ -367,7 +367,7 @@ fn render_help(frame: &mut Frame, area: Rect, scroll: usize, pal: &Palette) {
     let top = scroll.min(lines.len().saturating_sub(page));
     let edge = Style::default().fg(pal.color(pal.hi));
     let more = if lines.len() > page {
-        "\u{2191}/\u{2193} scroll, any other key closes"
+        "\u{2191}/\u{2193} j/k scroll, any other key closes"
     } else {
         "any key closes"
     };
