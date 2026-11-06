@@ -71,11 +71,23 @@ fn write_events(
     mut newest: i64,
     stats: &mut IngestStats,
 ) -> Result<i64, String> {
+    // The account of each session is read once: a token fingerprint when the
+    // session ran on one, else the account Claude Code is signed in to.
+    let mut labels: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut label_of = |session: &str| -> Result<String, String> {
+        if let Some(known) = labels.get(session) {
+            return Ok(known.clone());
+        }
+        let label =
+            crate::session_account::of_session(tx, session)?.unwrap_or_else(|| account.to_string());
+        labels.insert(session.to_string(), label.clone());
+        Ok(label)
+    };
     for event in events.usage {
         newest = newest.max(event.timestamp);
         let existed = db::has_usage_event(tx, &event.event_id)?;
         let mut event = event;
-        event.account = account.to_string();
+        event.account = label_of(&event.session_id)?;
         if event.agent.is_empty() {
             event.agent = name.to_string();
         }
@@ -93,7 +105,7 @@ fn write_events(
             continue;
         }
         let mut event = event;
-        event.account = account.to_string();
+        event.account = label_of(&event.session_id)?;
         db::insert_tool_event(tx, &event)?;
         stats.tools_inserted += 1;
     }
@@ -247,6 +259,52 @@ mod tests {
         assert!(rows.iter().all(|r| r.account == "dev@example.com"));
         assert!(rows.iter().all(|r| r.agent == "claude-code"));
         assert_eq!(db::get_watermark(&conn, "claude-code").unwrap(), 1788307201);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn each_session_is_labeled_by_its_own_credential_in_one_run() {
+        let dir = scratch_dir("usage-session-labels");
+        let root = dir.join("projects").join("proj-one");
+        fs::create_dir_all(&root).unwrap();
+        fs::copy(
+            fixture_root("usage").join("proj-one/s1.jsonl"),
+            root.join("s1.jsonl"),
+        )
+        .unwrap();
+        fs::copy(
+            fixture_root("tools").join("proj-one/s2.jsonl"),
+            root.join("s2.jsonl"),
+        )
+        .unwrap();
+        let conn = db::open_db(&dir.join("usage.db")).unwrap();
+        crate::session_account::record(&dir, "s1", Some("token:aaaa1111"));
+        crate::session_account::import(&conn, &dir).unwrap();
+
+        ingest(
+            &ClaudeCodeSource::new(dir.join("projects")),
+            "dev@example.com",
+            &conn,
+        )
+        .unwrap();
+
+        let label_of = |table: &str, session: &str| -> Vec<String> {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT DISTINCT account FROM {table} WHERE session_id = ?1"
+                ))
+                .unwrap();
+            stmt.query_map([session], |r| r.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        assert_eq!(label_of("usage_events", "s1"), ["token:aaaa1111"]);
+        assert_eq!(label_of("usage_events", "s2"), ["dev@example.com"]);
+        assert_eq!(
+            label_of("tool_invocation_events", "s2"),
+            ["dev@example.com"]
+        );
         let _ = fs::remove_dir_all(dir);
     }
 

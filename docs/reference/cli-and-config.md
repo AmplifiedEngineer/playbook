@@ -1632,7 +1632,7 @@ Example: `playbook usage account list`
 - `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 - `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
-Subcommands: `assign`, `list`, `name`, `reconcile`, `sessions`, `undo`
+Subcommands: `assign`, `fingerprint`, `list`, `name`, `reconcile`, `sessions`, `undo`
 
 ### `playbook usage account assign`
 
@@ -1650,6 +1650,17 @@ Example: `playbook usage account assign --from 2026-11-01T00:00 --to 2026-11-02T
 - `--as <KEY_OR_NAME>`: Account key or name that receives the events
 - `--was <KEY_OR_NAME>`: Move only events now labeled with this account key or name
 - `--confirm`: Apply the move; without it nothing changes
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+
+### `playbook usage account fingerprint`
+
+Print the account key for CLAUDE_CODE_OAUTH_TOKEN in this shell
+
+A session started with that variable set is recorded under a key like `token:ab12cd34`, made from the token with a one way hash. This prints the key and never the token. Run it in a shell that has the variable set, then use the key with `account name` and `account assign`.
+
+Example: `playbook usage account fingerprint`
+
 - `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 - `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
