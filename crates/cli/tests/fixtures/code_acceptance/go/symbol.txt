@@ -1,0 +1,2 @@
+exit: 0
+shape.go:11-13  struct Square  type Square struct

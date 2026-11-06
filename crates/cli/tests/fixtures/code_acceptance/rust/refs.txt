@@ -1,0 +1,5 @@
+exit: 0
+src/lib.rs:18:8  declaration (candidate)  pub fn area(p: &Point) -> i32 {
+src/lib.rs:30:23  use (candidate)  format!("{}", area(self))
+src/shape.rs:3:13  import (candidate)  use crate::{area, Point};
+src/shape.rs:15:5  use (candidate)  area(&corner()) * 2
