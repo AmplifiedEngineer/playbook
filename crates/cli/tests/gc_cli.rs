@@ -18,10 +18,13 @@ fn scratch_home(tag: &str) -> PathBuf {
     dir
 }
 
+// The child runs inside `home`: gc also sweeps build output under the current
+// directory, which would otherwise be this repo's own `target` folder.
 fn gc(home: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_playbook"))
         .arg("gc")
         .args(args)
+        .current_dir(home)
         .env("HOME", home)
         .output()
         .expect("playbook should spawn")
@@ -67,6 +70,7 @@ fn gc_at_fixed_now(home: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_playbook"))
         .arg("gc")
         .args(args)
+        .current_dir(home)
         .env("HOME", home)
         .env("PLAYBOOK_TEST_NOW", NOW.to_string())
         .output()
