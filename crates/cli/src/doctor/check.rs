@@ -790,6 +790,64 @@ fn config_rows(env: &Env) -> Vec<Row> {
 }
 
 fn worktree_rows(env: &Env) -> Vec<Row> {
+    let mut rows = stale_worktree_rows(env);
+    rows.extend(worktree_guard_row(env));
+    rows
+}
+
+/// The Claude Code release known to refuse shell commands in a worktree
+/// session: after `EnterWorktree` the Bash tool's directory falls back to the
+/// shared checkout and the harness refuses every command run there.
+const WORKTREE_GUARD_BAD_CLAUDE_VERSION: &str = "2.1.318";
+
+const WORKTREE_GUARD_RECOVERY: &str = "if a command is refused as isolated in a worktree, call ExitWorktree with action keep, then continue from the original directory; do not retry the command";
+
+/// The advisory row for the worktree guard bug. The harness keeps the recorded
+/// worktree path to itself, so doctor cannot tell a broken session from a
+/// healthy one. It shows only when the working directory is a linked worktree
+/// and the installed Claude Code is the known bad version.
+fn worktree_guard_row_from(version: Option<&str>, in_linked_worktree: bool) -> Option<Row> {
+    if !in_linked_worktree || version != Some(WORKTREE_GUARD_BAD_CLAUDE_VERSION) {
+        return None;
+    }
+    Some(
+        Row::new(
+            "-",
+            Level::Warn,
+            format!(
+                "Claude Code {WORKTREE_GUARD_BAD_CLAUDE_VERSION} can refuse shell commands in a worktree session (working directory falls back to the shared checkout)"
+            ),
+        )
+        .hint(WORKTREE_GUARD_RECOVERY),
+    )
+}
+
+/// A linked worktree keeps a `.git` file that points into the main checkout's
+/// `worktrees` folder; the main checkout keeps a folder, and a submodule keeps
+/// a file that points into `modules`.
+fn is_linked_worktree(root: &Path) -> bool {
+    fs::read_to_string(root.join(".git"))
+        .is_ok_and(|text| text.trim().starts_with("gitdir:") && text.contains("/worktrees/"))
+}
+
+/// The version in `claude --version` output such as `2.1.296 (Claude Code)`.
+fn claude_version(text: &str) -> Option<&str> {
+    text.split_whitespace().next()
+}
+
+fn worktree_guard_row(env: &Env) -> Option<Row> {
+    let root = env.repo_root.as_deref()?;
+    if !is_linked_worktree(root) {
+        return None;
+    }
+    let claude = on_path(env, "claude")?;
+    let mut cmd = Command::new(claude);
+    cmd.arg("--version");
+    let text = output_of(cmd)?;
+    worktree_guard_row_from(claude_version(&text), true)
+}
+
+fn stale_worktree_rows(env: &Env) -> Vec<Row> {
     let Some(root) = &env.repo_root else {
         return vec![Row::new(
             "-",
@@ -1137,6 +1195,9 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
     let Some(state) = state else {
         return rows;
     };
+    if let Some(row) = token_row(&env.home, &cwd, &state.token) {
+        rows.push(row);
+    }
     rows.push(daemon_row(&paths, state.port));
     let up = running(&state) && probe(state.port) == Reply::Collector;
     if up {
@@ -1196,6 +1257,53 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
             .hint("restart Claude Code so it reads the new settings, then start a session"),
     });
     rows
+}
+
+/// A warning when the bearer token Claude Code sends is not the collector's.
+/// The collector answers 401 to every export then, and Claude Code drops
+/// them without a message. `None` when the token matches or settings cannot
+/// be read.
+fn token_row(home: &Path, cwd: &Path, token: &str) -> Option<Row> {
+    let vars = crate::usage::telemetry_detect::merged_vars(home, cwd, false)?;
+    if token.is_empty() {
+        return None;
+    }
+    let general = vars.get("OTEL_EXPORTER_OTLP_HEADERS");
+    // A signal-specific header replaces the general one for that signal.
+    let in_effect = [
+        "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+        "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+    ]
+    .map(|name| vars.get(name).or(general));
+    let sent: Vec<Option<String>> = in_effect
+        .iter()
+        .map(|h| h.and_then(|h| bearer_token(h)))
+        .collect();
+    if sent.iter().all(|s| s.as_deref() == Some(token)) {
+        return None;
+    }
+    let message = if sent.iter().any(Option::is_none) {
+        "Claude Code settings send no collector token, so the collector refuses every export"
+    } else {
+        "the token in Claude Code settings is not the collector token, so the collector refuses every export"
+    };
+    Some(Row::new("-", Level::Warn, message).hint(TELEMETRY_SETUP_FIX))
+}
+
+/// The bearer token of the `Authorization` pair in an OTLP headers value
+/// (`k=v,k=v`, values may be percent-encoded).
+fn bearer_token(headers: &str) -> Option<String> {
+    headers.split(',').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        if !key.trim().eq_ignore_ascii_case("authorization") {
+            return None;
+        }
+        let value = value.trim().replace("%20", " ");
+        let (scheme, token) = value.split_once(' ')?;
+        scheme
+            .eq_ignore_ascii_case("bearer")
+            .then(|| token.trim().to_string())
+    })
 }
 
 /// Who holds the collector's lifetime lock, or why none does. Read only: it
@@ -1655,6 +1763,47 @@ mod tests {
             repo_root: None,
             repo_slug: None,
         }
+    }
+
+    #[test]
+    fn the_worktree_guard_row_shows_only_for_the_bad_version_in_a_linked_worktree() {
+        // Arrange
+        let bad = Some(WORKTREE_GUARD_BAD_CLAUDE_VERSION);
+
+        // Act
+        let row = worktree_guard_row_from(bad, true).expect("row");
+
+        // Assert
+        assert_eq!(row.level, Level::Warn);
+        assert!(row.message.contains(WORKTREE_GUARD_BAD_CLAUDE_VERSION));
+        assert!(row.hint.unwrap().contains("ExitWorktree with action keep"));
+        assert_eq!(
+            claude_version("2.1.318 (Claude Code)\n"),
+            Some(WORKTREE_GUARD_BAD_CLAUDE_VERSION)
+        );
+        assert!(worktree_guard_row_from(bad, false).is_none());
+        assert!(worktree_guard_row_from(Some("2.1.999"), true).is_none());
+        assert!(worktree_guard_row_from(None, true).is_none());
+    }
+
+    #[test]
+    fn a_gitfile_marks_a_linked_worktree_and_a_git_folder_does_not() {
+        // Arrange
+        let dir = crate::common::test_support::scratch_dir("doctor-linked");
+        let linked = dir.join("linked");
+        let main = dir.join("main");
+        fs::create_dir_all(main.join(".git")).unwrap();
+        fs::create_dir_all(&linked).unwrap();
+        fs::write(linked.join(".git"), "gitdir: /x/.git/worktrees/linked\n").unwrap();
+
+        let sub = dir.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join(".git"), "gitdir: ../.git/modules/sub\n").unwrap();
+
+        // Act and assert
+        assert!(!is_linked_worktree(&sub));
+        assert!(is_linked_worktree(&linked));
+        assert!(!is_linked_worktree(&main));
     }
 
     #[test]

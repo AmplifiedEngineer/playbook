@@ -37,4 +37,4 @@
 │                                                                                                                                          │
 │                                                                                                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- Tab tab 1-6 panel d day w week m month a all ←/→ day r range v view / filter s/S sort h help q quit         updated 01:46:40 UTC, every 5s
+ Tab tab 1-6 panel d day w week m month a all ←/→ day r range v view / filter s/S sort ? help q quit         updated 01:46:40 UTC, every 5s

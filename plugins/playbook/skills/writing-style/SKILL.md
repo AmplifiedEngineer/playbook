@@ -40,7 +40,7 @@ MUST apply these principles to anything written for review: the reviewer is the 
 - Be spartan and informative. Every sentence adds information. Cut sentences that only add emphasis.
 - Say each point once, in plain words. Don't restate it later in the same comment or reply.
 - Use short sentences. Default to one line for a reply, a reaction, or a status update. A paragraph is the exception, earned by real complexity.
-- Use active voice. "This breaks the import" not "the import is broken by this."
+- Use active voice only. Passive voice is banned: a form of "be" plus a past participle ("was added", "is handled", "has been fixed", "will be merged"). Name who or what acts. Before: "The retry was added and the timeout is handled by the client." After: "I added the retry. The client handles the timeout." When the actor does not matter, make the thing the subject: "The job fails", not "The job is failed." A status word is not passive: "the flag is deprecated", "the file is empty", "the PR is ready".
 - Use data and examples to support claims.
 - Address the reader as "you" and write as "I" where a first person fits ("I changed", "Done"). Code review comments are the exception: see `github-review-comments`.
 - Be kind and respectful. Name the problem and the fix without blame: "this breaks X. Change Y."
@@ -114,13 +114,36 @@ For text of 50 words or more, rate 1 to 10 on each dimension:
 
 Below 35 out of 50: revise, then re-score. Stop after the second pass. More passes risk changing the meaning. If the score is still below 35, name the remaining issues and ask. Skip scoring for text under 50 words and apply the core rules and quick checks only.
 
+## Length limits (MUST)
+
+Each text kind has a hard limit. Count sentences without the label and without code. A limit never rises: when the text runs over, cut it, and do not argue for more.
+
+| Rule | Text | Limit |
+|---|---|---|
+| `LEN-COMMIT-TITLE` | commit title and PR title | 72 characters, aim for 50 |
+| `LEN-COMMIT-BODY` | commit body | none by default; when the why is not obvious, 2 sentences or 3 bullets |
+| `LEN-PR-SUMMARY` | PR Summary section | 3 short sentences |
+| `LEN-PR-BODY` | whole PR body | 1200 characters, aim for 500 |
+| `LEN-REVIEW` | review comment on a diff | the label plus 1 sentence, 2 at most |
+| `LEN-REPLY` | reply to a PR comment | 1 sentence, 2 at most; "Fixed." is enough for a fix |
+| `LEN-TICKET` | ticket description | 3 sentences of what and why, then at most 5 acceptance bullets |
+| `LEN-CHAT` | status or answer in chat | the answer first, then 3 sentences at most |
+
+## What to cut
+
+- Background the reader already has. The author knows the code, and the reviewer knows the repo.
+- A restatement of the diff or the title. The diff shows what changed.
+- A reason nobody asked for. Give a reason only when you took a different path than expected.
+- Hedging: "might", "perhaps", "I think", "it seems", "maybe". State the fact, or say you did not check.
+- Thanks, praise, and a summary at the end.
+
 ## Shape by artifact
 
 Every artifact uses the same words and rules. The list gives the structure of each.
 
-- **Commit message:** a conventional title under 73 characters, imperative, one change. A body only when the why is not obvious. Details in `commits-and-prs`.
+- **Commit message:** a conventional title (`LEN-COMMIT-TITLE`), imperative, one change. A body only when the why is not obvious. Details in `commits-and-prs`.
 - **PR description:** the team template, section order unchanged. One line of what and why first. Details in `commits-and-prs`.
-- **Review comment or reply:** a plain-text label, then one or two sentences. Details in `github-review-comments`.
+- **Review comment or reply:** a plain-text label, then one or two sentences (`LEN-REVIEW`, `LEN-REPLY`). Details in `github-review-comments`.
 - **ADR:** the same rules and the same checks as everything else. Slightly more formal wording is fine (full sentences, "we decided", fewer fragments), but no banned phrase, no dash, no binary contrast. There is no ADR exemption.
 - **Chat reply:** the answer first, then only what the reader needs to act.
 
@@ -130,6 +153,8 @@ Every artifact uses the same words and rules. The list gives the structure of ea
 - **Editing:** fix the flagged patterns, keep the meaning and the author's deliberate choices, score, revise once or twice.
 - **Review only:** list the flagged patterns with locations and a score. Do not rewrite.
 - If you leave a pattern in on purpose, say so in one line with the reason.
+- `playbook prose check` warns on passive voice: a form of "be" plus a past participle. It is a soft finding and never fails `--strict`. Present-tense status words pass ("is deprecated", "is required", "is merged", "is named", "is unused"); the same word after "was", "will be" or "been" is an event and warns. Rewrite the sentence with an actor.
+- A file `<file>.facts` next to the checked file turns on two more checks. Each number, identifier, path and reference in the text must appear in the facts, and the text must fit the limit of the `kind:` named on the first line of the facts (`pr-body`, `review-comment`, `reply`, `commit-message`, `ticket`). Both are hard findings.
 
 ## Loading the references
 

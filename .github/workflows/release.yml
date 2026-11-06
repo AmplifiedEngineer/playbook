@@ -486,6 +486,8 @@ jobs:
           persist-credentials: false
 
       - name: Add the target
+        # bash on every OS: Windows runs pwsh by default, where $TARGET is empty.
+        shell: bash
         env:
           TARGET: ${{ matrix.target }}
         run: rustup target add "$TARGET"
