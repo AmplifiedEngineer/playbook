@@ -10,7 +10,7 @@ use super::period::Period;
 use super::query::{self, Range, WeekStart};
 use super::run::{ingest_new, run_summary, Paths};
 use super::{api, db, tui};
-use rusqlite::Connection;
+use playbook_store::Connection;
 use std::path::Path;
 use std::time::Duration;
 
@@ -383,7 +383,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let p = paths("entry-account-live");
         let live = crate::db::open_db(&p.db).unwrap();
-        let seed = |conn: &rusqlite::Connection| {
+        let seed = |conn: &playbook_store::Connection| {
             conn.execute(
                 "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
                     repo, branch, input_tokens, output_tokens, cache_creation_tokens,
@@ -420,7 +420,7 @@ mod tests {
         .unwrap();
         assert!(out.contains("now belong to token:abcd1234"), "{out}");
         let account = |db: &Path| -> String {
-            rusqlite::Connection::open(db)
+            playbook_store::Connection::open(db)
                 .unwrap()
                 .query_row("SELECT account FROM usage_events", [], |r| r.get(0))
                 .unwrap()

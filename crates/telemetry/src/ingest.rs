@@ -8,7 +8,7 @@
 use super::claude_code::ClaudeCodeSource;
 use super::db;
 use super::{Events, UsageSource};
-use rusqlite::{Connection, Transaction, TransactionBehavior};
+use playbook_store::{Connection, Transaction, TransactionBehavior};
 use std::path::PathBuf;
 
 #[derive(Debug, Default, PartialEq, Eq)]

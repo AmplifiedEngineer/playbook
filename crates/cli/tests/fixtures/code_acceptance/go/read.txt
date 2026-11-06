@@ -1,0 +1,9 @@
+exit: 0
+     1  // SPDX-FileCopyrightText: 2026 Igor Santos
+     2  // SPDX-License-Identifier: Apache-2.0
+     3  package shape
+     4  
+     5  const Scale = 2
+     6  
+     7  type Shape interface {
+     8  	Area() int

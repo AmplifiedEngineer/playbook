@@ -8,7 +8,7 @@
 use super::aggregate::civil_from_days;
 use super::db;
 use super::{ToolInvocationEvent, UsageEvent};
-use rusqlite::Connection;
+use playbook_store::Connection;
 use std::collections::BTreeMap;
 
 /// The day a calendar week starts on. Monday is the default.

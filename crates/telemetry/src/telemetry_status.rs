@@ -166,9 +166,9 @@ fn endpoint_is_missing(vars: &std::collections::BTreeMap<String, String>) -> boo
 
 /// Whether the usage database holds a telemetry request from the last day.
 fn rows_recent(paths: &Paths) -> bool {
-    let Ok(conn) = rusqlite::Connection::open_with_flags(
+    let Ok(conn) = playbook_store::Connection::open_with_flags(
         &paths.db,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        playbook_store::OpenFlags::SQLITE_OPEN_READ_ONLY,
     ) else {
         return false;
     };

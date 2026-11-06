@@ -16,7 +16,7 @@ use crate::period::{Comparison, Period};
 use crate::query::{self, LiveView, Range, SessionDay, Totals, WeekStart};
 use crate::run::Paths;
 use crate::UsageEvent;
-use rusqlite::Connection;
+use playbook_store::Connection;
 use std::collections::BTreeMap;
 
 /// One calendar day of the spend and token graphs.

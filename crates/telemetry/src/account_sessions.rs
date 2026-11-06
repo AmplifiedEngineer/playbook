@@ -7,7 +7,7 @@
 //! of every candidate boundary with the daily totals of an account dashboard.
 
 use crate::account_store::err;
-use rusqlite::{Connection, OptionalExtension};
+use playbook_store::{Connection, OptionalExtension};
 use std::collections::BTreeMap;
 
 /// One session with its first event in the window.
@@ -74,7 +74,7 @@ pub fn session_start(conn: &Connection, id: &str) -> Result<i64, String> {
         .query_row(
             "SELECT session_id FROM usage_events WHERE session_id <> ?1
              GROUP BY session_id HAVING MIN(timestamp) = ?2 LIMIT 1",
-            rusqlite::params![id, start],
+            playbook_store::params![id, start],
             |r| r.get(0),
         )
         .optional()
@@ -241,7 +241,7 @@ mod tests {
                 "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
                     repo, branch, input_tokens, output_tokens, cache_creation_tokens,
                     cache_read_tokens, cost_usd) VALUES (?1, ?2, ?3, 'w', 'm', '', ?4, 'b', 1, 1, 0, 0, ?5)",
-                rusqlite::params![id, ts, session, repo, cost],
+                playbook_store::params![id, ts, session, repo, cost],
             )
             .unwrap();
         }

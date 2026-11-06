@@ -11,7 +11,9 @@
 use crate::account_store::err;
 use crate::tz::Zone;
 use chrono::{NaiveDate, NaiveDateTime};
-use rusqlite::{named_params, Connection, OptionalExtension, Transaction, TransactionBehavior};
+use playbook_store::{
+    named_params, Connection, OptionalExtension, Transaction, TransactionBehavior,
+};
 
 pub const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS account_assignments (
@@ -156,7 +158,7 @@ pub fn assign(
     }
     tx.execute(
         "INSERT INTO account_assignments (created_at, from_ts, to_ts, target) VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![now, from, to, target],
+        playbook_store::params![now, from, to, target],
     )
     .map_err(|e| err("record the move", e))?;
     let id = tx.last_insert_rowid();

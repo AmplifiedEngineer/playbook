@@ -1,0 +1,15 @@
+---
+source: crates/code/tests/snapshots.rs
+expression: "render(LANGS[0])"
+---
+src/lib.rs module shape 4-4 exported
+src/lib.rs const SCALE 6-6 exported
+src/lib.rs struct Point 8-11 exported
+src/lib.rs enum Axis 13-16 exported
+src/lib.rs function area 18-22 exported
+src/lib.rs trait Describe 24-26 exported
+src/lib.rs method Describe::describe 25-25
+src/lib.rs method Point::describe 29-31
+src/shape.rs struct Square 5-7 exported
+src/shape.rs function corner 9-11 exported
+src/shape.rs function double_area 13-16 exported

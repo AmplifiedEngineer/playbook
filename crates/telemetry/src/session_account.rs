@@ -13,7 +13,7 @@
 //! the prefix `token:`. It cannot be turned back into the token.
 
 use crate::account_store::err;
-use rusqlite::{Connection, OptionalExtension};
+use playbook_store::{Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::Path;

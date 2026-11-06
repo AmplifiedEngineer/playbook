@@ -28,7 +28,7 @@
 
 use super::db::load_usage_events_of_sessions;
 use super::telemetry_db::{set_session_source, Source};
-use rusqlite::{params, Connection};
+use playbook_store::{params, Connection};
 
 /// Tokens may differ by this share of the transcript total.
 pub const TOKEN_TOLERANCE: f64 = 0.01;
