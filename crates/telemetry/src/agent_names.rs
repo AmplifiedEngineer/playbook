@@ -19,11 +19,15 @@ use crate::claude_code::read_lines;
 use crate::otlp::safe_text;
 use rusqlite::{params, Connection};
 use serde_json::Value;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const MAX_NAME_LEN: usize = 64;
 const MAX_ID_LEN: usize = 128;
+/// A meta file is a few hundred bytes; anything bigger is not one.
+const MAX_META_BYTES: u64 = 16 * 1024;
 
 /// The name Claude Code gives an agent from a plugin it does not list.
 pub const CUSTOM: &str = "custom";
@@ -32,41 +36,57 @@ pub const CUSTOM: &str = "custom";
 /// request. Returns the rows changed. A row without a matching transcript
 /// keeps `custom`, so running it again later can still fix it.
 pub fn resolve_custom(conn: &Connection, claude_projects: &Path) -> Result<usize, String> {
-    let sessions = custom_sessions(conn)?;
+    let sessions = custom_requests(conn)?;
     if sessions.is_empty() {
         return Ok(0);
     }
     let projects: Vec<PathBuf> = fs::read_dir(claude_projects)
         .map(|dir| dir.flatten().map(|e| e.path()).collect())
         .unwrap_or_default();
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("failed to start the agent name update: {e}"))?;
     let mut changed = 0;
-    for session in sessions {
+    for (session, wanted) in sessions {
         // The session id is a path segment next, so it must be a plain name.
-        if safe_text(&session, MAX_ID_LEN).is_none() || session.contains('/') {
+        if safe_text(&session, MAX_ID_LEN).is_none()
+            || session.contains('/')
+            || session == "."
+            || session == ".."
+        {
             continue;
         }
         for project in &projects {
             let dir = project.join(&session).join("subagents");
             for (agent_type, requests) in subagents(&dir) {
-                for request in requests {
-                    changed += rename(conn, &session, &request, &agent_type)?;
+                for request in requests.iter().filter(|r| wanted.contains(*r)) {
+                    changed += rename(&tx, &session, request, &agent_type)?;
                 }
             }
         }
     }
+    tx.commit()
+        .map_err(|e| format!("failed to save the agent names: {e}"))?;
     Ok(changed)
 }
 
-/// Sessions that still have a `custom` row.
-fn custom_sessions(conn: &Connection) -> Result<Vec<String>, String> {
+/// The request ids that still say `custom`, by session.
+fn custom_requests(conn: &Connection) -> Result<BTreeMap<String, HashSet<String>>, String> {
     let mut stmt = conn
-        .prepare("SELECT DISTINCT session_id FROM telemetry_requests WHERE agent_name = ?1")
+        .prepare("SELECT session_id, request_id FROM telemetry_requests WHERE agent_name = ?1")
         .map_err(|e| format!("failed to prepare the custom agent read: {e}"))?;
     let rows = stmt
-        .query_map([CUSTOM], |r| r.get::<_, String>(0))
+        .query_map([CUSTOM], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
         .map_err(|e| format!("failed to read custom agent rows: {e}"))?;
-    rows.collect::<Result<_, _>>()
-        .map_err(|e| format!("failed to read a custom agent row: {e}"))
+    let mut out: BTreeMap<String, HashSet<String>> = BTreeMap::new();
+    for row in rows {
+        let (session, request) =
+            row.map_err(|e| format!("failed to read a custom agent row: {e}"))?;
+        out.entry(session).or_default().insert(request);
+    }
+    Ok(out)
 }
 
 fn rename(conn: &Connection, session: &str, request: &str, name: &str) -> Result<usize, String> {
@@ -111,7 +131,16 @@ fn subagents(dir: &Path) -> Vec<(String, Vec<String>)> {
 
 /// The `agentType` of a meta file when it is a safe name other than `custom`.
 fn agent_type(meta: &Path) -> Option<String> {
-    let value: Value = serde_json::from_slice(&fs::read(meta).ok()?).ok()?;
+    let mut bytes = Vec::new();
+    fs::File::open(meta)
+        .ok()?
+        .take(MAX_META_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > MAX_META_BYTES {
+        return None;
+    }
+    let value: Value = serde_json::from_slice(&bytes).ok()?;
     let name = safe_text(value.get("agentType")?.as_str()?, MAX_NAME_LEN)?;
     (name != CUSTOM).then_some(name)
 }
@@ -267,10 +296,13 @@ mod tests {
     #[test]
     fn nothing_is_read_when_no_row_says_custom() {
         let conn = conn();
-        row(&conn, SESSION, "req_a", "");
-        let missing = Path::new("/nonexistent/projects");
+        let dir = root("agent-names-not-custom");
+        row(&conn, SESSION, "req_a", "Explore");
+        subagent(&dir, SESSION, "a1", "playbook:reviewer", &["req_a"]);
 
-        assert_eq!(resolve_custom(&conn, missing).unwrap(), 0);
+        assert_eq!(resolve_custom(&conn, &dir).unwrap(), 0);
+        assert_eq!(agent_of(&conn, "req_a"), "Explore");
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -283,5 +315,128 @@ mod tests {
         assert_eq!(resolve_custom(&conn, &dir).unwrap(), 1);
         assert_eq!(resolve_custom(&conn, &dir).unwrap(), 0);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_session_id_that_climbs_a_folder_is_never_followed() {
+        let conn = conn();
+        let dir = root("agent-names-climb");
+        row(&conn, "..", "req_a", "custom");
+        row(&conn, ".", "req_b", "custom");
+        // <projects>/subagents is where ".." would lead.
+        let escaped = dir.join("subagents");
+        fs::create_dir_all(&escaped).unwrap();
+        fs::write(
+            escaped.join("agent-x.meta.json"),
+            r#"{"agentType":"playbook:evil"}"#,
+        )
+        .unwrap();
+        fs::write(
+            escaped.join("agent-x.jsonl"),
+            "{\"requestId\":\"req_a\"}\n{\"requestId\":\"req_b\"}",
+        )
+        .unwrap();
+        // "." from a project folder leads to <project>/subagents.
+        let project = dir.join("-Users-me-repo");
+        fs::create_dir_all(project.join("subagents")).unwrap();
+        fs::copy(
+            escaped.join("agent-x.meta.json"),
+            project.join("subagents/agent-x.meta.json"),
+        )
+        .unwrap();
+        fs::copy(
+            escaped.join("agent-x.jsonl"),
+            project.join("subagents/agent-x.jsonl"),
+        )
+        .unwrap();
+
+        assert_eq!(resolve_custom(&conn, &dir).unwrap(), 0);
+        assert_eq!(agent_of(&conn, "req_a"), "custom");
+        assert_eq!(agent_of(&conn, "req_b"), "custom");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_meta_file_that_cannot_name_the_agent_leaves_the_row_alone() {
+        let cases: [(&str, Option<String>); 4] = [
+            ("custom-type", Some(r#"{"agentType":"custom"}"#.into())),
+            ("bad-json", Some("{not json".into())),
+            ("no-type", Some(r#"{"name":"x"}"#.into())),
+            (
+                "oversized",
+                Some(format!(
+                    r#"{{"agentType":"playbook:big","pad":"{}"}}"#,
+                    "a".repeat(20_000)
+                )),
+            ),
+        ];
+        for (tag, meta) in cases {
+            let conn = conn();
+            let dir = root(&format!("agent-names-{tag}"));
+            row(&conn, SESSION, "req_a", "custom");
+            let sub = dir.join("-Users-me-repo").join(SESSION).join("subagents");
+            fs::create_dir_all(&sub).unwrap();
+            fs::write(sub.join("agent-1.meta.json"), meta.unwrap()).unwrap();
+            fs::write(sub.join("agent-1.jsonl"), "{\"requestId\":\"req_a\"}").unwrap();
+
+            assert_eq!(resolve_custom(&conn, &dir).unwrap(), 0, "{tag}");
+            assert_eq!(agent_of(&conn, "req_a"), "custom", "{tag}");
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn a_meta_file_without_a_transcript_changes_nothing() {
+        let conn = conn();
+        let dir = root("agent-names-no-jsonl");
+        row(&conn, SESSION, "req_a", "custom");
+        let sub = dir.join("-Users-me-repo").join(SESSION).join("subagents");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(
+            sub.join("agent-1.meta.json"),
+            r#"{"agentType":"playbook:reviewer"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(resolve_custom(&conn, &dir).unwrap(), 0);
+        assert_eq!(agent_of(&conn, "req_a"), "custom");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_request_that_is_not_custom_is_not_renamed_by_a_sibling_transcript() {
+        let conn = conn();
+        let dir = root("agent-names-wanted");
+        row(&conn, SESSION, "req_a", "custom");
+        row(&conn, SESSION, "req_b", "Explore");
+        subagent(
+            &dir,
+            SESSION,
+            "a1",
+            "playbook:reviewer",
+            &["req_a", "req_b"],
+        );
+
+        assert_eq!(resolve_custom(&conn, &dir).unwrap(), 1);
+        assert_eq!(agent_of(&conn, "req_b"), "Explore");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_ingest_names_the_custom_rows() {
+        let paths = crate::util::scratch_paths("agent-names-ingest");
+        let conn = crate::db::open_db(&paths.db).unwrap();
+        row(&conn, SESSION, "req_a", "custom");
+        subagent(
+            &paths.claude_projects,
+            SESSION,
+            "a1",
+            "playbook:critic",
+            &["req_a"],
+        );
+
+        crate::run::ingest_into(&paths, &conn, &mut |_, _| true).unwrap();
+
+        assert_eq!(agent_of(&conn, "req_a"), "playbook:critic");
     }
 }
