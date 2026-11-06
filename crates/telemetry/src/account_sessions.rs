@@ -51,17 +51,38 @@ pub fn sessions(conn: &Connection, from: i64, to: i64) -> Result<Vec<SessionRow>
         .map_err(|e| err("list the sessions", e))
 }
 
-/// The time of the first event of session `id`.
+/// The time of the first event of session `id`. A boundary is a second, so a
+/// session that shares its first second with another session is refused: the
+/// list order between the two would not decide which side of the boundary
+/// each falls on.
 pub fn session_start(conn: &Connection, id: &str) -> Result<i64, String> {
-    conn.query_row(
-        "SELECT MIN(timestamp) FROM usage_events WHERE session_id = ?1",
-        [id],
-        |r| r.get::<_, Option<i64>>(0),
-    )
-    .optional()
-    .map_err(|e| err("find the session", e))?
-    .flatten()
-    .ok_or_else(|| format!("no session {id} in the usage store; list them with `account sessions`"))
+    let start = conn
+        .query_row(
+            "SELECT MIN(timestamp) FROM usage_events WHERE session_id = ?1",
+            [id],
+            |r| r.get::<_, Option<i64>>(0),
+        )
+        .optional()
+        .map_err(|e| err("find the session", e))?
+        .flatten()
+        .ok_or_else(|| {
+            format!("no session {id} in the usage store; list them with `account sessions`")
+        })?;
+    let other: Option<String> = conn
+        .query_row(
+            "SELECT session_id FROM usage_events WHERE session_id <> ?1
+             GROUP BY session_id HAVING MIN(timestamp) = ?2 LIMIT 1",
+            rusqlite::params![id, start],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| err("find the session", e))?;
+    match other {
+        Some(other) => Err(format!(
+            "session {id} starts in the same second as session {other}; give --from and --to times instead"
+        )),
+        None => Ok(start),
+    }
 }
 
 /// The text of `playbook usage account sessions`.
@@ -138,6 +159,21 @@ mod tests {
         assert!(session_start(&conn, "zzz")
             .unwrap_err()
             .contains("no session zzz"));
+    }
+
+    #[test]
+    fn a_boundary_session_that_shares_its_start_second_is_refused() {
+        let conn = store();
+        conn.execute(
+            "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
+                repo, branch, input_tokens, output_tokens, cache_creation_tokens,
+                cache_read_tokens, cost_usd) VALUES ('9', ?1, 'd', 'w', 'm', '', 'r', 'b', 1, 1, 0, 0, 1.0)",
+            [2 * DAY + 300],
+        )
+        .unwrap();
+        let err = session_start(&conn, "c").unwrap_err();
+        assert!(err.contains("same second as session d"), "{err}");
+        assert!(session_start(&conn, "b").is_ok());
     }
 
     #[test]
