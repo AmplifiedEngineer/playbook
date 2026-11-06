@@ -1265,21 +1265,45 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
 /// be read.
 fn token_row(home: &Path, cwd: &Path, token: &str) -> Option<Row> {
     let vars = crate::usage::telemetry_detect::merged_vars(home, cwd, false)?;
-    let sent = vars
-        .get("OTEL_EXPORTER_OTLP_HEADERS")
-        .and_then(|h| h.split_once("Bearer "))
-        .map(|(_, rest)| rest.split(',').next().unwrap_or("").trim().to_string());
-    if token.is_empty() || sent.as_deref() == Some(token) {
+    if token.is_empty() {
         return None;
     }
-    Some(
-        Row::new(
-            "-",
-            Level::Warn,
-            "the token in Claude Code settings is not the collector token, so the collector refuses every export",
-        )
-        .hint(TELEMETRY_SETUP_FIX),
-    )
+    let general = vars.get("OTEL_EXPORTER_OTLP_HEADERS");
+    // A signal-specific header replaces the general one for that signal.
+    let in_effect = [
+        "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+        "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+    ]
+    .map(|name| vars.get(name).or(general));
+    let sent: Vec<Option<String>> = in_effect
+        .iter()
+        .map(|h| h.and_then(|h| bearer_token(h)))
+        .collect();
+    if sent.iter().all(|s| s.as_deref() == Some(token)) {
+        return None;
+    }
+    let message = if sent.iter().any(Option::is_none) {
+        "Claude Code settings send no collector token, so the collector refuses every export"
+    } else {
+        "the token in Claude Code settings is not the collector token, so the collector refuses every export"
+    };
+    Some(Row::new("-", Level::Warn, message).hint(TELEMETRY_SETUP_FIX))
+}
+
+/// The bearer token of the `Authorization` pair in an OTLP headers value
+/// (`k=v,k=v`, values may be percent-encoded).
+fn bearer_token(headers: &str) -> Option<String> {
+    headers.split(',').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        if !key.trim().eq_ignore_ascii_case("authorization") {
+            return None;
+        }
+        let value = value.trim().replace("%20", " ");
+        let (scheme, token) = value.split_once(' ')?;
+        scheme
+            .eq_ignore_ascii_case("bearer")
+            .then(|| token.trim().to_string())
+    })
 }
 
 /// Who holds the collector's lifetime lock, or why none does. Read only: it
