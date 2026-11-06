@@ -6,7 +6,7 @@
 use clap::Subcommand;
 
 /// `playbook usage` subcommands.
-#[derive(Subcommand, Debug, Clone, Copy)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum UsageCommand {
     /// Warm the usage store in the background (run by the `usage-warm` hook)
     #[command(hide = true)]
@@ -103,5 +103,33 @@ pub enum UsageCommand {
         /// Say what would be removed without deleting anything
         #[arg(long)]
         dry_run: bool,
+    },
+    /// Name accounts and move past usage between them
+    ///
+    /// Every usage event carries an account key: the email Claude Code is
+    /// signed in to, or a `token:` fingerprint. Use these commands to see the
+    /// accounts, give a key a display name, and relabel a time range recorded
+    /// under the wrong account.
+    ///
+    /// Example: `playbook usage account list`
+    Account {
+        #[command(subcommand)]
+        command: AccountCommand,
+    },
+}
+
+/// `playbook usage account` subcommands.
+#[derive(Subcommand, Debug, Clone)]
+pub enum AccountCommand {
+    /// List the accounts with their events, cost and time span
+    List,
+    /// Give an account key a display name, or clear it with an empty name
+    ///
+    /// Example: `playbook usage account name igor@getdigital.com.br Company`
+    Name {
+        /// The account key shown by `account list`
+        key: String,
+        /// The name to show; empty clears it
+        name: String,
     },
 }

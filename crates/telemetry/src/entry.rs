@@ -4,7 +4,7 @@
 //! `playbook usage` and its subcommands: picks the terminal view or the text or
 //! JSON output.
 
-use super::command::UsageCommand;
+use super::command::{AccountCommand, UsageCommand};
 use super::daemon::{self, Stopped};
 use super::period::Period;
 use super::query::{self, Range, WeekStart};
@@ -67,6 +67,23 @@ pub fn json_report(
     serde_json::to_string_pretty(&data).map_err(|e| format!("failed to encode usage data: {e}"))
 }
 
+/// `playbook usage account ...`.
+fn account_run(paths: &Paths, command: &AccountCommand) -> Result<String, String> {
+    use super::account_store as store;
+    let conn = super::db::open_db(&paths.db)?;
+    match command {
+        AccountCommand::List => store::list_text(&conn),
+        AccountCommand::Name { key, name } => {
+            store::set_name(&conn, key, name)?;
+            Ok(if name.trim().is_empty() {
+                format!("cleared the name of {key}")
+            } else {
+                format!("{key} is shown as {}", name.trim())
+            })
+        }
+    }
+}
+
 /// Runs the command. The returned text, when not empty, is printed on stdout.
 pub fn run(
     sub: Option<UsageCommand>,
@@ -110,6 +127,7 @@ pub fn run(
             let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             super::collector::run_collect(paths, port, idle_seconds, &stop)
         }
+        Some(UsageCommand::Account { command }) => account_run(paths, &command),
         Some(UsageCommand::Prune { dry_run }) => super::collector::run_prune(paths, dry_run),
         Some(UsageCommand::Status { json }) => {
             let status = super::collector::status(paths, super::collector::configured_retention())?;
@@ -237,6 +255,41 @@ mod tests {
             stop_text(Stopped::Killed, Path::new("/x")),
             Ok("stopped".into())
         );
+    }
+
+    fn account(p: &Paths, args: AccountCommand) -> Result<String, String> {
+        run(
+            Some(UsageCommand::Account { command: args }),
+            &no_opts(),
+            p,
+            false,
+        )
+    }
+
+    #[test]
+    fn the_account_commands_name_a_key_and_list_it_through_the_entry_point() {
+        let p = paths("entry-account");
+        let conn = crate::db::open_db(&p.db).unwrap();
+        conn.execute(
+            "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
+                repo, branch, input_tokens, output_tokens, cache_creation_tokens,
+                cache_read_tokens, cost_usd) VALUES ('e', 86400, 's', 'a@b.c', 'm', '', 'r', 'b', 1, 1, 0, 0, 2.5)",
+            [],
+        )
+        .unwrap();
+        let name = |name: &str| AccountCommand::Name {
+            key: "a@b.c".into(),
+            name: name.into(),
+        };
+
+        assert!(account(&p, AccountCommand::List)
+            .unwrap()
+            .starts_with("a@b.c\n  1 events, $2.50"));
+        assert_eq!(account(&p, name("Home")).unwrap(), "a@b.c is shown as Home");
+        assert!(account(&p, AccountCommand::List)
+            .unwrap()
+            .starts_with("Home (a@b.c)"));
+        assert_eq!(account(&p, name("")).unwrap(), "cleared the name of a@b.c");
     }
 
     #[test]
