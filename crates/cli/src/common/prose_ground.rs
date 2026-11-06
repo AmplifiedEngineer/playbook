@@ -82,6 +82,15 @@ fn is_number(token: &str) -> bool {
     token.chars().all(|c| c.is_ascii_digit() || c == '.')
 }
 
+/// "and/or", "read/write" and "CI/CD" match the path shape but are words. A
+/// path has a dot or at least two slashes, and a code span is always kept.
+fn is_word_pair(token: &str) -> bool {
+    token.contains('/')
+        && !token.contains('.')
+        && token.matches('/').count() < 2
+        && !token.starts_with('/')
+}
+
 /// The numbers of a text as whole tokens, so "3" does not match "30".
 fn contains_number(facts: &str, number: &str) -> bool {
     TOKEN
@@ -106,7 +115,7 @@ pub fn unknown_tokens(text: &str, facts: &str) -> Vec<Finding> {
                 .trim_matches('`')
                 .trim_end_matches(['.', ',', ':', ';'])
                 .to_string();
-            if token.is_empty() {
+            if token.is_empty() || is_word_pair(&token) {
                 continue;
             }
             let known = if is_number(&token) {
@@ -270,6 +279,13 @@ mod tests {
         let got = tokens(text, "nothing relevant");
 
         assert_eq!(got, vec!["foo_bar", "lib/x.rs", "OPS-9", "run()"]);
+    }
+
+    #[test]
+    fn a_word_pair_with_a_slash_is_not_a_path() {
+        let got = tokens("Read and/or write, then check CI/CD.", "nothing");
+
+        assert!(got.is_empty(), "{got:?}");
     }
 
     #[test]
