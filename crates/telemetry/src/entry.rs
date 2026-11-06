@@ -75,10 +75,15 @@ fn account_run(paths: &Paths, command: &AccountCommand) -> Result<String, String
         AccountCommand::List => store::list_text(&conn),
         AccountCommand::Name { key, name } => {
             store::set_name(&conn, key, name)?;
+            let note = if store::has_events(&conn, key)? {
+                ""
+            } else {
+                " (no events carry this key yet, check the spelling)"
+            };
             Ok(if name.trim().is_empty() {
                 format!("cleared the name of {key}")
             } else {
-                format!("{key} is shown as {}", name.trim())
+                format!("{key} is shown as {}{note}", name.trim())
             })
         }
         AccountCommand::Assign {

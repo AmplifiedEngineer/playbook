@@ -1131,7 +1131,7 @@ fn enterprise_sources(cache_age: i64) -> Sources {
     use crate::plan::{Account, Plan, SpendLimit, UsageCache};
     Sources {
         account: Account {
-            plan: Plan::EnterpriseOrUnknown,
+            plan: Plan::Unknown,
             cache: Some(UsageCache {
                 fetched_at: NOW - cache_age,
                 five_hour: None,
@@ -1481,18 +1481,15 @@ fn the_used_area_is_denser_in_the_danger_zone_than_below_it() {
             .map(|ch| (ch as u32 - 0x2800).count_ones())
             .collect()
     };
-    let (green, red) = (dots_in(pal.live), dots_in(pal.error));
+    let (calm, alarm) = (dots_in(pal.usage_ink(0.0)), dots_in(pal.usage_ink(100.0)));
 
     // Assert
-    assert!(
-        !green.is_empty() && green.iter().all(|n| *n <= 4),
-        "{green:?}"
-    );
-    assert!(red.contains(&8), "no full red cell: {red:?}");
+    assert!(!calm.is_empty() && calm.iter().all(|n| *n <= 4), "{calm:?}");
+    assert!(alarm.contains(&8), "no full alarm cell: {alarm:?}");
 }
 
 #[test]
-fn the_dot_chart_colors_the_used_area_green_yellow_then_red_by_height() {
+fn the_dot_chart_colors_the_used_area_from_calm_to_alarm_by_height() {
     // Arrange
     let pal = Theme::Standard.palette(ColorDepth::True);
     let (b, limits) = burn_case("exceeded");
@@ -1514,9 +1511,14 @@ fn the_dot_chart_colors_the_used_area_green_yellow_then_red_by_height() {
         .collect();
 
     // Assert
-    for ink in [pal.live, pal.caution, pal.error, pal.hi] {
+    for ink in [pal.usage_ink(0.0), pal.usage_ink(100.0), pal.hi] {
         assert!(colors.contains(&pal.color(ink)), "{ink:?} not drawn");
     }
+    let used = colors
+        .iter()
+        .filter(|c| **c != pal.color(pal.hi) && **c != pal.color(pal.error))
+        .count();
+    assert!(used >= 3, "the gradient shows {used} colors");
 }
 
 #[test]

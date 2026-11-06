@@ -54,7 +54,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `review.suggest.packageSpan` | `3` | a number, see the config keys page for the range |
 | `review.suggest.untestedLines` | `150` | a number, see the config keys page for the range |
 | `security.defaults` | `false` | `true`, `false` |
-| `usage.theme` | `default` | `default`, `dark`, `light`, `mono` |
+| `usage.theme` | `default` | `default`, `spectrum`, `dark`, `light`, `mono` |
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
 | `usage.refreshSeconds` | `5` | a number, see the config keys page for the range |
 | `usage.telemetry` | `auto` | `auto`, `off` |
@@ -1625,7 +1625,7 @@ Subcommands: `account`, `collect`, `doctor`, `prune`, `status`, `stop`
 
 List the accounts in the usage store, name them and move events
 
-Every usage event carries an account key, the email Claude Code was signed in to. These commands show the keys, give each one a display name and relabel events recorded under the wrong account.
+Every usage event carries an account key: the email Claude Code was signed in to, or a `token:` fingerprint. These commands show the keys, give each one a display name and relabel events recorded under the wrong account.
 
 Example: `playbook usage account list`
 
@@ -1661,7 +1661,7 @@ List the accounts with their events, cost and time span
 
 Give an account key a display name, or clear it with an empty name
 
-Example: `playbook usage account name igor@getdigital.com.br Company`
+Example: `playbook usage account name you@example.com Company`
 
 - `<KEY>`: Account key shown by `account list`
 - `<NAME>`: Display name to show; empty clears it

@@ -56,7 +56,7 @@ pub fn default_value(key: &str) -> Option<Value> {
 /// The accepted strings of an enum key.
 pub fn allowed_values(key: &str) -> Option<&'static [&'static str]> {
     match key {
-        "usage.theme" => Some(&["default", "dark", "light", "mono"]),
+        "usage.theme" => Some(&["default", "spectrum", "dark", "light", "mono"]),
         "usage.weekStart" => Some(&["monday", "sunday", "saturday"]),
         "usage.timeZone" => Some(&["local", "utc"]),
         "usage.telemetry" => Some(&["auto", "off"]),

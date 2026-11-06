@@ -13,7 +13,7 @@
 
 use super::budget;
 use super::data::Data;
-use super::dots::DotGrid;
+use super::dots::{braille, DotGrid};
 use super::fmt::{axis_money, fit};
 use super::icon::Icon;
 use super::theme::{Ink, Palette};
@@ -37,8 +37,6 @@ const HEADROOM: f64 = 1.05;
 /// The thresholds drawn, in percent of the limit.
 const NEAR: f64 = 80.0;
 const PERCENT: f64 = 100.0;
-/// Percent of the limit where the used area turns from green to yellow.
-const RAMP_YELLOW: f64 = 60.0;
 /// The glyph in the legend for the used area drawn as dots.
 const DOT_ACTUAL: char = '\u{28ff}';
 
@@ -313,9 +311,8 @@ fn solid_rows(b: &Burnup, pal: &Palette, plot: &Plot) -> Vec<Vec<Span<'static>>>
 /// outranks the projection, which outranks the used area.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Dot {
-    Green,
-    Yellow,
-    Red,
+    /// The used area at this whole percent of the limit.
+    Used(u8),
     Half,
     Near,
     Projection,
@@ -325,24 +322,88 @@ enum Dot {
 impl Dot {
     fn ink(self, pal: &Palette) -> Ink {
         match self {
-            Dot::Green => pal.live,
-            Dot::Yellow => pal.caution,
-            Dot::Red | Dot::Limit => pal.error,
+            Dot::Used(pct) => pal.usage_ink(f64::from(pct)),
+            Dot::Limit => pal.error,
             Dot::Half | Dot::Near => pal.inactive,
             Dot::Projection => pal.hi,
         }
     }
 
-    /// The color stop of the used area at `percent` of the limit.
-    fn ramp(percent: f64) -> Dot {
-        if percent >= NEAR {
-            Dot::Red
-        } else if percent >= RAMP_YELLOW {
-            Dot::Yellow
-        } else {
-            Dot::Green
-        }
+    /// The used area at `percent` of the limit, to the nearest whole percent.
+    fn used(percent: f64) -> Dot {
+        Dot::Used(percent.clamp(0.0, 255.0).round() as u8)
     }
+}
+
+/// The dot row of the used line in each dot column up to `now`, `None` where
+/// nothing is used yet or the column lies after `now`.
+fn used_edge(b: &Burnup, fine: &Plot) -> Vec<Option<usize>> {
+    (0..fine.width)
+        .map(|x| {
+            let at = fine.time(b, x);
+            value_at(b, at).filter(|_| at <= b.now).map(|v| fine.row(v))
+        })
+        .collect()
+}
+
+/// The dot row of the projection in each dot column after `now`.
+fn projection_edge(b: &Burnup, fine: &Plot) -> Vec<Option<usize>> {
+    (0..fine.width)
+        .map(|x| {
+            let at = fine.time(b, x);
+            b.projected_at(at)
+                .filter(|_| at > b.now)
+                .map(|v| fine.row(v))
+        })
+        .collect()
+}
+
+/// The dots of a continuous line through one row per column. Two columns
+/// that differ in height meet halfway, so a rise reads as one stroke and not
+/// as two separate dots. A column with `None` breaks the line.
+fn connect(edge: &[Option<usize>]) -> Vec<(usize, usize)> {
+    // The rows each column covers, as `(low, high)`.
+    let mut span: Vec<Option<(usize, usize)>> = edge.iter().map(|r| r.map(|y| (y, y))).collect();
+    for x in 1..edge.len() {
+        let (Some(from), Some(to)) = (edge[x - 1], edge[x]) else {
+            continue;
+        };
+        // The left column runs to the middle, the right one from just past it.
+        let mid = (from + to) / 2;
+        let next = if to > from {
+            mid + 1
+        } else {
+            mid.saturating_sub(1)
+        };
+        let widen = |s: &mut Option<(usize, usize)>, row: usize| {
+            if let Some((lo, hi)) = s {
+                *lo = (*lo).min(row);
+                *hi = (*hi).max(row);
+            }
+        };
+        widen(&mut span[x - 1], mid);
+        widen(&mut span[x], if to == from { to } else { next });
+    }
+    span.into_iter()
+        .enumerate()
+        .filter_map(|(x, s)| s.map(|(lo, hi)| (lo..=hi).map(move |y| (x, y))))
+        .flatten()
+        .collect()
+}
+
+/// The most dots a cell of the used line holds below the danger zone, so the
+/// line never reads denser than the half-filled area beside it.
+const LINE_DOTS: u32 = 4;
+
+/// `ch` with dots dropped from a cell below `NEAR` that holds more than
+/// `LINE_DOTS`, so a steep rise stays lighter than the danger zone.
+fn thin(ch: char, dot: Dot) -> char {
+    let mut mask = (ch as u32).saturating_sub(0x2800) as u8;
+    let danger = matches!(dot, Dot::Used(pct) if f64::from(pct) >= NEAR);
+    while !danger && mask.count_ones() > LINE_DOTS {
+        mask &= mask - 1;
+    }
+    braille(mask)
 }
 
 /// The plot as spans of Braille cells, top row first. The roles are placed
@@ -363,8 +424,8 @@ fn dot_rows(b: &Burnup, pal: &Palette, plot: &Plot) -> Vec<Vec<Span<'static>>> {
             match role {
                 Role::Actual => {
                     let percent = b.limit.map_or(0.0, |l| fine.value(y) / l * PERCENT);
-                    let dot = Dot::ramp(percent);
-                    if dot == Dot::Red || (x + y) % 2 == 0 {
+                    let dot = Dot::used(percent);
+                    if percent >= NEAR || (x + y) % 2 == 0 {
                         dots.set(x, y, dot);
                     }
                 }
@@ -379,15 +440,39 @@ fn dot_rows(b: &Burnup, pal: &Palette, plot: &Plot) -> Vec<Vec<Span<'static>>> {
             }
         }
     }
+    let percent = |y: usize| b.limit.map_or(0.0, |l| fine.value(y) / l * PERCENT);
+    // The used line sits on its own grid and takes over the cells it crosses,
+    // so a line cell is never denser than the fill beside it.
+    let mut edge = DotGrid::new(plot.width, plot.height);
+    for (x, y) in connect(&used_edge(b, &fine)) {
+        edge.set(x, y, Dot::used(percent(y)));
+    }
+    for (x, y) in connect(&projection_edge(b, &fine)) {
+        if x % 3 != 2 {
+            dots.set(x, y, Dot::Projection);
+        }
+    }
     (0..plot.height)
         .map(|row| {
             (0..plot.width)
-                .map(|col| match (glyphs[row][col], dots.cell(col, row)) {
-                    (Role::Empty, Some((ch, dot))) => {
-                        Span::styled(ch.to_string(), style(pal, dot.ink(pal)))
+                .map(|col| {
+                    match (
+                        glyphs[row][col],
+                        match (edge.cell(col, row), dots.cell(col, row)) {
+                            // A limit or projection keeps its cell over the line.
+                            (Some(_), Some(over @ (_, Dot::Limit | Dot::Projection))) => Some(over),
+                            (Some((ch, dot)), _) => Some((thin(ch, dot), dot)),
+                            (None, fill) => fill,
+                        },
+                    ) {
+                        (Role::Empty, Some((ch, dot))) => {
+                            Span::styled(ch.to_string(), style(pal, dot.ink(pal)))
+                        }
+                        (Role::Empty, None) => Span::raw(" "),
+                        (role, _) => {
+                            Span::styled(role.glyph().to_string(), style(pal, role.ink(pal)))
+                        }
                     }
-                    (Role::Empty, None) => Span::raw(" "),
-                    (role, _) => Span::styled(role.glyph().to_string(), style(pal, role.ink(pal))),
                 })
                 .collect()
         })
@@ -534,49 +619,147 @@ pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette, dots: b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::a11y::{confusable, contrast, rgb_of, NON_TEXT_CONTRAST};
+    use crate::tui::a11y::{contrast, rgb_of, NON_TEXT_CONTRAST};
     use crate::tui::theme::{ColorDepth, Theme};
 
     #[test]
-    fn the_ramp_colors_meet_the_non_text_contrast_on_the_ground() {
-        // Arrange
+    fn the_used_area_takes_its_ink_from_the_usage_gradient() {
+        let pal = Theme::Standard.palette(ColorDepth::True);
+        assert_eq!(Dot::used(0.0).ink(&pal), pal.usage_ink(0.0));
+        assert_eq!(Dot::used(69.6).ink(&pal), pal.usage_ink(70.0));
+        assert_eq!(Dot::used(400.0).ink(&pal), pal.usage_ink(255.0));
+        assert!(Dot::used(255.0) < Dot::Projection);
+        assert!(Dot::Projection < Dot::Limit);
+    }
+
+    #[test]
+    fn the_used_area_stays_readable_on_a_dark_ground() {
         let pal = Theme::Standard.palette(ColorDepth::True);
         let bg = rgb_of(pal.bg);
-
-        // Act
-        let ratios: Vec<(Dot, f64)> = [Dot::Green, Dot::Yellow, Dot::Red]
-            .into_iter()
-            .map(|dot| (dot, contrast(rgb_of(dot.ink(&pal)), bg)))
-            .collect();
-
-        // Assert
-        for (i, (_, ratio)) in ratios.iter().enumerate() {
-            assert!(*ratio >= NON_TEXT_CONTRAST, "stop {i} is {ratio:.2}");
+        for pct in [0.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0] {
+            let ratio = contrast(rgb_of(Dot::used(pct).ink(&pal)), bg);
+            assert!(ratio >= NON_TEXT_CONTRAST, "{pct}% is {ratio:.2}");
         }
     }
 
-    #[test]
-    fn the_ramp_stops_stay_apart_under_each_color_vision_type() {
-        // Arrange
-        let pal = Theme::Standard.palette(ColorDepth::True);
-        let stops: Vec<_> = [Dot::Green, Dot::Yellow, Dot::Red]
-            .into_iter()
-            .map(|dot| rgb_of(dot.ink(&pal)))
-            .collect();
+    fn line(points: Vec<(i64, f64)>, now: i64) -> Burnup {
+        Burnup {
+            unit: Unit::Percent,
+            period: LimitPeriod::FiveHour,
+            start: 0,
+            end: 1_000,
+            now,
+            zone: crate::tz::Zone::Utc,
+            basis: Basis::Line,
+            points,
+            actual: Vec::new(),
+            total: 0.0,
+            projected_end: None,
+            limit: Some(100.0),
+            billed: None,
+            crossings: Vec::new(),
+            rate_limited: Vec::new(),
+        }
+    }
 
-        // Act
-        let pair = confusable(&stops);
+    fn fine(b: &Burnup) -> Plot {
+        let p = Plot::new(b, 10, 5);
+        Plot {
+            width: p.width * 2,
+            height: p.height * 4,
+            top: p.top,
+        }
+    }
 
-        // Assert
-        assert_eq!(pair, None);
+    /// Whether each column's dots touch those of the next column.
+    fn unbroken(dots: &[(usize, usize)]) -> bool {
+        let range = |x: usize| {
+            let ys: Vec<usize> = dots.iter().filter(|d| d.0 == x).map(|d| d.1).collect();
+            ys.iter().min().copied().zip(ys.iter().max().copied())
+        };
+        let last = dots.iter().map(|d| d.0).max().unwrap_or(0);
+        (0..last).all(|x| match (range(x), range(x + 1)) {
+            (Some((lo, hi)), Some((lo2, hi2))) => lo2 <= hi + 1 && lo <= hi2 + 1,
+            _ => false,
+        })
     }
 
     #[test]
-    fn the_ramp_runs_green_then_yellow_then_red_by_percent() {
-        assert!(Dot::ramp(0.0) == Dot::Green);
-        assert!(Dot::ramp(RAMP_YELLOW - 0.1) == Dot::Green);
-        assert!(Dot::ramp(RAMP_YELLOW) == Dot::Yellow);
-        assert!(Dot::ramp(NEAR - 0.1) == Dot::Yellow);
-        assert!(Dot::ramp(NEAR) == Dot::Red);
+    fn no_samples_draw_no_line() {
+        assert!(connect(&[]).is_empty());
+        assert!(connect(&[None, None]).is_empty());
+        let b = line(Vec::new(), 500);
+        assert!(connect(&used_edge(&b, &fine(&b))).is_empty());
+    }
+
+    #[test]
+    fn one_sample_draws_one_dot() {
+        assert_eq!(connect(&[Some(3)]), vec![(0, 3)]);
+    }
+
+    #[test]
+    fn two_samples_far_apart_in_height_join_without_a_gap() {
+        // Arrange
+        let edge = [Some(2), Some(14)];
+
+        // Act
+        let dots = connect(&edge);
+
+        // Assert
+        assert!(dots.contains(&(0, 2)) && dots.contains(&(1, 14)));
+        assert!(unbroken(&dots));
+        assert_eq!(dots.len(), 13);
+    }
+
+    #[test]
+    fn a_fall_joins_as_well_as_a_rise() {
+        let dots = connect(&[Some(14), Some(2)]);
+        assert!(unbroken(&dots));
+        assert_eq!(dots.len(), 13);
+    }
+
+    #[test]
+    fn a_missing_column_breaks_the_line() {
+        let dots = connect(&[Some(1), None, Some(9)]);
+        assert_eq!(dots, vec![(0, 1), (2, 9)]);
+    }
+
+    #[test]
+    fn a_steep_window_reading_gives_a_continuous_used_line() {
+        // Arrange
+        let b = line(vec![(0, 0.0), (100, 5.0), (200, 90.0)], 300);
+        let edge = used_edge(&b, &fine(&b));
+
+        // Act
+        let dots = connect(&edge);
+
+        // Assert
+        assert!(unbroken(&dots), "{dots:?}");
+        assert!(dots.len() > edge.iter().flatten().count());
+    }
+
+    #[test]
+    fn the_used_line_stops_at_now_and_the_projection_starts_after() {
+        // Arrange
+        let mut b = line(vec![(0, 0.0), (400, 40.0)], 400);
+        b.projected_end = Some(100.0);
+        let f = fine(&b);
+
+        // Act
+        let (used, projected) = (used_edge(&b, &f), projection_edge(&b, &f));
+
+        // Assert
+        for x in 0..f.width {
+            assert!(used[x].is_none() || projected[x].is_none(), "column {x}");
+        }
+        assert!(used[0].is_some() && projected[f.width - 1].is_some());
+    }
+
+    #[test]
+    fn a_steep_cell_below_the_danger_zone_keeps_four_dots_and_a_danger_one_all() {
+        assert_eq!(thin('\u{28ff}', Dot::used(10.0)).to_string(), "\u{28f0}");
+        assert_eq!(thin('\u{28ff}', Dot::used(70.0)).to_string(), "\u{28f0}");
+        assert_eq!(thin('\u{28ff}', Dot::used(90.0)), '\u{28ff}');
+        assert_eq!(thin('\u{2807}', Dot::used(10.0)), '\u{2807}');
     }
 }

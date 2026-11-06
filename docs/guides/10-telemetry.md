@@ -5,6 +5,7 @@
 Prompt text and tool content are never sent. Nothing leaves your machine. The collector listens on 127.0.0.1 only. Playbook's `session-init` hook (part of the hooks you install with setup) starts it when a session begins. Without those hooks, start it with `playbook usage collect`, or let `playbook cc` do it.
 
 - To turn it on later, or after you declined: `playbook setup --only telemetry`.
+- `playbook config set usage.telemetry auto` writes the same keys, and `... off` removes only those keys and puts back any value setup replaced. If telemetry is set up elsewhere, `auto` leaves it as it is and says so. Both print each key they touch with a one-line reason, the file path, the saved copy of the old file and the undo command. A settings file that is not valid JSON is left untouched.
 - If `CLAUDE_CODE_ENABLE_TELEMETRY` is 0 in `~/.claude/settings.json` and nothing else sets telemetry, `--yes` leaves it alone. Answer yes to the question or run `playbook setup --only telemetry`.
 - If telemetry is set in project settings, your shell or next to other `OTEL_` keys, setup leaves all of it as it is (see [What setup installs](05-what-setup-installs.md)).
 - `DISABLE_TELEMETRY` and `DO_NOT_TRACK` only turn off Anthropic's own analytics and are left as they are.
