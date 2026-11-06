@@ -958,7 +958,7 @@ mod tests {
         );
     }
 
-    fn placed_prompt_after_update(edit_before: Option<&str>) -> String {
+    fn placed_prompt_after_update(edit_before: Option<&str>) -> (String, bool) {
         let home = scratch_dir(if edit_before.is_some() {
             "plugin-update-prompt-edited"
         } else {
@@ -985,17 +985,21 @@ mod tests {
             claude: Some(claude),
         });
 
-        fs::read_to_string(&placed).unwrap()
+        let recorded = crate::init::migrate::placed_unchanged(&home, "system-prompt", &placed);
+        (fs::read_to_string(&placed).unwrap(), recorded)
     }
 
     #[test]
     fn an_update_refreshes_the_placed_system_prompt_from_the_new_plugin() {
-        assert_eq!(placed_prompt_after_update(None), "new rules");
+        let (text, recorded) = placed_prompt_after_update(None);
+
+        assert_eq!(text, "new rules");
+        assert!(recorded, "the new copy's hash must be recorded");
     }
 
     #[test]
     fn an_update_leaves_an_edited_system_prompt_alone() {
-        assert_eq!(placed_prompt_after_update(Some("my rules")), "my rules");
+        assert_eq!(placed_prompt_after_update(Some("my rules")).0, "my rules");
     }
 
     #[test]
