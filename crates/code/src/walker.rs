@@ -23,6 +23,18 @@ const EXCLUDED_DIRS: [&str; 8] = [
     "__pycache__",
 ];
 
+/// File name suffixes of generated files that are never indexed.
+const GENERATED_SUFFIXES: [&str; 3] = [".min.js", ".d.ts", ".pb.go"];
+
+/// Lockfile names that are never indexed.
+const LOCKFILE_NAMES: [&str; 5] = [
+    "Cargo.lock",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "go.sum",
+];
+
 /// Injectable caps, so tests never build huge inputs.
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
@@ -115,11 +127,16 @@ pub fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
 }
 
 /// Whether any directory component of `path` is a default exclude, or the
-/// file is a minified script.
+/// file is generated: a minified script, a declaration file, a protobuf
+/// output or a lockfile.
 pub fn is_default_excluded(path: &str) -> bool {
     let mut parts: Vec<&str> = path.split('/').collect();
     let file = parts.pop().unwrap_or("");
-    file.ends_with(".min.js") || parts.iter().any(|dir| EXCLUDED_DIRS.contains(dir))
+    GENERATED_SUFFIXES
+        .iter()
+        .any(|suffix| file.ends_with(suffix))
+        || LOCKFILE_NAMES.contains(&file)
+        || parts.iter().any(|dir| EXCLUDED_DIRS.contains(dir))
 }
 
 /// The paths `git ls-files -co --exclude-standard -z` prints, sorted and
@@ -381,6 +398,40 @@ mod tests {
         let mut want: Vec<&str> = awkward.to_vec();
         want.sort_unstable();
         assert_eq!(names(&found), want);
+    }
+
+    #[test]
+    fn generated_files_are_excluded_and_lookalikes_stay_indexed() {
+        let _guard = pinned();
+        // Arrange
+        let root = init("walker-generated");
+        let generated = [
+            "x.d.ts",
+            "y.pb.go",
+            "Cargo.lock",
+            "package-lock.json",
+            "yarn.lock",
+            "pnpm-lock.yaml",
+            "go.sum",
+        ];
+        for name in generated.iter().chain(["dist.ts", "lock.rs"].iter()) {
+            write(&root, name, b"x = 1\n");
+        }
+
+        // Act
+        let found = discover(&root, &Limits::default()).expect("discover");
+
+        // Assert
+        assert_eq!(names(&found), vec!["dist.ts", "lock.rs"]);
+        for name in generated {
+            assert!(
+                found
+                    .skipped
+                    .iter()
+                    .any(|s| s.path == name && s.reason == SkipReason::DefaultExclude),
+                "{name}"
+            );
+        }
     }
 
     #[test]
