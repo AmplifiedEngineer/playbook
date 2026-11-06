@@ -9,8 +9,8 @@
 
 use super::check::{on_path_in, Env, Level, Row};
 use crate::fastpath::PBTOP_PROGRAM;
+use crate::update::is_homebrew;
 use crate::update::resolve::compare;
-use crate::update::{is_homebrew, is_system_package};
 use std::cmp::Ordering;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -24,18 +24,12 @@ const INSTALL_SCRIPT_FIX: &str = "curl -fsSL https://raw.githubusercontent.com/p
 const BREW_LINK_FIX: &str = "brew uninstall pbtop && brew reinstall playbook";
 /// The Homebrew fix when only `pbtop` came from Homebrew.
 const BREW_UPGRADE_FIX: &str = "brew upgrade pbtop";
-/// The fix for the `.deb` and `.rpm` packages, which ship both binaries.
-const PACKAGE_FIX: &str =
-    "install the latest playbook .deb or .rpm package, which updates both binaries";
-
 /// Longest `pbtop --version` may run. The first command after an upgrade waits
 /// for it, so it is short.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(2);
 /// The folder of the Homebrew playbook formula's keg, which a `pbtop` link
 /// resolves into.
 const PLAYBOOK_KEG: &str = "/Cellar/playbook/";
-/// The folder the `.deb` and `.rpm` packages install into.
-const PACKAGE_BIN_DIR: &str = "/usr/bin";
 /// The Homebrew fix for a `pbtop` link that belongs to an older playbook.
 const BREW_PLAYBOOK_FIX: &str = "brew upgrade playbook";
 
@@ -93,8 +87,6 @@ pub(crate) fn fix(pbtop: &Path, exe: &Path) -> String {
         BREW_LINK_FIX.to_string()
     } else if brew {
         BREW_UPGRADE_FIX.to_string()
-    } else if pbtop.starts_with(PACKAGE_BIN_DIR) && is_system_package(exe) {
-        PACKAGE_FIX.to_string()
     } else {
         INSTALL_SCRIPT_FIX.to_string()
     }
@@ -232,14 +224,7 @@ mod tests {
     }
 
     #[test]
-    fn a_packaged_pbtop_is_fixed_with_the_package() {
-        let fix = fix(Path::new("/usr/bin/pbtop"), Path::new("/usr/bin/playbook"));
-
-        assert!(fix.contains(".deb or .rpm"), "{fix}");
-    }
-
-    #[test]
-    fn a_packaged_pbtop_next_to_another_playbook_is_reinstalled_with_the_script() {
+    fn a_pbtop_in_usr_bin_is_reinstalled_with_the_script() {
         let fix = fix(
             Path::new("/usr/bin/pbtop"),
             Path::new("/home/me/.local/bin/playbook"),
