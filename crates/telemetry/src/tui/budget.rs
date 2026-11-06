@@ -278,7 +278,7 @@ fn reported_line(v: &LimitsView, now: i64) -> Option<String> {
 
 /// Says that a manual monthly budget is set and the detected one applies.
 fn both_budgets_line(v: &LimitsView) -> Option<String> {
-    let (manual, detected) = v.manual_under_detected?;
+    let (manual, detected) = v.manual_beside_detected?;
     Some(format!(
         "Manual monthly budget {} and detected {}: the detected one applies",
         money(manual),
@@ -431,7 +431,7 @@ mod tests {
     fn both_budgets_are_named_with_the_one_that_applies() {
         let mut v = LimitsView::default();
         assert_eq!(both_budgets_line(&v), None);
-        v.manual_under_detected = Some((1000.0, 2000.0));
+        v.manual_beside_detected = Some((1000.0, 2000.0));
 
         assert_eq!(
             both_budgets_line(&v).as_deref(),
