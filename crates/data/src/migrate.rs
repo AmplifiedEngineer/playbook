@@ -21,7 +21,7 @@
 //!   merged tables must have a primary key, so a repeat cannot double count.
 
 use playbook_common::atomic::{acquire_dir_lock_aged, ensure_private_dir, LONG_LOCK_STALE_AGE};
-use rusqlite::{Connection, OpenFlags};
+use playbook_store::{Connection, OpenFlags};
 use std::cell::Cell;
 use std::fs;
 use std::io::IsTerminal;
@@ -140,7 +140,7 @@ fn q(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
-fn tables(conn: &Connection, schema: &str) -> rusqlite::Result<Vec<String>> {
+fn tables(conn: &Connection, schema: &str) -> playbook_store::Result<Vec<String>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT name FROM {schema}.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
     ))?;
@@ -148,13 +148,13 @@ fn tables(conn: &Connection, schema: &str) -> rusqlite::Result<Vec<String>> {
     rows.collect()
 }
 
-fn columns(conn: &Connection, schema: &str, table: &str) -> rusqlite::Result<Vec<String>> {
+fn columns(conn: &Connection, schema: &str, table: &str) -> playbook_store::Result<Vec<String>> {
     let mut stmt = conn.prepare(&format!("PRAGMA {schema}.table_info({})", q(table)))?;
     let rows = stmt.query_map([], |r| r.get::<_, String>(1))?;
     rows.collect()
 }
 
-fn count(conn: &Connection, schema: &str, table: &str) -> rusqlite::Result<i64> {
+fn count(conn: &Connection, schema: &str, table: &str) -> playbook_store::Result<i64> {
     conn.query_row(
         &format!("SELECT COUNT(*) FROM {schema}.{}", q(table)),
         [],
@@ -170,11 +170,11 @@ enum OldError {
     Transient(String),
 }
 
-fn classify(e: rusqlite::Error) -> OldError {
+fn classify(e: playbook_store::Error) -> OldError {
     match e.sqlite_error_code() {
-        Some(rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt) => {
-            OldError::Corrupt(e.to_string())
-        }
+        Some(
+            playbook_store::ErrorCode::NotADatabase | playbook_store::ErrorCode::DatabaseCorrupt,
+        ) => OldError::Corrupt(e.to_string()),
         _ => OldError::Transient(e.to_string()),
     }
 }
@@ -328,7 +328,7 @@ fn merge(step: &Move, rules: &[(&str, Rule)]) -> Result<u64, String> {
     // Deferred: an immediate transaction would also lock the attached old
     // file, which this process already holds a write lock on.
     let tx = conn
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)
+        .transaction_with_behavior(playbook_store::TransactionBehavior::Deferred)
         .map_err(|e| e.to_string())?;
     // Every non-empty old table must be listed, or it would be dropped when
     // the old file is set aside.
