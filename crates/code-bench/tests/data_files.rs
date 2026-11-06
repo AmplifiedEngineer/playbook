@@ -7,7 +7,8 @@
 
 use code_bench::corpus::Manifest;
 use code_bench::gate::{Baseline, Floor, Overrides};
-use code_bench::merge_base::{check, DataFile, GitReader, Shape};
+use code_bench::merge_base::{check, DataFile, GitReader, MergeBaseReader, Shape};
+use code_bench::mutants::floor_lowered;
 use code_bench::process::{ProcessRunner, SystemRunner};
 use code_bench::runner::QueryKind;
 use code_bench::tasks::TASKS_VERSION;
@@ -88,4 +89,30 @@ fn data_files_are_not_lower_than_the_merge_base() {
     };
     let found = check(&files, &reader, &overrides, run_date.trim());
     assert!(found.is_empty(), "{found:#?}");
+}
+
+const MUTATION_OVERRIDE: &str = "floor:mutation";
+
+#[test]
+fn the_mutation_floor_is_not_lower_than_the_merge_base() {
+    let runner = SystemRunner;
+    let date_args = ["log", "-1", "--format=%cs"].map(String::from);
+    let run_date = runner.run("git", &date_args, &root()).unwrap();
+    let reader = GitReader {
+        runner: &runner,
+        root: &root(),
+    };
+    let before = reader
+        .read(FLOOR)
+        .unwrap()
+        .map(|text| Floor::parse(&text).unwrap().mutation_floor_bps);
+    let now = Floor::parse(&required(FLOOR)).unwrap().mutation_floor_bps;
+    let overrides = Overrides::parse(&required(OVERRIDES)).unwrap();
+    let lowered = floor_lowered(before.flatten(), now);
+    assert!(
+        !lowered
+            || overrides
+                .active(MUTATION_OVERRIDE, run_date.trim())
+                .is_some()
+    );
 }

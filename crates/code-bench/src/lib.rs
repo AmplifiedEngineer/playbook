@@ -9,6 +9,7 @@ pub mod ctags;
 pub mod gate;
 pub mod merge_base;
 pub mod metrics;
+pub mod mutants;
 pub mod oracle;
 pub mod process;
 pub mod runner;
