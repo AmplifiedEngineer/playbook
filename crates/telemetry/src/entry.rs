@@ -78,6 +78,19 @@ pub fn run(
     // with older data moved in first), so no command errors on a fresh home.
     // This runs before the terminal view takes over the screen.
     super::tz::ensure_init();
+    // A rehearsal on a copy of the data file touches nothing else.
+    if let Some(UsageCommand::Account {
+        command,
+        db: Some(db),
+    }) = &sub
+    {
+        if !db.is_file() {
+            return Err(format!("no usage database at {}", db.display()));
+        }
+        let mut copy = paths.clone();
+        copy.db = db.clone();
+        return super::account_cmd::run(&copy, command);
+    }
     // The doctor only reads files, so it runs before the data file is created.
     if let Some(UsageCommand::Doctor { raw }) = sub {
         let usage_dir = paths
@@ -110,7 +123,7 @@ pub fn run(
             let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             super::collector::run_collect(paths, port, idle_seconds, &stop)
         }
-        Some(UsageCommand::Account { command }) => super::account_cmd::run(paths, &command),
+        Some(UsageCommand::Account { command, .. }) => super::account_cmd::run(paths, &command),
         Some(UsageCommand::Prune { dry_run }) => super::collector::run_prune(paths, dry_run),
         Some(UsageCommand::Status { json }) => {
             let status = super::collector::status(paths, super::collector::configured_retention())?;
@@ -243,7 +256,10 @@ mod tests {
 
     fn account(p: &Paths, args: AccountCommand) -> Result<String, String> {
         run(
-            Some(UsageCommand::Account { command: args }),
+            Some(UsageCommand::Account {
+                command: args,
+                db: None,
+            }),
             &no_opts(),
             p,
             false,
@@ -310,6 +326,29 @@ mod tests {
             .starts_with("nothing to move"));
         let undone = account(&p, AccountCommand::Undo { id: None }).unwrap();
         assert!(undone.contains("restored 1"), "{undone}");
+    }
+
+    #[test]
+    fn the_db_option_runs_an_account_command_on_a_copy_and_leaves_the_default_alone() {
+        let p = paths("entry-account-db");
+        let copy = crate::util::scratch_dir("entry-account-copy").join("copy.db");
+        crate::db::open_db(&copy).unwrap();
+        let on = |db: &Path| {
+            run(
+                Some(UsageCommand::Account {
+                    command: AccountCommand::List,
+                    db: Some(db.to_path_buf()),
+                }),
+                &no_opts(),
+                &p,
+                false,
+            )
+        };
+
+        assert_eq!(on(&copy), Ok("No usage recorded yet.".to_string()));
+        assert!(!p.db.exists(), "the default database was not created");
+        let err = on(&copy.with_file_name("missing.db")).unwrap_err();
+        assert!(err.contains("no usage database at"), "{err}");
     }
 
     #[test]

@@ -112,6 +112,9 @@ pub enum UsageCommand {
     ///
     /// Example: `playbook usage account list`
     Account {
+        /// Usage database file to use instead of the default, such as a copy made to rehearse on
+        #[arg(long, global = true, value_name = "FILE")]
+        db: Option<std::path::PathBuf>,
         #[command(subcommand)]
         command: AccountCommand,
     },
