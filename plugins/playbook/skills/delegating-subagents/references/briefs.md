@@ -92,7 +92,7 @@ Save the same facts, with a first line `kind: <kind>`, as `<file>.facts` next to
 
 | Kind | Template |
 |---|---|
-| `review-comment` | `<label> (<decorations>): <failure>. <fix>.` |
+| `review-comment` | `<label>[ (<decorations>)]: <failure>. <fix>.` Leave out the parentheses when there are no decorations. |
 | `reply` | `Fixed.` or `Done, <what changed>.` or `<reason>.` |
 | `commit-message` | `<type>(<scope>): <fact one line>` |
 | `ticket` | one sentence of what and why, then the acceptance bullets as given |
