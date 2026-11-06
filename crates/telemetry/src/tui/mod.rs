@@ -10,6 +10,7 @@ mod a11y;
 pub mod app;
 pub mod arrange;
 pub mod budget;
+pub mod budget_popup;
 pub mod burnup;
 pub mod chart;
 pub mod data;
@@ -195,6 +196,10 @@ fn event_loop(
                     Effect::Requery => worker.ask(app.range, &app.filter),
                     Effect::Sessions => sessions.open(),
                     Effect::SaveLayout(text) => autosave.push(text),
+                    Effect::SaveBudget(usd) => {
+                        app.note = Some(save_budget(&home, usd));
+                        worker.ask(app.range, &app.filter);
+                    }
                     Effect::ResetPrefs => {
                         let cleared = ui_state::reset(&home).map(|_| ());
                         let reset = Reset {
@@ -248,6 +253,25 @@ fn event_loop(
         crate::say::notice(&why);
     }
     Ok(())
+}
+
+/// Stores the manual monthly budget and says what happened.
+fn save_budget(home: &std::path::Path, usd: f64) -> String {
+    save_budget_with(usd, |value| {
+        crate::host::set_config_value(budget_popup::KEY, value, home)
+    })
+}
+
+/// [`save_budget`] with the write given, so the words can be tested.
+fn save_budget_with(
+    usd: f64,
+    write: impl FnOnce(&serde_json::Value) -> Result<(), String>,
+) -> String {
+    match write(&serde_json::Value::from(usd)) {
+        Ok(()) if usd > 0.0 => format!("Manual monthly budget set to {}", fmt::money(usd)),
+        Ok(()) => "Manual monthly budget cleared".to_string(),
+        Err(why) => format!("Budget not saved: {why}"),
+    }
 }
 
 type Loaded = Result<(Vec<crate::session_view::Record>, i64), String>;
@@ -339,6 +363,17 @@ mod tests {
             range: range.map(str::to_string),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn the_budget_note_says_set_cleared_or_not_saved() {
+        let set = save_budget_with(1000.0, |_| Ok(()));
+        let cleared = save_budget_with(0.0, |_| Ok(()));
+        let failed = save_budget_with(5.0, |_| Err("no config store yet".to_string()));
+
+        assert_eq!(set, "Manual monthly budget set to $1,000.00");
+        assert_eq!(cleared, "Manual monthly budget cleared");
+        assert_eq!(failed, "Budget not saved: no config store yet");
     }
 
     #[test]
