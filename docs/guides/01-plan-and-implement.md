@@ -54,9 +54,9 @@ A Segment aims for under 500 changed lines, needs a reason above 1000, and never
 
 ### Approval prompts before agents run
 
-`/playbook:plan` and `/playbook:adr` ask you for approval before they dispatch the `fact-checker`, the `critic` and the `test-reviewer`. They choose the model with `playbook route design`. That route is Opus at xhigh effort, and the top model needs your approval while `routing.escalate` is `ask`. `ask` is the default.
+`/playbook:plan` and `/playbook:adr` ask you for approval before they dispatch the `fact-checker`, the `critic` and the `test-reviewer`. They choose the model with `playbook route design`. That route is Opus at xhigh effort, and the top model needs your approval while `routing.escalate` is `ask`. The default is `auto`, so the prompts only appear if you set `ask`.
 
-To stop the prompts, run `playbook config set routing.escalate auto` in the repo, or add `--global` for every repo. With `auto`, the commands proceed and log the choice. See [Models and effort](14-models-and-effort.md#approval-prompts) for all three values.
+To turn the prompts on, run `playbook config set routing.escalate ask` in the repo, or add `--global` for every repo. With `auto`, the commands proceed and log the choice. See [Models and effort](14-models-and-effort.md#approval-prompts) for all three values.
 
 ### Auto
 

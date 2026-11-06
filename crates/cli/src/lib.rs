@@ -653,7 +653,7 @@ pub enum Command {
     /// `implement` reads `--tier` (low, medium or high). The answer includes
     /// whether the user must approve first (the top model, the high tier, or a
     /// task that failed twice). `routing.escalate` decides what happens then:
-    /// `ask` (default) tells you to ask the user, `auto` proceeds (auto mode
+    /// `ask` tells you to ask the user, `auto` (default) proceeds (auto mode
     /// and `auto.budgetUsd` still cap the spend), `deny` returns the cheaper
     /// route. Your effort ceiling always wins.
     ///
