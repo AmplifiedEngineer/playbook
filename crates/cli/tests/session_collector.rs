@@ -242,4 +242,7 @@ fn a_session_that_has_the_keys_or_no_setup_hears_nothing() {
     let endpoint = format!("http://127.0.0.1:{port}");
     let fine = home.session_start_stdout(&[("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint.as_str())]);
     assert!(!fine.contains(MISSING), "{fine}");
+
+    let headless = home.session_start_stdout(&[("PLAYBOOK_HEADLESS", "1")]);
+    assert!(!headless.contains(MISSING), "{headless}");
 }
