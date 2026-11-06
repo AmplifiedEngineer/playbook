@@ -1663,6 +1663,7 @@ A session started with that variable set is recorded under a key like `token:ab1
 
 Example: `playbook usage account fingerprint`
 
+- `--db <FILE>`: Usage database file to use instead of the default, such as a backup copy
 - `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 - `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
