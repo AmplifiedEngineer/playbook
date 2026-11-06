@@ -10,6 +10,7 @@ Why `SKILL.md` says to pass a `subagent_type` and write a stand-alone brief, and
 - Return cap
 - Review brief builder
 - Implementer brief builder
+- Writer brief builder
 - Auditor brief
 - Checks before dispatch
 
@@ -27,6 +28,7 @@ An `Agent` call that omits `subagent_type` forks the parent: the child inherits 
 | `repo-audit` | No | `context: fork`, `agent: auditor` (fresh) |
 | `deep-review`, `quick-review`, `implement` Step 9 reviewers, `review-triage`, `cheap-checker` | No, diff and excerpts go in the brief | `subagent_type: playbook:<agent>` |
 | `implement` implementers | No, the Work Unit brief is self-contained | `subagent_type: playbook:implementer` |
+| `deep-review`, `quick-review` comment drafts | No, the swept facts go in the brief | `subagent_type: playbook:writer` |
 | `plan`, `adr` critic, fact-checker, test-reviewer | No, they get the full artifact | `subagent_type: playbook:<agent>` |
 | `plan` Step 2 and discovery agents | No, they get a question and paths | `subagent_type: Explore` or `general-purpose` |
 | `learn-project` collectors and analysts | No | `subagent_type: playbook:<agent>` |
@@ -74,6 +76,28 @@ Measured on the seeded-defect fixture (`crates/cli/tests/fixtures/bench/reviewer
 ## Implementer brief builder
 
 An implementer brief is the per-Work-Unit file. Intent: work-unit-briefs. If the session's tool map (printed at session start) lists it, use that command to write it. Otherwise do this: write it by hand from the plan's Work Unit (its files, changes, test scenarios and done-when). Either way it also carries: the excerpts, with line numbers, of the files the step edits and of the one or two neighbours it must match (an interface it implements, the test it extends), the scoped verify command, and the limit: "The excerpts above are the context you need. Read a file only to edit it or when the excerpt cannot settle a question. Do not explore the repository." The Edit tool needs the file read first, so a file the step changes is still read; the saving is the exploratory reads around it. Take the excerpts from `playbook code context "<Work Unit title>"`, trimmed to the step's files, when the code search rule finds an index; else from Read.
+
+## Writer brief builder
+
+The writer turns decided facts into the final text. The orchestrator has done the analysis and sends no draft. A writer brief MUST contain, in this order:
+
+1. **Kind.** One of `pr-body`, `review-comment`, `reply`, `commit-message`, `ticket`.
+2. **Facts.** Only the values the text may use: the label and decorations, the failure in at most 12 words, the fix in at most 12 words, the evidence as `path:line`, ticket keys, numbers. Nothing else may appear in the text.
+3. **Reference.** The absolute path of the one reference for the kind, resolved by the orchestrator (the writer has no Bash): `github-review-comments.md` for a review comment or reply, `commits-and-prs.md` for a PR body, `conventional-commits.md` for a commit message.
+4. **Return.** "Return only the text. If a fact is missing, return one line `NEED: <fact>`."
+
+Save the same facts, with a first line `kind: <kind>`, as `<file>.facts` next to the returned text, then run `playbook prose check <file>`. It reports a number, identifier, path or reference that the facts do not hold, a text over its `LEN-*` limit and a passive voice hit.
+
+**Fallback template, no model.** When the check still fails after one resend, write the text by hand:
+
+| Kind | Template |
+|---|---|
+| `review-comment` | `<label>[ (<decorations>)]: <failure>. <fix>.` Leave out the parentheses when there are no decorations. |
+| `reply` | `Fixed.` or `Done, <what changed>.` or `<reason>.` |
+| `commit-message` | `<type>(<scope>): <fact one line>` |
+| `ticket` | one sentence of what and why, then the acceptance bullets as given |
+
+Measured in the pilot of 18 cases (Sonnet writing from the old rules against Haiku writing from the new rules): total length 2934 against 2856 characters, 0 invented facts for both, and the Haiku texts passed the length limits more often (2 over against 6). The strong model's output only shrinks when it stops writing the text: a decision record for a reply was longer than the reply, so replies stay with the orchestrator.
 
 ## Auditor brief
 

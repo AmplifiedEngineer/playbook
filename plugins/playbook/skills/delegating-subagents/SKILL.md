@@ -40,6 +40,7 @@ File delivery needs `Write` or `Bash`. The read-only agents have neither on purp
 | `analyst` | `playbook:analyst` | **Return value only** (Read, Grep, Glob, Skill) |
 | `cheap-checker` | `playbook:cheap-checker` | **Return value only** (Read, Grep, Glob, Skill) |
 | `review-triage` | `playbook:review-triage` | **Return value only** (Read, Grep, Glob, Skill) |
+| `writer` | `playbook:writer` | **Return value only** (Read, Skill) |
 
 **Always pass the `playbook:` prefix** from the second column. These are plugin agents, and a bare `subagent_type: critic` resolves to the wrong agent or none (fixed repo-wide in #284). Elsewhere, the bare name is only a label for talking about the agent. `playbook agents check` (run in CI) keeps the read-only rows free of `Edit`, `Write`, `NotebookEdit` and `Bash`. No test compares this table with `agents/*.md`: change both together.
 
@@ -72,7 +73,7 @@ Fork only when the child needs the decisions and corrections made earlier in thi
 
 ## Route the task first
 
-Route the task before picking an agent. Kinds: `mechanical`, `classify`, `check`, `review`, `implement`, `design`. Intent: route-model. If the session's tool map (printed at session start) lists it, use that command with the kind and `--json`. For `implement` add `--tier low|medium|high` (low for any well specified unit, medium for a cross-module change or ambiguous spec, high for workflow determinism, concurrency or subtle architecture). Add `--failures <n>` when the task already failed. Read `model`, `effort`, `agent` and `action`:
+Route the task before picking an agent. Kinds: `mechanical`, `classify`, `check`, `review`, `write`, `implement`, `design`. Intent: route-model. If the session's tool map (printed at session start) lists it, use that command with the kind and `--json`. For `implement` add `--tier low|medium|high` (low for any well specified unit, medium for a cross-module change or ambiguous spec, high for workflow determinism, concurrency or subtle architecture). Add `--failures <n>` when the task already failed. Read `model`, `effort`, `agent` and `action`:
 
 - `action: proceed`: dispatch the named agent.
 - `action: ask`: stop and ask the user first. The task runs on the top model, uses the high tier, or has failed twice. Do not dispatch until the user says yes.
@@ -80,7 +81,17 @@ Route the task before picking an agent. Kinds: `mechanical`, `classify`, `check`
 
 The `routing.escalate` key is the gate: `ask` (default) asks before escalating, `auto` proceeds and logs the assumption in the run, `deny` never escalates. Say the tier and a one line reason in every dispatch report. A failure does not raise the tier by itself. The user's effort ceiling always wins (`cappedFrom` says when it applied).
 
-Without the tool, do this: pick the agent from the roster above, which pins its own model, and treat the gate as `ask`, the default. Before you send a task to the top model or to the high tier, or after it has failed twice, stop and ask the user first.
+Use `write` for text, see "Writing text" below. Without the tool, do this: pick the agent from the roster above, which pins its own model, and treat the gate as `ask`, the default. Before you send a task to the top model or to the high tier, or after it has failed twice, stop and ask the user first.
+
+## Writing text
+
+The strong model decides and the cheap model writes. For a review comment on a diff, a ticket description or other text a person reads, finish the analysis first. Then dispatch `playbook:writer` (route kind `write`, Haiku) with a brief from "Writer brief builder" in [references/briefs.md](references/briefs.md). Do not draft the text yourself first: you would pay for it twice.
+
+1. Send the facts, not a draft. The writer adds no fact.
+2. Write the text to a file and the facts to `<file>.facts` with a first line `kind: <kind>`. Run `playbook prose check <file>`. If it prints a hard finding, a passive voice hit or an unknown token, send those lines back to the writer once.
+3. If it fails again, or the writer returns a `NEED:` line you cannot fill, write the text yourself from the template in the brief builder. Do not ask the user and do not pass `--failures` to the route: a text never needs approval.
+
+Kinds that stay with the orchestrator: a reply to a PR comment. The pilot showed that a decision record (action, reference, reason) costs more output tokens than the one or two sentences it replaces. The PR body and the commit message already run on Haiku through the delivery agent that `/playbook:create-pull-request` and `/playbook:commit-and-push` fork into, so they need no writer.
 
 ## Pick the tier
 
