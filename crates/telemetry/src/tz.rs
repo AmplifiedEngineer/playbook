@@ -8,10 +8,11 @@
 //! day starts. A "day number" is the count of calendar days since 1970-01-01
 //! in the chosen zone, so `aggregate::date_key` turns it into a date as before.
 //!
-//! The zone is `local` (the default) or `utc`. It is chosen once at start-up
+//! The zone is `local` (the default) or `utc`. It is chosen at start-up
 //! from, in order: the `--utc` / `--local` flag, the `PLAYBOOK_TELEMETRY_TZ`
 //! environment variable, the `usage.timeZone` setting, then `local`. A value
 //! that is not one of those two is ignored with a notice, never a panic.
+//! pbtop's `z` key switches between the two during a session.
 
 use chrono::{Local, Offset, TimeZone};
 
