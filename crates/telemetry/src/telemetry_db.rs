@@ -1315,9 +1315,9 @@ mod tests {
     }
 
     #[test]
-    fn a_live_row_wins_per_tool_use_id_and_the_agent_name_does_not_matter() {
-        // The live data may call the agent `custom`; the transcript says
-        // `playbook:reviewer`. One tool use id is one call.
+    fn a_live_row_wins_per_tool_use_id() {
+        // The transcript names the agent `playbook:reviewer`, the live data
+        // may say `custom`; neither name is in the key, so one id is one call.
         let conn = with_events(&[("tu1", "s1", 10, "agent"), ("tu2", "s1", 20, "agent")]);
         insert_tool(&conn, &tool("tu1", "Agent", false, 300, 11)).unwrap();
         let stats = tool_stats(&conn, 0, 100).unwrap();
@@ -1325,6 +1325,15 @@ mod tests {
         assert_eq!((agent.calls, agent.transcript_calls), (2, 1));
         assert_eq!((agent.failures, agent.outcomes, agent.timed), (1, 1, 1));
         assert_eq!((agent.total_ms, agent.max_ms), (300, 300));
+    }
+
+    #[test]
+    fn the_same_tool_use_id_in_another_session_is_a_different_call() {
+        let conn = with_events(&[("tu1", "other", 10, "agent")]);
+        insert_tool(&conn, &tool("tu1", "Agent", true, 5, 11)).unwrap();
+        let stats = tool_stats(&conn, 0, 100).unwrap();
+        let agent = stat(&stats, "Agent");
+        assert_eq!((agent.calls, agent.transcript_calls), (2, 1));
     }
 
     #[test]

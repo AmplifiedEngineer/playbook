@@ -882,11 +882,24 @@ pub const HEALTH_ROWS: usize = 9;
 /// The title note of a telemetry view: its source and, for a period, the
 /// span it is compared with.
 fn telemetry_note(pal: &Palette, data: &Data) -> Line<'static> {
-    let source = if data.health.tools.iter().any(|t| t.transcript_calls > 0) {
-        "source telemetry + transcripts"
-    } else {
-        "source telemetry"
+    note_with_source(pal, data, "source telemetry")
+}
+
+/// The Tools title note. Its source depends on the rows: live ones, transcript
+/// counts, or both. Health keeps `telemetry_note`, since it is live only.
+fn tools_note(pal: &Palette, data: &Data) -> Line<'static> {
+    let tools = &data.health.tools;
+    let transcript = tools.iter().any(|t| t.transcript_calls > 0);
+    let live = tools.iter().any(|t| t.calls > t.transcript_calls);
+    let source = match (live, transcript) {
+        (true, true) => "source telemetry + transcripts",
+        (false, true) => "source transcripts",
+        _ => "source telemetry",
     };
+    note_with_source(pal, data, source)
+}
+
+fn note_with_source(pal: &Palette, data: &Data, source: &str) -> Line<'static> {
     let text = match &data.comparison {
         Some(c) => format!("{source}  vs {}", c.period.previous_label()),
         None => source.to_string(),
@@ -920,7 +933,7 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, s
             "No tool calls in this range. v switches the view.",
         );
     }
-    block = block.title(telemetry_note(pal, data));
+    block = block.title(tools_note(pal, data));
     let compared = data.comparison.is_some();
     // The comparison columns only exist for a period, and only when wide.
     let min = if compared { 46 } else { u16::MAX };

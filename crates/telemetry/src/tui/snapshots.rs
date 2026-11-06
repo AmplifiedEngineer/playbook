@@ -893,9 +893,36 @@ fn transcript_counts_carry_a_marker_and_show_a_dash_for_what_they_cannot_know() 
     assert!(!text.contains("telemetry is off"), "{text}");
     assert!(text.contains("source telemetry + transcripts"), "{text}");
     let agent = row("Agent        ");
-    assert!(agent.contains("25~") && !agent.contains("0%"), "{agent}");
+    let dashes = agent.split_whitespace().filter(|c| *c == "-").count();
+    assert!(agent.contains("25~") && dashes >= 3, "{agent}");
+    assert!(!agent.contains("0%") && !agent.contains("0ms"), "{agent}");
     let bash = row("Bash        ");
     assert!(bash.contains("100ms") && !bash.contains("~"), "{bash}");
+}
+
+#[test]
+fn a_transcript_only_tool_has_no_previous_average_to_compare() {
+    use crate::telemetry_db::ToolStat;
+    use crate::tui::app::ProjectsView;
+    let agent = ToolStat {
+        name: "Agent".into(),
+        calls: 25,
+        transcript_calls: 25,
+        ..ToolStat::default()
+    };
+    let mut a = health_app(false, ProjectsView::Tools);
+    let data = a.data.as_mut().unwrap();
+    data.health.tools = vec![agent.clone()];
+    data.health.tools_before = vec![agent];
+    let text = draw(&a, 100, 30);
+    assert!(text.contains("source transcripts"), "{text}");
+    let line = text.lines().find(|l| l.contains("Agent        ")).unwrap();
+    let row = line.rsplit("││").next().unwrap();
+    let dashes = row
+        .split_whitespace()
+        .filter(|c| c.trim_end_matches('│') == "-")
+        .count();
+    assert!(dashes >= 4 && !row.contains("new"), "{row}");
 }
 
 #[test]
