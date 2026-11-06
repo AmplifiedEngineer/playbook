@@ -6,3 +6,11 @@
 # Workflow and governance files always require maintainer sign-off,
 # even if other paths delegate to additional reviewers in future.
 .github/ @igorjs
+
+# Benchmark data. A lower baseline, floor or fixture baseline, or an override,
+# changes what the gate accepts, so the maintainer reads each change.
+/crates/code-bench/data/baseline.json @igorjs
+/crates/code-bench/data/floor.json @igorjs
+/crates/code-bench/data/overrides.json @igorjs
+/crates/code/tests/fixtures/gate-baseline.json @igorjs
+/crates/code/tests/fixtures/*/xfail.toml @igorjs
