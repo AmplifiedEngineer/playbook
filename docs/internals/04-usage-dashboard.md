@@ -86,6 +86,7 @@ Keys:
 | `b` | Open the budget window: type the manual monthly budget in dollars, `Enter` saves it to `usage.budget.monthlyUsd`, `0` clears it, `Esc` cancels. |
 | `?` | Open the help window (below). |
 | `z` | Switch every time and day between local time and UTC for this session. The footer and the title name the zone. `usage.timeZone` sets the start-up zone. |
+| `u`, `U` | Pick the account. The view opens on the account of the newest event, and the title names it (a name set with `playbook usage account name`, else the account key). `u` steps to the next account, then to all accounts, then back to the newest. `U` jumps to all accounts and back. The totals, the charts and the budget panel count only the account shown. The agents, skills and health tables read telemetry rows, which carry no account, and stay unfiltered. |
 | `s` | Sort the focused table by the next column. A marker in the header shows the column and the direction. Text columns start ascending and number columns descending. |
 | `S` | Reverse the sort. |
 | `Enter` | Filter the whole view to the selected row: a model, a project or a session id. `Enter` on that row again lifts the filter. |

@@ -747,11 +747,15 @@ fn header_lines(d: &Data, pal: &Palette, room: usize) -> Vec<Line<'static>> {
 
 /// The time zone note in the header border. Weeks say which day they start on.
 fn zone_note(app: &App) -> String {
-    match app.range {
+    let zone = match app.range {
         Range::ThisWeek(w) | Range::LastWeek(w) => {
             format!("{}, weeks start {}", crate::tz::label(), w.short())
         }
         _ => crate::tz::label().to_string(),
+    };
+    match app.data.as_ref().map(|d| d.accounts.shown.as_str()) {
+        Some(account) if !account.is_empty() => format!("{zone}, {account}"),
+        _ => zone,
     }
 }
 

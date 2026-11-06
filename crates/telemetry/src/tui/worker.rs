@@ -7,6 +7,7 @@
 //! same ingest `usage --summary` runs. A first read of a large history goes
 //! in small batches and the screen shows the partial store as it grows.
 
+use super::account::AccountSel;
 use super::data::{self, Data};
 use crate::query::Range;
 use crate::run::{ingest_into, Paths};
@@ -21,7 +22,11 @@ pub const DEFAULT_REFRESH_SECONDS: u64 = 5;
 
 pub enum Request {
     /// Show this range and filter now, then keep refreshing them.
-    Query { range: Range, filter: String },
+    Query {
+        range: Range,
+        filter: String,
+        account: AccountSel,
+    },
 }
 
 pub enum Update {
@@ -42,11 +47,16 @@ pub struct Worker {
 const PARTIAL_EVERY: Duration = Duration::from_secs(1);
 
 /// Reads the store into a snapshot.
-fn snapshot(conn: &rusqlite::Connection, paths: &Paths, query: &(Range, String)) -> Update {
-    match data::load(conn, query.0, &query.1, now_secs()) {
+fn snapshot(
+    conn: &rusqlite::Connection,
+    paths: &Paths,
+    query: &(Range, String, AccountSel),
+) -> Update {
+    match data::load(conn, query.0, &query.1, &query.2, now_secs()) {
         Ok(mut d) => {
             // A limits failure never hides the rest of the view.
-            if let Ok(l) = data::load_limits(conn, paths, query.0, d.now) {
+            if let Ok(l) = data::load_limits(conn, paths, query.0, d.accounts.key.as_deref(), d.now)
+            {
                 d.limits = l;
             }
             Update::Data(Box::new(d))
@@ -56,11 +66,17 @@ fn snapshot(conn: &rusqlite::Connection, paths: &Paths, query: &(Range, String))
 }
 
 impl Worker {
-    pub fn spawn(paths: Paths, range: Range, filter: String, every: Duration) -> Worker {
+    pub fn spawn(
+        paths: Paths,
+        range: Range,
+        filter: String,
+        account: AccountSel,
+        every: Duration,
+    ) -> Worker {
         let (requests, request_rx) = mpsc::channel::<Request>();
         let (update_tx, updates) = mpsc::channel::<Update>();
         let handle = std::thread::spawn(move || {
-            let mut query = (range, filter);
+            let mut query = (range, filter, account);
             let mut first = true;
             loop {
                 let conn = match crate::db::open_db(&paths.db) {
@@ -70,7 +86,11 @@ impl Worker {
                             return;
                         }
                         match request_rx.recv_timeout(every) {
-                            Ok(Request::Query { range, filter }) => query = (range, filter),
+                            Ok(Request::Query {
+                                range,
+                                filter,
+                                account,
+                            }) => query = (range, filter, account),
                             Err(RecvTimeoutError::Timeout) => {}
                             Err(RecvTimeoutError::Disconnected) => return,
                         }
@@ -91,8 +111,13 @@ impl Worker {
                     if total == 0 || done == total {
                         return true;
                     }
-                    while let Ok(Request::Query { range, filter }) = request_rx.try_recv() {
-                        query = (range, filter);
+                    while let Ok(Request::Query {
+                        range,
+                        filter,
+                        account,
+                    }) = request_rx.try_recv()
+                    {
+                        query = (range, filter, account);
                         last_sent = std::time::Instant::now() - PARTIAL_EVERY;
                     }
                     if update_tx
@@ -120,7 +145,11 @@ impl Worker {
                     return;
                 }
                 match request_rx.recv_timeout(every) {
-                    Ok(Request::Query { range, filter }) => query = (range, filter),
+                    Ok(Request::Query {
+                        range,
+                        filter,
+                        account,
+                    }) => query = (range, filter, account),
                     Err(RecvTimeoutError::Timeout) => {}
                     Err(RecvTimeoutError::Disconnected) => return,
                 }
@@ -133,10 +162,11 @@ impl Worker {
         }
     }
 
-    pub fn ask(&self, range: Range, filter: &str) {
+    pub fn ask(&self, range: Range, filter: &str, account: &AccountSel) {
         let _ = self.requests.send(Request::Query {
             range,
             filter: filter.to_string(),
+            account: account.clone(),
         });
     }
 }

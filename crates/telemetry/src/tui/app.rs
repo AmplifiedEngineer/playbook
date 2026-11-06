@@ -4,6 +4,7 @@
 //! The terminal view's state and what each key does. Pure: no terminal, no
 //! store, so every key is a unit test.
 
+use super::account::AccountSel;
 use super::chart::Plot;
 use super::data::Data;
 use super::keys::{self, Cmd};
@@ -125,6 +126,8 @@ pub struct App {
     /// The first day of the week for the week ranges.
     pub week_start: WeekStart,
     pub filter: String,
+    /// Which account the numbers belong to.
+    pub account: AccountSel,
     /// The last store error, shown in the header until the next good refresh.
     pub error: Option<String>,
     pub quit: bool,
@@ -201,6 +204,7 @@ impl App {
             projects_view: ProjectsView::default(),
             week_start: WeekStart::default(),
             filter: String::new(),
+            account: AccountSel::default(),
             error: None,
             quit: false,
             theme: Theme::default(),
@@ -914,9 +918,32 @@ impl App {
                 });
                 return Effect::Requery;
             }
+            Cmd::Account => {
+                let (shown, choices) = self.accounts_shown();
+                let next = if code == KeyCode::Char('U') {
+                    self.account.toggle_all()
+                } else {
+                    self.account.next(shown.as_deref(), &choices)
+                };
+                if next == self.account {
+                    self.note = Some("Only one account has usage".to_string());
+                } else {
+                    self.account = next;
+                    self.cursor = None;
+                    return Effect::Requery;
+                }
+            }
             Cmd::Refresh => return Effect::Requery,
         }
         Effect::None
+    }
+
+    /// The account on screen and every account to pick from, as the last
+    /// refresh found them.
+    fn accounts_shown(&self) -> (Option<String>, Vec<(String, String)>) {
+        self.data.as_ref().map_or((None, Vec::new()), |d| {
+            (d.accounts.key.clone(), d.accounts.choices.clone())
+        })
     }
 
     /// Keys while the filter is being typed. Enter applies, Esc drops it.
@@ -1099,6 +1126,46 @@ mod tests {
         let mut app = App::new(Range::All);
         app.data = Some(data_with([5.0, 1.0, 3.0]));
         app
+    }
+
+    fn with_accounts(keys: &[&str]) -> App {
+        let mut app = loaded();
+        let choices: Vec<(String, String)> = keys
+            .iter()
+            .map(|k| (k.to_string(), k.to_string()))
+            .collect();
+        if let Some(d) = app.data.as_mut() {
+            d.accounts.key = AccountSel::Latest.resolve(&choices);
+            d.accounts.choices = choices;
+        }
+        app
+    }
+
+    #[test]
+    fn u_cycles_the_accounts_and_capital_u_shows_all_of_them() {
+        use super::super::account::AccountSel as Sel;
+        let mut app = with_accounts(&["work", "home"]);
+
+        assert_eq!(app.key(press(KeyCode::Char('u'))), Effect::Requery);
+        assert_eq!(app.account, Sel::Key("home".into()));
+        if let Some(d) = app.data.as_mut() {
+            d.accounts.key = Some("home".into());
+        }
+        assert_eq!(app.key(press(KeyCode::Char('u'))), Effect::Requery);
+        assert_eq!(app.account, Sel::All);
+        assert_eq!(app.key(press(KeyCode::Char('U'))), Effect::Requery);
+        assert_eq!(app.account, Sel::Latest);
+        assert_eq!(app.key(press(KeyCode::Char('U'))), Effect::Requery);
+        assert_eq!(app.account, Sel::All);
+    }
+
+    #[test]
+    fn u_with_one_account_changes_nothing_and_says_so() {
+        let mut app = with_accounts(&["work"]);
+
+        assert_eq!(app.key(press(KeyCode::Char('u'))), Effect::None);
+        assert_eq!(app.account, AccountSel::Latest);
+        assert_eq!(app.note.as_deref(), Some("Only one account has usage"));
     }
 
     #[test]

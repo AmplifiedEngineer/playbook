@@ -7,6 +7,7 @@
 
 #[cfg(test)]
 mod a11y;
+pub mod account;
 pub mod app;
 pub mod arrange;
 pub mod budget;
@@ -169,7 +170,13 @@ fn event_loop(
     let every = Duration::from_secs(super::entry::configured_refresh_seconds());
     app.refresh_every = every;
     app.telemetry = Some(super::telemetry_status::detect_here(paths));
-    let worker = Worker::spawn(paths.clone(), app.range, app.filter.clone(), every);
+    let worker = Worker::spawn(
+        paths.clone(),
+        app.range,
+        app.filter.clone(),
+        app.account.clone(),
+        every,
+    );
     let mut sessions = SessionsLoop::new(paths.clone());
     while !app.quit {
         app.area = terminal.size().map(Into::into)?;
@@ -193,12 +200,12 @@ fn event_loop(
                     }
                 }
                 Event::Key(key) if key.kind == KeyEventKind::Press => match app.key(key) {
-                    Effect::Requery => worker.ask(app.range, &app.filter),
+                    Effect::Requery => worker.ask(app.range, &app.filter, &app.account),
                     Effect::Sessions => sessions.open(),
                     Effect::SaveLayout(text) => autosave.push(text),
                     Effect::SaveBudget(usd) => {
                         app.note = Some(save_budget(&home, usd));
-                        worker.ask(app.range, &app.filter);
+                        worker.ask(app.range, &app.filter, &app.account);
                     }
                     Effect::ResetPrefs => {
                         let cleared = ui_state::reset(&home).map(|_| ());
@@ -210,7 +217,7 @@ fn event_loop(
                             last_saved: &mut last_saved,
                         };
                         if let Effect::Requery = reset.finish(cleared) {
-                            worker.ask(app.range, &app.filter);
+                            worker.ask(app.range, &app.filter, &app.account);
                         }
                     }
                     Effect::None => {}
