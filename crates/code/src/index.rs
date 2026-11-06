@@ -33,6 +33,11 @@ pub struct Options {
     /// The parser key stored with each content row. A manifest row whose
     /// content has another key counts as changed.
     pub parser: String,
+    /// Progress ticks one parse may spend before the file is skipped as
+    /// `parse_timeout`.
+    pub tick_budget: u64,
+    /// The parser a file runs through. Tests inject one that spends ticks.
+    pub driver: lang::Driver,
     /// The clock of the run in milliseconds since the epoch, for tests. The
     /// run reads the system clock when it is `None`.
     pub now_ms: Option<i64>,
@@ -54,6 +59,8 @@ impl Default for Options {
             max_threads: MAX_WORKERS,
             chunk_lines: 60,
             parser: lang::parser_key(),
+            tick_budget: lang::PARSE_TICK_BUDGET,
+            driver: Box::new(lang::drive),
             now_ms: None,
             before_write: None,
             #[cfg(test)]
@@ -103,7 +110,19 @@ static NO_CLEANUP_HOOKS: cleanup::Hooks = cleanup::Hooks {
     delete_file: None,
 };
 
+/// Hex characters kept of the guard fingerprint.
+const GUARD_FINGERPRINT_CHARS: usize = 16;
+
 impl Options {
+    /// A short hash of what decides a guard skip: the parser key, the tick
+    /// budget and the nesting cap. A changed value parses the file again.
+    fn guard_fingerprint(&self) -> String {
+        let text = format!("{}|{}|{}", self.parser, self.tick_budget, lang::MAX_NESTING);
+        let mut hex = playbook_common::hash::sha256_hex(text.as_bytes());
+        hex.truncate(GUARD_FINGERPRINT_CHARS);
+        hex
+    }
+
     fn before_write(&self) {
         if let Some(hook) = &self.before_write {
             hook();
@@ -236,6 +255,8 @@ enum Outcome {
     },
     Write(Box<Prepared>),
     Skip(Skipped),
+    GuardSkip(Skipped, String),
+    GuardKept,
     Missing(String),
     Failed {
         path: String,
@@ -349,6 +370,22 @@ struct Syntax {
     parsed: bool,
 }
 
+/// Whether the row is a guard skip with the same fingerprint, size and mtime.
+fn guard_still_holds(old: &Existing, meta: &std::fs::Metadata, fingerprint: &str) -> bool {
+    let Some((reason, stored)) = old
+        .error
+        .as_deref()
+        .and_then(|e| e.split_once(walker::GUARD_SEPARATOR))
+    else {
+        return false;
+    };
+    old.status == "skipped"
+        && walker::is_guard_reason(reason)
+        && stored == fingerprint
+        && i64::try_from(meta.len()).ok() == Some(old.size)
+        && old.mtime_ns == walker::mtime_ns(meta)
+}
+
 fn prepare(
     root: &Path,
     path: &str,
@@ -369,6 +406,9 @@ fn prepare(
             }
         }
     };
+    if existing.is_some_and(|old| guard_still_holds(old, &meta, &opts.guard_fingerprint())) {
+        return Outcome::GuardKept;
+    }
     let bytes = match std::fs::read(&full) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -415,7 +455,21 @@ fn prepare(
     let mut syntax = Syntax::default();
     if let Some(language) = lang::Lang::for_path(path) {
         syntax.lang = Some(language.name());
-        match lang::parse(language, &bytes) {
+        match lang::parse_guarded(&opts.driver, language, &bytes, opts.tick_budget) {
+            Err(stop @ (lang::ParseStop::TooDeep | lang::ParseStop::Timeout)) => {
+                let reason = if stop == lang::ParseStop::TooDeep {
+                    walker::SkipReason::TooDeep
+                } else {
+                    walker::SkipReason::ParseTimeout
+                };
+                let skipped = walker::Skipped {
+                    path: path.to_string(),
+                    reason,
+                    size,
+                    mtime_ns: mtime,
+                };
+                return Outcome::GuardSkip(skipped, opts.guard_fingerprint());
+            }
             Ok(tree) => {
                 let found = lang::extract(language, &tree, &bytes);
                 syntax.partial = tree.partial;
@@ -706,6 +760,28 @@ fn apply(
                 },
             )?;
         }
+        Outcome::GuardSkip(s, fingerprint) => {
+            opts.before_file(&s.path).map_err(ApplyError::Msg)?;
+            let error = format!(
+                "{}{}{fingerprint}",
+                s.reason.as_str(),
+                walker::GUARD_SEPARATOR
+            );
+            upsert_manifest(
+                conn,
+                wt,
+                &ManifestRow {
+                    path: &s.path,
+                    content: None,
+                    lang: None,
+                    sha: "",
+                    size: s.size,
+                    mtime_ns: s.mtime_ns,
+                    status: "skipped",
+                    error: Some(&error),
+                },
+            )?;
+        }
         Outcome::Touch {
             path,
             size,
@@ -716,7 +792,11 @@ fn apply(
                 params![wt, path, i64::try_from(*size).unwrap_or(i64::MAX), mtime_ns],
             )?;
         }
-        Outcome::Unchanged | Outcome::Adopt(_) | Outcome::Missing(_) | Outcome::Failed { .. } => {}
+        Outcome::Unchanged
+        | Outcome::GuardKept
+        | Outcome::Adopt(_)
+        | Outcome::Missing(_)
+        | Outcome::Failed { .. } => {}
     }
     Ok(())
 }
@@ -813,13 +893,15 @@ fn write_batch_once(
         }
         let path = match outcome {
             Outcome::Write(p) => p.path.clone(),
-            Outcome::Skip(s) => s.path.clone(),
+            Outcome::Skip(s) | Outcome::GuardSkip(s, _) => s.path.clone(),
             Outcome::Touch { path, .. } => path.clone(),
             Outcome::Failed { path, error } => {
                 failures.push((path.clone(), error.clone()));
                 continue;
             }
-            Outcome::Unchanged | Outcome::Adopt(_) | Outcome::Missing(_) => continue,
+            Outcome::Unchanged | Outcome::GuardKept | Outcome::Adopt(_) | Outcome::Missing(_) => {
+                continue
+            }
         };
         let sp = tx.savepoint()?;
         match apply(&sp, outcome, opts, wt, replace) {
@@ -1086,6 +1168,14 @@ pub fn run(
                 Outcome::Unchanged => {
                     report.unchanged += 1;
                     return Ok(());
+                }
+                Outcome::GuardKept => {
+                    report.skipped += 1;
+                    return Ok(());
+                }
+                Outcome::GuardSkip(skipped, fingerprint) => {
+                    report.skipped += 1;
+                    batch.push(Outcome::GuardSkip(skipped, fingerprint));
                 }
                 Outcome::Missing(path) => {
                     listed.remove(&path);

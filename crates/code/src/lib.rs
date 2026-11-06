@@ -17,6 +17,8 @@ pub mod index;
 pub mod lang;
 pub mod location;
 pub mod output;
+#[cfg(test)]
+mod parse_guard_tests;
 pub mod ranked;
 pub mod refs;
 pub mod search;
