@@ -1,6 +1,6 @@
 # Launcher and hooks
 
-`playbook cc` is the entry point for every session. It wraps `claude` with a system prompt, a model fallback chain, an effort ceiling, per-session agent variants, transcript retention and config-drift detection. Hooks add guards, nudges and state tracking around the session. Both are subcommands of the one `playbook` binary.
+`playbook cc` is the entry point for every session. It wraps `claude` with a system prompt, a model fallback chain, an effort ceiling, transcript retention and config-drift detection. Hooks add guards, nudges and state tracking around the session. Both are subcommands of the one `playbook` binary.
 
 ## The `playbook cc` and `playbook ccd` launcher
 
@@ -13,12 +13,12 @@ On every launch the launcher:
 - Trusts `$PWD` (the equivalent of `playbook trust`), so Claude Code's trust dialog never blocks. Best effort.
 - Passes `--system-prompt-file ~/.config/playbook/prompts/SYSTEM_PROMPT.md` when it is installed and `systemPrompt.enabled` is true, the default. With the key false it adds no prompt flag and passes your own prompt flags through, append flags included.
 - Passes the model fallback chain with `--fallback-model`, and exports `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` for any `models.*` override. See [Model tiers](02-model-routing-and-memory.md#model-tiers-and-the-55-rule).
-- Passes no `--settings`. Your effort ceiling lowers the default `--effort` the launcher adds and the agent variants it renders. It moves `CLAUDE_CODE_EFFORT_LEVEL` to `--effort`, so the variable cannot raise a playbook skill, command or agent above its own effort. See [Effort policy](02-model-routing-and-memory.md#effort-policy).
-- Renders the agent effort variants into a throwaway session plugin and passes it with `--plugin-dir`. Nothing is committed. `agents.variants` (`auto`, `all`, `off`) picks which, and `playbook agents variants` shows them. Code: `crates/cli/src/cc/agent_variants.rs`.
+- Passes no `--settings`. Your effort ceiling lowers the default `--effort` the launcher adds and the effort an orchestrator passes when it spawns an agent. It moves `CLAUDE_CODE_EFFORT_LEVEL` to `--effort`, so the variable cannot raise a playbook skill, command or agent above its own effort. See [Effort policy](02-model-routing-and-memory.md#effort-policy).
+- Removes the throwaway `playbook-variants-<pid>` folders that earlier releases left in the temp dir (`crates/cli/src/cc/stale_variants.rs`). Effort variants of the agents are gone: an orchestrator passes the `effort` parameter on the `Agent` call instead.
 - Sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` for that session when `memory.source` is `playbook`. It never edits Claude Code's settings or memory.
 - After `claude` exits, prunes to the newest `CCD_KEEP` transcripts per project (default 5, floor 2), with their sidecars and runtime state.
 
-A session started without the launcher, such as a plain `claude`, gets only the hooks and the status line: no playbook prompt, effort default, agent variants, model overrides or memory switch. The `claude` function that `launcher.claudeOverride` turned on is gone with the shell line.
+A session started without the launcher, such as a plain `claude`, gets only the hooks and the status line: no playbook prompt, effort default, model overrides or memory switch. The `claude` function that `launcher.claudeOverride` turned on is gone with the shell line.
 
 ### The `pb` short name
 

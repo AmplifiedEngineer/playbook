@@ -172,10 +172,9 @@ pub(crate) const META: &[Meta] = &[
         .for_agents(),
     free("adr next"),
     ro("agents")
-        .purpose("Check agent definition files and their effort variants")
+        .purpose("Check that agent definition files follow the playbook rules")
         .for_agents(),
     ro("agents check"),
-    ro("agents variants"),
     ro("atlassian")
         .purpose("Check the Atlassian tools the `playbook:atlassian` skill uses")
         .for_agents(),

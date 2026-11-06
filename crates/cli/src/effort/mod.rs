@@ -11,8 +11,9 @@
 //!
 //! The effective ceiling is the lower of the two. Claude Code enforces its own
 //! `maxEffortLevel` on everything. Playbook's ceiling is applied by the binary
-//! itself: to the agent variants the launcher renders per session, to the
-//! launcher's default `--effort`, and to what `playbook effort` reports. The
+//! itself: to the effort the orchestrator passes when it spawns an agent
+//! (`playbook effort resolve`), to the launcher's default `--effort`, and to
+//! what `playbook effort` reports. The
 //! launcher passes no `--settings`, and playbook never writes a Claude Code
 //! settings file, so the ceiling does not cap a command or skill that ships
 //! its own `effort` (`LIMIT`).
@@ -30,7 +31,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// What the playbook ceiling does not cap. Shown by `playbook effort` and `playbook doctor`.
-pub const LIMIT: &str = "playbook's ceiling caps agent variants, the launcher's default effort and what the binary reports. It does not cap a command, skill or base agent that ships its own effort, or a level you state for the session (--effort, effortLevel, CLAUDE_CODE_EFFORT_LEVEL, /effort), because only Claude Code's maxEffortLevel setting can, and playbook never writes it";
+pub const LIMIT: &str = "playbook's ceiling lowers the effort an orchestrator passes when it spawns an agent, the launcher's default effort and what the binary reports. It does not cap a command or skill that ships its own effort, a spawn that skips the resolve step, or a level you state for the session (--effort, effortLevel, CLAUDE_CODE_EFFORT_LEVEL, /effort), because only Claude Code's maxEffortLevel setting can, and playbook never writes it";
 
 /// The config key.
 pub const KEY: &str = "maxEffortLevel";
@@ -164,7 +165,7 @@ pub fn run_set(home: &Path, level: &str) -> Result<String, String> {
         format!("maxEffortLevel set to {level}, playbook sets no ceiling and Claude Code's applies")
     } else {
         format!(
-            "playbook maxEffortLevel set to {level}. Agent variants and the launcher's default effort stay at or below it, \
+            "playbook maxEffortLevel set to {level}. The effort passed to a spawned agent and the launcher's default effort stay at or below it, \
              and never above your Claude Code maxEffortLevel. Claude Code's settings are not changed. {LIMIT}."
         )
     })

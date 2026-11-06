@@ -639,7 +639,6 @@ fn table() -> Vec<Case> {
         case( "settings check", &[ "settings", "check", "{ROOT}/t.json", "{CWD}", ], ).code(1).err("not readable"),
         case("manifest check", &["manifest", "check"]).out("check-manifest: OK"),
         case("agents check", &["agents", "check"]).code(1).err("agents directory not found"),
-        case("agents variants", &["agents", "variants"]).out("no variants"),
         case( "gate record", &["gate", "record", "smoke", "plan", "design", "{ROOT}/in.txt"], ).file("in.txt", "x").code(1).err("no VERDICT"),
         case("gate snapshot", &["gate", "snapshot", "smoke", "design"]).code(1).err("does not exist"),
         case("gate check", &["gate", "check", "smoke", "plan"]).code(1).err("no phases specified"),

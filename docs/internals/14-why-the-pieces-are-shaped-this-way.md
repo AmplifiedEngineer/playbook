@@ -48,24 +48,21 @@ Plugin files name only the alias. `playbook cc` resolves each to the 5.5 model a
 Model sets how capable the work is. Effort sets how long it thinks. They are separate because the right pairing differs by task:
 
 - A fixed procedure (commit, push, open a PR) needs a cheap model at **low** effort. Thinking harder does not help.
-- A review needs a strong model. Opus at **medium** found as much as at high on the reviewer bench, so the reviewer ships at medium and a risky diff escalates to `xhigh` by variant.
+- A review needs a strong model. Opus at **medium** found as much as at high on the reviewer bench, so the reviewer ships at medium and a risky diff escalates to `high` through the `effort` parameter of the `Agent` call.
 - Design and orchestration commands (`plan`, `adr`, `deep-review`, `address-pr-comments`, `learn-project`, `implement`, `fix`) also ship at **medium**. The maintainer chose that on 2026-10-11 using the reviewer, implementer and critic results. No bench covers the design commands themselves. The `auditor` stays at **high** ([ADR-0023](../adr/0023-commands-at-medium.md)).
 - A small diff does not need an `xhigh` review, and a risky one might.
 
 The rule behind the current values: **lower effort where the work is mechanical or already decided, and never where a missed finding is costly.** A model that is wrong costs a rerun. A reviewer that stops looking costs a production bug. The table of every value and its reason is in [Effort policy](../internals/02-model-routing-and-memory.md#effort-policy).
 
-### Why there are effort variants of every agent, and why they are not files
+### Why an agent's effort is a parameter and not a separate agent
 
-The `Agent` tool takes a `model` per call but has no per-call effort. An agent's effort is fixed by its file. A role that needs two efforts (a small diff and a risky one) needs two definitions.
-
-Eleven agents times four more tiers would add dozens of descriptions to every session. So `playbook cc` and `playbook ccd` render only the variants a session can use, from the base agents, into a throwaway session plugin. Nothing is committed.
+The `Agent` tool takes an `effort` per call when a skill asks for it, and the `delegating-subagents` skill does. A role that needs two efforts (a small diff and a risky one) keeps one definition. Earlier releases rendered a variant of every agent per tier into a throwaway plugin, and a spawn by variant name skipped the ceiling check. One parameter on the base agent is the single place that sets the effort, so `maxEffortLevel` and `effort.agents.<name>` cap it before the spawn (see [ADR 0017](../adr/0017-per-component-effort-ceilings.md)).
 
 | Command or key | What it does |
 |---|---|
-| `agents.variants` (`auto`, `all`, `off`) | Controls the set of variants rendered |
-| `playbook agents variants` | Shows what a session would get |
-| `playbook agents check` | Fails CI when an agent has no `VARIANTS` entry or a tier cannot render |
-| `playbook effort resolve` | Tells the orchestrator which agent to spawn, because the user's effort ceilings decide it |
+| `playbook effort resolve` | Tells the orchestrator which `effort` to pass, because the user's effort ceilings decide it |
+| `playbook effort choose` | With `effort.auto` on, picks the level from the diff |
+| `agents.variants` | Kept so old configs load. It does nothing, and `playbook doctor` says so |
 
 The orchestrator then picks by diff size and risk, following the `delegating-subagents` skill.
 
@@ -75,7 +72,7 @@ Playbook sets the defaults, in each file. You set the ceiling. Playbook has its 
 
 | Playbook | Claude Code | Result |
 |---|---|---|
-| `xhigh` | `max` | `xhigh` applies to what the binary caps (agent variants and the launcher's default effort), because `xhigh` is below `max` |
+| `xhigh` | `max` | `xhigh` applies to what the binary caps (the effort passed to a spawned agent and the launcher's default effort), because `xhigh` is below `max` |
 | `xhigh` | `medium` | `medium` applies. Playbook never goes above Claude Code |
 | `auto` (the default) | any | Playbook adds no ceiling. Claude Code's applies if it has one |
 
@@ -85,11 +82,11 @@ Playbook only reads Claude Code's `maxEffortLevel` (from the user, project and l
 
 Playbook's ceiling caps:
 
-- the agent variants the launcher renders for a session
+- the effort an orchestrator passes when it spawns an agent
 - the default effort the launcher adds
 - what `playbook effort` and `playbook doctor` report
 
-It does not cap a command, skill or base agent that ships its own `effort`. It does not cap a level you state for the session (`--effort`, `effortLevel`, `CLAUDE_CODE_EFFORT_LEVEL`, `/effort`). Playbook cannot cap those because the only mechanism for that is Claude Code's `maxEffortLevel` setting, and playbook never writes a Claude Code settings file. A session started without the launcher gets no playbook ceiling. Only Claude Code's own `maxEffortLevel` bounds `/effort` and `--effort`.
+It does not cap a command or skill that ships its own `effort`, and a spawn that skips the resolve step is not capped. It does not cap a level you state for the session (`--effort`, `effortLevel`, `CLAUDE_CODE_EFFORT_LEVEL`, `/effort`). Playbook cannot cap those because the only mechanism for that is Claude Code's `maxEffortLevel` setting, and playbook never writes a Claude Code settings file. A session started without the launcher gets no playbook ceiling. Only Claude Code's own `maxEffortLevel` bounds `/effort` and `--effort`.
 
 The launcher moves `CLAUDE_CODE_EFFORT_LEVEL` to `--effort` in the session it starts (one stderr line says so):
 
@@ -127,7 +124,7 @@ For the why, start here, follow the links, then check the ADR in `docs/adr/` tha
 | You want to change | Look at |
 |---|---|
 | Which model a command or agent uses | The `model:` line in its file, then [Model routing](../internals/02-model-routing-and-memory.md) |
-| How hard it thinks | The `effort:` line in its file, or ask `playbook effort resolve agents <name>` for the variant |
+| How hard it thinks | The `effort:` line in its file, or ask `playbook effort resolve agents <name>` for the `effort` to pass |
 | The most effort anything may use | `playbook effort <level>` |
 | How far the PR flow goes | [Config keys](../reference/config-keys.md) |
 | Whether playbook asks or decides | `playbook mode`, and the [auto mode guide](../guides/04-auto-mode.md) |
