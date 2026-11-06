@@ -245,7 +245,7 @@ Cache rules:
 - The cache is read again only when the file changes, and a half written file keeps the last good reading.
 - The period of the cached limit is assumed to be the calendar month.
 
-**Plan name.** It comes from the rate limit tier names in the config file. Only the two tiers seen on Max accounts are recognized. Everything else shows as "Enterprise or unknown plan". When a plan has no 5 hour and weekly windows, the Budget (when it has room) and Projection panels say "5 hour and weekly windows: not available for this plan" and add that Pro and Max get them from the playbook statusline. A plan this version cannot tell from Enterprise, such as Pro, gets the same text. On a Max plan with no reading yet they say a reading appears after a session with the playbook statusline. Run `playbook usage doctor` to see which sources exist on a machine.
+**Plan name.** It comes from the rate limit tier names in the config file. The two tiers seen on Max accounts are recognized as Max. An account whose organizationType is claude_enterprise, or whose seatTier names enterprise, is Enterprise: the panels hide the 5 hour and weekly windows and say the whole limit is the monthly extra usage budget. Everything else shows as "Unknown plan". When a plan has no 5 hour and weekly windows, the Budget (when it has room) and Projection panels say "5 hour and weekly windows: not available for this plan" and add that Pro and Max get them from the playbook statusline. An unknown plan, such as Pro, gets the same text. On a Max plan with no reading yet they say a reading appears after a session with the playbook statusline. Run `playbook usage doctor` to see which sources exist on a machine.
 
 **Manual budget.** It covers the UTC calendar month or week (the week starts on `usage.weekStart`). The spend is the estimated cost from your local history, not your bill. Set it with `playbook config set --global usage.budget.monthlyUsd 200`. `0` means no budget.
 
@@ -312,7 +312,7 @@ For the period on screen (today, this week or this month, this week for other ra
 |---|---|
 | `known`, `hint` | `hint` is set when nothing is known. |
 | `snapshot_captured_at`, `snapshot_stale` | Snapshot fields. |
-| `plan`, `plan_label` | `plan` is `max_5x`, `max_20x` or `enterprise_or_unknown`. |
+| `plan`, `plan_label` | `plan` is `max_5x`, `max_20x`, `enterprise` or `unknown`. |
 | `windows_note` | Null when a window is known. |
 | `reason` | Why no limit comes from Claude: `no-reading`, `stale`, `cap-unknown`, `windows-reset` or `rate-limited-seen`, else null. |
 | `comparison` | Null, `skipped` with the reason, or the amount Claude reports and the local estimate with `delta_usd`, `delta_pct`, `disagrees`, `read_at` and `stale`. |
