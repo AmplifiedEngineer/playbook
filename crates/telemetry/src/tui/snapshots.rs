@@ -1230,12 +1230,32 @@ fn an_enterprise_account_shows_the_cached_spend_limit_and_says_the_windows_are_n
 }
 
 #[test]
-fn a_stale_cached_limit_is_labeled_with_its_age_and_says_used_is_this_machine_only() {
+fn a_stale_cached_limit_is_labeled_with_its_age_and_says_this_machine_is_added() {
     let a = with_sources(
         tabbed(1),
         &enterprise_sources(46 * 3600),
         Range::LastDays(30),
     );
+
+    let text = draw(&a, 140, 40);
+
+    assert!(
+        text.contains("[cached 1d 22h ago, plus this machine since]"),
+        "{text}"
+    );
+    assert!(text.contains("$121.80/$500.00"), "{text}");
+}
+
+#[test]
+fn a_stale_cache_without_an_amount_still_says_used_is_this_machine_only() {
+    let mut s = enterprise_sources(46 * 3600);
+    if let Some(c) = s.account.cache.as_mut() {
+        c.spend = Some(crate::plan::SpendLimit {
+            limit_usd: 500.0,
+            used_usd: None,
+        });
+    }
+    let a = with_sources(tabbed(1), &s, Range::LastDays(30));
 
     let text = draw(&a, 140, 40);
 

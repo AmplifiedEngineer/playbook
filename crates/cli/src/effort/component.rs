@@ -331,6 +331,7 @@ impl Resolution {
             "claudeCode": self.claude,
             "ceiling": self.ceiling,
             "effective": self.effective,
+            "effort": self.effective,
             "file": self.file,
             "subagentType": self.subagent_type,
             "allowed": self.allowed,
@@ -622,6 +623,38 @@ mod tests {
         .unwrap();
         let r = resolve(Kind::Command, "deep-review", &home, None, Some(&root));
         assert_eq!(r.effective.as_deref(), Some("medium"));
+    }
+
+    #[test]
+    fn the_spawn_effort_is_the_effective_level_for_every_agent() {
+        let (home, root) = plugin("cmp-spawn-effort");
+        write::set(
+            Tier::Global,
+            "maxEffortLevel",
+            &Value::String("medium".into()),
+            &home,
+            None,
+        )
+        .unwrap();
+        for (kind, name) in components(&root) {
+            if kind != Kind::Agent {
+                continue;
+            }
+            let json = resolve(kind, &name, &home, None, Some(&root)).to_json();
+            let level = json["effort"].as_str();
+            assert_eq!(level, json["effective"].as_str(), "{name}");
+            assert!(
+                level.is_none_or(|l| rank(l) <= rank("medium")),
+                "{name} spawns above the ceiling"
+            );
+        }
+    }
+
+    #[test]
+    fn with_no_ceiling_the_spawn_effort_is_the_shipped_effort() {
+        let (home, root) = plugin("cmp-spawn-shipped");
+        let json = resolve(Kind::Agent, "reviewer", &home, None, Some(&root)).to_json();
+        assert_eq!(json["effort"].as_str(), json["shipped"].as_str());
     }
 
     #[test]
