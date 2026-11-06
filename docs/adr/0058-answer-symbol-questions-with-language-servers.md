@@ -1,8 +1,10 @@
 # ADR-0058: Answer Symbol Questions With Language Servers, One Per Call, Behind a Trust Gate
 
-- **Status:** Accepted
+> Superseded by [ADR 0060](0060-use-tree-sitter-only-for-the-code-index.md). Decision 7 (the crate boundary) carries over to it.
+
+- **Status:** Superseded by [ADR 0060](0060-use-tree-sitter-only-for-the-code-index.md) (decisions 1 to 6; decision 7 carries over)
 - **Date created:** 2026-10-21
-- **Date modified:** 2026-11-04
+- **Date modified:** 2026-11-06
 
 ## Context
 
