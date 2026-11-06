@@ -1,8 +1,8 @@
 # ADR-0026: Ship a Local Code Index in the Binary, Accepting About 5 MB of Size
 
-- **Status:** Accepted, amended by [ADR 0056](0056-share-one-code-index-across-worktrees.md) (decision 2, index location)
+- **Status:** Accepted, amended by [ADR 0056](0056-share-one-code-index-across-worktrees.md) (decision 2, index location) and by [ADR 0060](0060-use-tree-sitter-only-for-the-code-index.md) (decision 3 withdrawn)
 - **Date created:** 2026-10-12
-- **Date modified:** 2026-10-30
+- **Date modified:** 2026-11-06
 
 ## Context
 
@@ -40,6 +40,8 @@ The FTS5 change removes `-USQLITE_ENABLE_FTS5` from `LIBSQLITE3_FLAGS`. FTS3, RT
 The index is a cache at `$HOME/.config/playbook/repos/<owner>/<repo>/<worktree-id>/code/index.sqlite3`, built with the worktree scoped state helper from ADR-0012. The brief proposed `<repo>/.playbook/code/`, which matches the repo local layout of ADR-0010 that ADR-0012 superseded. Nothing is written inside the repository, so no ignore rule is needed. Each worktree has its own index. A repository with no `origin` remote gets an actionable error, as `gate` does. The schema version lives in `PRAGMA user_version` and a mismatch deletes and rebuilds the file, because the index is disposable. Index files are not removed when a worktree is deleted. `playbook code index --rebuild` and manual removal are the documented cleanup.
 
 ### 3. Managed language server downloads and trust
+
+> Withdrawn by [ADR 0060](0060-use-tree-sitter-only-for-the-code-index.md).
 
 Language servers are optional. Three rules bound the risk:
 
