@@ -86,7 +86,7 @@ Evidence for the rows marked "See below":
   - Opus high 200/200. Opus medium 199/200 (the one miss was `rd-lower`, a seeded finding, 139/140 recall). Sonnet medium and high 200/200. Opus low 49/50 in a 5 run round.
   - Cost per call: Opus high $0.0155 to $0.0168, Opus medium $0.0125 to $0.0136 (19% less), Sonnet high $0.0066 to $0.0072, Sonnet medium $0.0050 to $0.0054.
   - The 7 seeded findings are a small set of distinct bugs. The bench does not prove recall on harder ones.
-  - Risk is bounded by the variants: an orchestrator sends a security lens, a diff over 60 KB or an auth, secrets or crypto diff to `reviewer-xhigh`, and a small diff to `reviewer-low`. A session started without `playbook cc` or `playbook ccd` has the base reviewer only, at medium.
+  - Risk is bounded by the variants: an orchestrator sends a security lens, a diff over 60 KB or an auth, secrets or crypto diff to the reviewer at `high` effort, and a small diff to `low`, both set with the `effort` parameter of the `Agent` call.
   - Sonnet matched Opus on this set at about 60% less. Moving the reviewer to Sonnet would also change the tier rule above and stays unapplied until a larger set of seeded diffs exists.
 - **`agents/critic`.** Round 2 bench (2026-10-10, 90 calls per cell on 6 plans, 4 with a seeded flaw and 2 clean): Sonnet medium 89/90 (98.9%) at $0.0088, Sonnet low 89/90 at $0.0078, Sonnet high 71/90 (78.9%) at $0.0145. Every miss at `high` was a false blocking finding on a clean plan. The only missed flaw in 180 medium and low calls was one `cr-destructive` run. Medium is 39% cheaper and no worse on seeded flaws. Haiku scored 67 to 73% on the same cases (false blocks on clean plans), so the critic stays on Sonnet.
 - **`agents/fact-checker`.** The `high` in the file was already cut to `medium` by the Haiku effort cap, so the file now says what runs. Measured with `playbook eval bench` on real playbook excerpts over three rounds (2026-10-09 and 2026-10-10, 6 cases): Haiku high 137/138 (99.3%) at $0.00027 a call, medium 134/138 (97.1%) at $0.00021, low 86/90 (95.6%, four misses on one case) at $0.00015, Sonnet high 78/78. Medium is within 3 points of high, so it is the setting.
@@ -157,9 +157,9 @@ Permission to lower comes only from the quality floor table in `crates/cli/src/e
 - a risk class (path patterns and memory facts anchored to touched paths whose name or description names a risk);
 - the stage 1 evidence.
 
-The candidates are exactly `Resolution::allowed`, the variant files at or under every ceiling, so the result is a `subagent_type` that `resolve` already lists, which is the mechanism the `-low` and `-xhigh` variants use today.
+The candidates are the levels at or under every ceiling, so the result is an `effort` that `resolve` would allow. The orchestrator passes it as the `effort` parameter of the `Agent` call on the base agent.
 
-- Raising (large diff, risky path, security lens) aims for `xhigh`.
+- Raising (large diff, risky path, security lens) aims for `high`.
 - Lowering needs a small, clean diff, a row in the floor table, an agent that is not costly to miss, a level at or above the floor, and evidence with enough history and no escalation or repeat signal.
 - Any error or panic gives the default.
 - Every call in `suggest` or `on` mode appends a row to `effort/auto.log`.

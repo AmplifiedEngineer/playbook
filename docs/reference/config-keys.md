@@ -158,9 +158,9 @@ The thresholds are constants in `crates/cli/src/effort/suggest.rs`.
 
 Off by default. Set it with `playbook config set --global effort.auto suggest` (log only) or `on`.
 
-- When the orchestrator dispatches an agent it asks `playbook effort choose <agent> --base <ref>`. The answer is the name of an existing variant (`reviewer-low`, `reviewer-xhigh`), because the `Agent` tool has no per-call effort and a variant file is how effort is set today.
+- When the orchestrator dispatches an agent it asks `playbook effort choose <agent> --base <ref>`. The answer is a level, returned as `effort`, that the orchestrator passes as the `effort` parameter of the `Agent` call on the base agent.
 - The choice looks at the diff (changed lines, files, bytes, languages), a risk class (paths such as auth, secrets, crypto, migrations and CI workflows, plus memory facts anchored to touched paths that name a security, hot, flaky or incident risk) and the usage evidence from `suggest`.
-- Risky or large diffs are raised, to `xhigh` at most. Small clean diffs are lowered, to `low` at most and never below the agent's quality floor, and only when the usage evidence has enough history and shows no escalations. The reviewer, the auditor and any agent marked costly to miss are only raised.
+- Risky or large diffs are raised, to `high` at most. Small clean diffs are lowered, to `low` at most and never below the agent's quality floor, and only when the usage evidence has enough history and shows no escalations. The reviewer, the auditor and any agent marked costly to miss are only raised.
 - It never goes above a ceiling: Claude Code's `maxEffortLevel`, playbook's, the `effort.agents.<name>` key and the model cap all apply first, and the choice is one of the files they allow.
 - Any error (a diff that cannot be read, a bad input, no usage store) gives the default.
 - Every choice is appended to `~/.config/playbook/effort/auto.log` (UTC time, component, default and chosen level, inputs, reason). `playbook effort log` shows it, and a dispatch that differs from the default prints one line saying so. Nothing leaves your machine.

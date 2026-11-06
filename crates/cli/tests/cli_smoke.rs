@@ -554,7 +554,7 @@ fn table() -> Vec<Case> {
         case( "effort resolve", &["effort", "resolve", "agent", "reviewer"], ).out("no such component"),
         case("effort suggest", &["effort", "suggest"]).code(1).err("no plugin root"),
         case("effort apply", &["effort", "apply"]).code(1).err("no plugin root"),
-        case("effort choose", &["effort", "choose", "reviewer"]).out("no dispatch type"),
+        case("effort choose", &["effort", "choose", "reviewer"]).out("playbook:reviewer"),
         case("effort log", &["effort", "log"]).out("No automatic effort choices"),
         case("effort reset", &["effort", "reset"]).out("nothing to reset"),
         case("effort list", &["effort", "list"]).out("no plugin root"),

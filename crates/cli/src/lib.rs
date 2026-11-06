@@ -249,9 +249,10 @@ pub enum EffortCommand {
     ///
     /// Does nothing while `effort.auto` is `off` (the default). With `suggest`
     /// it logs what it would pick and the dispatch keeps the default. With
-    /// `on` it names the `subagent_type` to spawn: an existing variant, picked
-    /// strictly between the agent's quality floor and every ceiling, raised for
-    /// risky or large diffs and lowered only for small clean ones. An agent
+    /// `on` it names the `effort` to pass to the `Agent` call on the base
+    /// agent, picked strictly between the agent's quality floor and every
+    /// ceiling, raised (to `high` at most) for risky or large diffs and lowered
+    /// only for small clean ones. An agent
     /// marked costly to miss is never lowered. Any error gives the default.
     /// Every choice is appended to a local log (`playbook effort log`).
     ///
