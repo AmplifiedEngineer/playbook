@@ -83,7 +83,8 @@ fn is_number(token: &str) -> bool {
 }
 
 /// "and/or", "read/write" and "CI/CD" match the path shape but are words. A
-/// path has a dot or at least two slashes, and a code span is always kept.
+/// path has a dot or at least two slashes. The check runs on the token after
+/// its backticks are trimmed, so `and/or` in a code span is skipped too.
 fn is_word_pair(token: &str) -> bool {
     token.contains('/')
         && !token.contains('.')
