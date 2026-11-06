@@ -13,9 +13,12 @@ pub fn data_dir(home: &Path) -> PathBuf {
     crate::config::root(home).join("data")
 }
 
+/// The file name of the usage database inside the data folder.
+pub const USAGE_DB_FILE: &str = "usage.db";
+
 /// The usage database for the user at `home`.
 pub fn usage_db(home: &Path) -> PathBuf {
-    data_dir(home).join("usage.db")
+    data_dir(home).join(USAGE_DB_FILE)
 }
 
 #[cfg(test)]

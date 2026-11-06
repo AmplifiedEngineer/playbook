@@ -55,6 +55,10 @@ Two hooks watch every session whose resolved mode is `auto`.
 
 While auto is on, the model cannot switch the mode, change the `mode`, `auto.*` or `fix.*` settings, or edit the config files. This covers `auto.agentBudgetUsd` and `auto.sessionCeilingUsd`. Only you can, by typing the command yourself. At a cap it also cannot raise the cap. The one exception is an unreadable cost: then it may run `playbook mode ask` to leave auto.
 
+## Routing approval is a separate setting
+
+Auto mode does not turn off the model approval prompts. Those come from `routing.escalate`, which is `ask` by default. To stop them, run `playbook config set routing.escalate auto` (add `--global` for every repo). See [Models and effort](14-models-and-effort.md#approval-prompts).
+
 ## Flags do not reach hooks
 
 The hooks read only `PLAYBOOK_MODE` and the config, never your command flags. If you run a command with `--auto` while the resolved mode is `ask`, you get auto behavior in the command text only, with no question hook and no spend cap. `playbook mode status --flag auto` prints a warning when the flag and the hooks disagree. To get the hooks, run `playbook mode auto` or set `PLAYBOOK_MODE=auto`. The reverse also holds: `--ask` while the mode is `auto` still has the question tool denied.

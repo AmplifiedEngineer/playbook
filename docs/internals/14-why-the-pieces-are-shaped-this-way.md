@@ -27,7 +27,7 @@ A skill is knowledge loaded into whoever uses it. If a skill set `effort: low`, 
 
 Commands could do everything inline. Agents exist for three reasons:
 
-1. **Structural limits.** The read-only reviewers (`reviewer`, `critic`, `fact-checker`, `test-reviewer`, `analyst`, `cheap-checker`, `review-triage`) have no `Edit`, `Write` or `Bash` tool. You can verify in the file that a reviewer cannot change the code, and `playbook agents check` enforces it in CI. A prompt saying "do not edit" cannot do that.
+1. **Structural limits.** The read-only reviewers (`reviewer`, `critic`, `fact-checker`, `test-reviewer`, `analyst`, `cheap-checker`, `review-triage`) have no `Edit`, `Write` or `Bash` tool. The `writer` is read-only too, with `Read` and `Skill` only. You can verify in the file that a reviewer cannot change the code, and `playbook agents check` enforces it in CI. A prompt saying "do not edit" cannot do that.
 2. **Cost control.** Mechanical work (git steps, gathering history, applying an approved diff) goes to Haiku at low effort. The expensive model is kept for costly mistakes.
 3. **Context control.** An agent's long output stays out of the main conversation. Only its result comes back.
 
@@ -38,7 +38,7 @@ The full list of agents, their tools and how a command binds to one is in [Autho
 The rule is: spend on judgment, save on routine.
 
 - **Sonnet** is the session default and covers most coding. `implementer` and `critic` use it because they write code or check plans, and Sonnet at medium effort did as well as high in `playbook eval bench`.
-- **Haiku** runs `git`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer` and `analyst`. The first five apply a decision someone else made, or classify with a safe fallback, and a wrong answer is cheap to detect and rerun. The last three ran on Haiku after the same bench showed no meaningful loss on real playbook code.
+- **Haiku** runs `git`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst` and `writer`. The `git`, `collector`, `cheap-checker`, `review-triage` and `writer` agents apply a decision someone else made, or classify with a safe fallback, and a wrong answer is cheap to detect and rerun. The `fact-checker`, `test-reviewer` and `analyst` ran on Haiku after the same bench showed no meaningful loss on real playbook code.
 - **Opus** runs design (`/playbook:plan`, `/playbook:adr`), every `reviewer` and the `auditor`. A missed review finding or a weak design costs far more than the extra tokens.
 
 Plugin files name only the alias. `playbook cc` resolves each to the 5.5 model and passes the previous generation as a fallback. The table, the overrides (`models.<alias>`) and the routing details, including the hook that nudges design prompts toward Opus, are in [Model routing and memory](../internals/02-model-routing-and-memory.md).

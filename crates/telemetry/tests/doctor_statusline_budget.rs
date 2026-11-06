@@ -52,7 +52,7 @@ fn a_fresh_cache_and_a_lower_own_budget_explain_which_source_wins() {
         "What the statusline budget line will show",
         "  monthly: from the Claude Code cache, 1h 0m old (fresh)",
         "  limit in force: $1000.00, your usage.budget.monthlyUsd, which is lower than the $1500.00 Claude reports",
-        "  order: statusline reading, then the Claude Code cache from this month, then nothing. Your monthly budget replaces the limit only when it is lower, and never supplies an amount used.",
+        "  order: statusline reading, then the Claude Code cache from this month, then, with a monthly budget set, this machine's cost for the month from the usage database, then nothing. Your monthly budget replaces the limit only when it is lower.",
     ] {
         assert!(text.contains(line), "{line}\n{text}");
     }
@@ -155,4 +155,28 @@ fn doctor_says_pbtop_keeps_the_claude_limit_when_your_budget_is_lower_and_where_
     let higher =
         Home::new("pbtop-higher", FIXTURE).report(&[(LimitPeriod::Monthly, 3000.0)], HOUR, false);
     assert!(!higher.contains("is lower than that limit"), "{higher}");
+}
+
+#[test]
+fn a_budget_alone_with_local_spend_names_the_usage_database_as_the_source() {
+    let home = Home::new("local", "{}");
+    let conn = playbook_telemetry::db::open_db(&home.0.join("usage.db")).unwrap();
+    let event = playbook_telemetry::UsageEvent {
+        event_id: "e1".to_string(),
+        timestamp: FETCHED,
+        account: "a".to_string(),
+        agent: "claude-code".to_string(),
+        model: "claude-opus-4-1".to_string(),
+        input_tokens: 1_000_000,
+        ..playbook_telemetry::UsageEvent::default()
+    };
+    playbook_telemetry::db::upsert_usage_event(&conn, &event).unwrap();
+    let text = home.report(&OWN, HOUR, false);
+    for line in [
+        "  monthly: from the usage database of this machine only (local)",
+        "  limit in force: $1000.00, your usage.budget.monthlyUsd",
+    ] {
+        assert!(text.contains(line), "{line}\n{text}");
+    }
+    assert!(!text.contains("Claude reports"), "{text}");
 }
