@@ -873,6 +873,20 @@ impl App {
                 self.editor = Some(super::editor::Editor::new(&self.layout, self.tab));
             }
             Cmd::Help => self.help = Some(0),
+            Cmd::Zone => {
+                let to = match crate::tz::current() {
+                    crate::tz::Zone::Utc => crate::tz::Zone::Local,
+                    _ => crate::tz::Zone::Utc,
+                };
+                crate::tz::set(to);
+                // The cursor is a day number in the old zone.
+                self.cursor = None;
+                self.note = Some(match to {
+                    crate::tz::Zone::Utc => "Showing UTC".to_string(),
+                    _ => "Showing local time".to_string(),
+                });
+                return Effect::Requery;
+            }
             Cmd::Refresh => return Effect::Requery,
         }
         Effect::None
@@ -1056,6 +1070,29 @@ mod tests {
         let mut app = App::new(Range::All);
         app.data = Some(data_with([5.0, 1.0, 3.0]));
         app
+    }
+
+    #[test]
+    fn z_switches_between_local_time_and_utc_and_asks_for_a_new_read() {
+        use crate::tz::{self, Zone};
+        tz::set(Zone::Utc);
+        let mut app = loaded();
+        app.cursor = Some(NOW.div_euclid(86_400));
+
+        let first = app.key(press(KeyCode::Char('z')));
+        let after_first = tz::current();
+        let note_first = app.note.clone();
+        let second = app.key(press(KeyCode::Char('z')));
+
+        assert_eq!((first, second), (Effect::Requery, Effect::Requery));
+        assert_eq!(after_first, Zone::Local);
+        assert_eq!(
+            app.cursor, None,
+            "a day number from the old zone is dropped"
+        );
+        assert_eq!(note_first.as_deref(), Some("Showing local time"));
+        assert_eq!(tz::current(), Zone::Utc);
+        assert_eq!(app.note.as_deref(), Some("Showing UTC"));
     }
 
     #[test]
@@ -1551,7 +1588,7 @@ mod tests {
     #[test]
     fn an_unbound_key_does_nothing() {
         let mut app = App::new(Range::All);
-        assert_eq!(app.key(press(KeyCode::Char('z'))), Effect::None);
+        assert_eq!(app.key(press(KeyCode::Char('x'))), Effect::None);
         assert!(!app.quit);
     }
 
@@ -1729,6 +1766,7 @@ mod tests {
             EditLayout,
             Help,
             Refresh,
+            Zone,
         ] {
             assert!(keys::BINDINGS.iter().any(|b| b.cmd == cmd), "{cmd:?}");
         }

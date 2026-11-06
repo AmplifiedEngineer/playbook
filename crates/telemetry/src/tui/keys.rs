@@ -43,6 +43,7 @@ pub enum Cmd {
     EditLayout,
     Help,
     Refresh,
+    Zone,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -353,6 +354,16 @@ pub const BINDINGS: &[Binding] = &[
         panels: ALL_PANELS,
         text: "Next color theme (off with NO_COLOR)",
         hint: hint("t", "theme", 12, 2),
+    },
+    Binding {
+        cmd: Cmd::Zone,
+        keys: &[c('z')],
+        ctrl: false,
+        shown: "z",
+        group: Group::Periods,
+        panels: ALL_PANELS,
+        text: "Switch between local time and UTC",
+        hint: None,
     },
     Binding {
         cmd: Cmd::Sessions,
