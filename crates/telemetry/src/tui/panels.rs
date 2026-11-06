@@ -882,9 +882,27 @@ pub const HEALTH_ROWS: usize = 9;
 /// The title note of a telemetry view: its source and, for a period, the
 /// span it is compared with.
 fn telemetry_note(pal: &Palette, data: &Data) -> Line<'static> {
+    note_with_source(pal, data, "source telemetry")
+}
+
+/// The Tools title note. Its source depends on the rows: live ones, transcript
+/// counts, or both. Health keeps `telemetry_note`, since it is live only.
+fn tools_note(pal: &Palette, data: &Data) -> Line<'static> {
+    let tools = &data.health.tools;
+    let transcript = tools.iter().any(|t| t.transcript_calls > 0);
+    let live = tools.iter().any(|t| t.calls > t.transcript_calls);
+    let source = match (live, transcript) {
+        (true, true) => "source telemetry + transcripts",
+        (false, true) => "source transcripts",
+        _ => "source telemetry",
+    };
+    note_with_source(pal, data, source)
+}
+
+fn note_with_source(pal: &Palette, data: &Data, source: &str) -> Line<'static> {
     let text = match &data.comparison {
-        Some(c) => format!("source telemetry  vs {}", c.period.previous_label()),
-        None => "source telemetry".to_string(),
+        Some(c) => format!("{source}  vs {}", c.period.previous_label()),
+        None => source.to_string(),
     };
     note_line(pal, &text, pal.box_mem).right_aligned()
 }
@@ -901,10 +919,12 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, s
         "Tools",
         pal.box_mem,
     );
-    if !data.telemetry_rows {
-        return empty(frame, area, pal, block, &telemetry_off(app));
-    }
+    // Transcript counts fill days the collector missed, so tool rows show
+    // even when the range has no live telemetry.
     if data.health.tools.is_empty() {
+        if !data.telemetry_rows {
+            return empty(frame, area, pal, block, &telemetry_off(app));
+        }
         return empty(
             frame,
             area,
@@ -913,7 +933,7 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, s
             "No tool calls in this range. v switches the view.",
         );
     }
-    block = block.title(telemetry_note(pal, data));
+    block = block.title(tools_note(pal, data));
     let compared = data.comparison.is_some();
     // The comparison columns only exist for a period, and only when wide.
     let min = if compared { 46 } else { u16::MAX };
@@ -952,14 +972,26 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, s
                     } else {
                         Style::default()
                     };
+                    // `~` marks a count that includes transcript calls, which
+                    // carry no outcome and no time. Those figures show `-`.
+                    let calls = if t.transcript_calls > 0 {
+                        format!("{}~", t.calls)
+                    } else {
+                        t.calls.to_string()
+                    };
+                    let or_dash = |known: bool, text: String| if known { text } else { "-".into() };
                     let mut cells = vec![
                         Cell::from(fit(&t.name, w[0])),
-                        num(t.calls.to_string()),
-                        num(percent(t.error_rate())).style(rate_style),
-                        num(duration_ms(t.avg_ms())),
-                        num(duration_ms(t.max_ms as f64)),
+                        num(calls),
+                        num(or_dash(t.has_outcome(), percent(t.error_rate()))).style(rate_style),
+                        num(or_dash(t.has_duration(), duration_ms(t.avg_ms()))),
+                        num(or_dash(t.has_duration(), duration_ms(t.max_ms as f64))),
                     ];
                     match before.get(t.name.as_str()) {
+                        Some(p) if !(t.has_duration() && p.has_duration()) => {
+                            cells.push(num("-").style(Style::default()));
+                            cells.push(change_cell(pal, "-".to_string(), 0.0));
+                        }
                         Some(p) => {
                             let delta = t.avg_ms() - p.avg_ms();
                             let pct = Change::of(t.avg_ms(), p.avg_ms()).percent;
