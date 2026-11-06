@@ -3,4 +3,6 @@
 
 //! Offline adapters that supply candidates and ground truth.
 
+pub mod audit;
 pub mod rg;
+pub mod scip;
