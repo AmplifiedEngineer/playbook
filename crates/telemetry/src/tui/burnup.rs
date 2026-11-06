@@ -467,9 +467,12 @@ fn dot_rows(b: &Burnup, pal: &Palette, plot: &Plot) -> Vec<Vec<Span<'static>>> {
                 .map(|col| {
                     match (
                         glyphs[row][col],
-                        edge.cell(col, row)
-                            .map(|(ch, dot)| (thin(ch, dot), dot))
-                            .or_else(|| dots.cell(col, row)),
+                        match (edge.cell(col, row), dots.cell(col, row)) {
+                            // A limit or projection keeps its cell over the line.
+                            (Some(_), Some(over @ (_, Dot::Limit | Dot::Projection))) => Some(over),
+                            (Some((ch, dot)), _) => Some((thin(ch, dot), dot)),
+                            (None, fill) => fill,
+                        },
                     ) {
                         (Role::Empty, Some((ch, dot))) => {
                             Span::styled(ch.to_string(), style(pal, dot.ink(pal)))
