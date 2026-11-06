@@ -1,0 +1,97 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+#
+# Nightly benchmark of the code index. One leg per language clones the pinned
+# repos of that language (cached between runs), runs the real playbook binary
+# on them, and judges the report against the committed baseline. The report is
+# uploaded whether the gate passes or fails. Runs on a schedule and on demand
+# only, never on a pull request. No oracle tool is installed: the pilot run
+# reads the committed answers files and never downloads an oracle.
+
+name: code-bench
+
+on:
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: code-bench-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CLONE_CACHE: ${{ github.workspace }}/.code-bench-cache
+  REPORT: ${{ github.workspace }}/code-bench-report.json
+
+jobs:
+  bench:
+    name: bench (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [rust, go, javascript]
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            crates.io:443
+            github.com:443
+            index.crates.io:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            static.crates.io:443
+            static.rust-lang.org:443
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Cache cargo registry and build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: code-bench-cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            code-bench-cargo-v1-${{ runner.os }}-
+
+      # The clones are pinned by commit, so the key changes only with the
+      # manifest.
+      - name: Cache the pinned clones
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CLONE_CACHE }}
+          key: code-bench-clones-v1-${{ matrix.language }}-${{ hashFiles('crates/code-bench/corpus.toml') }}
+
+      - name: Build the binaries
+        run: cargo build --release -p playbook -p code-bench
+
+      - name: Run the pilot repos
+        env:
+          LANGUAGE: ${{ matrix.language }}
+        run: target/release/code-bench pilot --language "$LANGUAGE" "$CLONE_CACHE" "$REPORT" target/release/playbook
+
+      - name: Gate
+        env:
+          LANGUAGE: ${{ matrix.language }}
+        run: target/release/code-bench gate --language "$LANGUAGE" "$REPORT" "$(date -u +%F)"
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: code-bench-report-${{ matrix.language }}
+          path: ${{ env.REPORT }}
+          if-no-files-found: warn
+          retention-days: 30
