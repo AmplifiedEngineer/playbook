@@ -1,6 +1,6 @@
 ╭─┤Agent Budget Dashboard├──┤UTC├──────────────────────────────────────────────╮
 │╭┤ Help: keys by group ├─────────────────────────────────────────────────────╮│
-││h, ?       Show this help                           all panels              ││
+││?          Show this help                           all panels              ││
 ││                                                                            ││
 ││Sorting                                                                     ││
 ╰│s          Sort by the next column                  tables                  │╯
@@ -20,5 +20,5 @@
 ││                                                                            ││
 ││Marks                                                                       ││
 ││~          Tools: count only, from transcripts                              ││
-╰╰┤ ↑/↓ scroll, any other key closes ├────────────────────────────────────────╯╯
- w week m month r range v view / filter h help q quit      updated 01:46:40 UTC
+╰╰┤ ↑/↓ j/k scroll, any other key closes ├────────────────────────────────────╯╯
+ w week m month r range v view / filter ? help q quit      updated 01:46:40 UTC
