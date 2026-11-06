@@ -16,7 +16,12 @@
 | `playbook usage stop` | Stops the running collector through its authenticated shutdown route. It waits up to 3 seconds before it kills one that does not answer (only after checking the pid is the playbook collector). Prints `stopped` or `not running`. |
 | `playbook usage doctor [--raw]` | Lists where `pbtop` can read your limits on this machine: plan fields and cached usage numbers in the Claude Code config file, the statusline reading and the manual budgets. It prints field names, ages, the plan label, window percentages and manual budget amounts, never an email, name, id, organization or token. It also says what the statusline budget line will show and which source decided it. `--raw` adds the plan field values and the raw numbers the readers saw. Run it on another machine and share the output when the limits look wrong. |
 
-Every command that shows data reads new history first. You never ingest by hand.
+| `playbook usage account list` | Lists each account key with its events, cost and time span. A display name shows first, with the key in brackets. |
+| `playbook usage account name <KEY> <NAME>` | Gives an account key a display name. An empty name clears it. It warns when no event carries the key. Names show only in `account list`. |
+| `playbook usage account assign --from <T> --to <T> --as <KEY_OR_NAME> [--was <KEY_OR_NAME>] [--confirm]` | Moves the events in a time range to another account. Without `--confirm` it only prints how many events and how much cost would move. The end of the range is exclusive. Times use your zone, or UTC with `--utc`. Running the same move again moves nothing. It also moves the skill and agent records. |
+| `playbook usage account undo [ID]` | Reverses the newest applied move, or the one with this number. It leaves records that were relabeled since. |
+
+Every command that shows data, except `account`, reads new history first. You never ingest by hand.
 
 ## The terminal view
 
@@ -26,7 +31,7 @@ It needs at least 80 columns by 24 rows. Below that it says so and draws nothing
 
 **Tabs.** Three by default: Charts (cost per day beside cost per model per day, then tokens and the burn-up), Numbers (models, breakdown, the Budget panel and the Projection panel, see [Spending limits and budget headroom](#spending-limits-and-budget-headroom)) and Sessions (live sessions and sessions per day). Every tab has a header (range, cost, tokens, messages) and a tab bar under it. The tabs and panels come from the `usage.ui.layout` config key (see the [config keys page](../reference/config-keys.md)): up to 12 tabs, `F1` to `F12` select them, a `|` in a tab starts a new row of one or two panels, and a word like `spend.model` or `breakdown.agents` pins a panel to one view while `spend` and `breakdown` switch with `v`. A pinned panel ignores `v` and says so in the footer. `]` and `[` walk every panel on screen, even two views of the same panel, and the number key picks the first. A layout with one tab keeps the old single screen, with the Budget panel from 36 rows.
 
-**Header.** For `today`, `week` and `month` it is a comparison. It names the two spans and says they cover the same elapsed span (see [Period comparison](#period-comparison)), then shows cost, tokens and messages for both with the change in amount and percent (`new` when the previous value was zero). Increases are yellow and decreases green, and the sign carries it without color. The other ranges show their own totals and say `(no previous period to compare)`. Everything is UTC and the header says so, with the first day of the week when the range is a week.
+**Header.** For `today`, `week` and `month` it is a comparison. It names the two spans and says they cover the same elapsed span (see [Period comparison](#period-comparison)), then shows cost, tokens and messages for both with the change in amount and percent (`new` when the previous value was zero). Increases are yellow and decreases green, and the sign carries it without color. The other ranges show their own totals and say `(no previous period to compare)`. The header names the time zone in use, local time by default or UTC, and `z` switches it. It also names the first day of the week when the range is a week.
 
 **Refresh.** The view re-reads the store every 5 seconds (`usage.refreshSeconds`, 1 to 3600). The footer shows when it last did (`updated 01:46:40 UTC, every 5s`), or why the read failed. A short footer keeps the time and drops the interval. A refresh leaves the chart cursor, focus, sorts, spend view, a filter being typed and the selected rows alone. Each table finds its selected row again by what it is (a model, a project, a session, a day), so a row that moved stays selected and the scroll follows it.
 
@@ -34,19 +39,19 @@ The panels:
 
 | Key | Panel | Shows |
 |---|---|---|
-| `1` | Spend per day, USD | A bar chart of the cost for each UTC day in the range, with axes (below). `v` steps it through three views: the total, the same bars stacked by model, and a table with a row for each day (see below). |
+| `1` | Spend per day, USD | A bar chart of the cost for each day in the chosen time zone in the range, with axes (below). `v` steps it through three views: the total, the same bars stacked by model, and a table with a row for each day (see below). |
 | `2` | Tokens per day | The same for tokens, in the net gradient. |
 | `3` | Models | Messages, tokens and cost per model, with a swatch in the model's color. For `today`, `week` and `month` it also shows the cost in the previous period and the change in amount and percent, for every model used in either period (a model that only the previous period used reads `$0.00` now, and one with no spend before reads `new`). Other ranges show a share meter instead. `s` also sorts by the previous cost and the change. |
 | `4` | Projects | The same, per repo. `v` steps it through Agents, Skills, Tools and Health: requests, tokens and cost per agent or per skill from telemetry, with a note of how much of the spend telemetry covers. With no telemetry rows in the range it says `Telemetry off` and how to turn it on. Agent, skill, tool and health rows cannot filter the view. Tools and Health are described under [Tool latency and health](#tool-latency-and-health). |
 | `5` | Live sessions | Sessions with a message in the last 15 minutes, with state, cost and age. |
-| `6` | Sessions per day | Every session in the range, grouped by UTC day with the newest day first. Each row has the short session id, project, main model, messages, tokens and cost for that day, and a session that runs past midnight has a row for each day. The day is named on the first row of its group, and `s` orders the sessions inside each day. `Enter` filters the view to the session. |
+| `6` | Sessions per day | Every session in the range, grouped by day in the chosen time zone with the newest day first. Each row has the short session id, project, main model, messages, tokens and cost for that day, and a session that runs past midnight has a row for each day. The day is named on the first row of its group, and `s` orders the sessions inside each day. `Enter` filters the view to the session. |
 
 ### The charts
 
-Both charts use eighth blocks, one bar per UTC day. Idle days are zero and days still to come in a week or month in progress are empty. Today charts the last seven days, since one bar says nothing, and the title says so (`Spend per day, USD, 7 days`).
+Both charts use eighth blocks, one bar per day in the chosen time zone. Idle days are zero and days still to come in a week or month in progress are empty. Today charts the last seven days, since one bar says nothing, and the title says so (`Spend per day, USD, 7 days`).
 
 - **y axis.** Labels at the bottom, middle and top, with a blank column between them and the box, in dollars or tokens with units (`$0`, `$2.5`, `$250`, `$2.5K`, `500K`, `2.5M`). The top is a round value above the peak (1, 1.2, 1.6, 2, 2.5, 3, 4, 5, 6 or 8 times a power of ten), so the labels are round and the middle is half the top. Faint dotted guides mark the top and the middle.
-- **x axis.** With one bar a day (a week, a month that fits, today's seven days) the weekday is on one row and the day of the month, 1 to 31, directly below it, when each cell fits the label and a gap. The weekday row needs a letter and a gap in every cell, so a month in a narrow panel has only the numbers. When the numbers do not fit, every second, third or seventh day is labeled, always with the first and the last bar (a number that would touch the last one is left out). No full dates sit on the axis: the header carries the period's UTC dates (`this week Oct 6 to Oct 12 until 12:00`, `last 30 days Sep 13 to Oct 12, 2026`), and the readout line names the day under the cursor in full. When a bar holds several days (a wide range), the axis keeps the short first, middle and last date. Today's labels are bold and underlined, the peak day's are yellow, and the cursor's are highlighted.
+- **x axis.** With one bar a day (a week, a month that fits, today's seven days) the weekday is on one row and the day of the month, 1 to 31, directly below it, when each cell fits the label and a gap. The weekday row needs a letter and a gap in every cell, so a month in a narrow panel has only the numbers. When the numbers do not fit, every second, third or seventh day is labeled, always with the first and the last bar (a number that would touch the last one is left out). No full dates sit on the axis: the header carries the period's dates in the chosen time zone (`this week Oct 6 to Oct 12 until 12:00`, `last 30 days Sep 13 to Oct 12, 2026`), and the readout line names the day under the cursor in full. When a bar holds several days (a wide range), the axis keeps the short first, middle and last date. Today's labels are bold and underlined, the peak day's are yellow, and the cursor's are highlighted.
 - **Totals line.** The total, the peak (with its date) and the average per day that has happened, for the range.
 - **Cursor.** `Left` and `Right` (or `h` and `l`) move it one bar, `Home` and `End` jump to the first and last bar while a chart has the focus. A readout line gives the day, cost, messages, tokens and top model with its share (the token chart leads with tokens). It starts on today, both charts share it, and a new range resets it.
 - **Legend.** Bar color follows height along the theme gradient (dark to light blue for cost), and the legend in the bottom border says so. The mono theme has neither.
@@ -122,7 +127,7 @@ Weeks start on Monday. Set `usage.weekStart` to `sunday` or `saturday` to change
 Each period (`today`, `week`, `month`) is compared with the one before it (yesterday, last week, last month) over the same elapsed span, so a Thursday afternoon is never set against a whole week. The code is `crates/telemetry/src/period.rs`.
 
 - The current span runs from the start of the period through the second of `now`. The previous span starts at the start of the previous period and lasts as long, but never runs past that period (on March 31 the month so far is compared with all of a 28 day February). The header and `--summary` state the elapsed span.
-- Everything is UTC seconds. A week starts at 00:00 UTC on the day `usage.weekStart` names, and an event at 23:59:59 UTC belongs to the earlier day whatever your local clock says.
+- Times are seconds. A week starts at midnight in the chosen time zone on the day `usage.weekStart` names. An event belongs to the day it falls on in that zone. In local time a day can be 23 or 25 hours long.
 - Cost, tokens and messages each get the amount of change and the percent. The percent is `n/a` (JSON `null`) when the previous value was zero.
 - `--json` adds `comparison`: `period`, `span_seconds`, `current` and `previous` (`start`, `end`, `start_date`, `end_date`, totals), `change` for the three numbers, and `models` with each model's current and previous group.
 
@@ -134,6 +139,7 @@ Each period (`today`, `week`, `month`) is compared with the one before it (yeste
 | `dark` | The terminal's own ground with single colors. |
 | `light` | The same with darker colors for a white ground. |
 | `mono` | No color. The selected row is shown in reverse video. |
+| `spectrum` | The default look with usage colored along the hue wheel, green to yellow to orange to red, so a rising share reads as rising danger. It is opt in: set `usage.theme` to `spectrum` or press `t`. |
 
 The theme comes from the `usage.theme` config key (`default`, `spectrum`, `dark`, `light`, `mono`; see [config keys](../reference/config-keys.md)) and `t` changes it for the session. `NO_COLOR` set to anything but empty forces `mono` and locks it.
 
@@ -210,7 +216,7 @@ Tests run against hand-written transcripts in `crates/telemetry/tests/fixtures/u
 
 ## Spending limits and budget headroom
 
-The Budget panel, `--summary` and `--json` (`limits`) show how much of a limit you have used and how fast you are using it. The code is `crates/telemetry/src/limits.rs` (the math) and `crates/telemetry/src/limits_source.rs` (where limits come from). All times are UTC.
+The Budget panel, `--summary` and `--json` (`limits`) show how much of a limit you have used and how fast you are using it. The code is `crates/telemetry/src/limits.rs` (the math) and `crates/telemetry/src/limits_source.rs` (where limits come from). Limits that Claude reports use UTC months. A manual budget and the local spend use the chosen time zone.
 
 ### Where a limit comes from
 
@@ -232,7 +238,7 @@ Notes:
 **Which monthly limit wins**, in order:
 
 1. A detected monthly limit: a monthly spend limit from the statusline (behind a gateway), or a cached spend limit fetched after that reading, whatever its age.
-2. With no statusline reading, the cached spend limit however old.
+2. With no statusline reading, the cached spend limit at any age.
 3. `usage.budget.monthlyUsd`, only when nothing is detected. It does not draw a bar beside a detected limit. When both are set and differ, the Budget panel adds a line with both amounts and says the detected one applies.
 
 A cached limit over six hours old, whether it won under item 1 or item 2, is tagged `limit cached <age> ago, used is this machine only`. The cache's used amount is dropped and the bar shows this machine's estimate. A line under the bar then shows the amount Claude Code last reported, with its age and the word stale. A manual budget is tagged `manual, local` for the same reason and gets the same line.
@@ -247,7 +253,7 @@ Cache rules:
 
 **Plan name.** It comes from the rate limit tier names in the config file. The two tiers seen on Max accounts are recognized as Max. An account whose organizationType is claude_enterprise, or whose seatTier names enterprise, is Enterprise: the panels hide the 5 hour and weekly windows and say the whole limit is the monthly extra usage budget. Everything else shows as "Unknown plan". When a plan has no 5 hour and weekly windows, the Budget (when it has room) and Projection panels say "5 hour and weekly windows: not available for this plan" and add that Pro and Max get them from the playbook statusline. An unknown plan, such as Pro, gets the same text. On a Max plan with no reading yet they say a reading appears after a session with the playbook statusline. Run `playbook usage doctor` to see which sources exist on a machine.
 
-**Manual budget.** It covers the UTC calendar month or week (the week starts on `usage.weekStart`). The spend is the estimated cost from your local history, not your bill. Set it with `playbook config set --global usage.budget.monthlyUsd 200`. `0` means no budget.
+**Manual budget.** It covers the calendar month or week in the chosen time zone (the week starts on `usage.weekStart`). The spend is the estimated cost from your local history, not your bill. Set it with `playbook config set --global usage.budget.monthlyUsd 200`. `0` means no budget.
 
 ### What you see in each case
 
@@ -292,7 +298,7 @@ The state is one of:
 
 Each state also starts with a mark, so it reads without color: `▲` for `limit reached` and `will exceed` (bold), `◆` for `on track`, `●` for `under` and `○` for `too early to project`. Where the icon is left out (non-UTF-8 locale, `NO_COLOR` or `TERM` `dumb`) the marks are `!`, `~`, `+` and `?`. A refusal in the layout editor starts with the alert mark in the same way.
 
-A month has 28 to 31 days (a leap February has 29) and a period ends at the next UTC midnight, so there is no daylight saving. The same math serves the 5 hour and weekly windows, where the limit is 100 percent and rates are percent per hour and per day.
+A month has 28 to 31 days (a leap February has 29) and a reported limit ends at the next UTC midnight, so it has no daylight saving. A manual budget follows the chosen zone, so in local time a day can be 23 or 25 hours long. The same math serves the 5 hour and weekly windows, where the limit is 100 percent and rates are percent per hour and per day.
 
 For the period on screen (today, this week or this month, this week for other ranges) the panel also shows the average cost per hour and per day against the previous period over the same elapsed span, the same rule as the period comparison.
 
@@ -356,7 +362,7 @@ A seat billed by usage has no 5 hour or 7 day window. It has a monthly dollar li
 - **Which source wins.** The amount used and the limit come from the first source that has them: the statusline reading when it carries dollars and was read within six hours (a Claude apps gateway sends it), then the cache. The cache must have been fetched this UTC month and not in the future, because a figure from last month says nothing about this one. With neither, a monthly budget falls back to this machine's usage database (see "A budget alone"); without a budget the segment is left out, and so is a figure of zero used.
 - **A stale cache.** Claude Code writes the cache when it fetches usage, and the `/usage` view does that, so it can be days old. After six hours (`STALE_SECONDS`) the figure is still shown, because spend only grows within a month, but with its age and without a projection. It is red only when the amount already passed the limit.
 - **Your own budget.** `usage.budget.monthlyUsd` replaces the limit when it is lower than the one Claude reports, and the text then says `mo budget` instead of `mo`. A higher budget changes nothing.
-- **A budget alone.** With no gateway reading and no cache figure, a monthly budget is measured against this machine's cost for the local calendar month, read from the usage database, and the text says `mo budget (local)` because other machines are not counted. All accounts on the machine are summed. The total is kept for 10 seconds (`LOCAL_TOTAL_CACHE_SECONDS`) in `monthly-local-total` under the statusline cache folder, the database is opened read only and never created, and if it is missing or busy the segment is left out.
+- **A budget alone.** With no gateway reading and no cache figure, a monthly budget is measured against this machine's cost for the UTC calendar month, read from the usage database, and the text says `mo budget (local)` because other machines are not counted. All accounts on the machine are summed. The total is kept for 10 seconds (`LOCAL_TOTAL_CACHE_SECONDS`) in `monthly-local-total` under the statusline cache folder, the database is opened read only and never created, and if it is missing or busy the segment is left out.
 - **Not the whole account.** Apart from the local figure, the amount comes from Claude Code, not from this machine's transcripts. Whether it counts the whole organization or only your seat is not documented, so the line never calls it the organization total.
 - **No 5 hour note.** When the data has no 5 hour window the line says nothing about it.
 - **Narrow terminals.** The words after the figure go first, then the whole segment. The 7 day alarm is kept.
@@ -374,13 +380,13 @@ A limit that is a percentage of a window (the 5 hour and weekly windows of a pla
 
 ### The burn-up panel
 
-The Burn-up panel is on the Charts tab. It plots the spend of the period so far against a limit that Claude Code reported, with a dotted projection at the current pace, a cutoff line for the limit and lines for 50, 80 and 100 percent, each marked where it is or will be crossed. It uses the most used limit that has a burn-up. Where the terminal shows Braille the plot is drawn as dots, four times as fine vertically: the used area is green below 60 percent of the limit, yellow to 80 and vermilion above, half-filled below 80 percent and fully filled from there so the danger zone reads without color. Crossing markers stay whole cell glyphs. `PBTOP_DOTS=0` keeps the solid chart for a font that draws Braille badly, and the mono theme, `NO_COLOR`, `TERM=dumb` and a non UTF-8 locale use it too.
+The Burn-up panel is on the Charts tab. It plots the spend of the period so far against a limit that Claude Code reported, with a dotted projection at the current pace, a cutoff line for the limit and lines for 50, 80 and 100 percent, each marked where it is or will be crossed. It uses the most used limit that has a burn-up. Where the terminal shows Braille the plot is drawn as dots, four times as fine vertically: the used color blends smoothly with the share of the limit. It holds the first color below 50 percent, moves to the next at 70 percent and the next at 90 percent, and holds the last from 100 percent. The default theme runs bluish green, yellow, orange, vermilion. The spectrum theme runs green, yellow, orange, red. The used line is one unbroken stroke, with no gaps between columns of different height. The dots are half filled below 80 percent and fully filled from there, so the danger zone reads without color. Crossing markers stay whole cell glyphs. `PBTOP_DOTS=0` keeps the solid chart for a font that draws Braille badly, and the mono theme, `NO_COLOR`, `TERM=dumb` and a non UTF-8 locale use it too.
 
 - A monthly dollar limit is drawn from the daily cost of this machine.
 - A window in percent is drawn from the readings saved in `rate_limits.jsonl`, or as a straight line from the start of the window to the figure Claude Code reported when none were saved.
 - With no limit known the panel says so and charts the spend alone.
 
-The used area is drawn as Braille dots, four times as fine as a whole cell in height. It is green below 60 percent of the limit, yellow from 60 and red from 80, and from 80 percent every dot of a cell is set, so the danger zone reads denser without color. Set `PBTOP_DOTS=0` if your font draws Braille badly; the chart then keeps the solid glyphs, as it does in the mono theme and when symbols are off.
+The used area is drawn as Braille dots, four times as fine as a whole cell in height. Its color follows the share of the limit as described above, and from 80 percent every dot of a cell is set, so the danger zone reads denser without color. Set `PBTOP_DOTS=0` if your font draws Braille badly; the chart then keeps the solid glyphs, as it does in the mono theme and when symbols are off.
 
 Nothing here is set by hand: the limit and the used figure come from what Claude Code reports. The math is in `crates/telemetry/src/burnup.rs` and the drawing in `crates/telemetry/src/tui/burnup.rs`.
 
@@ -450,7 +456,7 @@ Telemetry is the default source for the per agent, skill and latency views. Tran
 | `playbook cc` (and `playbook ccd`) | Sets the variables for that session only, when you have set no telemetry yourself and a collector runs. Like most playbook commands, it starts the collector first when your user settings point at it. |
 | Plain `claude`, the IDE, the desktop app | If you answered yes to the setup question (the default) or ran `playbook setup --only telemetry`, the variables are in the `env` block of `~/.claude/settings.json`, which these clients read. The `session-init` hook, the prompt hooks and most playbook commands start the collector when it is down. With the hooks part off, only a playbook command starts it. Otherwise they are read from transcripts. |
 
-Playbook never changes your Claude Code settings on its own. Only `setup` writes them, after you say yes (`--yes` counts, and the question defaults to yes), and only when no telemetry variable exists in your environment or in any settings file (user, project, local, managed).
+Playbook changes your Claude Code settings only when you ask. `playbook config set --global usage.telemetry auto` writes the telemetry keys and `off` removes them. `setup` writes them after you say yes (`--yes` counts, and the question defaults to yes), and only when no telemetry variable exists in your environment or in any settings file (user, project, local, managed).
 
 - **The one exception** is a lone off switch (`CLAUDE_CODE_ENABLE_TELEMETRY` set to an off value and no other telemetry variable anywhere) in `~/.claude/settings.json`. A yes replaces it, and `playbook uninstall` puts the old value back.
 - Any other value you set is never overridden. If you turned telemetry off elsewhere, or point it at your own endpoint, playbook leaves it and reads transcripts.
@@ -463,7 +469,7 @@ Playbook never changes your Claude Code settings on its own. Only `setup` writes
 - `telemetry: on, collector not running`, with the fix: run any playbook command or start a session.
 - `telemetry: off (disabled in your Claude Code settings, using transcripts)`, with the fix: run `playbook setup --telemetry`, which replaces an off switch that stands alone in `~/.claude/settings.json`, or remove `CLAUDE_CODE_ENABLE_TELEMETRY` from the `env` block of your settings yourself when it is set anywhere else.
 - `telemetry: off (set up by you for another endpoint, using transcripts)`
-- `telemetry: off (usage.telemetry is off, using transcripts)`, with the fix: `playbook config set usage.telemetry auto`.
+- `telemetry: off (usage.telemetry is off, using transcripts)`, with the fix: `playbook config set --global usage.telemetry auto`.
 - `telemetry: off (not configured)`, with the fix: `playbook setup --telemetry`, or start sessions with `cc`.
 
 If the collector is not running when a session starts, Claude Code may drop what it sends, and that session is read from transcripts. After a reboot or a logout this lasts until the next playbook command or hook starts the collector.
@@ -472,7 +478,7 @@ If the collector is not running when a session starts, Claude Code may drop what
 
 - **What is stored.** Only `api_request` rows with the session id, request id, model, effort, agent name, the four token counts, the cost and the call duration, plus one row per tool call (tool name, outcome, duration), per failed API attempt (status code, attempt number, duration) and per metric point of active time, lines of code, commits or pull requests (session id, type, interval, value). Prompts, tool content, file paths, emails, user, account and organization ids, and resource attributes are dropped when the receiver parses a request and never reach the database.
 - **What `cc` sets.** With `usage.telemetry` at `auto`, a running receiver and no telemetry setting of yours, `cc` sets these in the session's environment only: `CLAUDE_CODE_ENABLE_TELEMETRY`, `OTEL_LOGS_EXPORTER=otlp`, `OTEL_METRICS_EXPORTER=otlp`, the traces exporter to `none`, the `http/json` protocol, the loopback endpoint, an `Authorization` header with the receiver's token and `OTEL_METRICS_INCLUDE_ACCOUNT_UUID=false`. It never turns on `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_TOOL_CONTENT` or `OTEL_LOG_RAW_API_BODIES`.
-- **What it never does.** `cc` never writes Claude Code settings and adds no `--settings` flag. Only `playbook setup --telemetry`, with your consent, writes the same variables (and nothing else) into the `env` block of your settings. If any telemetry variable is already set in your environment or in a settings `env` block (user, project, local or managed), or such a file cannot be parsed, `cc` sets nothing and your own configuration wins. `setup` has one exception, described above: a yes replaces a lone off switch in the user settings.
+- **What it never does.** `cc` never writes Claude Code settings and adds no `--settings` flag. Only `playbook setup --telemetry`, with your consent, or `playbook config set --global usage.telemetry auto`, which you run yourself, writes the same variables (and nothing else) into the `env` block of your settings. If any telemetry variable is already set in your environment or in a settings `env` block (user, project, local or managed), or such a file cannot be parsed, `cc` sets nothing and your own configuration wins. `setup` has one exception, described above: a yes replaces a lone off switch in the user settings.
 - **How long it is kept.** 90 days and 500000 rows per table by default (`usage.telemetryRetentionDays`, `usage.telemetryMaxRows`), pruned automatically and by `playbook usage prune`.
 - **Where it goes.** The receiver listens on 127.0.0.1 only and the store file is private to you. `usage.telemetry` set to `off` stops `cc` from touching the environment at all.
 
@@ -507,7 +513,7 @@ Two more views of the projects panel (`4`, then `v` three and four times) read `
 - **Health** shows API errors with their rate, retries, tool errors with their rate, active time (busy time when no metric arrived), API requests, lines changed, commits and pull requests, each against the previous period, and the cache hit rate. The cache hit rate is cache read tokens over all input side tokens and comes from the transcripts, so it shows with telemetry off too. Only a few rows fit in a small terminal and the table scrolls.
 - **Retries.** An API error with attempt 2 or more is a failure that came after a retry, and that is what `Retries` counts. Claude Code exports no plain retry counter in the log events. A 404 for an unknown model was seen with attempt 1, so it is an error and not a retry. `api_retries_exhausted` did not appear in a trial and is not read.
 - **Active time and counters.** The receiver also reads four delta counters from `/v1/metrics`: `active_time.total` (user and cli seconds, added up), `lines_of_code.count`, `commit.count` and `pull_request.count`. Only the `session.id` and `type` attributes are read, and a cumulative sum is skipped because adding it up would count it again. A point is keyed by session, metric, type and exact interval, so a redelivered point is stored once (table `telemetry_metrics`). Claude Code sends metrics every 60 seconds by default, so the last minute of a session can be missing. Health shows Active time when any was collected and otherwise Busy time, the sum of API call time and tool call time, which is a floor and not the metric. Cost and token metrics are not stored, since the `api_request` events carry them with a key.
-- **Sources and empty state.** Every figure except the cache hit rate is telemetry only. The panel says `Telemetry off` when the range has no telemetry rows, and the title note reads `source telemetry`. Periods are UTC, like the rest of the view.
+- **Sources and empty state.** Every figure except the cache hit rate is telemetry only. The panel says `Telemetry off` when the range has no telemetry rows, and the title note reads `source telemetry`. Periods follow the chosen time zone, like the rest of the view.
 - **Not verified.** Tool names of MCP tools and plugin tools, which Claude Code may redact without the tool details flag, and the attempt numbers of a real overload (an unknown model was the trial case).
 
 ## Checking and running the collector
