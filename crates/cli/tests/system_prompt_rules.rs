@@ -21,6 +21,17 @@ fn prompt() -> String {
 }
 
 #[test]
+fn the_prompt_carries_the_worktree_recovery_rule() {
+    // Arrange
+    let text = prompt();
+
+    // Act and assert
+    for needle in ["EnterWorktree", "ExitWorktree", "isolation: worktree"] {
+        assert!(text.contains(needle), "missing {needle}");
+    }
+}
+
+#[test]
 fn the_prompt_stays_under_its_budget() {
     let len = prompt().chars().count();
 

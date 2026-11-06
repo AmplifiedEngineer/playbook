@@ -11,9 +11,9 @@ The format for code review comments in this plugin. It follows the [Conventional
 ```
 
 - label: one label that says what kind of comment it is.
-- subject: the main message, one or two plain sentences.
+- subject: the main message, one plain sentence.
 - decorations: optional, in parentheses, comma separated. Example: `(non-blocking)` or `(non-blocking, security)`.
-- discussion: optional. Context, reasoning or next steps, after a blank line.
+- discussion: optional. One sentence of mechanism or next step, after a blank line. The whole comment stays within `LEN-REVIEW` in `playbook:writing-style`: the subject plus the discussion make 2 sentences at most.
 
 Write the label in lowercase and plain text, with no bold.
 
@@ -59,15 +59,13 @@ A `(blocking)` or `(non-blocking)` decoration overrides the label default. If bo
 ```
 issue (blocking, security): The export endpoint returns every tenant's rows.
 
-The query has no tenant filter, so any signed-in user can read other tenants' data.
-Add a tenant filter to the query and pass the tenant from the session.
+The query has no tenant filter. Add one from the session.
 ```
 
 ```
 suggestion (non-blocking, perf): Load the prices once before the loop.
 
-Today the loop runs one query per order line. For an order with 500 lines that is 500 round trips.
-One query with a list of ids returns the same data in one call.
+The loop runs one query per order line.
 ```
 
 Finding codes such as F1 and F2 stay internal IDs in a report. The posted comment text follows this format.

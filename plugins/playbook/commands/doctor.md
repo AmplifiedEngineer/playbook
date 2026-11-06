@@ -107,6 +107,9 @@ These never fail the check and carry no fix hint:
   `.worktrees/<repo>/` is the session launcher's worktree, `review-worktrees/` is
   the PR review, `repos/<owner>/<repo>/worktrees/<plan-slug>/<wu-id>` is a `/playbook:implement`
   Work Unit), or "no stale worktrees found".
+- A WARN row for the Claude Code worktree guard bug, shown only when the
+  directory is a linked worktree and Claude Code is the known affected version.
+  Pass its hint on: call `ExitWorktree` with action `keep`.
 - Files you edited after playbook placed them, as `migration <id>: <message>`,
   where `<id>` is a slug such as `system-prompt-edited`.
 
