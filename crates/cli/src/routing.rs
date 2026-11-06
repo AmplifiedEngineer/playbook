@@ -118,11 +118,11 @@ impl Escalate {
     }
 }
 
-/// The configured policy, `ask` when unset or unreadable.
+/// The configured policy, `auto` when unset or unreadable.
 pub fn escalate(home: &Path) -> Escalate {
     match config::resolve(ESCALATE_KEY, home, None) {
-        Ok((Value::String(s), _)) => Escalate::parse(&s).unwrap_or(Escalate::Ask),
-        _ => Escalate::Ask,
+        Ok((Value::String(s), _)) => Escalate::parse(&s).unwrap_or(Escalate::Auto),
+        _ => Escalate::Auto,
     }
 }
 

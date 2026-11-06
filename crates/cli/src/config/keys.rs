@@ -307,7 +307,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "memory.source" => Some(Value::String("both".to_string())),
         "agents.variants" => Some(Value::String("auto".to_string())),
         "models.haiku" | "models.sonnet" | "models.opus" => Some(Value::String(String::new())),
-        "routing.escalate" => Some(Value::String("ask".to_string())),
+        "routing.escalate" => Some(Value::String("auto".to_string())),
         "auto.budgetUsd" => Some(Value::Number(AUTO_BUDGET_USD.into())),
         "auto.agentBudgetUsd" => Some(Value::Number(AUTO_AGENT_BUDGET_USD.into())),
         "auto.sessionCeilingUsd" => Some(Value::Number(0.into())),
@@ -485,6 +485,20 @@ mod tests {
         // Assert
         assert_eq!(default, Some(Value::String("auto".to_string())));
         assert_eq!(allowed, Some(&["auto", "ask", "off"][..]));
+    }
+
+    #[test]
+    fn routing_escalate_defaults_to_auto_and_allows_three_values() {
+        // Arrange
+        let key = "routing.escalate";
+
+        // Act
+        let default = default_value(key);
+        let allowed = allowed_enum_values(key);
+
+        // Assert
+        assert_eq!(default, Some(Value::String("auto".to_string())));
+        assert_eq!(allowed, Some(&["ask", "auto", "deny"][..]));
     }
 
     #[test]

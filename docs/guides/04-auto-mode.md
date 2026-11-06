@@ -57,7 +57,7 @@ While auto is on, the model cannot switch the mode, change the `mode`, `auto.*` 
 
 ## Routing approval is a separate setting
 
-Auto mode does not turn off the model approval prompts. Those come from `routing.escalate`, which is `ask` by default. To stop them, run `playbook config set routing.escalate auto` (add `--global` for every repo). See [Models and effort](14-models-and-effort.md#approval-prompts).
+Auto mode does not change the model approval prompts. Those come from `routing.escalate`, which is `auto` by default, so they do not appear unless you set `ask` (`playbook config set routing.escalate ask`, add `--global` for every repo). See [Models and effort](14-models-and-effort.md#approval-prompts).
 
 ## Flags do not reach hooks
 
