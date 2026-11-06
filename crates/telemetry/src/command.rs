@@ -112,7 +112,7 @@ pub enum UsageCommand {
     ///
     /// Example: `playbook usage account list`
     Account {
-        /// Usage database file to use instead of the default, such as a copy made with `sqlite3 usage.db ".backup copy.db"`
+        /// Usage database file to use instead of the default, such as a backup copy
         #[arg(long, global = true, value_name = "FILE")]
         db: Option<std::path::PathBuf>,
         #[command(subcommand)]
