@@ -30,7 +30,7 @@ It runs on Opus at medium effort and reads the codebase and memory first, so it 
 
 1. **Divergent.** It challenges the premise, weighs 2 or 3 approaches, and asks you to approve a design. It can route to `/playbook:adr` when the decision is hard to reverse.
 2. **Convergent.** In the same session, it interviews you for Work Units and Segments, one question at a time, each with a recommended answer.
-3. **Quality gate.** A `fact-checker` verifies paths, signatures and the dependency graph. A `critic` challenges the design. A `test-reviewer` checks the test plan. Each phase retries up to three times on FAIL. WARNs show but do not block.
+3. **Quality gate.** A `fact-checker` verifies paths, signatures and the dependency graph. A `critic` challenges the design. A `test-reviewer` checks the test plan. Each phase runs up to `gate.maxRounds` rounds (5 by default) and stops earlier on PASS or WARN. It stops as STUCK after two rounds without progress. WARNs show but do not block.
 
 It checkpoints after every decision, so rerunning with the same topic offers to resume. The plan is saved to `playbook path plans` as `<slug>.md`, with a `<slug>-quality.md` report, and key decisions are stored as memory facts.
 

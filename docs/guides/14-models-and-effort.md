@@ -4,9 +4,9 @@ Each command and agent names its model and effort in its own frontmatter. Spend 
 
 | Tier | Model | Falls back to | Used for |
 |---|---|---|---|
-| Opus | `claude-opus-5-5` | `claude-opus-5` | Design, every reviewer, the repo auditor |
+| Opus | `claude-opus-5-5` | `claude-opus-5` | Design, the reviewer, the repo auditor |
 | Sonnet | `claude-sonnet-5-5` | `claude-sonnet-5` | Session default, implementer, critic |
-| Haiku | `claude-haiku-5-5` | `claude-haiku-4-5` | Mechanical agents: git, collector, fact-checker, triage |
+| Haiku | `claude-haiku-5-5` | `claude-haiku-4-5` | Mechanical and checking agents: git, collector, cheap-checker, triage, fact-checker, test-reviewer, analyst, writer |
 
 Plugin files name only the alias, and `playbook cc` passes the fallback chain. Run `playbook doctor models` to see the table, your overrides and the chain in force.
 
