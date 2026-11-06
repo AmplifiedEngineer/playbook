@@ -449,7 +449,7 @@ fn doctor_shows_the_effort_ceiling_read_only_and_its_limit() {
     );
     assert!(
         t.iter()
-            .any(|m| m.contains("does not cap a command, skill or base agent")),
+            .any(|m| m.contains("does not cap a command or skill that ships its own effort")),
         "{t:?}"
     );
     assert_eq!(

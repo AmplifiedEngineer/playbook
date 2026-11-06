@@ -408,14 +408,9 @@ arg playbook settings check id=repo_root long=- short=- value_names=REPO_ROOT po
 command playbook manifest subcommands=check aliases=- groups=Manifest[-]
 command playbook manifest check subcommands=- aliases=- groups=Check[repo_root]
 arg playbook manifest check id=repo_root long=- short=- value_names=REPO_ROOT possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=std::path::PathBuf conflicts=-
-command playbook agents subcommands=check,variants aliases=- groups=Agents[-]
+command playbook agents subcommands=check aliases=- groups=Agents[-]
 command playbook agents check subcommands=- aliases=- groups=Check[agents_dir]
 arg playbook agents check id=agents_dir long=- short=- value_names=AGENTS_DIR possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=std::path::PathBuf conflicts=-
-command playbook agents variants subcommands=- aliases=- groups=Variants[agents_dir,ceiling,mode,json]
-arg playbook agents variants id=agents_dir long=- short=- value_names=AGENTS_DIR possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=std::path::PathBuf conflicts=-
-arg playbook agents variants id=ceiling long=ceiling short=- value_names=CEILING possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
-arg playbook agents variants id=mode long=mode short=- value_names=MODE possible=- defaults=auto aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
-arg playbook agents variants id=json long=json short=- value_names=JSON possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
 command playbook gate subcommands=record,snapshot,check aliases=- groups=Gate[-]
 command playbook gate record subcommands=- aliases=- groups=Record[plan_slug,command,phase,input,source,stuck]
 arg playbook gate record id=plan_slug long=- short=- value_names=PLAN_SLUG possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-

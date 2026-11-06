@@ -7,13 +7,13 @@
 //! no-op rather than failing: a launcher that refuses to start because a cache
 //! directory is missing is worse than a stale cache.
 
-pub mod agent_variants;
 pub mod bust_cache;
 pub mod clean_resume;
 pub mod config_drift;
 pub mod launch;
 pub mod retention;
 pub mod sessions;
+pub mod stale_variants;
 pub mod telemetry;
 pub mod worktree;
 pub mod worktree_run;

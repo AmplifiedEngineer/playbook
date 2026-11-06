@@ -843,7 +843,7 @@ fn a_path_that_already_has_the_binary_is_left_alone() {
     assert_eq!(seen.lines().next().unwrap(), path);
 }
 
-// --- Effort-tier variants through --agents (ADR-0017) ---
+// --- Effort-tier variants are gone (ADR-0017 amendment) ---
 
 fn plugin_with_agents(e: &Env) -> PathBuf {
     let root = e.root.join("plugin");
@@ -856,30 +856,6 @@ fn plugin_with_agents(e: &Env) -> PathBuf {
     root
 }
 
-/// The variant agent files the first call's `--plugin-dir` held, by name:
-/// (frontmatter and body text). The fake `claude` copies the directory while
-/// it still exists, because the launcher removes it after the session.
-fn variant_files(e: &Env) -> Option<std::collections::BTreeMap<String, String>> {
-    let dir = e.root.join("claude.log.plug/agents");
-    let mut out = std::collections::BTreeMap::new();
-    for entry in fs::read_dir(dir).ok()? {
-        let path = entry.ok()?.path();
-        let name = path.file_stem()?.to_string_lossy().into_owned();
-        out.insert(name, fs::read_to_string(&path).ok()?);
-    }
-    Some(out)
-}
-
-/// The `--agents` JSON in the first call, if any (the fallback route).
-fn agents_arg(e: &Env) -> Option<serde_json::Value> {
-    let line = e.raw_calls().into_iter().next()?;
-    let rest = line.split_once("--agents ")?.1.to_string();
-    serde_json::Deserializer::from_str(&rest)
-        .into_iter::<serde_json::Value>()
-        .next()?
-        .ok()
-}
-
 fn launch_with_plugin(e: &Env, root: &Path, args: &[&str]) {
     let out = e.launch_with(
         &["--"],
@@ -890,105 +866,45 @@ fn launch_with_plugin(e: &Env, root: &Path, args: &[&str]) {
 }
 
 #[test]
-fn the_launcher_passes_variants_as_a_session_plugin_and_removes_it_after() {
+fn the_launcher_adds_no_variant_agents_or_plugin() {
     let e = env("variants");
     let root = plugin_with_agents(&e);
     launch_with_plugin(&e, &root, &["fresh"]);
-
-    let files = variant_files(&e).expect("--plugin-dir was passed");
-    for name in ["reviewer-low", "reviewer-medium", "reviewer-xhigh"] {
-        let text = &files[name];
-        assert!(text.contains(&format!("name: {name}\n")), "{text}");
-        assert!(text.contains("model: sonnet\n"), "{text}");
-        assert!(text.contains("tools: Read, Grep\n"), "{text}");
-        assert!(text.ends_with("Review.\n"), "{text}");
-    }
-    assert!(files["reviewer-low"].contains("effort: low\n"));
-    assert!(!files.contains_key("reviewer"), "the base is not repeated");
-    assert!(
-        e.root
-            .join("claude.log.plug/.claude-plugin/plugin.json")
-            .is_file(),
-        "the throwaway plugin needs a manifest"
-    );
-    assert!(
-        agents_arg(&e).is_none(),
-        "no --agents when the plugin route works"
-    );
-    let seen = fs::read_to_string(e.root.join("claude.log.var")).unwrap();
-    assert_eq!(seen.trim(), "reviewer-low,reviewer-medium,reviewer-xhigh");
-    let plug = fs::read_to_string(e.root.join("claude.log.vplug")).unwrap();
-    assert_eq!(plug.trim(), "playbook-variants");
-
     let line = e.raw_calls().remove(0);
-    let dir = line
-        .split_once("--plugin-dir ")
-        .and_then(|(_, r)| r.split_whitespace().next())
-        .expect("plugin dir in the args");
-    assert!(
-        !Path::new(dir).exists(),
-        "{dir} should be removed after the session"
-    );
+    assert!(!line.contains("--plugin-dir"), "{line}");
+    assert!(!line.contains("--agents"), "{line}");
 }
 
 #[test]
-fn a_ceiling_keeps_the_higher_variants_out() {
-    let e = env("variants-ceiling");
-    let root = plugin_with_agents(&e);
-    set_effort(&e, "medium");
-    launch_with_plugin(&e, &root, &["fresh"]);
-    let files = variant_files(&e).expect("--plugin-dir was passed");
-    assert!(files.contains_key("reviewer-medium"));
-    assert!(!files.contains_key("reviewer-xhigh"));
-}
-
-#[test]
-fn agents_variants_off_and_a_user_agents_flag_add_nothing() {
+fn the_old_variants_setting_is_still_accepted_and_changes_nothing() {
     let e = env("variants-off");
     let root = plugin_with_agents(&e);
-    let set = Command::new(env!("CARGO_BIN_EXE_playbook"))
-        .args(["config", "set", "--global", "agents.variants", "off"])
-        .env("HOME", &e.home)
-        .output()
-        .unwrap();
-    assert!(set.status.success(), "{set:?}");
+    for value in ["off", "all"] {
+        let set = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["config", "set", "--global", "agents.variants", value])
+            .env("HOME", &e.home)
+            .output()
+            .unwrap();
+        assert!(set.status.success(), "{set:?}");
+    }
     launch_with_plugin(&e, &root, &["fresh"]);
-    assert!(variant_files(&e).is_none());
-    assert!(agents_arg(&e).is_none());
-
-    let e2 = env("variants-user-flag");
-    let root2 = plugin_with_agents(&e2);
-    launch_with_plugin(&e2, &root2, &["--agents", "{}", "fresh"]);
-    let line = e2.raw_calls().remove(0);
-    assert_eq!(line.matches("--agents").count(), 1, "{line}");
-    assert!(!line.contains("--plugin-dir"), "{line}");
-}
-
-#[test]
-fn without_a_plugin_root_no_variants_are_passed() {
-    let e = env("variants-no-root");
-    e.launch(&["fresh"]);
-    assert!(agents_arg(&e).is_none());
-    assert!(variant_files(&e).is_none());
-    let seen = fs::read_to_string(e.root.join("claude.log.var")).unwrap();
-    assert_eq!(seen.trim(), "unset");
-}
-
-#[test]
-fn variants_inherited_from_a_parent_session_do_not_reach_the_new_one() {
-    let e = env("variants-inherited");
-    e.launch_with(
-        &["--"],
-        &["fresh"],
-        &[
-            ("PLAYBOOK_AGENT_VARIANTS", "reviewer-low"),
-            ("PLAYBOOK_AGENT_VARIANTS_PLUGIN", "playbook-variants"),
-        ],
+    let line = e.raw_calls().remove(0);
+    assert!(
+        !line.contains("--plugin-dir") && !line.contains("--agents"),
+        "{line}"
     );
-    let names = fs::read_to_string(e.root.join("claude.log.var")).unwrap();
-    let plugin = fs::read_to_string(e.root.join("claude.log.vplug")).unwrap();
-    assert_eq!(names.trim(), "unset");
-    assert_eq!(plugin.trim(), "unset");
+}
+
+#[test]
+fn a_leftover_variants_folder_of_a_dead_session_is_removed_on_launch() {
+    let e = env("variants-leftover");
+    let tmp = e.root.join("tmp");
+    let old = tmp.join("playbook-variants-4000000");
+    fs::create_dir_all(old.join("agents")).unwrap();
+    fs::write(old.join("agents/reviewer-low.md"), "x").unwrap();
+    let out = e.launch_with(&["--"], &["fresh"], &[("TMPDIR", tmp.to_str().unwrap())]);
+    assert!(out.status.success(), "{out:?}");
+    assert!(!old.exists(), "the leftover folder should be gone");
 }
 
 #[test]

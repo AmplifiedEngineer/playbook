@@ -137,9 +137,9 @@ Creates `docs/adr` in the repo if it is missing. Prints `Next number: NNNN   Dat
 
 ### `playbook agents`
 
-Check agent definition files and show their effort variants
+Check that agent definition files follow the playbook rules
 
-Subcommands: `check`, `variants`
+Subcommands: `check`
 
 ### `playbook agents check`
 
@@ -148,19 +148,6 @@ Check every agent definition follows the agent rules
 Exits 0 when all pass and 1 otherwise.
 
 - `<AGENTS_DIR>`: Directory of agent definitions. Defaults to `plugins/playbook/agents` in the repo, else `agents` at the repo root
-
-### `playbook agents variants`
-
-Show the effort-tier variants a session would get
-
-Variants such as `reviewer-low` are not files. `playbook cc` and `playbook ccd` render them from the base agents and pass them to Claude Code with `--agents`. This prints the same set, so you can see what a session would hold and its size. Use `--json` for the full definitions.
-
-Example: `playbook agents variants --ceiling medium`
-
-- `<AGENTS_DIR>`: Directory of agent definitions. Defaults to `plugins/playbook/agents` in the repo, else `agents` at the repo root
-- `--ceiling <CEILING>`: Lowest effort ceiling to apply to every agent (default: none)
-- `--mode <MODE>`: One of auto, all or off
-- `--json`: Print the `--agents` JSON
 
 ### `playbook atlassian`
 
@@ -647,7 +634,7 @@ Set playbook's own ceiling on effort, or inspect one component's
 
 `auto` (the default) sets no ceiling, so Claude Code's own `maxEffortLevel` decides how high effort may go. Each skill, command and agent still keeps the effort it ships with. `low`, `medium`, `high`, `xhigh` or `max` set playbook's own ceiling. The key is `maxEffortLevel`, named like Claude Code's. The effective ceiling is the lower of this and Claude Code's own `maxEffortLevel`, which playbook only reads and never changes. Sessions started with `playbook cc` or `playbook ccd` get the ceiling. With no level, shows both values and the one that wins.
 
-The ceiling caps the agent variants the launcher renders, the default effort it adds and what the binary reports. It does not cap a command, skill or base agent that ships its own effort, or a level you state for the session, because only Claude Code's `maxEffortLevel` setting can, and playbook never writes it.
+The ceiling lowers the `effort` an orchestrator passes when it spawns an agent, the default effort the launcher adds and what the binary reports. It does not cap a command or skill that ships its own effort, a level you state for the session, or a spawn that skips the resolve step, because only Claude Code's `maxEffortLevel` setting can, and playbook never writes it.
 
 Example: `playbook effort xhigh`
 

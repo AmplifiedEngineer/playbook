@@ -34,8 +34,6 @@ impl Home {
             .env("HOME", &self.0)
             .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("CLAUDE_PLUGIN_ROOT")
-            .env_remove("PLAYBOOK_AGENT_VARIANTS")
-            .env_remove("PLAYBOOK_AGENT_VARIANTS_PLUGIN")
             .output()
             .expect("playbook should spawn")
     }
@@ -182,18 +180,13 @@ fn run_with_root(h: &Home, root: &std::path::Path, args: &[&str]) -> std::proces
         .args(args)
         .env("HOME", &h.0)
         .env("CLAUDE_PLUGIN_ROOT", root)
-        .env(
-            "PLAYBOOK_AGENT_VARIANTS",
-            "reviewer-low,reviewer-medium,reviewer-xhigh",
-        )
-        .env_remove("PLAYBOOK_AGENT_VARIANTS_PLUGIN")
         .current_dir(&h.0)
         .output()
         .unwrap()
 }
 
 #[test]
-fn a_component_ceiling_is_set_with_config_and_resolved_to_an_agent_file() {
+fn a_component_ceiling_is_set_with_config_and_resolved_to_the_base_agent_and_an_effort() {
     let h = Home::new("component-resolve");
     let root = plugin_root(&h);
     let set = h.run(&["config", "set", "--global", "effort.agents.reviewer", "low"]);
@@ -207,8 +200,9 @@ fn a_component_ceiling_is_set_with_config_and_resolved_to_an_agent_file() {
     assert!(out.status.success(), "{}", text(&out));
     let j: serde_json::Value = serde_json::from_str(&text(&out)).unwrap();
     assert_eq!(j["effective"], "low");
-    assert_eq!(j["file"], "reviewer-low");
-    assert_eq!(j["subagentType"], "reviewer-low");
+    assert_eq!(j["effort"], "low");
+    assert_eq!(j["subagentType"], "playbook:reviewer");
+    assert!(j.get("file").is_none() && j.get("allowed").is_none(), "{j}");
     assert_eq!(j["claudeCode"], serde_json::Value::Null);
 }
 
