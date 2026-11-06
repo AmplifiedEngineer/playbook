@@ -506,7 +506,7 @@
 <text x="1265.6" y="477.7" fill="#b07d00" textLength="8.4" lengthAdjust="spacingAndGlyphs">│</text>
 <text x="14.0" y="495.7" fill="#b07d00" textLength="8.4" lengthAdjust="spacingAndGlyphs">│</text>
 <rect x="22.4" y="482.0" width="8.4" height="18.0" fill="#1f4e79"/>
-<text x="22.4" y="495.7" fill="#bbbbbb" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-weight="700">■</text>
+<text x="22.4" y="495.7" fill="#e69f00" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-weight="700">■</text>
 <rect x="30.8" y="482.0" width="8.4" height="18.0" fill="#1f4e79"/>
 <rect x="39.2" y="482.0" width="8.4" height="18.0" fill="#1f4e79"/>
 <text x="39.2" y="495.7" fill="#ffffff" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-weight="700">o</text>
@@ -626,7 +626,7 @@
 <text x="1240.4" y="495.7" fill="#6b6b6b" textLength="25.2" lengthAdjust="spacingAndGlyphs">···</text>
 <text x="1265.6" y="495.7" fill="#b07d00" textLength="8.4" lengthAdjust="spacingAndGlyphs">│</text>
 <text x="14.0" y="513.7" fill="#b07d00" textLength="8.4" lengthAdjust="spacingAndGlyphs">│</text>
-<text x="22.4" y="513.7" fill="#56b4e9" textLength="8.4" lengthAdjust="spacingAndGlyphs">■</text>
+<text x="22.4" y="513.7" fill="#009e73" textLength="8.4" lengthAdjust="spacingAndGlyphs">■</text>
 <text x="39.2" y="513.7" fill="#cccccc" textLength="67.2" lengthAdjust="spacingAndGlyphs">sonnet-5</text>
 <text x="266.0" y="513.7" fill="#cccccc" textLength="8.4" lengthAdjust="spacingAndGlyphs">7</text>
 <text x="291.2" y="513.7" fill="#cccccc" textLength="50.4" lengthAdjust="spacingAndGlyphs">166.6K</text>
@@ -645,7 +645,7 @@
 <text x="1223.6" y="513.7" fill="#6b6b6b" textLength="42.0" lengthAdjust="spacingAndGlyphs">·····</text>
 <text x="1265.6" y="513.7" fill="#b07d00" textLength="8.4" lengthAdjust="spacingAndGlyphs">│</text>
 <text x="14.0" y="531.7" fill="#b07d00" textLength="8.4" lengthAdjust="spacingAndGlyphs">│</text>
-<text x="22.4" y="531.7" fill="#cc79a7" textLength="8.4" lengthAdjust="spacingAndGlyphs">■</text>
+<text x="22.4" y="531.7" fill="#1b6fb5" textLength="8.4" lengthAdjust="spacingAndGlyphs">■</text>
 <text x="39.2" y="531.7" fill="#cccccc" textLength="58.8" lengthAdjust="spacingAndGlyphs">haiku-5</text>
 <text x="266.0" y="531.7" fill="#cccccc" textLength="8.4" lengthAdjust="spacingAndGlyphs">5</text>
 <text x="291.2" y="531.7" fill="#cccccc" textLength="50.4" lengthAdjust="spacingAndGlyphs">119.0K</text>
