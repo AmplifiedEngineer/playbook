@@ -126,7 +126,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 24] = [
+const PROBES: [Probe; 25] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -151,6 +151,7 @@ const PROBES: [Probe; 24] = [
     },
     |env| vec![attribution_row(env)],
     update_rows,
+    super::pbtop::rows,
     |env| vec![policy_guard_row(env)],
     |env| vec![codex_row(env)],
     doc_rows,
@@ -220,7 +221,12 @@ fn mark_paused(mut rows: Vec<Row>) -> Vec<Row> {
 }
 
 fn on_path(env: &Env, name: &str) -> Option<PathBuf> {
-    std::env::split_paths(&env.path_var)
+    on_path_in(&env.path_var, name)
+}
+
+/// The first file called `name` in the absolute folders of `path_var`.
+pub(super) fn on_path_in(path_var: &std::ffi::OsStr, name: &str) -> Option<PathBuf> {
+    std::env::split_paths(path_var)
         .filter(|d| d.is_absolute())
         .map(|d| d.join(name))
         .find(|p| p.is_file())
@@ -434,7 +440,7 @@ fn layer5(env: &Env) -> Option<Row> {
     ))
 }
 
-fn version_of(bin: &Path) -> String {
+pub(super) fn version_of(bin: &Path) -> String {
     let mut cmd = Command::new(bin);
     cmd.arg("--version");
     output_of(cmd)
@@ -1750,7 +1756,7 @@ pub fn failed(rows: &[Row]) -> bool {
 mod tests {
     use super::*;
 
-    const PROBE_COUNT: usize = 24;
+    const PROBE_COUNT: usize = 25;
     const COMPLETION_PROBE_AT: usize = PROBE_COUNT - 2;
 
     fn env_for(home: &Path) -> Env {
