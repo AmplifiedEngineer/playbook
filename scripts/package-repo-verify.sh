@@ -35,9 +35,11 @@ seed() { mkdir -p "$HOME/.config/playbook"; echo keep > "$HOME/.config/playbook/
 if [ "$kind" = apt ]; then
   mkdir -p /etc/apt/keyrings
   cp /site/playbook.gpg /etc/apt/keyrings/playbook.gpg
+  # POSIX sh: Debian and Ubuntu run this under dash, which has no ${@:2}.
   apt_with() {
-    echo "deb [signed-by=/etc/apt/keyrings/playbook.gpg] file://$1/apt stable main" > /tmp/playbook.list
-    apt-get -o Dir::Etc::sourcelist=/tmp/playbook.list -o Dir::Etc::sourceparts=- "${@:2}"
+    dir="$1"; shift
+    echo "deb [signed-by=/etc/apt/keyrings/playbook.gpg] file://$dir/apt stable main" > /tmp/playbook.list
+    apt-get -o Dir::Etc::sourcelist=/tmp/playbook.list -o Dir::Etc::sourceparts=- "$@"
   }
   tamper /tmp/bad/apt/dists/stable/InRelease
   if apt_with /tmp/bad update >/dev/null 2>&1; then echo "apt accepted a tampered InRelease" >&2; exit 1; fi
@@ -45,8 +47,10 @@ if [ "$kind" = apt ]; then
   if [ -n "$prev" ]; then apt_with /site install -y "playbook=$prev" >/dev/null; seed; fi
   apt_with /site install -y "playbook=$want" >/dev/null
 else
+  # dnf5 skips a repository whose repomd.xml signature is bad and still exits 0,
+  # unless skip_if_unavailable is off, so the tamper check needs it off.
   repo() {
-    printf "[playbook]\nname=playbook\nbaseurl=file://%s/rpm/\$basearch\nenabled=1\nrepo_gpgcheck=1\ngpgcheck=0\ngpgkey=file:///site/playbook.asc\n" "$1" > /etc/yum.repos.d/playbook.repo
+    printf "[playbook]\nname=playbook\nbaseurl=file://%s/rpm/\$basearch\nenabled=1\nrepo_gpgcheck=1\ngpgcheck=0\ngpgkey=file:///site/playbook.asc\nskip_if_unavailable=False\n" "$1" > /etc/yum.repos.d/playbook.repo
   }
   tamper /tmp/bad/rpm/x86_64/repodata/repomd.xml
   repo /tmp/bad
@@ -66,7 +70,7 @@ fi
 run() {
   echo "== $1"
   docker run --rm --network none -v "$site:/site:ro" "$2" sh -c "$inner" sh "$3" "$version" "$prev" \
-    || fail "$1 failed"
+    || fail "$1 failed (container exit $?)"
   echo "ok $1"
 }
 

@@ -169,16 +169,30 @@ fn is_off_in_claude_code(claude_home: &Path, id: &str) -> bool {
         == Some(serde_json::Value::Bool(false))
 }
 
-/// The version Claude Code lists for plugin `id`, from its `installPath`.
-fn installed_version(claude_home: &Path, id: &str) -> Option<String> {
+/// The folder Claude Code lists for plugin `id`.
+fn installed_path(claude_home: &Path, id: &str) -> Option<PathBuf> {
     let entry = crate::common::plugin_state::installed_entry_at(claude_home, id)?;
     let first = match entry {
         serde_json::Value::Array(list) => list.into_iter().next()?,
         other => other,
     };
-    let path = first.get("installPath")?.as_str()?;
-    crate::plugin_root::plugin_version(Path::new(path))
+    Some(PathBuf::from(first.get("installPath")?.as_str()?))
+}
+
+/// The version Claude Code lists for plugin `id`, from its `installPath`.
+fn installed_version(claude_home: &Path, id: &str) -> Option<String> {
+    crate::plugin_root::plugin_version(&installed_path(claude_home, id)?)
         .filter(|v| crate::plugin_root::is_plain_version(v))
+}
+
+/// Copies the new plugin's system prompt over the placed one, so a user who
+/// opted in gets new prompt text without running `playbook setup`. A copy the
+/// user edited, or a prompt that was never placed, stays as it is.
+fn refresh_system_prompt(home: &Path, plugin_dir: &Path) {
+    use crate::init::system_prompt::{place_system_prompt, Placement};
+    if let Ok(Placement::Placed(_)) = place_system_prompt(plugin_dir, home, false) {
+        crate::init::migrate::record_system_prompt(home);
+    }
 }
 
 /// What the update reads, passed in so tests use a scratch home and a fake
@@ -250,6 +264,9 @@ pub fn run(probe: &Probe) -> Outcome {
             last
         };
         return Outcome::Failed { id, why };
+    }
+    if let Some(dir) = installed_path(&claude_home, &id) {
+        refresh_system_prompt(&probe.home, &dir);
     }
     let after = installed_version(&claude_home, &id);
     if after.is_some() && after != before {
@@ -939,6 +956,50 @@ mod tests {
             out.line().unwrap(),
             "plugin: updated playbook@pragmatic-engineer from 0.36.0 to 0.37.0. Restart Claude Code to load it"
         );
+    }
+
+    fn placed_prompt_after_update(edit_before: Option<&str>) -> (String, bool) {
+        let home = scratch_dir(if edit_before.is_some() {
+            "plugin-update-prompt-edited"
+        } else {
+            "plugin-update-prompt"
+        });
+        let old = plugin(&home, "0.36.0");
+        let new = plugin(&home, "0.37.0");
+        for (dir, text) in [(&old, "old rules"), (&new, "new rules")] {
+            fs::create_dir_all(dir.join("prompts")).unwrap();
+            fs::write(dir.join("prompts/SYSTEM_PROMPT.md"), text).unwrap();
+        }
+        let placed = crate::init::system_prompt::path(&home);
+        fs::create_dir_all(placed.parent().unwrap()).unwrap();
+        fs::write(&placed, "old rules").unwrap();
+        crate::init::migrate::record_system_prompt(&home);
+        if let Some(text) = edit_before {
+            fs::write(&placed, text).unwrap();
+        }
+        install(&home, "playbook@pragmatic-engineer", &old);
+        let claude = fake_claude(&home, Some(&new), 0);
+
+        run(&Probe {
+            home: home.clone(),
+            claude: Some(claude),
+        });
+
+        let recorded = crate::init::migrate::placed_unchanged(&home, "system-prompt", &placed);
+        (fs::read_to_string(&placed).unwrap(), recorded)
+    }
+
+    #[test]
+    fn an_update_refreshes_the_placed_system_prompt_from_the_new_plugin() {
+        let (text, recorded) = placed_prompt_after_update(None);
+
+        assert_eq!(text, "new rules");
+        assert!(recorded, "the new copy's hash must be recorded");
+    }
+
+    #[test]
+    fn an_update_leaves_an_edited_system_prompt_alone() {
+        assert_eq!(placed_prompt_after_update(Some("my rules")).0, "my rules");
     }
 
     #[test]

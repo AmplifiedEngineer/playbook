@@ -9,7 +9,7 @@ The policy lives in each file's frontmatter (`agents/*.md` and `commands/*.md`) 
 | Tier | Takes |
 |---|---|
 | **Sonnet** (session default) | Most coding: `/playbook:implement`, `/playbook:fix`, the `implementer` and the `critic`. |
-| **Haiku** | Mechanical, formatting and search work: `git`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, and the `doctor`, `session-handoff`, `session-start` and `setup` commands. |
+| **Haiku** | Mechanical, formatting and search work: `git`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, `writer`, and the `doctor`, `session-handoff`, `session-start` and `setup` commands. |
 | **Opus** | Design (`/playbook:plan`, `/playbook:adr`), every `reviewer` (`/playbook:quick-review`, `/playbook:deep-review` and `/playbook:implement` Step 9, all at the reviewer's own medium effort unless a variant is picked), the `auditor` behind `/playbook:repo-audit`, `/playbook:address-pr-comments` and `/playbook:learn-project`. |
 
 Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mode.
@@ -24,6 +24,7 @@ Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mod
 | `classify` | haiku, medium | `review-triage` |
 | `check` | haiku, medium | `cheap-checker` |
 | `review` | opus, medium | `reviewer` |
+| `write` | haiku, medium | `writer` (turns decided facts into a short text; replies to PR comments stay with the orchestrator) |
 | `implement` (`--tier low\|medium\|high`) | sonnet, low, medium or high | `implementer` |
 | `design` | opus, xhigh | `critic` (stress-tests the design at its own Sonnet medium; the design itself runs in the command on Opus) |
 
@@ -67,6 +68,7 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 | `agents/critic` | sonnet | `medium` (was high) | See below. |
 | `agents/fact-checker` | haiku | `medium` (was high) | See below. |
 | `agents/test-reviewer` | haiku | `low` (kept) | See below. |
+| `agents/writer` | haiku | `medium` | Writes the final text of one kind from facts the orchestrator decided. Pilot on 18 cases: no invented fact, no hard prose finding. It does not decide anything. |
 | `agents/analyst` | haiku (was sonnet) | `medium` (was high) | See below. |
 | `agents/implementer` | sonnet | `medium` (was high) | See the implementer bench below. |
 | `agents/auditor` | opus | `high` (kept) | A whole repository audit whose findings people act on. No headless bench exists for it. The maintainer kept it at `high` on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). |
