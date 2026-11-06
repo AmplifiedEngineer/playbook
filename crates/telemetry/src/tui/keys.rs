@@ -46,6 +46,7 @@ pub enum Cmd {
     Budget,
     Zone,
     Account,
+    ResetUsage,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -475,6 +476,16 @@ pub const BINDINGS: &[Binding] = &[
         group: Group::Refresh,
         panels: ALL_PANELS,
         text: "Set the manual monthly budget",
+        hint: None,
+    },
+    Binding {
+        cmd: Cmd::ResetUsage,
+        keys: &[c('X')],
+        ctrl: false,
+        shown: "X",
+        group: Group::Refresh,
+        panels: ALL_PANELS,
+        text: "Delete usage history, asks to confirm",
         hint: None,
     },
     Binding {

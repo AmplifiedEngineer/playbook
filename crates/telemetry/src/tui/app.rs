@@ -157,6 +157,8 @@ pub struct App {
     pub help: Option<usize>,
     /// The budget window, when it is open.
     pub budget_popup: Option<super::budget_popup::BudgetPopup>,
+    /// True while the window that asks before deleting the usage history is open.
+    pub reset_popup: bool,
     /// Files read and files to read while a first read runs.
     pub indexing: Option<(usize, usize)>,
     /// Where transcripts are read from, named in the empty states.
@@ -189,6 +191,8 @@ pub enum Effect {
     SaveBudget(f64),
     /// Clear the stored layout and screen setup, then call `reset_done`.
     ResetPrefs,
+    /// Delete the usage history and read the transcripts again.
+    ResetUsage,
 }
 
 /// What `v` says on a panel pinned to one view.
@@ -221,6 +225,7 @@ impl App {
             area: Rect::new(0, 0, 100, 30),
             help: None,
             budget_popup: None,
+            reset_popup: false,
             indexing: None,
             sources: String::new(),
             telemetry: None,
@@ -657,6 +662,9 @@ impl App {
                 }
             };
         }
+        if self.reset_popup {
+            return self.reset_popup_key(key.code, ctrl);
+        }
         if self.help.is_some() {
             return self.help_key(key.code, ctrl);
         }
@@ -667,6 +675,22 @@ impl App {
             Some(binding) => self.run(binding.cmd, key.code),
             None => Effect::None,
         }
+    }
+
+    /// Keys while the reset window is open: `y` deletes, Ctrl-C quits and any
+    /// other key cancels.
+    fn reset_popup_key(&mut self, code: KeyCode, ctrl: bool) -> Effect {
+        if ctrl && code == KeyCode::Char('c') {
+            self.quit = true;
+            return Effect::None;
+        }
+        self.reset_popup = false;
+        if ctrl || !super::reset_popup::confirms(code) {
+            return Effect::None;
+        }
+        self.error = None;
+        self.note = Some("Reading the transcripts again".to_string());
+        Effect::ResetUsage
     }
 
     /// Keys while the layout editor is open. Ctrl-C quits.
@@ -934,6 +958,7 @@ impl App {
                 }
             }
             Cmd::Refresh => return Effect::Requery,
+            Cmd::ResetUsage => self.reset_popup = true,
         }
         Effect::None
     }
@@ -1179,6 +1204,64 @@ mod tests {
         let effect = app.key(press(KeyCode::Enter));
         assert_eq!(effect, Effect::SaveBudget(1000.0));
         assert!(app.budget_popup.is_none());
+    }
+
+    #[test]
+    fn capital_x_asks_first_and_only_y_deletes_the_history() {
+        // Arrange
+        let mut app = loaded();
+
+        // Act
+        let opened = app.key(press(KeyCode::Char('X')));
+        let confirmed = app.key(press(KeyCode::Char('y')));
+
+        // Assert
+        assert_eq!(opened, Effect::None);
+        assert_eq!(confirmed, Effect::ResetUsage);
+        assert!(!app.reset_popup);
+        assert!(app.note.is_some());
+    }
+
+    #[test]
+    fn any_other_key_cancels_the_reset_and_does_not_leak_to_the_view() {
+        for cancel in [
+            KeyCode::Esc,
+            KeyCode::Enter,
+            KeyCode::Char('n'),
+            KeyCode::Char('q'),
+        ] {
+            let mut app = loaded();
+            app.key(press(KeyCode::Char('X')));
+            assert!(app.reset_popup);
+
+            let effect = app.key(press(cancel));
+
+            assert_eq!(effect, Effect::None, "{cancel:?}");
+            assert!(!app.reset_popup && !app.quit, "{cancel:?}");
+        }
+    }
+
+    #[test]
+    fn caps_lock_does_not_make_the_answer_miss_and_ctrl_c_still_quits() {
+        let mut app = loaded();
+        app.key(press(KeyCode::Char('X')));
+        assert_eq!(app.key(press(KeyCode::Char('Y'))), Effect::ResetUsage);
+
+        app.key(press(KeyCode::Char('X')));
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!(app.key(ctrl_c), Effect::None);
+        assert!(app.quit);
+    }
+
+    #[test]
+    fn a_ctrl_chord_on_y_does_not_confirm_the_reset() {
+        let mut app = loaded();
+        app.key(press(KeyCode::Char('X')));
+
+        let effect = app.key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL));
+
+        assert_eq!(effect, Effect::None);
+        assert!(!app.reset_popup);
     }
 
     #[test]
@@ -1902,6 +1985,7 @@ mod tests {
             Help,
             Refresh,
             Zone,
+            ResetUsage,
         ] {
             assert!(keys::BINDINGS.iter().any(|b| b.cmd == cmd), "{cmd:?}");
         }

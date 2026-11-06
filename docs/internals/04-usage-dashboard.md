@@ -84,6 +84,7 @@ Keys:
 | `v` | Change the view of the focused panel, and only that panel. With Spend focused it steps total, by model and daily table. With Projects focused it steps projects, agents, skills, tools and health. On the other four panels it does nothing. The title of Spend and Projects always shows `v view: <name>`, and the other panels show no such tag. |
 | `R`, `B` | Read new usage and the budget limits now. The view also refreshes by itself. |
 | `b` | Open the budget window: type the manual monthly budget in dollars, `Enter` saves it to `usage.budget.monthlyUsd`, `0` clears it, `Esc` cancels. |
+| `X` | Reset the usage history. A window asks first; `y` (or `Y`) deletes, and any other key cancels. The events, the tool events and the read progress are deleted in one transaction, so another reader sees the old history or none, never half. The worker then reads every transcript again like a first run, newest first, and the panels fill while the footer shows the progress. The budget, the limit readings, the account names, the telemetry rows and the layout stay. |
 | `?` | Open the help window (below). |
 | `z` | Switch every time and day between local time and UTC for this session. The footer and the title name the zone. `usage.timeZone` sets the start-up zone. |
 | `u`, `U` | Pick the account. The view opens on the account of the newest event, and the title names it (a name set with `playbook usage account name`, else the account key). `u` steps to the next account, then to all accounts, then back to the newest. `U` jumps to all accounts and back. The totals, the charts and the budget panel count only the account shown. The agents, skills and health tables read telemetry rows, which carry no account, and stay unfiltered. |
@@ -100,6 +101,21 @@ Keys:
 | `q`, `Esc`, `Ctrl-C` | Quit. |
 
 The view is keyboard only, so the terminal's own text selection and scrolling keep working.
+
+#### The key map
+
+A key that deletes data is an uppercase letter and asks first. On the main view each letter has one meaning. The layout editor is a separate window with its own keys; its `R` resets the layout and asks `[y/N]`.
+
+| Group | Keys |
+|---|---|
+| Move | `1` to `6`, `[`, `]`, `Tab`, `Shift-Tab`, `F1` to `F12`, `j`, `k`, `h`, `l`, `g`, `G`, arrows, `PageUp`, `PageDown`, `Home`, `End` |
+| Period | `d`, `w`, `W`, `m`, `M`, `a`, `r`, `z` |
+| View | `v`, `t`, `p`, `e`, `?` |
+| Sort and filter | `s`, `S`, `/`, `Enter`, `c`, `u`, `U` |
+| Refresh and data | `R` or `B` read now, `b` budget, `X` reset the usage history |
+| Quit | `q`, `Esc`, `Ctrl-C` |
+
+The review of the map found no key to remove. The layout editor no longer has the `w` and `s` save keys the review asked about, because it saves each change within 200 ms. `x` stays the editor's delete-a-tab key, so the reset took `X` on the main view, which no key used. Terminals send a capital letter with Caps Lock on and do not say it was Caps Lock, so a pair such as `w` and `W` cannot be told apart then. For that reason no capital letter is the only way to a destructive action without a confirmation, and `Y` confirms the reset like `y`. No key changed, so nothing needs an alias.
 
 **Help window.** `?` opens a centered window listing every key, grouped (navigation, periods, views, sorting, filtering, refresh, quit), with the panels each acts on. It is sized for 80 by 24. On a shorter screen the arrows, `j`, `k`, `PageUp`, `PageDown`, `Home` and `End` scroll it. Any other key closes it, and `Ctrl-C` still quits. Data keeps refreshing underneath and nothing the user set (focus, selection, sorts, views, cursor) changes.
 
@@ -183,6 +199,7 @@ One SQLite database at `~/.config/playbook/data/usage.db`, tied to no repo becau
 - **Connection.** Setup follows `crates/cli/src/gate/db.rs`: `busy_timeout` first, then WAL mode, because a refresh reads while `ingest` writes from other processes.
 - **One-time repair.** The first ingest after upgrading from an older version rescans the transcripts (`crates/telemetry/src/backfill.rs`) and corrects the repo and the cache lifetime split on rows stored earlier. A row whose transcript is gone keeps its old repo and is priced as five minute cache.
 - **Watermark.** One per source (the newest timestamp read). Ingest skips transcript files last modified before it, so a repeat is cheap. It is inclusive and events are deduped by id, so re-reading the newest event is harmless.
+- **Reset.** `X` in the view runs `db::reset_usage`: one transaction that empties `usage_events`, `tool_invocation_events`, `usage_backfill_files` and `usage_watermarks`. With no watermark, the next ingest is a first run. No table or column changes, so an existing database needs no migration.
 - **Transaction.** Each ingest is one `IMMEDIATE` transaction: rows and watermark commit together or not at all, and a second ingest waits for the first instead of failing.
 
 ## Adding another agent
@@ -242,7 +259,7 @@ Notes:
 2. With no statusline reading, the cached spend limit at any age.
 3. `usage.budget.monthlyUsd`, only when nothing is detected. It does not draw a bar beside a detected limit. When both are set and differ, the Budget panel adds a line with both amounts and says the detected one applies.
 
-A cached limit over six hours old, whether it won under item 1 or item 2, is tagged `limit cached <age> ago, used is this machine only`. The cache's used amount is dropped and the bar shows this machine's estimate. A line under the bar then shows the amount Claude Code last reported, with its age and the word stale. A manual budget is tagged `manual, local` for the same reason and gets the same line.
+A cached limit over six hours old, whether it won under item 1 or item 2, is tagged `cached <age> ago, plus this machine since` when the cache has a used amount from this UTC month. The bar then shows that amount plus this machine's messages after the read, because spend only grows within a month. Without such an amount the tag is `limit cached <age> ago, used is this machine only` and the bar is this machine's estimate for the UTC month. A line under the bar shows the amount Claude Code last reported, with its age and the word stale. A manual budget is tagged `manual, local` for the same reason and gets the same line.
 
 Cache rules:
 
@@ -268,7 +285,7 @@ You set no limit for any of these. The rows come from what Claude Code reports o
 | D. No windows, dollar cap known | The cache `spend` block, or the statusline `spend_limit`. | One dollar row, tagged `measured` or `cached`. When a reported figure and this machine's estimate both exist, a line next to it shows both, the reported one labeled "reported by Claude". | Monthly spend, the projection to the end of the period and the cutoff lines. |
 | E. Cap not reported | Nothing. | One line on what is missing: a window plan is told to run a session with the playbook statusline, a dollar or unknown plan that the cap is not reported by Claude Code on this login. Local spend and burn still show. | Spend and projection, and no cutoff lines. A limit of zero is never drawn. |
 | F. API key, Bedrock, Vertex or Foundry | Nothing. | As E, and the `usage.budget.*` lines when you set them. | As E, or with the budget as the 100 percent line. |
-| G. Reading over 6 hours old | Any. | A statusline reading stays, tagged `measured, stale`. A cached dollar limit over 6 hours old is still used when nothing newer was detected, tagged `limit cached <age> ago, used is this machine only`. A cached window over 6 hours old is dropped. The comparison line says "stale, read N ago". | The monthly dollar chart marks the time of the reported figure. A window chart ends at the last reading, and its saved readings stay as they were. |
+| G. Reading over 6 hours old | Any. | A statusline reading stays, tagged `measured, stale`. A cached dollar limit over 6 hours old is still used when nothing newer was detected, tagged `cached <age> ago, plus this machine since` (or `limit cached <age> ago, used is this machine only` when the cache has no amount). A cached window over 6 hours old is dropped. The comparison line says "stale, read N ago". | The monthly dollar chart marks the time of the reported figure. A window chart ends at the last reading, and its saved readings stay as they were. |
 | H. Window already reset | Any. | The window is dropped, as Claude Code drops it. | None. |
 | I. A rate limit error seen | An `api_error` with status 429 in the Claude Code telemetry. | A line "Claude Code was rate limited at T (HTTP 429)" with the newest time. A 429 counts for the line and the reason for 7 days. When a window plan has no reading and a 429 was seen, the reason is `rate-limited-seen`; other reasons keep their word. | A `×` marker at each 429 inside the period shown. A 429 before the period starts or at its end is not drawn. A retried call counts once. |
 

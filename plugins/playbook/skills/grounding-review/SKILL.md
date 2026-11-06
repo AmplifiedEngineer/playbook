@@ -1,6 +1,7 @@
 ---
 name: grounding-review
 description: Evidence and labeling rules for reviewing a PR or diff. Use for any quick or deep code review. Not for investigation.
+user-invocable: false
 ---
 
 # Review Grounding
