@@ -50,12 +50,13 @@ Skills live in `skills/<name>/SKILL.md` and load on demand when the session deci
 
 A skill and a command must never share a name. Claude Code exposes every skill as `/playbook:<name>` too, so a same-named command and skill collide. `crates/plugin-checks/tests/name_collisions.rs` fails on the pair.
 
-The frontmatter has two fields:
+The frontmatter has two required fields and one optional field:
 
 | Field | Purpose |
 |---|---|
 | `name` | Machine identifier used to reference the skill. |
 | `description` | The trigger. Claude reads this to decide whether to load the skill. |
+| `user-invocable` | Optional. `false` hides the skill from the `/` menu. The model and subagents can still load it. |
 
 The body is the content Claude gets when the skill loads: rules, templates, formats, decision tables. Write it as self-contained prose because the skill loads without surrounding context.
 
@@ -76,6 +77,12 @@ Rules and formats go here.
 ```
 
 The `description` field does all the targeting. Write it as a "use when..." sentence that names the task clearly. A vague description means the skill loads at the wrong time or not at all.
+
+### Keep helper skills out of the slash menu
+
+Typing `/playbook` lists every skill. Only entry points a user would type belong there, such as `playbook-usage`. A helper that commands and subagents load, such as `grounding-review` or `engineering-standards`, sets `user-invocable: false`. Claude Code documents this field for skills: the skill leaves the `/` menu and the model can still load it. `crates/plugin-checks/tests/slash_menu_visibility.rs` fails when a skill is neither on its public list nor hidden, so a new helper does not leak into the menu.
+
+Commands stay visible. The Claude Code docs state `user-invocable` for skills only, and `/playbook:review` runs `quick-review` and `deep-review` as commands, so a hidden command could break that path. The test also fails if a command sets the field. Hide commands only after a live session confirms the field works there.
 
 ## Hooks
 

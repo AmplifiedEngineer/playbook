@@ -1,6 +1,7 @@
 ---
 name: engineering-standards
 description: Team standards for code design, commits, PRs, testing, and deployment. Use when designing code, preparing a PR, or planning tests or a deploy.
+user-invocable: false
 ---
 
 # Engineering Standards

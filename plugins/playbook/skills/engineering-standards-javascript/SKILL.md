@@ -1,6 +1,7 @@
 ---
 name: engineering-standards-javascript
 description: JavaScript and TypeScript rules for code and tests, including validation and Jest or Vitest mocks. Use when writing or reviewing JS or TS.
+user-invocable: false
 ---
 
 # Engineering Standards: JavaScript and TypeScript

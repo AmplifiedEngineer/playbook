@@ -1,6 +1,7 @@
 ---
 name: finish-pull-request
 description: Self-reviews a freshly opened PR, fixes findings, promotes the draft, merges when allowed. Use right after create-pull-request returns a PR URL.
+user-invocable: false
 ---
 
 # Finish Pull Request

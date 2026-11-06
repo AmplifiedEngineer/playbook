@@ -74,7 +74,7 @@ Every hook is a module under `crates/cli/src/hooks/`, run as `playbook hook <nam
 
 **The handoff loop.**
 
-1. `context-hygiene` (UserPromptSubmit) asks the model to run `playbook handoff save --session <id>`. The file is named `<dir>-<epoch>-<pid>-<id>.md` under `~/.config/playbook/runtime/handoff/`, keyed by directory like any handoff.
+1. `context-hygiene` (UserPromptSubmit) asks the model to run `playbook handoff save --session <id>`. The file is named `<dir>_<hash>_<epoch>_<pid>_<id>.md` under `~/.config/playbook/runtime/handoff/`, keyed by directory like any handoff. `<hash>` is eight hex characters of a hash of the full path, so `my_app` and `my-app` never share a handoff. Files an older version saved as `<dir>-<epoch>-<pid>.md` are still read, and an older tagged file is not.
 2. When the session ends with `/clear`, `session-clean-exit` (SessionEnd, reason `clear`) drops a marker in `handoff/cleared/`.
 3. The next `session-init` with source `clear` takes the tagged handoff whose marker is freshest. It injects at most 3,000 characters of it with the path of the full file (tombstoned by gc), and removes the marker, so it loads once.
 

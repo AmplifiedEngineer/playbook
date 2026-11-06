@@ -1,6 +1,7 @@
 ---
 name: engineering-standards-rust
 description: Rust rules for code and reviews, covering ownership, errors, types, API design, async, unsafe, testing and Clippy lints. Use when writing or reviewing Rust, or a diff that touches .rs files.
+user-invocable: false
 ---
 
 # Engineering Standards: Rust
