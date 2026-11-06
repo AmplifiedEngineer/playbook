@@ -2,6 +2,48 @@
 
 Release notes for playbook: the binary and the plugin in `plugins/playbook`. From 0.34.0 they ship together as one `vX.Y.Z` release with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). Each release has a section named `## playbook <version>`, newest first, which the release pull request adds from the notes that `scripts/release-notes.sh` builds. The sections from 0.33.0 down are plugin releases from before the two lines joined. The binary skips 0.27 to 0.33: it goes from 0.26 to 0.34.0.
 
+## playbook 0.40.2
+
+### Features
+
+- **pbtop**: move with h and l and scroll the help with j and k
+- **pbtop**: switch between local time and UTC with z
+- **doctor**: warn when the Claude Code token is not the collector's
+- **pbtop**: set the manual monthly budget from a window
+- **pbtop**: show the manual and the detected monthly budget together
+- **telemetry**: sync Claude Code keys on config set
+- **pbtop**: detect Enterprise and hide the 5 hour and weekly windows
+- **pbtop**: join the burn-up lines into unbroken strokes
+- **pbtop**: color the burnup usage by an HSV gradient
+- **pbtop**: add an opt-in spectrum theme
+- **statusline**: show local spend against a monthly budget ([#1586](https://github.com/pragmatic-engineer/playbook/pull/1586))
+- **usage**: add account list and display names
+- **usage**: move events between accounts and undo the move
+- **routing**: default routing.escalate to auto ([#1595](https://github.com/pragmatic-engineer/playbook/pull/1595))
+- **usage**: list sessions and move events by session boundary
+- **usage**: compare session boundaries with a dashboard
+- **telemetry**: show one merged Tools table with a transcript marker ([#1575](https://github.com/pragmatic-engineer/playbook/pull/1575))
+- **hooks**: warn at session start when the telemetry keys are missing ([#1576](https://github.com/pragmatic-engineer/playbook/pull/1576))
+- **pbtop**: link pbtop to playbook and warn on an older pbtop ([#1588](https://github.com/pragmatic-engineer/playbook/pull/1588))
+- **usage**: label each session by the credential it used ([#1581](https://github.com/pragmatic-engineer/playbook/pull/1581))
+- **pbtop**: pick the account with u and show it in the title ([#1582](https://github.com/pragmatic-engineer/playbook/pull/1582))
+- **usage**: run the account commands on a copy of the database
+- **effort**: return the Agent tool effort from effort resolve ([#1596](https://github.com/pragmatic-engineer/playbook/pull/1596))
+- **plugin**: hide helper skills from the slash menu ([#1597](https://github.com/pragmatic-engineer/playbook/pull/1597))
+- **review**: pick findings and comments from a checklist ([#1599](https://github.com/pragmatic-engineer/playbook/pull/1599))
+- **nix**: move the Nix flake to pragmatic-engineer/nix ([#1603](https://github.com/pragmatic-engineer/playbook/pull/1603))
+
+### Fixes
+
+- **telemetry**: name custom agents from transcripts
+- **pbtop**: keep the stale reported amount in the monthly budget bar ([#1601](https://github.com/pragmatic-engineer/playbook/pull/1601))
+- **handoff**: stop key collisions and keep the file on a failed archive ([#1598](https://github.com/pragmatic-engineer/playbook/pull/1598))
+
+### Other changes
+
+- ci(auto-update): update armed PRs one at a time ([#1590](https://github.com/pragmatic-engineer/playbook/pull/1590))
+- chore(release): drop the AUR, apt and dnf, scoop and winget channels ([#1604](https://github.com/pragmatic-engineer/playbook/pull/1604))
+
 ## playbook 0.40.1
 
 ### Features
