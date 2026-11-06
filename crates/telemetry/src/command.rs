@@ -6,7 +6,7 @@
 use clap::Subcommand;
 
 /// `playbook usage` subcommands.
-#[derive(Subcommand, Debug, Clone, Copy)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum UsageCommand {
     /// Warm the usage store in the background (run by the `usage-warm` hook)
     #[command(hide = true)]
@@ -103,5 +103,32 @@ pub enum UsageCommand {
         /// Say what would be removed without deleting anything
         #[arg(long)]
         dry_run: bool,
+    },
+    /// List the accounts in the usage store and name them
+    ///
+    /// Every usage event carries an account key: the email Claude Code was
+    /// signed in to, or a `token:` fingerprint. These commands show the keys
+    /// and give each one a display name.
+    ///
+    /// Example: `playbook usage account list`
+    Account {
+        #[command(subcommand)]
+        command: AccountCommand,
+    },
+}
+
+/// `playbook usage account` subcommands.
+#[derive(Subcommand, Debug, Clone)]
+pub enum AccountCommand {
+    /// List the accounts with their events, cost and time span
+    List,
+    /// Give an account key a display name, or clear it with an empty name
+    ///
+    /// Example: `playbook usage account name you@example.com Company`
+    Name {
+        /// Account key shown by `account list`
+        key: String,
+        /// Display name to show; empty clears it
+        name: String,
     },
 }
