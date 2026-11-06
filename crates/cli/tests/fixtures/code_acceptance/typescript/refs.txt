@@ -1,0 +1,6 @@
+exit: 0
+src/main.ts:3:10  import (candidate)  import { Square } from "./shapes";
+src/main.ts:5:43  use (candidate)  export function makeSquare(side: number): Square {
+src/main.ts:7:14  use (candidate)  return new Square(side);
+src/main.ts:10:30  use (candidate)  export function total(items: Square[]): number {
+src/shapes.ts:15:14  declaration (candidate)  export class Square implements Shape {

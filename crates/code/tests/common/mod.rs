@@ -20,6 +20,8 @@ pub(crate) struct Row {
     pub name: String,
     pub kind: String,
     pub start_line: i64,
+    pub end_line: i64,
+    pub exported: bool,
 }
 
 /// A fixture copied to a scratch repo and indexed.
@@ -80,7 +82,8 @@ impl Indexed {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT f.path, s.qualified_name, s.name, s.kind, s.start_line
+                "SELECT f.path, s.qualified_name, s.name, s.kind, s.start_line, s.end_line,
+                        s.exported
                  FROM symbols s JOIN files f ON f.id = s.file_id
                  ORDER BY f.path, s.start_line, s.qualified_name",
             )
@@ -92,6 +95,8 @@ impl Indexed {
                 name: r.get(2)?,
                 kind: r.get(3)?,
                 start_line: r.get(4)?,
+                end_line: r.get(5)?,
+                exported: r.get(6)?,
             })
         })
         .expect("query")

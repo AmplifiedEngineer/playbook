@@ -1,0 +1,9 @@
+exit: 0
+const:3-3  SCALE  export const SCALE = 2
+interface:5-8  Shape  export interface Shape
+  method:7-7  Shape.area  area(): number
+enum:10-13  Axis  export enum Axis
+class:15-22  Square  export class Square implements Shape
+  method:17-17  Square.constructor  constructor(private side: number)
+  method:19-21  Square.area  area(): number
+type_alias:24-24  Id  export type Id = string

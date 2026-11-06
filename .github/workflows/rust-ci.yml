@@ -302,6 +302,7 @@ jobs:
         env:
           PKGS: ${{ needs.changes.outputs.pkgs || '--workspace' }}
           SHARD: ${{ matrix.shard }}
+          INSTA_UPDATE: "no"
         run: |
           # A hash partition gives each test to exactly one shard. The
           # collector daemon group stays one test at a time inside its shard,

@@ -1,0 +1,7 @@
+exit: 0
+main.go:5:20  use (candidate)  func Total(items []Square) int {
+main.go:15:17  use (candidate)  return Total([]Square{NewSquare(2), NewSquare(3)})
+shape.go:11:6  declaration (candidate)  type Square struct {
+shape.go:16:9  use (candidate)  func (s Square) Area() int {
+shape.go:20:26  use (candidate)  func NewSquare(side int) Square {
+shape.go:21:9  use (candidate)  return Square{Side: side}

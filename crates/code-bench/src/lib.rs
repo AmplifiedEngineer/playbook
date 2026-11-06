@@ -4,5 +4,6 @@
 //! Dev-only benchmark for the code index. Nothing in the shipped binary
 //! depends on this crate; `tests/dependency_tree.rs` keeps it that way.
 
+pub mod corpus;
 pub mod metrics;
 pub mod tokenizer;

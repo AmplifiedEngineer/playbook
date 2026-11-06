@@ -1,0 +1,19 @@
+exit: 0
+== pkg/shapes.py:6-12  symbol Square; text
+class Square:
+    def __init__(self, side):
+        self.side = side
+
+    def area(self):
+        # Square area
+        return self.side * self.side * SCALE
+== pkg/shapes.py:15-16  symbol make_square
+def make_square(side):
+    return Square(side)
+== pkg/main.py:1-6  text; import
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+from pkg.shapes import Square, make_square
+# Square helpers
+
+def total(items):

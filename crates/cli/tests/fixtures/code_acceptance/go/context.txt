@@ -1,0 +1,17 @@
+exit: 0
+== shape.go:11-13  symbol Square; text
+type Square struct {
+	Side int
+}
+== shape.go:20-22  symbol NewSquare
+func NewSquare(side int) Square {
+	return Square{Side: side}
+}
+== main.go:1-7  text
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: Apache-2.0
+package shape
+// Square totals.
+func Total(items []Square) int {
+	label := "Square"
+	sum := 0

@@ -1,0 +1,5 @@
+exit: 0
+pkg/main.py:3:24  import (candidate)  from pkg.shapes import Square, make_square
+pkg/main.py:12:35  use (candidate)  return total([make_square(2), Square(3)])
+pkg/shapes.py:6:7  declaration (candidate)  class Square:
+pkg/shapes.py:16:12  use (candidate)  return Square(side)
