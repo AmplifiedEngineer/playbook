@@ -14,6 +14,8 @@ concurrency:
 jobs:
   update:
     name: update
+    # Holds the GitHub App credentials. Protection rules for them live on this environment.
+    environment: bot-app
     runs-on: ubuntu-latest
     # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
     timeout-minutes: 5
