@@ -12,7 +12,8 @@ Install order:
 2. The install script (`install.sh`), when you have no Homebrew.
 3. cargo binstall or mise.
 4. A `.deb` or `.rpm` package.
-5. The marketplace plugin, for the skills only.
+5. Nix, the Arch Linux AUR, or scoop on Windows (experimental).
+6. The marketplace plugin, for the skills only.
 
 ## Pick an install mode
 
@@ -81,7 +82,7 @@ Use this when you have no Homebrew. install.sh is a bash script, so it does not 
 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
 ```
 
-It installs only the `playbook` binary, into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`), after checking its SHA256, its build attestation when `gh` can check it, and a `--version` smoke test. It puts that directory on `PATH`. It does not touch Claude Code's plugins or settings.
+It installs the `playbook` binary and the `pbdoc` document converter, and links `pb`, into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`). When a release has no `pbdoc` archive, it warns and skips `pbdoc`. It checks each download after checking its SHA256, its build attestation when `gh` can check it, and a `--version` smoke test. It puts that directory on `PATH`. It does not touch Claude Code's plugins or settings.
 
 When it replaces an older binary, it prints `playbook updated from A to B.`, then the breaking changes of the new release if there are any, then a link to the full release notes. Before 1.0 a breaking change can ship in any release, so read them.
 
@@ -142,7 +143,7 @@ playbook setup
 
 ### Debian, Ubuntu and Fedora packages
 
-Each release has a `.deb` and an `.rpm` for x86_64 and arm64. They hold the static `playbook` and `pbtop` binaries and the `pb` link in `/usr/bin`, with no dependencies. Download the file for your machine and `SHA256SUMS` from the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest), check them as in [Without `curl | bash`](#without-curl--bash) below, then install with your package manager, which asks for its own privileges (`playbook` never runs `sudo`):
+Each release has a `.deb` and an `.rpm` for x86_64 and arm64. They hold the static `playbook` and `pbtop` binaries and the `pb` link in `/usr/bin`, and the bash, fish and zsh completion files under `/usr/share`, with no dependencies. Download the file for your machine and `SHA256SUMS` from the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest), check them as in [Without `curl | bash`](#without-curl--bash) below, then install with your package manager, which asks for its own privileges (`playbook` never runs `sudo`):
 
 ```bash
 sudo apt install ./playbook_<version>_amd64.deb     # Debian, Ubuntu (arm64: _arm64.deb)
@@ -341,7 +342,7 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 
 ## Shell completions
 
-`playbook completions bash`, `playbook completions zsh` and `playbook completions fish` print a completion script on stdout. Homebrew, the Linux packages and Nix ship the completion files. After `install.sh`, `cargo binstall` or mise, run `playbook setup` and answer yes to the completions question, or run `playbook setup --only completions` from the shell you use. Setup writes a small file for the shell in `$SHELL`, which asks the installed binary for the script, so an upgrade needs no rewrite. For zsh that file is a loader at `~/.local/share/playbook/completions.zsh` that does its work on the first Tab press, and setup also adds one marked line to `~/.zshrc` that sources it, creating that file when it is missing. `playbook uninstall` removes the loader and the line after a backup of `~/.zshrc`. It keeps the backup, so delete `~/.zshrc.bak-<stamp>` by hand when you no longer need it. Without a terminal and without `--yes`, setup skips this part. To load the script yourself instead, run `source <(playbook completions bash)` from your own shell setup. The script also completes `pb`, but only when `pb` on your `PATH` is the same file as `playbook`.
+`playbook completions bash`, `playbook completions zsh` and `playbook completions fish` print a completion script on stdout. Homebrew and the Linux packages ship the completion files. After a Nix install, `install.sh`, the AUR package, `cargo binstall` or mise, run `playbook setup` and answer yes to the completions question, or run `playbook setup --only completions` from the shell you use. Setup writes a small file for the shell in `$SHELL`, which asks the installed binary for the script, so an upgrade needs no rewrite. For zsh that file is a loader at `~/.local/share/playbook/completions.zsh` that does its work on the first Tab press, and setup also adds one marked line to `~/.zshrc` that sources it, creating that file when it is missing. `playbook uninstall` removes the loader and the line after a backup of `~/.zshrc`. It keeps the backup, so delete `~/.zshrc.bak-<stamp>` by hand when you no longer need it. Without a terminal and without `--yes`, setup skips this part. To load the script yourself instead, run `source <(playbook completions bash)` from your own shell setup. The script also completes `pb`, but only when `pb` on your `PATH` is the same file as `playbook`.
 
 ## Skills without the binary
 

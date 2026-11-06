@@ -63,7 +63,7 @@ Before this wizard, the command (then called `init`) printed a flat plan and one
 
 ## The parts
 
-Each part has a flag pair. With no flag, `setup` asks in a terminal and uses the default otherwise. `--yes` accepts every default, so it turns every part but the security defaults on. It keeps the system prompt off when `systemPrompt.enabled` is false or on an earlier install that had none, and the `pb` link off after a stored no. `--aliases`, `--claude-override` and `--collector-service` are retired: setup accepts them and does nothing, with a note on stderr when it is a terminal.
+Each part has a flag pair. With no flag, `setup` asks in a terminal and uses the default otherwise. `--yes` accepts every default, so it turns every part but the security defaults on. It keeps the system prompt off when `systemPrompt.enabled` is false or on an earlier install that had none, and the `pb` link off after a stored no. `--aliases`, `--claude-override`, `--collector-service` and `--disk-ballast` are retired: setup accepts them and does nothing, with a note on stderr when it is a terminal.
 
 | Part | Default | Flags | Files it edits |
 | :- | :- | :- | :- |
@@ -130,8 +130,6 @@ Setup writes no line to your `.zshrc` or `.bashrc`. `playbook cc`, `playbook ccd
 `--short-name` asks whether `pb` should be a short name for `playbook`. `install.sh` and the Homebrew formula already make a `pb` symlink, so on those installs the part only checks it. Otherwise, when no other `pb` is on your PATH and playbook sits in the install folder (`$PLAYBOOK_BIN_DIR`, default `~/.local/bin`), setup adds the relative symlink `pb -> playbook` there, the same link `install.sh` makes. It never replaces a `pb` that runs something else, and when playbook lives anywhere else it prints the `ln -s` command to run by hand. The answer is stored as `launcher.shortName`, and a stored no keeps `--yes` from adding the link. `playbook uninstall --remove-binary` removes the link. See [the launcher](../internals/01-launcher-and-hooks.md#the-pb-short-name).
 
 `--completions` installs tab completion for the shell in `$SHELL`. Bash and fish get a small stub for `playbook` and for `pb` in their own completion folders. Zsh has no such folder, so setup writes a loader at `~/.local/share/playbook/completions.zsh` and adds one line to `~/.zshrc`, marked with the trailing comment `# playbook completions`, that sources it when the loader is readable. The loader runs `playbook completions zsh` on the first Tab press, so shell startup costs nothing, and it prints nothing when `playbook` is missing. Setup rewrites a loader it wrote, keeps a loader or stub it did not write, and does not touch a marked line that you edited. An earlier version wrote a stub at `~/.local/share/zsh/site-functions/_playbook` and a three-line block in `~/.zshrc`. Setup removes that stub and replaces the block with the one line, after a backup `~/.zshrc.bak-<stamp>`. `playbook uninstall` removes the loader and every exact line and old block after a backup `~/.zshrc.bak-<stamp>`, and keeps that backup.
-
-### Disk ballast
 
 ### Policy guard
 

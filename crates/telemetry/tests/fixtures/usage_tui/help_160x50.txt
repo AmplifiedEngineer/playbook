@@ -43,8 +43,8 @@
 │                                        │c          Clear the filter                         all panels              │sonnet-5              1   23.8K    $0.95│
 │                                        │                                                                            │opus-5                1   23.8K    $1.40│
 │                                        │Refresh                                                                     │sonnet-5              1   23.8K    $0.20│
-│                                        │R          Read new usage now (also automatic)      all panels              │opus-5                1   23.8K    $6.00│
-│                                        │                                                                            │haiku-5               1   23.8K    $0.01│
-│                                        │Quit                                                                        │haiku-5               1   23.8K    $0.02│
+│                                        │R, B       Read usage and budget limits now         all panels              │opus-5                1   23.8K    $6.00│
+│                                        │b          Set the manual monthly budget            all panels              │haiku-5               1   23.8K    $0.01│
+│                                        │                                                                            │haiku-5               1   23.8K    $0.02│
 ╰────────────────────────────────────────╰┤ ↑/↓ j/k scroll, any other key closes ├────────────────────────────────────╯────────────────────────────────────────╯
  1-6 panel d day w week m month a all ←/→ day r range v view / filter s/S sort t theme (default) ? help enter select q quit      updated 01:46:40 UTC, every 5s

@@ -9,14 +9,15 @@
 //! documented by Anthropic, so every read can come back empty and every
 //! caller treats empty as "unknown".
 //!
-//! The plan is a guess from the rate limit tier names. Only the two tiers seen
-//! on real Max accounts are recognized. Any other value, including every
-//! Enterprise value, maps to [`Plan::EnterpriseOrUnknown`] instead of being
-//! guessed at.
+//! The plan comes from the rate limit tier names (the two tiers seen on real
+//! Max accounts), then from `organizationType` or `seatTier` for Enterprise.
+//! Any other value maps to [`Plan::Unknown`] instead of being guessed at.
 
 use crate::claude_code::parse_iso8601_utc;
+use crate::data::USAGE_DB_FILE;
 use crate::limits::{LimitPeriod, Unit};
 use crate::limits_source::{self, Window};
+use crate::local_total::LocalTotal;
 use crate::monthly_use;
 use crate::period::elapsed_text;
 use crate::spend::SpendFigure;
@@ -44,9 +45,12 @@ const CLOCK_SKEW_SECONDS: i64 = 300;
 pub enum Plan {
     Max5x,
     Max20x,
-    /// Anything else: Enterprise, Team, Pro, an API account or a value that
-    /// this version does not know.
-    EnterpriseOrUnknown,
+    /// An Enterprise organization. The whole limit is the monthly extra usage
+    /// budget, so there are no 5 hour or weekly windows.
+    Enterprise,
+    /// Anything else: Team, Pro, an API account or a value that this version
+    /// does not know.
+    Unknown,
 }
 
 impl Plan {
@@ -55,7 +59,8 @@ impl Plan {
         match self {
             Plan::Max5x => "max_5x",
             Plan::Max20x => "max_20x",
-            Plan::EnterpriseOrUnknown => "enterprise_or_unknown",
+            Plan::Enterprise => "enterprise",
+            Plan::Unknown => "unknown",
         }
     }
 
@@ -63,13 +68,14 @@ impl Plan {
         match self {
             Plan::Max5x => "Max 5x",
             Plan::Max20x => "Max 20x",
-            Plan::EnterpriseOrUnknown => "Enterprise or unknown plan",
+            Plan::Enterprise => "Enterprise",
+            Plan::Unknown => "Unknown plan",
         }
     }
 
     /// Whether this plan is known to have the 5 hour and weekly windows.
     pub fn has_windows(self) -> bool {
-        !matches!(self, Plan::EnterpriseOrUnknown)
+        matches!(self, Plan::Max5x | Plan::Max20x)
     }
 
     fn from_tiers(tiers: &[&str]) -> Plan {
@@ -79,7 +85,26 @@ impl Plan {
         } else if has("max_5x") {
             Plan::Max5x
         } else {
-            Plan::EnterpriseOrUnknown
+            Plan::Unknown
+        }
+    }
+
+    /// The plan from the account fields: the Max tiers first, then an
+    /// Enterprise organization (`organizationType` is `claude_enterprise`, or
+    /// `seatTier` names enterprise), else unknown.
+    fn from_account(
+        tiers: &[&str],
+        organization_type: Option<&str>,
+        seat_tier: Option<&str>,
+    ) -> Plan {
+        match Plan::from_tiers(tiers) {
+            Plan::Unknown
+                if organization_type == Some("claude_enterprise")
+                    || seat_tier.is_some_and(|t| t.to_lowercase().contains("enterprise")) =>
+            {
+                Plan::Enterprise
+            }
+            plan => plan,
         }
     }
 }
@@ -248,7 +273,7 @@ pub struct Account {
 impl Default for Account {
     fn default() -> Self {
         Account {
-            plan: Plan::EnterpriseOrUnknown,
+            plan: Plan::Unknown,
             cache: None,
         }
     }
@@ -341,7 +366,7 @@ fn account(root: &Value) -> Account {
         .filter_map(|k| tier(k))
         .collect();
     Account {
-        plan: Plan::from_tiers(&tiers),
+        plan: Plan::from_account(&tiers, tier("organizationType"), tier("seatTier")),
         cache: cache(root),
     }
 }
@@ -575,9 +600,15 @@ fn raw_cache_lines(root: &Value) -> Vec<String> {
 }
 
 /// What the statusline budget line will show, and which source decided it.
-fn budget_lines(s: &limits_source::Sources, now: i64, raw: bool) -> Vec<String> {
+fn budget_lines(s: &limits_source::Sources, usage_dir: &Path, now: i64, raw: bool) -> Vec<String> {
     let mut out = vec!["What the statusline budget line will show".to_string()];
-    let figure = monthly_use::monthly_use(s.snapshot.as_ref(), &s.account, &s.budgets, now);
+    let local = LocalTotal {
+        db: usage_dir.join(USAGE_DB_FILE),
+        cache: None,
+    };
+    let figure = monthly_use::monthly_use(s.snapshot.as_ref(), &s.account, &s.budgets, now, || {
+        local.month_used(now)
+    });
     match &figure {
         None => out.push(
             "  monthly: nothing to show (no dollar limit with an amount used this month)"
@@ -592,16 +623,21 @@ fn budget_lines(s: &limits_source::Sources, now: i64, raw: bool) -> Vec<String> 
                     "  monthly: from the Claude Code cache, {} old (fresh)",
                     elapsed_text(age)
                 ),
+                monthly_use::Source::Local => {
+                    "  monthly: from the usage database of this machine only (local)".to_string()
+                }
                 monthly_use::Source::Cache { age, fresh: false } => format!(
                     "  monthly: from the Claude Code cache, {} old (stale: shown with its age and no projection; Claude Code writes the cache when it fetches usage, which the /usage view does)",
                     elapsed_text(age)
                 ),
             });
             let in_force = limits_source::amount(Unit::Dollars, m.limit.limit);
-            out.push(if m.own_budget {
+            out.push(if m.source == monthly_use::Source::Local {
+                format!("  limit in force: {in_force}, your usage.budget.monthlyUsd")
+            } else if let (true, Some(reported)) = (m.own_budget, m.reported_usd) {
                 format!(
                     "  limit in force: {in_force}, your usage.budget.monthlyUsd, which is lower than the {} Claude reports",
-                    limits_source::amount(Unit::Dollars, m.reported_usd)
+                    limits_source::amount(Unit::Dollars, reported)
                 )
             } else {
                 format!("  limit in force: {in_force} as Claude reports it")
@@ -623,7 +659,7 @@ fn budget_lines(s: &limits_source::Sources, now: i64, raw: bool) -> Vec<String> 
         out.push("  5 hour window: absent in the data, so the line leaves it out".to_string());
     }
     out.push(
-        "  order: statusline reading, then the Claude Code cache from this month, then nothing. Your monthly budget replaces the limit only when it is lower, and never supplies an amount used.".to_string(),
+        "  order: statusline reading, then the Claude Code cache from this month, then, with a monthly budget set, this machine's cost for the month from the usage database, then nothing. Your monthly budget replaces the limit only when it is lower.".to_string(),
     );
     if let (true, Some(m)) = (raw, &figure) {
         let own = s
@@ -631,9 +667,12 @@ fn budget_lines(s: &limits_source::Sources, now: i64, raw: bool) -> Vec<String> 
             .iter()
             .find(|(p, _)| *p == LimitPeriod::Monthly)
             .map_or("none".to_string(), |(_, usd)| format!("${usd:.2}"));
+        let reported = m
+            .reported_usd
+            .map_or("none".to_string(), |usd| format!("${usd:.2}"));
         out.push(format!(
-            "    raw: monthly used ${:.2} of reported limit ${:.2}, own budget {own}, limit in force ${:.2}",
-            m.limit.used, m.reported_usd, m.limit.limit
+            "    raw: monthly used ${:.2} of reported limit {reported}, own budget {own}, limit in force ${:.2}",
+            m.limit.used, m.limit.limit
         ));
     }
     out
@@ -755,7 +794,7 @@ pub fn report(
     out.push(String::new());
     out.extend(verdict_lines(&sources, now));
     out.push(String::new());
-    out.extend(budget_lines(&sources, now, raw));
+    out.extend(budget_lines(&sources, usage_dir, now, raw));
     if !raw {
         out.push(String::new());
         out.push(
@@ -823,11 +862,53 @@ mod tests {
     }
 
     #[test]
-    fn any_other_tier_name_is_enterprise_or_unknown() {
+    fn the_owners_enterprise_account_is_enterprise() {
+        let root: Value = serde_json::from_str(
+            r#"{"oauthAccount":{"organizationType":"claude_enterprise","seatTier":"enterprise_usage_based","organizationRateLimitTier":"default_raven_enterprise","hasExtraUsageEnabled":true}}"#,
+        )
+        .unwrap();
+
+        let plan = account(&root).plan;
+
+        assert_eq!(plan, Plan::Enterprise);
+        assert_eq!(plan.key(), "enterprise");
+        assert!(!plan.has_windows());
+    }
+
+    #[test]
+    fn either_enterprise_field_alone_is_enough() {
+        let by_type: Value =
+            serde_json::from_str(r#"{"oauthAccount":{"organizationType":"claude_enterprise"}}"#)
+                .unwrap();
+        let by_seat: Value =
+            serde_json::from_str(r#"{"oauthAccount":{"seatTier":"Enterprise_Usage_Based"}}"#)
+                .unwrap();
+
+        assert_eq!(account(&by_type).plan, Plan::Enterprise);
+        assert_eq!(account(&by_seat).plan, Plan::Enterprise);
+    }
+
+    #[test]
+    fn a_non_enterprise_account_stays_unknown_and_a_max_tier_stays_max() {
+        let team: Value = serde_json::from_str(
+            r#"{"oauthAccount":{"organizationType":"claude_team","seatTier":"standard","organizationRateLimitTier":"default_raven"}}"#,
+        )
+        .unwrap();
+        let max: Value = serde_json::from_str(
+            r#"{"oauthAccount":{"organizationType":"claude_enterprise","organizationRateLimitTier":"default_claude_max_5x"}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(account(&team).plan, Plan::Unknown);
+        assert_eq!(account(&max).plan, Plan::Max5x);
+    }
+
+    #[test]
+    fn any_other_tier_name_is_unknown() {
         let plan = Plan::from_tiers(&["default_raven", "something_new"]);
 
-        assert_eq!(plan, Plan::EnterpriseOrUnknown);
-        assert_eq!(plan.label(), "Enterprise or unknown plan");
+        assert_eq!(plan, Plan::Unknown);
+        assert_eq!(plan.label(), "Unknown plan");
         assert!(!plan.has_windows());
     }
 
@@ -1408,7 +1489,7 @@ mod tests {
         limits_source::Sources {
             snapshot: Some(snapshot),
             account: Account {
-                plan: Plan::EnterpriseOrUnknown,
+                plan: Plan::Unknown,
                 cache,
             },
             ..limits_source::Sources::default()

@@ -79,7 +79,7 @@ check: build
 #
 # Dev tooling only. Online audits run when GH_TOKEN is set, or gh is signed in.
 zizmor:
-    GH_TOKEN="${GH_TOKEN:-$(gh auth token 2>/dev/null || true)}" zizmor --persona auditor --min-severity medium --no-progress .
+    GH_TOKEN="${GH_TOKEN:-$(gh auth token 2>/dev/null || true)}" zizmor --persona auditor --no-progress .
 
 # cargo-nextest schedules tests across every test binary at once.
 #
