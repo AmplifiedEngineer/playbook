@@ -6,10 +6,12 @@
 //! an oracle: a repo without an answers file reports no refs truth.
 //! `code-bench gate` judges a report against the committed baseline.
 //! `code-bench fixtures --write-baseline` rewrites the fixture baseline.
+//! `code-bench mutants` judges a cargo-mutants run against the score floor.
 
 use code_bench::corpus::{fetch, GitTransport, Manifest, ThreadSleeper, Tier};
 use code_bench::fixtures;
 use code_bench::gate::{evaluate, Baseline, Floor, Inputs, Overrides, MIN_TASKS_PER_CELL};
+use code_bench::mutants::{judge, score_from_outcomes, MutantsError, Verdict};
 use code_bench::oracle::rg::Candidate;
 use code_bench::runner::{self, PlaybookBinary, RepoJob, Report};
 use code_bench::scope::scope_to_language;
@@ -23,7 +25,7 @@ const HOME_DIR: &str = "home";
 const DATA_DIR: &str = "crates/code-bench/data";
 const WRITE_BASELINE_FLAG: &str = "--write-baseline";
 const LANGUAGE_FLAG: &str = "--language";
-const USAGE: &str = "usage: code-bench pilot [--language LANG] CACHE_DIR REPORT_FILE [PLAYBOOK_BINARY]\n       code-bench gate [--language LANG] REPORT_FILE RUN_DATE\n       code-bench fixtures --write-baseline";
+const USAGE: &str = "usage: code-bench pilot [--language LANG] CACHE_DIR REPORT_FILE [PLAYBOOK_BINARY]\n       code-bench gate [--language LANG] REPORT_FILE RUN_DATE\n       code-bench mutants OUTCOMES_FILE\n       code-bench fixtures --write-baseline";
 
 struct Args {
     language: Option<String>,
@@ -151,6 +153,38 @@ fn write_fixture_baseline() -> Result<(), String> {
     std::fs::write(fixtures::baseline_path(), report?).map_err(|e| e.to_string())
 }
 
+/// Judges the mutation score in a cargo-mutants `outcomes.json` against the
+/// floor in `floor.json`. Without a committed floor the score is printed as
+/// the first measurement and the run passes.
+fn mutants(args: &[String]) -> Result<(), String> {
+    let [outcomes_file] = args else {
+        return Err(USAGE.to_string());
+    };
+    let floor = Floor::parse(&read_data("floor.json")?)
+        .map_err(|e| e.to_string())?
+        .mutation_floor_bps;
+    let read = || {
+        let text = std::fs::read_to_string(outcomes_file)
+            .map_err(|e| MutantsError::Read(format!("{outcomes_file}: {e}")))?;
+        score_from_outcomes(&text)
+    };
+    let verdict = judge(read, floor).map_err(|e| e.to_string())?;
+    match &verdict {
+        Verdict::FirstMeasurement(score) => {
+            println!("mutation score {score} basis points, no floor is committed yet");
+        }
+        Verdict::Pass { score, floor } => {
+            println!("mutation score {score} basis points, floor {floor}");
+        }
+        Verdict::Below { score, floor } => {
+            return Err(format!(
+                "mutation score {score} basis points is below the floor {floor}"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.split_first() {
@@ -159,6 +193,7 @@ fn main() {
         Some((command, [flag])) if command == "fixtures" && flag == WRITE_BASELINE_FLAG => {
             write_fixture_baseline()
         }
+        Some((command, rest)) if command == "mutants" => mutants(rest),
         _ => Err(USAGE.to_string()),
     };
     if let Err(message) = result {

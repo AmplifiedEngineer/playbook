@@ -64,7 +64,7 @@ mod tests {
             waivers: vec![waiver("hugo"), waiver("pandas")],
             repos: vec![row("cobra"), row("ripgrep")],
         };
-        let (kept, _) = scope_to_language(&manifest(), "go", baseline, Floor { cells: vec![] });
+        let (kept, _) = scope_to_language(&manifest(), "go", baseline, Floor::default());
         let repos: Vec<_> = kept.repos.iter().map(|r| r.repo.as_str()).collect();
         let waivers: Vec<_> = kept.waivers.iter().map(|w| w.repo.as_str()).collect();
         assert_eq!(repos, ["cobra"]);
@@ -78,7 +78,7 @@ mod tests {
             waivers: vec![waiver("hugo")],
             repos: vec![row("cobra")],
         };
-        let (kept, _) = scope_to_language(&manifest(), "cobol", baseline, Floor { cells: vec![] });
+        let (kept, _) = scope_to_language(&manifest(), "cobol", baseline, Floor::default());
         assert!(kept.repos.is_empty() && kept.waivers.is_empty());
     }
 }

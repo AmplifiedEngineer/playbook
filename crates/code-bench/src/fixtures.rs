@@ -165,7 +165,10 @@ pub fn judge(baseline: &Baseline, report: &Report) -> Vec<Failure> {
     let ids = BTreeSet::new();
     evaluate(&Inputs {
         baseline,
-        floor: &Floor { cells: Vec::new() },
+        floor: &Floor {
+            cells: Vec::new(),
+            mutation_floor_bps: None,
+        },
         overrides: &Overrides {
             entries: Vec::new(),
         },
