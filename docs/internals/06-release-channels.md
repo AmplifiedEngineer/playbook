@@ -72,20 +72,21 @@ When `downstream` has moved the tap (its `moved` output, not set when the app se
 
 ### Nix flake
 
-After `verify`, the `nix` job moves the Nix flake (root `flake.nix`):
+The flake lives in [pragmatic-engineer/nix](https://github.com/pragmatic-engineer/nix), with the `playbook` and `pbtop` outputs. After `verify`, the `nix` job moves it, the way `downstream` moves the tap:
 
 1. It checks `SHA256SUMS` and the four Nix assets against their attestation.
-2. `scripts/render-flake.sh` rewrites the `releases` block (the version and one SRI hash per system).
-3. The job opens `release/nix-vX.Y.Z` titled `chore(release): nix flake X.Y.Z` with the app token, auto-merge on, and waits up to 30 minutes for the merge.
+2. `scripts/render-flake.sh` rewrites the `releases` block of `flake.nix` in a checkout of that repository (the version and one SRI hash per system).
+3. The job opens `release/nix-vX.Y.Z` there titled `chore(release): nix flake X.Y.Z` with the app token, auto-merge on, and waits up to 30 minutes for the merge.
 
-- `scripts/release-notes.sh` leaves that commit out of the next notes.
-- The job skips when the release is not the latest or `flake.nix` is already ahead, so a backport does not move the flake back. Without the app secrets it warns and passes.
-- If `main` moved between the checkout and the commit, `release-gh.sh` fails with "Run again": run the workflow with `version=X.Y.Z`.
-- A dry run renders from a stand-in `SHA256SUMS`, shows the diff and opens nothing.
-- The tag `vX.Y.Z` carries the flake of the release before it, so users pin `main` or the merge commit of the flake pull request.
-- To roll the flake back, open a pull request that reverts the flake change. The older hashes stay valid because release assets do not change.
+- `scripts/release-notes.sh` still leaves such a commit out of the notes, for the history from before the flake moved.
+- The job skips when the release is not the latest or the flake is already ahead, so a backport does not move the flake back. Without the app secrets it warns and passes.
+- The app token covers `pragmatic-engineer/nix` only. When the igorjs app installation cannot reach that repository, the job fails and the summary names the owner step: add the repository to the installation, then run again with `version=X.Y.Z`.
+- If the flake repository moved between the checkout and the commit, `release-gh.sh` fails with "Run again": run the workflow with `version=X.Y.Z`.
+- A dry run renders from a stand-in `SHA256SUMS`, checks the token with read calls, shows the diff and opens nothing.
+- The flake has no release tags, so users pin the merge commit of the flake pull request.
+- To roll the flake back, open a pull request in that repository that reverts the flake change. The older hashes stay valid because release assets do not change.
 
-Then `verify-nix-linux` and `verify-nix-macos` run `nix run github:pragmatic-engineer/playbook/<commit>#playbook -- --version` at the commit that carries the flake and compare it with the version. The Linux job also builds a copy with a wrong hash, which must fail. Both are leaf jobs, skipped in a dry run and when `nix` moved nothing.
+Then `verify-nix-linux` and `verify-nix-macos` run `nix run github:pragmatic-engineer/nix/<commit>#playbook -- --version` at the commit that carries the flake and compare it with the version. The Linux job also builds a copy with a wrong hash, which must fail. Both are leaf jobs, skipped in a dry run and when `nix` moved nothing. The flake repository also builds both outputs on Linux and macOS in its own CI.
 
 ### AUR
 
