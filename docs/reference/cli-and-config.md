@@ -1224,7 +1224,7 @@ Reads the writing-style and engineering-standards skills from the plugin root (`
 
 Find the PRs stacked with a PR
 
-Reads the GitHub stack API, then falls back to the branch chain. Takes the arguments as one string (`#12 --json --max-prs 6 --max-lines 3000`). Prints a summary, or JSON with `--json`. `--context` writes one shared review context under `/tmp/pr-stack-<pr>`. `map --stack <file> --findings <file>` gives each finding to the PR whose diff holds the line.
+Reads the GitHub stack API, then falls back to the branch chain. Takes the arguments as one string (`#12 --json --max-prs 6 --max-lines 3000`). Prints a summary, or JSON with `--json`. `--context` writes one shared review context under `/tmp/pr-stack-<pr>`. `--digest` prints what the open PRs above the PR change, per file. `map --stack <file> --findings <file>` gives each finding to the PR whose diff holds the line and lists the findings a PR above changes under `fixed_above`.
 
 - `<ARGS>`: Command arguments as one string, such as `#12 --json`
 

@@ -1,10 +1,10 @@
 # Release channels
 
-A release reaches users through three channels: the GitHub release assets (built by the `build` and `publish` jobs of `release.yml`), the Homebrew tap `pragmatic-engineer/homebrew-tap` and the plugin marketplace `pragmatic-engineer/marketplace`.
+A release reaches users through these channels: the GitHub release assets (built by the `build` and `publish` jobs of `release.yml`), `install.sh`, which downloads those assets, the Homebrew tap `pragmatic-engineer/homebrew-tap`, the Nix flake in `pragmatic-engineer/nix` and the plugin marketplace `pragmatic-engineer/marketplace`. Nothing else ships playbook: there is no AUR package, apt or dnf repository, scoop bucket or winget package. On Windows the route is the raw `.exe` release asset.
 
 After a release is published and checked, the `downstream` job of `release.yml` opens a pull request in the tap and in the marketplace, as the section on the release workflow describes. The tap also checks every 30 minutes for a newer release and bumps a formula itself when the `downstream` job has not done it within an hour.
 
-A release attaches five `playbook` binaries, five `pbtop` archives, four `pbdoc` archives (macOS and Linux only), four Linux packages, `release-notes.json` and `SHA256SUMS`, which lists the other nineteen. It builds no plugin archive. The plugin in `plugins/playbook` ships with the same `vX.Y.Z`, as described next.
+A release attaches five `playbook` binaries, five `pbtop` archives, four `pbdoc` archives (macOS and Linux only), `release-notes.json` and `SHA256SUMS`, which lists the other fifteen. It builds no plugin archive. The plugin in `plugins/playbook` ships with the same `vX.Y.Z`, as described next.
 
 ## The plugin release
 
@@ -72,101 +72,21 @@ When `downstream` has moved the tap (its `moved` output, not set when the app se
 
 ### Nix flake
 
-After `verify`, the `nix` job moves the Nix flake (root `flake.nix`):
+The flake lives in [pragmatic-engineer/nix](https://github.com/pragmatic-engineer/nix), with the `playbook` and `pbtop` outputs. After `verify`, the `nix` job moves it, the way `downstream` moves the tap:
 
 1. It checks `SHA256SUMS` and the four Nix assets against their attestation.
-2. `scripts/render-flake.sh` rewrites the `releases` block (the version and one SRI hash per system).
-3. The job opens `release/nix-vX.Y.Z` titled `chore(release): nix flake X.Y.Z` with the app token, auto-merge on, and waits up to 30 minutes for the merge.
+2. `scripts/render-flake.sh` rewrites the `releases` block of `flake.nix` in a checkout of that repository (the version and one SRI hash per system).
+3. The job opens `release/nix-vX.Y.Z` there titled `chore(release): nix flake X.Y.Z` with the app token, auto-merge on, and waits up to 30 minutes for the merge.
 
-- `scripts/release-notes.sh` leaves that commit out of the next notes.
-- The job skips when the release is not the latest or `flake.nix` is already ahead, so a backport does not move the flake back. Without the app secrets it warns and passes.
-- If `main` moved between the checkout and the commit, `release-gh.sh` fails with "Run again": run the workflow with `version=X.Y.Z`.
-- A dry run renders from a stand-in `SHA256SUMS`, shows the diff and opens nothing.
-- The tag `vX.Y.Z` carries the flake of the release before it, so users pin `main` or the merge commit of the flake pull request.
-- To roll the flake back, open a pull request that reverts the flake change. The older hashes stay valid because release assets do not change.
+- `scripts/release-notes.sh` still leaves such a commit out of the notes, for the history from before the flake moved.
+- The job skips when the release is not the latest or the flake is already ahead, so a backport does not move the flake back. Without the app secrets it warns and passes.
+- The app token covers `pragmatic-engineer/nix` only. When the igorjs app installation cannot reach that repository, the job fails and the summary names the owner step: add the repository to the installation, then run again with `version=X.Y.Z`.
+- If the flake repository moved between the checkout and the commit, `release-gh.sh` fails with "Run again": run the workflow with `version=X.Y.Z`.
+- A dry run renders from a stand-in `SHA256SUMS`, checks the token with read calls, shows the diff and opens nothing.
+- The flake has no release tags, so users pin the merge commit of the flake pull request.
+- To roll the flake back, open a pull request in that repository that reverts the flake change. The older hashes stay valid because release assets do not change.
 
-Then `verify-nix-linux` and `verify-nix-macos` run `nix run github:pragmatic-engineer/playbook/<commit>#playbook -- --version` at the commit that carries the flake and compare it with the version. The Linux job also builds a copy with a wrong hash, which must fail. Both are leaf jobs, skipped in a dry run and when `nix` moved nothing.
-
-### AUR
-
-After `verify`, the `aur` job publishes the Arch package `playbook-bin` to the AUR.
-
-- `packaging/aur/PKGBUILD.tmpl` is the template. `scripts/render-pkgbuild.sh` fills it with the version and the two Linux `playbook-X.Y.Z-<target>` lines of `SHA256SUMS`.
-- Before it renders, the job checks `SHA256SUMS` and the two Linux binaries against their attestation, so the AUR carries the attested hashes.
-- It keeps the `pkgrel` and `epoch` of the AUR when the `pkgver` is the same, so a manual fix is not overwritten. A new `pkgver` gives `pkgrel=1`.
-- `scripts/aur-verify.sh` runs in the `archlinux:base-devel` container (pinned by digest in `release.yml`). It makes `.SRCINFO` with `makepkg --printsrcinfo` as a non-root user, builds with `makepkg -f`, installs with `pacman -U`, compares `playbook --version` with the release, and downloads the aarch64 asset to check its sum. A failure stops the job before anything is pushed.
-- Then the job commits `playbook-bin: X.Y.Z` and pushes `PKGBUILD` and `.SRCINFO` to `ssh://aur@aur.archlinux.org/playbook-bin.git` on `master`, the only branch the AUR takes. It builds the live repository from `https://aur.archlinux.org/playbook-bin.git`, with up to five tries for the AUR to catch up. No change means no commit: a run with the same version pushes nothing.
-- The SSH host key is pinned in `packaging/aur/known_hosts` with `StrictHostKeyChecking=yes`. The fingerprints are on https://aur.archlinux.org/ and `scripts/aur-verify.test.sh` checks them. A changed host key fails the job: refresh the file from that page.
-- The key file is written to `RUNNER_TEMP` with mode 600 and removed in an `always()` step.
-- The job is a leaf. A backport or an older release never rolls the AUR back. A dry run builds the newest published release from its real assets, shows the diff and pushes nothing.
-- Without the secret `AUR_SSH_PRIVATE_KEY` in the `aur` environment, the job builds and checks the package, skips the push with a notice and passes.
-
-One-time setup, by a maintainer. The workflow cannot do these:
-
-1. Create a dedicated bot account on https://aur.archlinux.org/. An AUR SSH key reaches every package of its account, so do not use a personal account that owns other packages.
-2. Check that `playbook-bin` is free (https://aur.archlinux.org/packages/playbook-bin). The first push creates it.
-3. Make a key pair with `ssh-keygen -t ed25519 -f aur_key -C playbook-release`. Add `aur_key.pub` to the bot account under My Account, SSH Public Key. Store the private key as the secret `AUR_SSH_PRIVATE_KEY` of a new GitHub environment `aur` that deploys from `main` only. Delete the local key files.
-4. Add a personal AUR account as co-maintainer of `playbook-bin`, so a rollback does not depend on CI.
-5. Rotate by adding a new public key to the bot account, replacing the secret, then removing the old public key.
-
-To fix a bad push, clone `ssh://aur@aur.archlinux.org/playbook-bin.git`, commit a correction and push to `master`.
-
-A fix at the same version raises `pkgrel`. A real rollback to an older `pkgver` looks like a downgrade to pacman, so raise `epoch` in the same commit (the template keeps an `epoch` that is there).
-
-A run with `version=` of an older release does not apply, because the job only publishes the latest release. Orphaning or deleting the package goes through the AUR web page.
-
-### apt and dnf repository
-
-After `verify`, two leaf jobs publish a signed repository to GitHub Pages ([ADR 0052](../adr/0052-signed-apt-and-dnf-repository.md)). A failure turns the run red and blocks no other channel. Run `gh workflow run release.yml -f version=X.Y.Z` to try again.
-
-- `package-repo-sign` runs `scripts/package-repo-fetch.sh`, which takes the newest five `vX.Y.Z` releases that list packages. A release that lists none is skipped without any attestation check, so the older releases from before packaging, which were attested from tags, are passed over. A release that lists packages must verify strictly: `SHA256SUMS` and every package must be attested by the release workflow on the default branch (`refs/heads/main`), and the hashes must match. A tag attested release with packages is refused, and any failed check stops the job. `scripts/package-repo.sh` rebuilds both indexes from them and signs them. `scripts/package-repo-verify.sh` then installs from the built folder in Debian, Ubuntu and Fedora containers, checks that a tampered index is refused and, when two versions exist, that an upgrade keeps a seeded file under `~/.config/playbook`. This job holds the key and has `contents: read` only.
-- `package-repo-deploy` holds the Pages permissions and no key. After the deploy it reads the public URL, retries for up to five minutes, and checks both signatures with the published key.
-- A missing `PACKAGE_SIGNING_KEY` or `PACKAGE_SIGNING_PASSPHRASE` in the `package-repo` environment skips the job with a warning and a line in the run summary. The release is already published, so the run stays green and the repository stays as it was. Set both secrets and run `gh workflow run release.yml -f version=X.Y.Z` to publish. A dry run signs with a throwaway key made at the build clock and deploys nothing.
-- The signing subkey is RSA 4096 and lasts three years. The build warns under 90 days and fails under 30.
-- To yank a version, add it to `packaging/apt/yanked.txt` in a pull request and run the release workflow again. A rerun alone does not remove a bad release. Pages also keeps the earlier deployment for a manual redeploy.
-- If the key leaks, revoke the subkey, publish a new key and an advisory, replace both secrets and rebuild. Clients fetch the new `playbook.gpg`.
-
-One time setup for the maintainer. The jobs cannot do these:
-
-1. Generate an RSA 4096 primary key offline, with a signing subkey that expires in three years. Keep the primary on an offline token or encrypted media, with a second copy.
-2. Export the subkey only: `gpg --armor --export-secret-subkeys <fingerprint>!`.
-3. Create environment `package-repo` limited to `main`, with secrets `PACKAGE_SIGNING_KEY` (the exported subkey) and `PACKAGE_SIGNING_PASSPHRASE`.
-4. In Settings, Pages, set the source to GitHub Actions, and create environment `github-pages`.
-5. Publish the fingerprint in the release notes and this guide. If you own a custom domain, point it at Pages and change the URL in the install guide before the first release.
-6. Run `gh workflow run release.yml -f version=<latest> -f dry_run=true` to prove the build, then without `dry_run` to publish.
-
-The first real run decides the Pages egress hosts and whether block mode covers container traffic, which is why both jobs use audit mode for now.
-
-### Scoop
-
-After `verify`, the `scoop` job moves the Windows scoop bucket, the repository `pragmatic-engineer/scoop-bucket` (ADR 0053, Windows is experimental).
-
-- It checks `SHA256SUMS` and the Windows `.exe` against their attestation.
-- `scripts/render-scoop.sh` fills `packaging/scoop/playbook.json.tmpl` with the version and the hash of that `.exe`.
-- The job opens `release/vX.Y.Z` titled `chore(release): playbook X.Y.Z` in the bucket with the app token, auto-merge on, and waits up to 30 minutes for the merge.
-- It skips when the release is not the latest or the bucket is already ahead, so a backport does not move the bucket back.
-- Without the app secrets, or when the app is not installed on the bucket repository, it warns and passes.
-- Token custody is the same as for the tap: `BOT_APP_CLIENT_ID` and `BOT_APP_PRIVATE_KEY`, with the app installed on the bucket repository.
-- A dry run renders from a stand-in `SHA256SUMS` into the run summary and opens nothing.
-
-Then `verify-scoop` installs scoop on a clean Windows runner from a pinned installer script, installs the rendered manifest from a file, checks `playbook --version`, removes it, and installs again from the bucket (with retries) once the pull request has merged. It is a leaf job with no secret, skipped in a dry run.
-
-To roll back, revert the bucket pull request. Users who already installed keep their version until `scoop update`, and scoop treats a lower version as older, so ship a higher patch release to replace a bad one.
-
-### winget
-
-After `verify`, the `winget` job on a Windows runner opens a pull request to `microsoft/winget-pkgs` for the `.exe` (ADR 0053, Windows is experimental). The package identifier is `PragmaticEngineer.Playbook`.
-
-- It checks `SHA256SUMS` and the `.exe` against their attestation.
-- `wingetcreate update` writes the manifest. The job then compares the installer hash in it with the attested hash and only then submits. It never passes the token on the command line: the token reaches the tool as `WINGET_CREATE_GITHUB_TOKEN`.
-- `wingetcreate` is a pinned release with its SHA256 kept in the workflow.
-- It skips when the release is not the latest or the version already has a pull request, so a rerun opens no second one.
-- It warns and passes while `WINGET_PAT` is not set in environment `winget`.
-- Token custody: a classic `public_repo` token of a dedicated bot account that owns the fork of `winget-pkgs`, stored only as `WINGET_PAT` of environment `winget`, limited to `main`.
-- The first manifest is made with `wingetcreate new` and landed by hand, because `update` needs an accepted package. Until then the job fails at `wingetcreate update`.
-- A dry run prints the command and opens nothing.
-
-Microsoft moderators decide the pull request, and validation can take days. Closing the pull request before it merges undoes it. After the merge, a bad version leaves through a pull request to `winget-pkgs`, so treat winget as best effort. The binary has no Authenticode signature, so validation may flag it.
+Then `verify-nix-linux` and `verify-nix-macos` run `nix run github:pragmatic-engineer/nix/<commit>#playbook -- --version` at the commit that carries the flake and compare it with the version. The Linux job also builds a copy with a wrong hash, which must fail. Both are leaf jobs, skipped in a dry run and when `nix` moved nothing. The flake repository also builds both outputs on Linux and macOS in its own CI.
 
 ### Dry run
 
@@ -190,7 +110,7 @@ The workflow uses two tokens:
 The app secrets and their guards:
 
 - `BOT_APP_CLIENT_ID` and `BOT_APP_PRIVATE_KEY` are organization secrets that the playbook, tap and marketplace repositories can read.
-- The jobs that read these secrets run in the `cicd` environment: `prepare`, `tag`, `downstream`, `nix` and `scoop` in `release.yml`, and `auto-update-pr.yml`. The Dependabot auto-merge job runs in the `dependabot` environment. The secrets stay shared. The environments are where protection rules go, and the workflow change alone adds none.
+- The jobs that read these secrets run in the `cicd` environment: `prepare`, `tag`, `downstream` and `nix` in `release.yml`, and `auto-update-pr.yml`. The Dependabot auto-merge job runs in the `dependabot` environment. The secrets stay shared. The environments are where protection rules go, and the workflow change alone adds none.
 - Each step asks the app only for the permissions it needs. `downstream` mints one token per repository.
 - The workflow runs only from `workflow_dispatch`, anything but a dry run only from `main`, and `downstream` only from `main`.
 - Any workflow in those three repositories can read the key. The guards are the rulesets and the checks in each workflow: the downstream release workflows act only on a merged pull request from the app on a `release/v*` branch.
@@ -221,34 +141,20 @@ Release assets by tool:
 - playbook: `playbook-<version>-<target>`, the raw binary.
 - pbtop: `pbtop-<version>-<target>.tar.gz` holding `pbtop` alone.
 - pbdoc: `pbdoc-<version>-<target>.tar.gz` holding `pbdoc` and `NOTICE-pbdoc`, for the four macOS and Linux targets.
-- Debian, Ubuntu: `playbook_<version>_amd64.deb` and `playbook_<version>_arm64.deb`.
-- Fedora, RHEL: `playbook-<version>.x86_64.rpm` and `playbook-<version>.aarch64.rpm`.
+- Windows: `playbook-<version>-x86_64-pc-windows-msvc.exe`, the raw binary and the only Windows route.
 
 The Homebrew tap maps each formula to its asset.
 
-### Linux packages
-
-Each package holds `playbook`, the `pb` link and `pbtop` in `/usr/bin`, the shell completion files in `/usr/share`, and the license. It has no dependencies, no config file and no install or remove script, so an upgrade or a removal never touches user config.
-
-- `scripts/nfpm.yaml` describes it. `scripts/package-linux.sh` builds it with a pinned nfpm (version and SHA-256 are in the script; bump both together).
-- The two Linux build legs build the packages from their own static binaries, install them in Debian, Ubuntu and Fedora containers with `scripts/package-smoke.sh`, and attest them with the other assets. A bad package stops the release before the draft is published.
-- The `publish` job puts them in `SHA256SUMS` and expects 18 assets.
-- After `verify`, the `verify-packages` job downloads the x86_64 pair from the published release, checks the sums and the attestation, and runs the same container test. It blocks no other channel. A red result fails the run, and a run with the same version starts it again.
-- A dry run builds and tests the packages and publishes nothing. The container images are pinned by digest in `scripts/package-smoke.sh`.
-
 ### pbdoc
 
-Only `install.sh` and Homebrew ship `pbdoc`, the document converter. The `.deb` and `.rpm` packages, `cargo binstall`, mise and the nix flake install `playbook` without it, and `playbook doc` then reports that no converter is installed. This is a known limit.
+Only `install.sh` and Homebrew ship `pbdoc`, the document converter. The Nix flake and the raw release assets give `playbook` without it, and `playbook doc` then reports that no converter is installed. This is a known limit.
 
 Release checklist for the release that adds `pbdoc`: the tap pull request that adds `resource "pbdoc"` to `Formula/playbook.rb` (homebrew-tap #53) merges first, and the release workflow and the installer changes ship together. The `downstream` job fails when the tap formula has no `resource "pbdoc"`, so a tag cut before that pull request merges cannot ship silently.
 
-### cargo binstall and mise
+### Raw asset names
 
-`cargo binstall` and mise install the raw `playbook-<version>-<target>` binary and depend on that name.
+`install.sh`, `playbook update` and tools that read the release by name, such as `cargo binstall` and mise, depend on the raw `playbook-<version>-<target>` name. Those two tools are not a supported channel and no job installs with them.
 
-- `[package.metadata.binstall]` in `crates/cli/Cargo.toml` holds the URL template. mise needs nothing, since it matches the operating system and architecture words in the asset name.
+- `[package.metadata.binstall]` in `crates/cli/Cargo.toml` holds the URL template.
 - `scripts/asset-names.test.sh` expands the template for every target of the build matrix and fails when it differs from the name `release.yml` gives the asset.
-- After `verify`, the `verify-installers` job runs `scripts/verify-installers.sh`. Pinned cargo-binstall and mise install the published release in an empty `HOME`, and `cargo binstall` may not compile. The installed file must report the version, match its `SHA256SUMS` line and verify against its attestation.
-- It blocks no other channel. A red result fails the run, and a run with the same version starts it again.
-- A dry run installs the last released version instead, which checks the job and its egress list without publishing anything.
-- The crates.io name `playbook` belongs to another project, so the documented command uses `--git` and the metadata disables the quick-install strategy.
+- The crates.io name `playbook` belongs to another project, so a `cargo binstall` command needs `--git`, and the metadata disables the quick-install strategy.

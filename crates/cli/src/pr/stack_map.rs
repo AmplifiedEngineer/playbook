@@ -19,22 +19,41 @@ use std::fs;
 use std::path::Path;
 
 /// The new-side line ranges one diff covers, per file.
-type Ranges = BTreeMap<String, Vec<(u64, u64)>>;
+pub(super) type Ranges = BTreeMap<String, Vec<(u64, u64)>>;
+
+/// Which side of a hunk header to read.
+#[derive(Clone, Copy)]
+pub(super) enum Side {
+    /// The `+start,len` part: lines as the PR leaves them.
+    New,
+    /// The `-start,len` part: lines as the PR's base has them.
+    Old,
+}
 
 /// Read the hunk headers of a unified diff. A range spans the whole hunk, so
-/// a comment may sit on an added or an unchanged line inside it.
-fn hunks(diff: &str) -> Ranges {
+/// a comment may sit on an added or an unchanged line inside it. On the old
+/// side the file name comes from the `---` line, so a deleted file is kept.
+pub(super) fn hunks(diff: &str, side: Side) -> Ranges {
+    let (file_mark, range_mark) = match side {
+        Side::New => ("+++ ", '+'),
+        Side::Old => ("--- ", '-'),
+    };
     let mut out: Ranges = BTreeMap::new();
     let mut file: Option<String> = None;
     for line in diff.lines() {
-        if let Some(rest) = line.strip_prefix("+++ ") {
-            file = rest.strip_prefix("b/").map(str::to_string);
+        if let Some(rest) = line.strip_prefix(file_mark) {
+            let prefix = if matches!(side, Side::New) {
+                "b/"
+            } else {
+                "a/"
+            };
+            file = rest.strip_prefix(prefix).map(str::to_string);
         } else if line.starts_with("@@") {
             let Some(f) = &file else { continue };
-            let Some(plus) = line.split_whitespace().find(|t| t.starts_with('+')) else {
+            let Some(range) = line.split_whitespace().find(|t| t.starts_with(range_mark)) else {
                 continue;
             };
-            let spec = plus.trim_start_matches('+');
+            let spec = range.trim_start_matches(range_mark);
             let (start, len) = match spec.split_once(',') {
                 Some((s, l)) => (s.parse::<u64>(), l.parse::<u64>()),
                 None => (spec.parse::<u64>(), Ok(1)),
@@ -51,7 +70,7 @@ fn hunks(diff: &str) -> Ranges {
     out
 }
 
-fn holds(ranges: &Ranges, file: &str, line: u64) -> bool {
+pub(super) fn holds(ranges: &Ranges, file: &str, line: u64) -> bool {
     ranges
         .get(file)
         .is_some_and(|rs| rs.iter().any(|(a, b)| (*a..=*b).contains(&line)))
@@ -81,6 +100,7 @@ fn map_findings(
     let mut stale: BTreeMap<u64, String> = BTreeMap::new();
     let mut open: Vec<(u64, String, Ranges)> = Vec::new();
     let mut state_of: BTreeMap<u64, String> = BTreeMap::new();
+    let mut old_of: Vec<(u64, Ranges)> = Vec::new();
     for p in &prs {
         let (Some(n), Some(state)) = (p["number"].as_u64(), p["state"].as_str()) else {
             continue;
@@ -102,15 +122,20 @@ fn map_findings(
                 stale.insert(n, "the PR was retargeted since the review started".into());
             }
         }
+        old_of.push((
+            n,
+            hunks(diffs.get(&n).map_or("", String::as_str), Side::Old),
+        ));
         open.push((
             n,
             p["head_sha"].as_str().unwrap_or("").to_string(),
-            hunks(diffs.get(&n).map_or("", String::as_str)),
+            hunks(diffs.get(&n).map_or("", String::as_str), Side::New),
         ));
     }
 
     let mut by_pr: BTreeMap<u64, Vec<Value>> = BTreeMap::new();
     let mut loose = Vec::new();
+    let mut fixed_above = Vec::new();
     for f in findings {
         let file = f["file"]
             .as_str()
@@ -170,6 +195,10 @@ fn map_findings(
             loose.push(unmapped(f, &format!("held for #{n}: {why}")));
             continue;
         }
+        if let Some(above) = changed_above(&old_of, n, file, line) {
+            fixed_above.push(json!({ "finding": f, "pr": n, "fixed_by": above }));
+            continue;
+        }
         by_pr.entry(n).or_default().push(json!({
             "path": file, "line": line, "side": "RIGHT", "body": body,
         }));
@@ -192,7 +221,24 @@ fn map_findings(
         .iter()
         .map(|(n, why)| json!({ "pr": n, "reason": why }))
         .collect();
-    json!({ "by_pr": by_pr_json, "unmapped": loose, "stale": stale_json })
+    json!({
+        "by_pr": by_pr_json,
+        "unmapped": loose,
+        "stale": stale_json,
+        "fixed_above": fixed_above,
+    })
+}
+
+/// The first open PR above `pr` whose diff changes or removes `file:line` of
+/// the code `pr` leaves. A PR's old side is its parent's new side, so the
+/// numbers match for the PR right above and drift only by lines the PRs in
+/// between added or removed.
+fn changed_above(old_of: &[(u64, Ranges)], pr: u64, file: &str, line: u64) -> Option<u64> {
+    let at = old_of.iter().position(|(n, _)| *n == pr)?;
+    old_of[at + 1..]
+        .iter()
+        .find(|(_, old)| holds(old, file, line))
+        .map(|(n, _)| *n)
 }
 
 fn read_json(path: &str) -> Result<Value, String> {
@@ -328,9 +374,9 @@ mod tests {
 
     #[test]
     fn hunk_ranges_cover_the_new_side_and_skip_deleted_files() {
-        let r = hunks(DIFF_A);
+        let r = hunks(DIFF_A, Side::New);
         assert_eq!(r["src/a.rs"], [(1, 4), (22, 24)]);
-        assert!(!hunks(DIFF_B).contains_key("src/b.rs"));
+        assert!(!hunks(DIFF_B, Side::New).contains_key("src/b.rs"));
         assert!(holds(&r, "src/a.rs", 3) && !holds(&r, "src/a.rs", 10));
     }
 
@@ -366,7 +412,7 @@ mod tests {
         let m = map_findings(
             &stack(),
             &diffs(),
-            &[finding("src/a.rs", 3, Some(2))],
+            &[finding("src/a.rs", 2, Some(2))],
             &live_ok(),
         );
         assert!(m["by_pr"].get("2").is_some(), "{m}");
@@ -457,6 +503,39 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("no longer open"));
+    }
+
+    #[test]
+    fn a_finding_on_code_a_pr_above_changes_is_listed_as_fixed_above() {
+        let three = json!({"prs":[
+            {"number":2,"state":"open","head_sha":"s2","base":"b1"},
+            {"number":3,"state":"open","head_sha":"s3","base":"b2"},
+            {"number":4,"state":"open","head_sha":"s4","base":"b3"}]});
+        let mut d = diffs();
+        d.insert(
+            4,
+            "--- a/src/q.rs\n+++ b/src/q.rs\n@@ -7,2 +7,2 @@\n-a\n+b\n".into(),
+        );
+        let mut live = live_ok();
+        live.insert(
+            4,
+            Live {
+                head_sha: "s4".into(),
+                base: "b3".into(),
+                open: true,
+            },
+        );
+        let f = [
+            finding("src/a.rs", 3, Some(2)),
+            finding("src/a.rs", 2, Some(2)),
+            finding("src/a.rs", 3, Some(3)),
+        ];
+        let m = map_findings(&three, &d, &f, &live);
+        assert_eq!(m["fixed_above"].as_array().unwrap().len(), 1, "{m}");
+        assert_eq!(m["fixed_above"][0]["pr"], 2);
+        assert_eq!(m["fixed_above"][0]["fixed_by"], 3);
+        assert_eq!(m["by_pr"]["2"]["comments"].as_array().unwrap().len(), 1);
+        assert_eq!(m["by_pr"]["3"]["comments"].as_array().unwrap().len(), 1);
     }
 
     #[test]

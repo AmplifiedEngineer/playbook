@@ -27,6 +27,7 @@ pub mod panels;
 #[cfg(test)]
 mod parity;
 pub mod projection;
+pub mod reset_popup;
 pub mod scale;
 #[cfg(test)]
 mod screenshot;
@@ -207,6 +208,7 @@ fn event_loop(
                         app.note = Some(save_budget(&home, usd));
                         worker.ask(app.range, &app.filter, &app.account);
                     }
+                    Effect::ResetUsage => worker.reset(),
                     Effect::ResetPrefs => {
                         let cleared = ui_state::reset(&home).map(|_| ());
                         let reset = Reset {

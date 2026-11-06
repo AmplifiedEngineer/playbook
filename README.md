@@ -27,25 +27,16 @@ Pick the first route that fits. Each one installs the `playbook` binary. Then ru
    curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
    ```
 
-3. **cargo binstall or mise**. Use `--git`, because a plain `cargo binstall playbook` installs a different project:
-
-   ```bash
-   cargo binstall --git https://github.com/pragmatic-engineer/playbook playbook
-   mise use github:pragmatic-engineer/playbook
-   ```
-
-4. **.deb or .rpm** for Debian, Ubuntu and Fedora, from the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest). See [the install guide](docs/guides/00-install.md#debian-ubuntu-and-fedora-packages).
-
-5. **Marketplace plugin**, for the skills only. It adds no binary, hooks or guards:
+3. **Marketplace plugin**, for the skills only. It adds no binary, hooks or guards:
 
    ```bash
    claude plugin marketplace add pragmatic-engineer/marketplace
    claude plugin install playbook@pragmatic-engineer
    ```
 
-For the best result, install the binary first and the plugin after it. Nix, Arch Linux (AUR), Windows (experimental, with scoop), a pinned version and a route with no `curl | bash` are in the [install guide](docs/guides/00-install.md). To see what `playbook setup` changes before you agree, read [What setup installs](docs/guides/05-what-setup-installs.md).
+For the best result, install the binary first and the plugin after it. Nix, Windows (experimental, with the raw `.exe`), a pinned version and a route with no `curl | bash` are in the [install guide](docs/guides/00-install.md). To see what `playbook setup` changes before you agree, read [What setup installs](docs/guides/05-what-setup-installs.md).
 
-Pin a version of the install script with `PLAYBOOK_REF=v0.40.1`. Update with `brew upgrade playbook` on Homebrew, or `playbook update` on the other routes. On a brew install, `playbook update` stops and tells you to run `brew upgrade playbook`. Run `playbook doctor check` to see what is in place, or `/playbook:doctor` in a Claude Code session.
+Pin a version of the install script with `PLAYBOOK_REF=v0.40.2`. Update with `brew upgrade playbook` on Homebrew, or `playbook update` on the other routes. On a brew install, `playbook update` stops and tells you to run `brew upgrade playbook`. Run `playbook doctor check` to see what is in place, or `/playbook:doctor` in a Claude Code session.
 
 ### Homebrew tap trust
 

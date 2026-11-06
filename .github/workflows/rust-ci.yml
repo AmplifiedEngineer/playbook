@@ -154,18 +154,22 @@ jobs:
           fi
           echo "pkgs=$pkgs" | tee -a "$GITHUB_OUTPUT"
 
-  # The macOS leg always reports, because "build-test (macos-latest)" is a
-  # required check. It builds and tests on the daily run, a manual run, the
+  # Builds and runs the tests. build-test below waits for this job and for
+  # lint, so a slow lint step never delays the tests. The macOS leg always
+  # reports, because "build-test (macos-latest)" is a required check through
+  # build-test. It builds and tests on the daily run, a manual run, the
   # release pull request and a release gate (a call from release.yml, whose
   # event is workflow_dispatch). Anywhere else it skips its steps on a Linux
   # runner, so it costs no macOS runner. The check name comes from the matrix
   # value, never the runner. A release gate runs the macOS leg alone.
-  build-test:
-    name: build-test
+  test:
+    name: test
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.ref && '["macos-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
+        # Linux splits the tests over two runners, each compiling for itself.
+        # macOS runs them whole. Build-test below waits for every leg.
+        include: ${{ fromJSON(inputs.ref && '[{"os":"macos-latest","shard":""}]' || '[{"os":"ubuntu-latest","shard":"1/2"},{"os":"ubuntu-latest","shard":"2/2"},{"os":"macos-latest","shard":""}]') }}
     needs: changes
     # Run even if `changes` failed (fail open); never let a skipped needs
     # turn a required check into a skipped one.
@@ -187,10 +191,7 @@ jobs:
       # Whether this leg saves the cargo cache: Linux after a push to main,
       # macOS after a daily or manual run on main, the runs that build it
       # there. A release gate never saves, so it does not slow the release.
-      SAVE_CACHE: ${{ (github.event_name == 'push' && matrix.os == 'ubuntu-latest') || (matrix.os == 'macos-latest' && github.ref == 'refs/heads/main' && (inputs.ref || '') == '' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')) }}
-      # Single source of truth for the cache key and the install command
-      # below, so they can't drift apart. Bump deliberately, not implicitly.
-      CARGO_AUDIT_VERSION: "0.22.2"
+      SAVE_CACHE: ${{ (github.event_name == 'push' && matrix.os == 'ubuntu-latest' && matrix.shard == '1/2') || (matrix.os == 'macos-latest' && github.ref == 'refs/heads/main' && (inputs.ref || '') == '' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')) }}
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         # Linux-only action; it self-skips on macOS with a confusing warning
@@ -270,28 +271,6 @@ jobs:
         if: env.LANE == 'true'
         run: rustc --version
 
-      - name: Ensure rustfmt and clippy components
-        if: env.LANE == 'true'
-        run: rustup component add rustfmt clippy
-
-      - name: cargo fmt --all --check
-        if: env.LANE == 'true'
-        run: cargo fmt --all --check
-
-      - name: cargo clippy
-        if: env.LANE == 'true'
-        env:
-          PKGS: ${{ needs.changes.outputs.pkgs || '--workspace' }}
-        run: cargo clippy $PKGS --all-targets -- -D warnings
-
-      # Non-test code must not panic on bad input: unwrap and expect are errors
-      # there. Tests may use them, so this covers the library and the binary only.
-      - name: cargo clippy (no unwrap or expect outside tests)
-        if: env.LANE == 'true'
-        env:
-          PKGS: ${{ needs.changes.outputs.pkgs || '--workspace' }}
-        run: cargo clippy $PKGS --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
-
       # nextest schedules every test across all test binaries, where
       # `cargo test` runs the binaries one after another. Pinned like the
       # other tools: the action to a commit SHA, the tool to a release older
@@ -321,7 +300,149 @@ jobs:
         if: env.LANE == 'true'
         env:
           PKGS: ${{ needs.changes.outputs.pkgs || '--workspace' }}
-        run: cargo nextest run $PKGS --no-tests=pass --config-file .github/nextest.toml --profile ci
+          SHARD: ${{ matrix.shard }}
+        run: |
+          # A hash partition gives each test to exactly one shard. The
+          # collector daemon group stays one test at a time inside its shard,
+          # and the shards run on separate runners.
+          args=()
+          if [ -n "$SHARD" ]; then
+            args+=(--partition "hash:$SHARD")
+          fi
+          # shellcheck disable=SC2086
+          cargo nextest run $PKGS --no-tests=pass --config-file .github/nextest.toml --profile ci "${args[@]}"
+
+      # The key changes only with Cargo.lock and the toolchain, and almost
+      # every change rebuilds the workspace crates, so the cache keeps only
+      # what dependencies need: their compiled output and the downloaded
+      # crate files. Every output of a workspace unit (named by the hash in
+      # its .fingerprint folder), the incremental data and the unpacked
+      # sources (cargo unpacks them again from the downloads) go. Outputs of
+      # dependency versions Cargo.lock no longer uses stay until the key
+      # version is bumped. A leg off the lane built nothing, so there is
+      # nothing to trim or save, and the save below skips with this step.
+      - name: Trim the cargo cache before saving
+        id: trim
+        if: env.LANE == 'true' && env.SAVE_CACHE == 'true' && success() && steps.cargo.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          sizes() {
+            for p in target ~/.cargo/registry; do
+              if [ -e "$p" ]; then du -sh "$p"; fi
+            done
+          }
+          sizes
+          rm -rf ~/.cargo/registry/src target/debug/incremental target/debug/examples
+          if [ -d target/debug ]; then
+            find target/debug -maxdepth 1 -type f -delete
+          fi
+          for f in target/debug/.fingerprint/playbook*-* target/debug/.fingerprint/pbtop*-*; do
+            [ -e "$f" ] || continue
+            find target/debug/deps -maxdepth 1 -name "*-${f##*-}*" -delete
+            rm -rf "$f"
+          done
+          rm -rf target/debug/build/playbook*-* target/debug/build/pbtop*-*
+          sizes
+
+      - name: Save cargo registry and build output (build-test)
+        if: steps.trim.outcome == 'success'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cargo.outputs.cache-primary-key }}
+
+  # The static checks, apart from the tests so they run beside them. Same lanes
+  # and runners as the test job. build-test below waits for it.
+  lint:
+    name: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.ref && '["macos-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
+    needs: changes
+    if: ${{ !cancelled() }}
+    # The macOS condition here and in LANE below must stay the same as in test.
+    runs-on: ${{ (matrix.os == 'macos-latest' && !(github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v') || (inputs.ref || '') != '')) && 'ubuntu-latest' || matrix.os }}
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      # Whether this leg lints. Each step below checks it. It must match LANE
+      # in the test job. The macOS condition matches runs-on above and reads only the event, and
+      # a missing docs_only output counts as not docs-only, so it fails open.
+      LANE: ${{ needs.changes.outputs.docs_only != 'true' && (matrix.os != 'macos-latest' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v') || (inputs.ref || '') != '') }}
+      # Single source of truth for the cache key and the install command
+      # below, so they can't drift apart. Bump deliberately, not implicitly.
+      CARGO_AUDIT_VERSION: "0.22.2"
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        # Linux-only action; it self-skips on macOS with a confusing warning
+        # (same convention as shell-ci.yml).
+        if: runner.os == 'Linux' && env.LANE == 'true'
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            crates.io:443
+            github.com:443
+            index.crates.io:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            static.crates.io:443
+            static.rust-lang.org:443
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.LANE == 'true'
+        with:
+          # Set only by a release gate. Empty means the event's commit.
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Cache cargo registry and build output (lint)
+        id: cargo
+        if: env.LANE == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-build-test-v3-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            cargo-build-test-v3-${{ runner.os }}-
+
+      # Prints the version rust-toolchain.toml actually resolved to, so a
+      # reviewer can confirm the pin took effect from the job log instead of
+      # trusting rustup's documented override behavior on faith.
+      - name: rustc --version
+        if: env.LANE == 'true'
+        run: rustc --version
+
+      - name: Ensure rustfmt and clippy components
+        if: env.LANE == 'true'
+        run: rustup component add rustfmt clippy
+
+      - name: cargo fmt --all --check
+        if: env.LANE == 'true'
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        if: env.LANE == 'true'
+        env:
+          PKGS: ${{ needs.changes.outputs.pkgs || '--workspace' }}
+        run: cargo clippy $PKGS --all-targets -- -D warnings
+
+      # Non-test code must not panic on bad input: unwrap and expect are errors
+      # there. Tests may use them, so this covers the library and the binary only.
+      - name: cargo clippy (no unwrap or expect outside tests)
+        if: env.LANE == 'true'
+        env:
+          PKGS: ${{ needs.changes.outputs.pkgs || '--workspace' }}
+        run: cargo clippy $PKGS --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
+
 
       # nextest does not run doctests, and `cargo test --doc` builds every
       # selected crate again to look for them. This runs it only for crates
@@ -412,47 +533,31 @@ jobs:
           # CVEs get caught, only skips recompiling the same binary.
           cargo audit
 
-      # The key changes only with Cargo.lock and the toolchain, and almost
-      # every change rebuilds the workspace crates, so the cache keeps only
-      # what dependencies need: their compiled output and the downloaded
-      # crate files. Every output of a workspace unit (named by the hash in
-      # its .fingerprint folder), the incremental data and the unpacked
-      # sources (cargo unpacks them again from the downloads) go. Outputs of
-      # dependency versions Cargo.lock no longer uses stay until the key
-      # version is bumped. A leg off the lane built nothing, so there is
-      # nothing to trim or save, and the save below skips with this step.
-      - name: Trim the cargo cache before saving
-        id: trim
-        if: env.LANE == 'true' && env.SAVE_CACHE == 'true' && success() && steps.cargo.outputs.cache-hit != 'true'
+  # The required check names. The test and lint jobs above carry the work; this
+  # job keeps the "build-test (<os>)" names the ruleset asks for, and fails
+  # unless both succeeded. A leg off its lane skips every step in both jobs and
+  # still succeeds, so a docs-only change reports a green build-test too.
+  build-test:
+    name: build-test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.ref && '["macos-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
+    needs: [test, lint]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      sha: ${{ needs.test.outputs.sha }}
+    env:
+      TEST_RESULT: ${{ needs.test.result }}
+      LINT_RESULT: ${{ needs.lint.result }}
+    steps:
+      - name: Require the test and lint jobs to succeed
         run: |
-          set -euo pipefail
-          sizes() {
-            for p in target ~/.cargo/registry; do
-              if [ -e "$p" ]; then du -sh "$p"; fi
-            done
-          }
-          sizes
-          rm -rf ~/.cargo/registry/src target/debug/incremental target/debug/examples
-          if [ -d target/debug ]; then
-            find target/debug -maxdepth 1 -type f -delete
-          fi
-          for f in target/debug/.fingerprint/playbook*-* target/debug/.fingerprint/pbtop*-*; do
-            [ -e "$f" ] || continue
-            find target/debug/deps -maxdepth 1 -name "*-${f##*-}*" -delete
-            rm -rf "$f"
-          done
-          rm -rf target/debug/build/playbook*-* target/debug/build/pbtop*-*
-          sizes
-
-      - name: Save cargo registry and build output (build-test)
-        if: steps.trim.outcome == 'success'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ steps.cargo.outputs.cache-primary-key }}
+          echo "test: $TEST_RESULT, lint: $LINT_RESULT"
+          [ "$TEST_RESULT" = success ] && [ "$LINT_RESULT" = success ]
 
   # Runs the completion scripts in real bash, zsh and fish. Non-required by
   # design, and skipped in a release gate (`!inputs.ref`) so a flaky or newly

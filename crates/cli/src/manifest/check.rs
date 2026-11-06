@@ -17,7 +17,7 @@
 use std::path::{Path, PathBuf};
 
 /// Top-level files the manifest allows verbatim.
-const ALLOW_FILES: [&str; 18] = [
+const ALLOW_FILES: [&str; 16] = [
     ".gitignore",
     "CHANGELOG.md",
     "README.md",
@@ -25,8 +25,6 @@ const ALLOW_FILES: [&str; 18] = [
     "NOTICE",
     "NOTICE-pbdoc",
     "justfile",
-    "flake.nix",
-    "flake.lock",
     "install.sh",
     "install-pbtop.sh",
     "CODE_OF_CONDUCT.md",
@@ -39,15 +37,8 @@ const ALLOW_FILES: [&str; 18] = [
 ];
 
 /// Top-level directories any tracked file may live under.
-const ALLOW_DIRS: [&str; 8] = [
-    "seed",
-    "plugins",
-    "scripts",
-    "docs",
-    ".github",
-    "crates",
-    ".cargo",
-    "packaging",
+const ALLOW_DIRS: [&str; 7] = [
+    "seed", "plugins", "scripts", "docs", ".github", "crates", ".cargo",
 ];
 
 /// A personal settings.json must never track, at the root or inside an
@@ -160,11 +151,11 @@ mod tests {
         assert!(violations(&tracked).is_empty());
     }
 
-    /// The Nix flake and its lock sit at the root, where `nix run` reads them.
+    /// The Nix flake lives in pragmatic-engineer/nix, so a root flake is an offender.
     #[test]
-    fn the_nix_flake_files_are_allowlisted() {
+    fn the_nix_flake_files_are_offenders() {
         let tracked = vec!["flake.nix".to_string(), "flake.lock".to_string()];
-        assert!(violations(&tracked).is_empty());
+        assert_eq!(violations(&tracked), tracked);
     }
 
     #[test]
@@ -194,13 +185,6 @@ mod tests {
         assert_eq!(violations(&tracked).len(), 1);
     }
 
-    /// Package manifest templates (scoop) live under `packaging/`.
-    #[test]
-    fn packaging_templates_are_allowlisted() {
-        let tracked = vec!["packaging/scoop/playbook.json.tmpl".to_string()];
-        assert!(violations(&tracked).is_empty());
-    }
-
     #[test]
     fn allowlisted_top_level_directory_passes() {
         let tracked = vec!["scripts/check-links.sh".to_string()];
@@ -208,9 +192,9 @@ mod tests {
     }
 
     #[test]
-    fn the_packaging_directory_passes() {
+    fn the_retired_packaging_directory_is_an_offender() {
         let tracked = vec!["packaging/aur/PKGBUILD.tmpl".to_string()];
-        assert!(violations(&tracked).is_empty());
+        assert_eq!(violations(&tracked), tracked);
     }
 
     #[test]
