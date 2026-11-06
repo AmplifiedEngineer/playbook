@@ -43,6 +43,8 @@ pub enum Cmd {
     EditLayout,
     Help,
     Refresh,
+    Budget,
+    Zone,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -355,6 +357,16 @@ pub const BINDINGS: &[Binding] = &[
         hint: hint("t", "theme", 12, 2),
     },
     Binding {
+        cmd: Cmd::Zone,
+        keys: &[c('z')],
+        ctrl: false,
+        shown: "z",
+        group: Group::Periods,
+        panels: ALL_PANELS,
+        text: "Switch between local time and UTC",
+        hint: None,
+    },
+    Binding {
         cmd: Cmd::Sessions,
         keys: &[c('p')],
         ctrl: false,
@@ -436,12 +448,22 @@ pub const BINDINGS: &[Binding] = &[
     },
     Binding {
         cmd: Cmd::Refresh,
-        keys: &[c('R')],
+        keys: &[c('R'), c('B')],
         ctrl: false,
-        shown: "R",
+        shown: "R, B",
         group: Group::Refresh,
         panels: ALL_PANELS,
-        text: "Read new usage now (also automatic)",
+        text: "Read usage and budget limits now",
+        hint: None,
+    },
+    Binding {
+        cmd: Cmd::Budget,
+        keys: &[c('b')],
+        ctrl: false,
+        shown: "b",
+        group: Group::Refresh,
+        panels: ALL_PANELS,
+        text: "Set the manual monthly budget",
         hint: None,
     },
     Binding {

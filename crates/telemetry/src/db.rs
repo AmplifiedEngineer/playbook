@@ -113,6 +113,16 @@ pub fn open_db(path: &Path) -> Result<Connection, String> {
     )
     .map_err(|e| format!("failed to create telemetry schema: {e}"))?;
     super::telemetry_db::ensure_columns(&conn)?;
+    retry_busy(
+        || conn.execute_batch(super::account_store::SCHEMA_SQL),
+        BUSY_TIMEOUT,
+    )
+    .map_err(|e| format!("failed to create account names table: {e}"))?;
+    retry_busy(
+        || conn.execute_batch(super::account_move::SCHEMA_SQL),
+        BUSY_TIMEOUT,
+    )
+    .map_err(|e| format!("failed to create account move tables: {e}"))?;
     Ok(conn)
 }
 
@@ -548,6 +558,9 @@ mod tests {
         assert_eq!(
             tables,
             vec![
+                "account_assignment_rows",
+                "account_assignments",
+                "account_names",
                 "session_reconcile",
                 "session_sources",
                 "telemetry_errors",

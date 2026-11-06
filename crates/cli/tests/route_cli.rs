@@ -68,10 +68,23 @@ fn routine_implementation_proceeds_on_sonnet_at_low() {
 }
 
 #[test]
-fn design_asks_first_by_default() {
+fn design_proceeds_by_default() {
     let h = Home::new();
     let v = h.route(&["design"]);
     assert_eq!(v["model"], "opus");
+    assert_eq!(v["action"], "proceed");
+    assert_eq!(v["approvalNeeded"], false);
+    assert_eq!(v["approvalReason"], "runs on the top model");
+}
+
+#[test]
+fn escalate_ask_asks_first_for_the_top_model() {
+    let h = Home::new();
+    assert!(h
+        .run(&["config", "set", "--global", "routing.escalate", "ask"])
+        .status
+        .success());
+    let v = h.route(&["design"]);
     assert_eq!(v["action"], "ask");
     assert_eq!(v["approvalNeeded"], true);
 }
@@ -96,6 +109,10 @@ fn escalate_auto_proceeds_and_deny_returns_the_cheaper_route() {
 #[test]
 fn a_second_failure_needs_approval_and_the_ceiling_wins() {
     let h = Home::new();
+    assert!(h
+        .run(&["config", "set", "--global", "routing.escalate", "ask"])
+        .status
+        .success());
     assert_eq!(h.route(&["check", "--failures", "2"])["action"], "ask");
     assert!(h.run(&["effort", "low"]).status.success());
     let v = h.route(&["check"]);

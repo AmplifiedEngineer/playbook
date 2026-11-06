@@ -24,7 +24,7 @@ Reads: the same store as `playbook usage` (new history is ingested first), the f
 
 ## The sessions view
 
-In `playbook usage`, press `p` for a full screen table of the same records, in the usage theme and in UTC. Keys: `j` and `k` move, `v` changes the order (newest activity, grouped by repo, or by state with the ones that need attention first), `r` reads again now, `p` or `Esc` goes back, `q` quits.
+In `playbook usage`, press `p` for a full screen table of the same records, in the usage theme and in the chosen time zone. Keys: `j` and `k` move, `v` changes the order (newest activity, grouped by repo, or by state with the ones that need attention first), `r` reads again now, `p` or `Esc` goes back, `q` quits.
 
 The view reads again every 30 seconds, off the drawing loop, so a slow `gh` never freezes the screen. The selected session's suggestion shows under the table. The view has no key that closes, removes or stops anything.
 

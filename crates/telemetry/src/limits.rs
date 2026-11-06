@@ -355,21 +355,41 @@ impl Limit {
         now: i64,
         week: WeekStart,
     ) -> Limit {
+        let used = Limit::spent(period, events, now, week);
+        Limit::manual_budget_used(period, limit_usd, used, now, week)
+    }
+
+    /// A manual dollar budget for the calendar period holding `now`, with the
+    /// amount used already summed.
+    pub fn manual_budget_used(
+        period: LimitPeriod,
+        limit_usd: f64,
+        used: f64,
+        now: i64,
+        week: WeekStart,
+    ) -> Limit {
         let (start, end) = period.containing(now, week);
         Limit {
             unit: Unit::Dollars,
             period,
             origin: Origin::Manual,
-            used: events
-                .iter()
-                .filter(|e| e.timestamp >= start && e.timestamp <= now)
-                .map(|e| e.cost_usd)
-                .sum::<f64>()
-                + 0.0,
+            used,
             limit: limit_usd,
             start,
             end,
         }
+    }
+
+    /// The cost of `events` from the start of the calendar period holding
+    /// `now` through `now`.
+    pub fn spent(period: LimitPeriod, events: &[UsageEvent], now: i64, week: WeekStart) -> f64 {
+        let (start, _) = period.containing(now, week);
+        events
+            .iter()
+            .filter(|e| e.timestamp >= start && e.timestamp <= now)
+            .map(|e| e.cost_usd)
+            .sum::<f64>()
+            + 0.0
     }
 
     pub fn to_json(&self, now: i64) -> Value {

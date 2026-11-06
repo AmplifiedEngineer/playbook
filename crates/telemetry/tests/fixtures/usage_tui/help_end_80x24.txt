@@ -1,18 +1,18 @@
 ╭─┤Agent Budget Dashboard├──┤UTC├──────────────────────────────────────────────╮
 │╭┤ Help: keys by group ├─────────────────────────────────────────────────────╮│
-││?          Show this help                           all panels              ││
 ││                                                                            ││
 ││Sorting                                                                     ││
-╰│s          Sort by the next column                  tables                  │╯
-╭│S          Reverse the sort order                   tables                  │╮
-││                                                                            ││
+││s          Sort by the next column                  tables                  ││
+╰│S          Reverse the sort order                   tables                  │╯
+╭│                                                                            │╮
 ││Filtering                                                                   ││
 ││/          Type a filter on any field               all panels              ││
 ││Enter      Filter to selected row; again to undo    tables 3-6              ││
 ││c          Clear the filter                         all panels              ││
-╰│                                                                            │╯
-╭│Refresh                                                                     │╮
-││R          Read new usage now (also automatic)      all panels              ││
+││                                                                            ││
+╰│Refresh                                                                     │╯
+╭│R, B       Read usage and budget limits now         all panels              │╮
+││b          Set the manual monthly budget            all panels              ││
 ││                                                                            ││
 ╰│Quit                                                                        │╯
 ╭│q, Esc     Quit                                     all panels              │╮

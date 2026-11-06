@@ -6,6 +6,9 @@
 //! an agent's own file format, so a second source only implements the trait.
 
 pub mod account;
+pub mod account_move;
+pub mod account_store;
+pub mod agent_names;
 pub mod aggregate;
 pub mod api;
 pub mod backfill;
@@ -25,6 +28,7 @@ pub mod ingest;
 pub mod limits;
 pub mod limits_history;
 pub mod limits_source;
+pub mod local_total;
 pub mod migrate;
 pub mod monthly_use;
 pub mod otlp;
