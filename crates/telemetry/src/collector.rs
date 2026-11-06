@@ -281,9 +281,10 @@ pub fn last_event(paths: &Paths) -> Option<i64> {
     .ok()?;
     conn.busy_timeout(Duration::from_millis(300)).ok()?;
     let mut newest = None;
+    // Live rows only: a transcript row is not a sign that the collector runs.
     for table in [
         "telemetry_requests",
-        "telemetry_tools",
+        "telemetry_tools WHERE source = 'otlp'",
         "telemetry_errors",
         "telemetry_metrics",
     ] {
@@ -317,7 +318,7 @@ pub fn status(paths: &Paths, retention: Retention) -> Result<Status, String> {
             .map_err(|e| format!("failed to read {table}: {e}"))
         };
         let (r, tr) = count("telemetry_requests")?;
-        let (t, tt) = count("telemetry_tools")?;
+        let (t, tt) = count("telemetry_tools WHERE source = 'otlp'")?;
         let (e, te) = count("telemetry_errors")?;
         let (m, tm) = count("telemetry_metrics")?;
         (requests, tool_calls, api_errors, metric_points) = (r, t, e, m);

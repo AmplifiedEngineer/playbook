@@ -51,11 +51,13 @@ CREATE TABLE IF NOT EXISTS telemetry_tools (
     tool_use_id TEXT NOT NULL,
     timestamp INTEGER NOT NULL,
     tool_name TEXT NOT NULL,
-    success INTEGER NOT NULL CHECK(success IN (0, 1)),
-    duration_ms INTEGER NOT NULL CHECK(duration_ms >= 0),
+    success INTEGER CHECK(success IN (0, 1)),
+    duration_ms INTEGER CHECK(duration_ms >= 0),
+    source TEXT NOT NULL DEFAULT 'otlp' CHECK(source IN ('otlp','transcript')),
     PRIMARY KEY (session_id, tool_use_id)
 );
 CREATE INDEX IF NOT EXISTS telemetry_tools_by_time ON telemetry_tools (timestamp);
+CREATE INDEX IF NOT EXISTS telemetry_tools_by_use ON telemetry_tools (tool_use_id);
 CREATE TABLE IF NOT EXISTS telemetry_errors (
     session_id TEXT NOT NULL,
     sequence INTEGER NOT NULL,
@@ -64,6 +66,7 @@ CREATE TABLE IF NOT EXISTS telemetry_errors (
     status_code INTEGER NOT NULL CHECK(status_code >= 0),
     attempt INTEGER NOT NULL CHECK(attempt >= 0),
     duration_ms INTEGER NOT NULL CHECK(duration_ms >= 0),
+    source TEXT NOT NULL DEFAULT 'otlp' CHECK(source IN ('otlp','transcript')),
     PRIMARY KEY (session_id, sequence)
 );
 CREATE INDEX IF NOT EXISTS telemetry_errors_by_time ON telemetry_errors (timestamp);
@@ -85,6 +88,7 @@ DROP TABLE IF EXISTS telemetry_requests;
 DROP TABLE IF EXISTS session_sources;
 DROP TABLE IF EXISTS session_reconcile;
 DROP INDEX IF EXISTS telemetry_tools_by_time;
+DROP INDEX IF EXISTS telemetry_tools_by_use;
 DROP TABLE IF EXISTS telemetry_tools;
 DROP INDEX IF EXISTS telemetry_errors_by_time;
 DROP TABLE IF EXISTS telemetry_errors;
@@ -186,7 +190,80 @@ pub fn migrate_up(conn: &Connection) -> Result<(), String> {
 /// Tables made before a column existed lack it.
 pub(super) fn ensure_columns(conn: &Connection) -> Result<(), String> {
     ensure_column(conn, "skill_name", "TEXT NOT NULL DEFAULT ''")?;
-    ensure_column(conn, "duration_ms", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "duration_ms", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_source_columns(conn)
+}
+
+const SOURCE_DDL: &str = "TEXT NOT NULL DEFAULT 'otlp' CHECK(source IN ('otlp','transcript'))";
+
+fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+        params![table, column],
+        |r| r.get(0),
+    )
+    .map_err(|e| format!("failed to inspect {table}: {e}"))
+}
+
+/// Adds `source` to the tool and error tables (ADR 0016: an idempotent,
+/// self-healing step that runs on every open). Every row that exists becomes
+/// `otlp`. Transcript rows have no outcome and no duration, so the tool table
+/// also drops NOT NULL on `success` and `duration_ms`. SQLite cannot do that
+/// in place, so the table is rebuilt in one transaction. The check runs again
+/// under the write lock, so two openers rebuild it once.
+fn ensure_source_columns(conn: &Connection) -> Result<(), String> {
+    if !has_column(conn, "telemetry_errors", "source")? {
+        let sql = format!("ALTER TABLE telemetry_errors ADD COLUMN source {SOURCE_DDL}");
+        if let Err(e) = conn.execute_batch(&sql) {
+            // A concurrent opener may have added it first.
+            if !has_column(conn, "telemetry_errors", "source")? {
+                return Err(format!("failed to add telemetry_errors.source: {e}"));
+            }
+        }
+    }
+    if has_column(conn, "telemetry_tools", "source")? {
+        return Ok(());
+    }
+    let fail = |e: rusqlite::Error| format!("failed to migrate telemetry_tools: {e}");
+    conn.execute_batch("BEGIN IMMEDIATE").map_err(fail)?;
+    let rebuilt = (|| -> Result<(), rusqlite::Error> {
+        let again: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('telemetry_tools') WHERE name = 'source')",
+            [],
+            |r| r.get(0),
+        )?;
+        if again {
+            return Ok(());
+        }
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS telemetry_tools_new;
+             CREATE TABLE telemetry_tools_new (
+                session_id TEXT NOT NULL,
+                tool_use_id TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                tool_name TEXT NOT NULL,
+                success INTEGER CHECK(success IN (0, 1)),
+                duration_ms INTEGER CHECK(duration_ms >= 0),
+                source TEXT NOT NULL DEFAULT 'otlp' CHECK(source IN ('otlp','transcript')),
+                PRIMARY KEY (session_id, tool_use_id)
+             );
+             INSERT INTO telemetry_tools_new
+                (session_id, tool_use_id, timestamp, tool_name, success, duration_ms, source)
+                SELECT session_id, tool_use_id, timestamp, tool_name, success, duration_ms, 'otlp'
+                FROM telemetry_tools;
+             DROP TABLE telemetry_tools;
+             ALTER TABLE telemetry_tools_new RENAME TO telemetry_tools;
+             CREATE INDEX IF NOT EXISTS telemetry_tools_by_time ON telemetry_tools (timestamp);
+             CREATE INDEX IF NOT EXISTS telemetry_tools_by_use ON telemetry_tools (tool_use_id);",
+        )
+    })();
+    match rebuilt {
+        Ok(()) => conn.execute_batch("COMMIT").map_err(fail),
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(fail(e))
+        }
+    }
 }
 
 fn ensure_column(conn: &Connection, column: &str, ddl: &str) -> Result<(), String> {
@@ -251,10 +328,16 @@ pub fn insert_request(conn: &Connection, r: &TelemetryRequest) -> Result<usize, 
 /// Stores a tool call. Keyed by session and tool use id, so a redelivered
 /// batch is a no-op.
 pub fn insert_tool(conn: &Connection, t: &TelemetryTool) -> Result<usize, String> {
+    // A live row replaces a transcript row of the same call, never the reverse.
+    conn.execute(
+        "DELETE FROM telemetry_tools WHERE tool_use_id = ?1 AND source = 'transcript'",
+        [&t.tool_use_id],
+    )
+    .map_err(|e| format!("failed to replace transcript tool {}: {e}", t.tool_use_id))?;
     conn.execute(
         "INSERT OR IGNORE INTO telemetry_tools
-            (session_id, tool_use_id, timestamp, tool_name, success, duration_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            (session_id, tool_use_id, timestamp, tool_name, success, duration_ms, source)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'otlp')",
         params![
             t.session_id,
             t.tool_use_id,
@@ -306,6 +389,51 @@ pub fn insert_error(conn: &Connection, e: &TelemetryError) -> Result<usize, Stri
         ],
     )
     .map_err(|err| format!("failed to insert telemetry error: {err}"))
+}
+
+/// Rows written per statement while the transcript backfill runs.
+const BACKFILL_CHUNK: i64 = 2_000;
+
+/// Copies tool calls from `tool_invocation_events` (what the transcripts say)
+/// into `telemetry_tools` as `transcript` rows, newest first, for calls newer
+/// than the retention window. A call that has any row already, live or from an
+/// earlier run, is skipped by its tool use id, so a live row is never
+/// overwritten or doubled and a second run changes nothing. Transcripts carry
+/// no outcome and no duration, so both are NULL. Stops after `budget`; the
+/// next run continues. Returns the rows written.
+pub fn backfill_transcript_tools(
+    conn: &Connection,
+    now: i64,
+    retention: Retention,
+    budget: std::time::Duration,
+) -> Result<usize, String> {
+    let cutoff = if retention.days > 0 {
+        now - to_i64(retention.days).saturating_mul(86_400)
+    } else {
+        i64::MIN
+    };
+    let started = std::time::Instant::now();
+    let mut total = 0;
+    loop {
+        let n = conn
+            .execute(
+                "INSERT OR IGNORE INTO telemetry_tools
+                    (session_id, tool_use_id, timestamp, tool_name, success, duration_ms, source)
+                 SELECT e.session_id, e.event_id, e.timestamp,
+                        CASE e.kind WHEN 'agent' THEN 'Agent' ELSE 'Skill' END,
+                        NULL, NULL, 'transcript'
+                 FROM tool_invocation_events e
+                 WHERE e.timestamp >= ?1
+                   AND NOT EXISTS (SELECT 1 FROM telemetry_tools t WHERE t.tool_use_id = e.event_id)
+                 ORDER BY e.timestamp DESC LIMIT ?2",
+                params![cutoff, BACKFILL_CHUNK],
+            )
+            .map_err(|e| format!("failed to backfill tool calls from transcripts: {e}"))?;
+        total += n;
+        if n < BACKFILL_CHUNK as usize || started.elapsed() >= budget {
+            return Ok(total);
+        }
+    }
 }
 
 /// When Claude Code logged an HTTP 429 in `[since, until)`, oldest first. One
@@ -361,7 +489,8 @@ pub fn tool_stats(conn: &Connection, since: i64, until: i64) -> Result<Vec<ToolS
         .prepare(
             "SELECT CASE WHEN tool_name = '' THEN 'unknown' ELSE tool_name END AS n,
                     COUNT(*), SUM(1 - success), SUM(duration_ms), MAX(duration_ms)
-             FROM telemetry_tools WHERE timestamp >= ?1 AND timestamp < ?2
+             FROM telemetry_tools
+             WHERE source = 'otlp' AND timestamp >= ?1 AND timestamp < ?2
              GROUP BY n ORDER BY COUNT(*) DESC, n",
         )
         .map_err(|e| format!("failed to read telemetry tools: {e}"))?;
@@ -459,7 +588,8 @@ pub fn health(conn: &Connection, since: i64, until: i64) -> Result<Health, Strin
     )?;
     let tool = one(
         "SELECT COUNT(*), COALESCE(SUM(1 - success), 0), COALESCE(SUM(duration_ms), 0)
-                    FROM telemetry_tools WHERE timestamp >= ?1 AND timestamp < ?2",
+                    FROM telemetry_tools
+                    WHERE source = 'otlp' AND timestamp >= ?1 AND timestamp < ?2",
     )?;
     Ok(Health {
         requests: req[0],
@@ -1223,5 +1353,240 @@ mod tests {
             .collect();
         assert_eq!(got, [("Explore", 2), ("reviewer", 1)]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    const OLD_TOOLS_AND_ERRORS: &str = "
+        CREATE TABLE telemetry_tools (
+            session_id TEXT NOT NULL, tool_use_id TEXT NOT NULL, timestamp INTEGER NOT NULL,
+            tool_name TEXT NOT NULL, success INTEGER NOT NULL CHECK(success IN (0, 1)),
+            duration_ms INTEGER NOT NULL CHECK(duration_ms >= 0),
+            PRIMARY KEY (session_id, tool_use_id));
+        CREATE INDEX telemetry_tools_by_time ON telemetry_tools (timestamp);
+        CREATE TABLE telemetry_errors (
+            session_id TEXT NOT NULL, sequence INTEGER NOT NULL, timestamp INTEGER NOT NULL,
+            model TEXT NOT NULL, status_code INTEGER NOT NULL, attempt INTEGER NOT NULL,
+            duration_ms INTEGER NOT NULL, PRIMARY KEY (session_id, sequence));
+        INSERT INTO telemetry_tools VALUES ('s1', 'tu1', 100, 'Bash', 0, 40);
+        INSERT INTO telemetry_tools VALUES ('s1', 'tu2', 200, 'Read', 1, 5);
+        INSERT INTO telemetry_errors VALUES ('s1', 1, 100, 'opus', 529, 1, 90);";
+
+    fn sources(conn: &Connection, table: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(&format!("SELECT source FROM {table} ORDER BY rowid"))
+            .unwrap();
+        let rows = stmt.query_map([], |r| r.get(0)).unwrap();
+        rows.map(Result::unwrap).collect()
+    }
+
+    #[test]
+    fn migrating_the_previous_schema_keeps_rows_and_marks_them_otlp() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(OLD_TOOLS_AND_ERRORS).unwrap();
+        migrate_up(&conn).unwrap();
+        migrate_up(&conn).unwrap();
+        assert_eq!(sources(&conn, "telemetry_tools"), ["otlp", "otlp"]);
+        assert_eq!(sources(&conn, "telemetry_errors"), ["otlp"]);
+        let (ok, ms): (i64, i64) = conn
+            .query_row(
+                "SELECT success, duration_ms FROM telemetry_tools WHERE tool_use_id = 'tu1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((ok, ms), (0, 40));
+        // The rebuilt table accepts an unknown outcome and an unknown duration.
+        conn.execute(
+            "INSERT INTO telemetry_tools VALUES ('s2', 'tu3', 1, 'Agent', NULL, NULL, 'transcript')",
+            [],
+        )
+        .unwrap();
+        let by_use: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'telemetry_tools_by_use'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(by_use, 1);
+    }
+
+    fn with_events(events: &[(&str, &str, i64, &str)]) -> Connection {
+        let conn = mem();
+        conn.execute_batch(
+            "CREATE TABLE tool_invocation_events (event_id TEXT PRIMARY KEY,
+                timestamp INTEGER NOT NULL, session_id TEXT NOT NULL, account TEXT NOT NULL,
+                kind TEXT NOT NULL, name TEXT NOT NULL);",
+        )
+        .unwrap();
+        for (id, session, ts, kind) in events {
+            let name = if *kind == "agent" {
+                "playbook:reviewer"
+            } else {
+                "playbook:plan"
+            };
+            conn.execute(
+                "INSERT INTO tool_invocation_events VALUES (?1, ?2, ?3, 'a', ?4, ?5)",
+                params![id, ts, session, kind, name],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    const FOREVER: Retention = Retention {
+        days: 0,
+        max_rows: 0,
+    };
+    const NOW: i64 = 1_000_000_000;
+    const BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+
+    fn backfill(conn: &Connection) -> usize {
+        backfill_transcript_tools(conn, NOW, FOREVER, BUDGET).unwrap()
+    }
+
+    fn by_name(conn: &Connection) -> Vec<(String, i64)> {
+        let mut stmt = conn
+            .prepare("SELECT tool_name, COUNT(*) FROM telemetry_tools GROUP BY 1 ORDER BY 1")
+            .unwrap();
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        rows.map(Result::unwrap).collect()
+    }
+
+    #[test]
+    fn backfill_counts_match_a_hand_counted_fixture() {
+        let conn = with_events(&[
+            ("a1", "s1", 10, "agent"),
+            ("a2", "s1", 20, "agent"),
+            ("a3", "s2", 30, "agent"),
+            ("k1", "s1", 40, "skill"),
+            ("k2", "s2", 50, "skill"),
+        ]);
+        assert_eq!(backfill(&conn), 5);
+        assert_eq!(
+            by_name(&conn),
+            [("Agent".to_string(), 3), ("Skill".to_string(), 2)]
+        );
+        assert_eq!(sources(&conn, "telemetry_tools"), ["transcript"; 5]);
+        let known: i64 = conn
+            .query_row(
+                "SELECT COUNT(success) + COUNT(duration_ms) FROM telemetry_tools",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(known, 0, "no outcome or duration is invented");
+    }
+
+    #[test]
+    fn a_second_backfill_run_changes_nothing() {
+        let conn = with_events(&[("a1", "s1", 10, "agent"), ("k1", "s1", 40, "skill")]);
+        assert_eq!(backfill(&conn), 2);
+        let before = by_name(&conn);
+        assert_eq!(backfill(&conn), 0);
+        assert_eq!(by_name(&conn), before);
+    }
+
+    #[test]
+    fn a_live_row_with_the_same_tool_use_id_is_kept_once_and_untouched() {
+        let conn = with_events(&[("tu9", "s1", 10, "agent"), ("tu8", "s1", 20, "agent")]);
+        insert_tool(&conn, &tool("tu9", "Agent", false, 321, 11)).unwrap();
+        backfill(&conn);
+        let (n, src, ok, ms): (i64, String, i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*), MAX(source), MIN(success), MIN(duration_ms)
+                 FROM telemetry_tools WHERE tool_use_id = 'tu9'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!((n, src.as_str(), ok, ms), (1, "otlp", 0, 321));
+        assert_eq!(sources(&conn, "telemetry_tools").len(), 2);
+    }
+
+    #[test]
+    fn a_live_row_that_arrives_later_replaces_the_transcript_row() {
+        let conn = with_events(&[("tu9", "s1", 10, "agent")]);
+        backfill(&conn);
+        insert_tool(&conn, &tool("tu9", "Agent", true, 77, 11)).unwrap();
+        insert_tool(&conn, &tool("tu9", "Agent", true, 77, 11)).unwrap();
+        assert_eq!(sources(&conn, "telemetry_tools"), ["otlp"]);
+        backfill(&conn);
+        assert_eq!(sources(&conn, "telemetry_tools"), ["otlp"]);
+    }
+
+    #[test]
+    fn a_differing_agent_name_does_not_duplicate_the_call() {
+        // The live data calls the agent `custom`, the transcript says
+        // `playbook:reviewer`. Both are one Agent call with one tool use id.
+        let conn = with_events(&[("tu1", "s1", 10, "agent")]);
+        insert_tool(&conn, &tool("tu1", "Agent", true, 9, 10)).unwrap();
+        backfill(&conn);
+        assert_eq!(by_name(&conn), [("Agent".to_string(), 1)]);
+    }
+
+    #[test]
+    fn transcript_only_and_live_only_days_both_keep_their_rows() {
+        let day = 86_400;
+        let conn = with_events(&[("old1", "s1", 2 * day + 5, "agent")]);
+        insert_tool(&conn, &tool("live1", "Bash", true, 3, 5 * day + 5)).unwrap();
+        backfill(&conn);
+        let per_day = |lo: i64, hi: i64| -> Vec<String> {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT source FROM telemetry_tools WHERE timestamp >= ?1 AND timestamp < ?2",
+                )
+                .unwrap();
+            let rows = stmt.query_map([lo, hi], |r| r.get(0)).unwrap();
+            rows.map(Result::unwrap).collect()
+        };
+        assert_eq!(per_day(2 * day, 3 * day), ["transcript"]);
+        assert_eq!(per_day(5 * day, 6 * day), ["otlp"]);
+    }
+
+    #[test]
+    fn health_and_tool_stats_stay_live_only() {
+        let conn = with_events(&[("a1", "s1", 10, "agent"), ("a2", "s1", 11, "agent")]);
+        insert_tool(&conn, &tool("live", "Bash", false, 40, 12)).unwrap();
+        backfill(&conn);
+        let h = health(&conn, 0, 100).unwrap();
+        assert_eq!((h.tool_calls, h.tool_failures, h.tool_ms), (1, 1, 40));
+        let stats = tool_stats(&conn, 0, 100).unwrap();
+        assert_eq!(stats.len(), 1);
+        assert_eq!((stats[0].name.as_str(), stats[0].calls), ("Bash", 1));
+        assert!(
+            health(&conn, 10, 12).unwrap().is_empty(),
+            "no live rows, no data"
+        );
+    }
+
+    #[test]
+    fn backfill_follows_the_retention_window() {
+        let day = 86_400;
+        let conn = with_events(&[
+            ("old", "s1", NOW - 100 * day, "agent"),
+            ("new", "s1", NOW - day, "agent"),
+        ]);
+        let r = Retention {
+            days: 90,
+            max_rows: 0,
+        };
+        assert_eq!(backfill_transcript_tools(&conn, NOW, r, BUDGET).unwrap(), 1);
+        assert_eq!(backfill(&conn), 1, "no limit takes the rest");
+    }
+
+    #[test]
+    fn a_spent_budget_still_writes_one_chunk_and_the_next_run_continues() {
+        let ids: Vec<String> = (0..2_500).map(|i| format!("t{i}")).collect();
+        let events: Vec<(&str, &str, i64, &str)> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (id.as_str(), "s1", 1_000 + i as i64, "skill"))
+            .collect();
+        let conn = with_events(&events);
+        let none = std::time::Duration::ZERO;
+        let run = || backfill_transcript_tools(&conn, NOW, FOREVER, none).unwrap();
+        assert_eq!(run(), 2_000);
+        assert_eq!(run(), 500);
+        assert_eq!(run(), 0);
     }
 }

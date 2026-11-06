@@ -53,6 +53,7 @@ fn ingest_at(
         .map_err(|e| format!("failed to begin ingest transaction: {e}"))?;
     let mut stats = IngestStats::default();
     let newest = write_events(&tx, events, account, name, watermark, &mut stats)?;
+    backfill_tools(&tx)?;
 
     // raise_watermark never moves backwards, so a quiet scan keeps the old value.
     db::raise_watermark(&tx, name, newest.min(now - WATERMARK_SAFETY_SECS))?;
@@ -98,6 +99,23 @@ fn write_events(
         stats.tools_inserted += 1;
     }
     Ok(newest)
+}
+
+/// The most time one ingest spends copying tool calls into the telemetry table.
+const TOOL_BACKFILL_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Copies the tool calls the transcripts show into `telemetry_tools` as
+/// `transcript` rows, inside the ingest transaction. Live rows are never
+/// touched, only the retention window is filled, and a long history takes a
+/// few runs because each one stops at its time budget.
+fn backfill_tools(tx: &Transaction) -> Result<(), String> {
+    crate::telemetry_db::backfill_transcript_tools(
+        tx,
+        crate::util::time::now_secs(),
+        crate::collector::configured_retention(),
+        TOOL_BACKFILL_BUDGET,
+    )
+    .map(|_| ())
 }
 
 /// Set once a first-run backfill has read every transcript.
@@ -177,6 +195,7 @@ pub fn ingest_claude(
     }
     let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
         .map_err(|e| format!("failed to begin ingest transaction: {e}"))?;
+    backfill_tools(&tx)?;
     let newest = db::newest_usage_of(&tx, name)?;
     db::raise_watermark(&tx, name, newest.min(started - WATERMARK_SAFETY_SECS))?;
     db::raise_watermark(&tx, BACKFILL_DONE, 1)?;
@@ -515,5 +534,46 @@ mod tests {
         .unwrap();
         assert_eq!(calls, 0);
         assert_eq!(count(&conn, "usage_events"), 5);
+    }
+
+    #[test]
+    fn ingest_copies_tool_calls_into_the_telemetry_table_once_and_keeps_live_rows() {
+        let dir = scratch_dir("usage-tool-backfill");
+        let conn = db::open_db(&dir.join("usage.db")).unwrap();
+        let now = crate::util::time::now_secs();
+        let call = |id: &str, kind: ToolKind| crate::ToolInvocationEvent {
+            event_id: id.into(),
+            timestamp: now - 60,
+            session_id: "s".into(),
+            account: String::new(),
+            kind,
+            name: "playbook:reviewer".into(),
+        };
+        conn.execute(
+            "INSERT INTO telemetry_tools VALUES ('s', 'tu_live', ?1, 'Agent', 0, 250, 'otlp')",
+            [now - 60],
+        )
+        .unwrap();
+        let source = Fake(Events {
+            tools: vec![
+                call("tu_live", ToolKind::Agent),
+                call("tu_a", ToolKind::Agent),
+                call("tu_s", ToolKind::Skill),
+            ],
+            ..Events::default()
+        });
+        ingest(&source, "a", &conn).unwrap();
+        ingest(&source, "a", &conn).unwrap();
+
+        assert_eq!(count(&conn, "telemetry_tools"), 3);
+        let live: (String, i64, i64) = conn
+            .query_row(
+                "SELECT source, success, duration_ms FROM telemetry_tools WHERE tool_use_id = 'tu_live'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(live, ("otlp".to_string(), 0, 250));
+        let _ = fs::remove_dir_all(dir);
     }
 }
