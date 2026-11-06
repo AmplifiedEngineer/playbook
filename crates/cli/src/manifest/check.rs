@@ -17,7 +17,7 @@
 use std::path::{Path, PathBuf};
 
 /// Top-level files the manifest allows verbatim.
-const ALLOW_FILES: [&str; 18] = [
+const ALLOW_FILES: [&str; 16] = [
     ".gitignore",
     "CHANGELOG.md",
     "README.md",
@@ -25,8 +25,6 @@ const ALLOW_FILES: [&str; 18] = [
     "NOTICE",
     "NOTICE-pbdoc",
     "justfile",
-    "flake.nix",
-    "flake.lock",
     "install.sh",
     "install-pbtop.sh",
     "CODE_OF_CONDUCT.md",
@@ -160,11 +158,11 @@ mod tests {
         assert!(violations(&tracked).is_empty());
     }
 
-    /// The Nix flake and its lock sit at the root, where `nix run` reads them.
+    /// The Nix flake lives in pragmatic-engineer/nix, so a root flake is an offender.
     #[test]
-    fn the_nix_flake_files_are_allowlisted() {
+    fn the_nix_flake_files_are_offenders() {
         let tracked = vec!["flake.nix".to_string(), "flake.lock".to_string()];
-        assert!(violations(&tracked).is_empty());
+        assert_eq!(violations(&tracked), tracked);
     }
 
     #[test]

@@ -26,8 +26,9 @@
 # pragmatic-engineer/marketplace and waits for their own vX.Y.Z releases.
 # Then `aur` pushes the Arch package playbook-bin to the AUR, after a build in an
 # Arch container (a leaf job; without its secret it skips the push).
-# Then `nix` moves flake.nix to the release with a release/nix-vX.Y.Z pull
-# request to main, and two leaf jobs run the flake on Linux and macOS.
+# Then `nix` moves flake.nix in pragmatic-engineer/nix to the release with a
+# release/nix-vX.Y.Z pull request, and two leaf jobs run the flake on Linux
+# and macOS.
 # Then `scoop` moves the Windows bucket (pragmatic-engineer/scoop-bucket) with a
 # release/vX.Y.Z pull request, and `verify-scoop` installs it on Windows.
 # A published release is never built or uploaded again. A tag is never moved.
@@ -1825,20 +1826,22 @@ jobs:
           echo "$report"
           echo "Homebrew on Linux installed playbook and pbtop $VERSION." >> "$GITHUB_STEP_SUMMARY"
 
-  # Moves the Nix flake to the release (issue 1147). The flake fetches the
-  # release binaries by a fixed hash, so the hashes exist only after the
-  # release is built. This job checks the four Nix assets against SHA256SUMS
-  # and their attestation, rewrites the releases block of flake.nix with
-  # scripts/render-flake.sh, and opens release/nix-vX.Y.Z to main with the app
-  # token, then waits for the merge queue. It is a leaf job: a red result
-  # fails the run and leaves the release published. main keeps the hashes of
-  # the previous release, which stay valid because assets never change. A
-  # backport or an older release never moves the flake back. A tag vX.Y.Z has
-  # the flake of the release before it, since tags are made before the hashes
-  # exist: users pin main or the merge commit (docs/guides/00-install.md).
-  # When main moved since the checkout, the job fails with "Run again": run
-  # it with the same -f version. A dry run renders from a stand-in
-  # SHA256SUMS, prints the diff and opens nothing.
+  # Moves the Nix flake to the release (issue 1147). The flake lives in
+  # pragmatic-engineer/nix and fetches the release binaries by a fixed hash,
+  # so the hashes exist only after the release is built. This job checks the
+  # four Nix assets against SHA256SUMS and their attestation, rewrites the
+  # releases block of flake.nix in a checkout of that repository with
+  # scripts/render-flake.sh, and opens release/nix-vX.Y.Z there with the app
+  # token, the way `downstream` moves the Homebrew tap, then waits for the
+  # merge. It is a leaf job: a red result fails the run and leaves the
+  # release published. The flake keeps the hashes of the previous release,
+  # which stay valid because assets never change. A backport or an older
+  # release never moves the flake back. Users pin the merge commit of the
+  # pull request (docs/guides/00-install.md). When the flake repository moved
+  # since the checkout, the job fails with "Run again": run it with the same
+  # -f version. A dry run renders from a stand-in SHA256SUMS, prints the diff
+  # and opens nothing. When the app cannot reach the repository, the job
+  # fails and names the owner step.
   nix:
     name: nix
     # Holds the GitHub App credentials. Protection rules for them live on this environment.
@@ -1855,10 +1858,11 @@ jobs:
       contents: read
       attestations: read # gh attestation verify reads the attestations
     outputs:
-      # The commit of main that carries the flake of this release, or empty.
+      # The commit of pragmatic-engineer/nix that carries the flake of this release, or empty.
       sha: ${{ steps.pr.outputs.sha || steps.render.outputs.sha }}
     env:
       GH_REPO: ${{ github.repository }}
+      NIX_REPO: pragmatic-engineer/nix
       VERSION: ${{ needs.plan.outputs.version }}
       TAG: ${{ needs.plan.outputs.tag }}
       DRY_RUN: ${{ needs.plan.outputs.dry_run }}
@@ -1875,11 +1879,15 @@ jobs:
             tuf-repo.github.com:443
             tuf-repo-cdn.sigstore.dev:443
 
-      # The default branch as it is now: the release pull request merged
-      # after this run started, so the dispatch commit is behind.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      # Only the flake file is read and written here. No code from it runs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: pragmatic-engineer/nix
+          path: downstream/nix
           persist-credentials: false
 
       - name: Check the release and write the flake
@@ -1894,7 +1902,8 @@ jobs:
           targets="x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin"
           echo "sha=" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
-          have="$(sed -n 's/^ *version = "\(.*\)";$/\1/p' flake.nix | head -n 1)"
+          flake=downstream/nix/flake.nix
+          have="$(sed -n 's/^ *version = "\(.*\)";$/\1/p' "$flake" | head -n 1)"
           if [ "$DRY_RUN" = true ]; then
             # The full shape of the real file, with hashes made from the names.
             for t in $targets x86_64-pc-windows-msvc; do
@@ -1904,7 +1913,7 @@ jobs:
           else
             # A backport or an older release must not move the flake back.
             if [ "$(printf '%s\n%s\n' "$have" "$VERSION" | sort -V | tail -n 1)" != "$VERSION" ]; then
-              echo "::notice::flake.nix is at $have, ahead of $VERSION, so it is left alone."
+              echo "::notice::the flake is at $have, ahead of $VERSION, so it is left alone."
               echo "skip=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -1928,11 +1937,11 @@ jobs:
             done
             cd "$GITHUB_WORKSPACE"
           fi
-          scripts/render-flake.sh "$VERSION" "$rel/SHA256SUMS" flake.nix
-          if git diff --quiet -- flake.nix; then
+          scripts/render-flake.sh "$VERSION" "$rel/SHA256SUMS" "$flake"
+          if git -C downstream/nix diff --quiet -- flake.nix; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            # main already carries this release.
-            if [ "$DRY_RUN" != true ]; then echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"; fi
+            # The flake repository already carries this release.
+            if [ "$DRY_RUN" != true ]; then echo "sha=$(git -C downstream/nix rev-parse HEAD)" >> "$GITHUB_OUTPUT"; fi
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
@@ -1943,7 +1952,7 @@ jobs:
             [ "$DRY_RUN" != true ] || echo "Dry run: the hashes are stand-ins, and nothing is opened."
             echo
             echo '~~~diff'
-            git diff -- flake.nix
+            git -C downstream/nix diff -- flake.nix
             echo '~~~'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -1965,26 +1974,42 @@ jobs:
           {
             echo "## Nix flake skipped"
             echo
-            echo "The app secrets are not set. Run \`scripts/render-flake.sh $VERSION SHA256SUMS flake.nix\` with the SHA256SUMS of $TAG and open the pull request by hand, or set the secrets and run \`gh workflow run release.yml -f version=$VERSION\` again."
+            echo "The app secrets are not set. Run \`scripts/render-flake.sh $VERSION SHA256SUMS flake.nix\` on the flake of $NIX_REPO with the SHA256SUMS of $TAG and open the pull request there by hand, or set the secrets and run \`gh workflow run release.yml -f version=$VERSION\` again."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # One token for this repository. A dry run asks for read access only.
+      # One token for the flake repository. A dry run asks for read access only.
       - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         if: steps.render.outputs.skip != 'true' && steps.bot.outputs.configured == 'true'
         id: app
+        continue-on-error: true
         with:
           client-id: ${{ secrets.BOT_APP_CLIENT_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
+          owner: pragmatic-engineer
+          repositories: nix
           permission-contents: ${{ needs.plan.outputs.dry_run == 'true' && 'read' || 'write' }}
           permission-pull-requests: ${{ needs.plan.outputs.dry_run == 'true' && 'read' || 'write' }}
+
+      # Fails the job with the owner step when the app cannot reach the repository.
+      - name: Explain a missing app installation
+        if: steps.app.outcome == 'failure'
+        run: |
+          echo "::error::The igorjs app cannot get a token for $NIX_REPO. Add $NIX_REPO to the repositories of the igorjs app installation (organization settings, Installed GitHub Apps, igorjs, Configure), then run again with the same -f version." >&2
+          {
+            echo "## Nix flake not moved"
+            echo
+            echo "The igorjs app cannot get a token for $NIX_REPO. Add that repository to the app installation, then run \`gh workflow run release.yml --repo $GH_REPO -f version=$VERSION\` again."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
       - name: Check the app token
         if: steps.render.outputs.skip != 'true' && steps.bot.outputs.configured == 'true' && needs.plan.outputs.dry_run == 'true'
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
-        run: scripts/release-gh.sh find "$GH_REPO" "release/nix-$TAG"
+        run: |
+          set -euo pipefail
+          gh api "repos/$NIX_REPO" --jq '"\(.full_name): pull: \(.permissions.pull // false)"'
+          scripts/release-gh.sh find "$NIX_REPO" "release/nix-$TAG"
 
       - name: Open the pull request and wait for the merge
         id: pr
@@ -2003,22 +2028,22 @@ jobs:
               echo "$1 The release $TAG is published. Run again with the same version:"
               echo
               echo '```bash'
-              echo "gh pr list --repo $GH_REPO --head release/nix-$TAG --state all"
+              echo "gh pr list --repo $NIX_REPO --head release/nix-$TAG --state all"
               echo "gh workflow run release.yml --repo $GH_REPO -f version=$VERSION"
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           }
-          out="$(scripts/release-gh.sh pr "$GH_REPO" "release/nix-$TAG" "$title" "$RUNNER_TEMP/nix-body.md" . flake.nix)" \
+          out="$(scripts/release-gh.sh pr "$NIX_REPO" "release/nix-$TAG" "$title" "$RUNNER_TEMP/nix-body.md" downstream/nix flake.nix)" \
             || manual "The flake pull request for $TAG could not be opened. The log says why."
           n="$(sed -n 's/^pr=//p' <<<"$out")"
-          echo "Pull request: https://github.com/$GH_REPO/pull/$n" >> "$GITHUB_STEP_SUMMARY"
-          sha="$(scripts/release-gh.sh wait "$GH_REPO" "$n" 1800 | sed -n 's/^sha=//p')" \
+          echo "Pull request: https://github.com/$NIX_REPO/pull/$n" >> "$GITHUB_STEP_SUMMARY"
+          sha="$(scripts/release-gh.sh wait "$NIX_REPO" "$n" 1800 | sed -n 's/^sha=//p')" \
             || manual "The flake pull request $n did not merge. The log says why."
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || manual "The merge commit of pull request $n is unknown."
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
-  # Runs the flake the way a user does, at the commit that carries it, on
+  # Runs the flake the way a user does, at the commit of pragmatic-engineer/nix that carries it, on
   # Linux, and tampers with a copy to see that a wrong hash fails. A leaf
   # job. The host list is written from reasoning and not from a run: when the
   # first release blocks a host, add it here.
@@ -2031,7 +2056,7 @@ jobs:
     permissions:
       contents: read
     env:
-      GH_REPO: ${{ github.repository }}
+      NIX_REPO: pragmatic-engineer/nix
       VERSION: ${{ needs.plan.outputs.version }}
       SHA: ${{ needs.nix.outputs.sha }}
     steps:
@@ -2051,6 +2076,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: pragmatic-engineer/nix
           ref: ${{ needs.nix.outputs.sha }}
           persist-credentials: false
 
@@ -2059,7 +2085,7 @@ jobs:
       - name: Run the flake and tamper with a copy
         run: |
           set -euo pipefail
-          out="$(nix run "github:$GH_REPO/$SHA#playbook" -- --version)"
+          out="$(nix run "github:$NIX_REPO/$SHA#playbook" -- --version)"
           [ "${out##* }" = "$VERSION" ] \
             || { echo "::error::nix run says '$out', not $VERSION." >&2; exit 1; }
           echo "nix run: $out"
@@ -2089,7 +2115,7 @@ jobs:
     permissions:
       contents: read
     env:
-      GH_REPO: ${{ github.repository }}
+      NIX_REPO: pragmatic-engineer/nix
       VERSION: ${{ needs.plan.outputs.version }}
       SHA: ${{ needs.nix.outputs.sha }}
     steps:
@@ -2098,7 +2124,7 @@ jobs:
       - name: Run the flake
         run: |
           set -euo pipefail
-          out="$(nix run "github:$GH_REPO/$SHA#playbook" -- --version)"
+          out="$(nix run "github:$NIX_REPO/$SHA#playbook" -- --version)"
           [ "${out##* }" = "$VERSION" ] \
             || { echo "::error::nix run says '$out', not $VERSION." >&2; exit 1; }
           echo "Nix on macOS ran playbook $VERSION from $SHA." >> "$GITHUB_STEP_SUMMARY"
