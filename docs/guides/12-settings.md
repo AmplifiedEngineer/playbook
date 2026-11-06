@@ -8,6 +8,7 @@ playbook config set --global autoReview.fix true      # fix confirmed review fin
 playbook config set --global autoMerge.enabled true   # mark ready, wait for green checks, merge
 playbook config set --global pr.draft false           # open PRs ready for review
 playbook config export > playbook-config.json         # back up; load with `config import`
+playbook config set --global routing.escalate auto     # stop the approval prompts before the top model runs
 playbook state list                                   # inspect playbook's own bookkeeping
 ```
 
