@@ -45,6 +45,7 @@ pub enum Cmd {
     Refresh,
     Budget,
     Zone,
+    Account,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -355,6 +356,16 @@ pub const BINDINGS: &[Binding] = &[
         panels: ALL_PANELS,
         text: "Next color theme (off with NO_COLOR)",
         hint: hint("t", "theme", 12, 2),
+    },
+    Binding {
+        cmd: Cmd::Account,
+        keys: &[c('u'), c('U')],
+        ctrl: false,
+        shown: "u, U",
+        group: Group::Filtering,
+        panels: ALL_PANELS,
+        text: "Next account; U shows all, or the newest",
+        hint: None,
     },
     Binding {
         cmd: Cmd::Zone,

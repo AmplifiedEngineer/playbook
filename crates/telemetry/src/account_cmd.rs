@@ -23,6 +23,12 @@ pub fn run_on(conn: Connection, command: &AccountCommand) -> Result<String, Stri
     let time = |text: &str| mv::parse_time(text, zone);
     match command {
         AccountCommand::List => store::list_text(&conn),
+        AccountCommand::Fingerprint => super::session_account::env_fingerprint().ok_or_else(|| {
+            format!(
+                "{} is not set in this shell",
+                super::session_account::TOKEN_ENV
+            )
+        }),
         AccountCommand::Name { key, name } => {
             store::set_name(&conn, key, name)?;
             let note = if store::has_events(&conn, key)? {

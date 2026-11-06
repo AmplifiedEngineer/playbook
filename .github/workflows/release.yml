@@ -1789,16 +1789,36 @@ jobs:
           eval "$("$brew" shellenv)"
           # A fresh tap clone, so the formula is the one the tap has now.
           brew tap pragmatic-engineer/tap
-          brew install pragmatic-engineer/tap/playbook
-          brew install pragmatic-engineer/tap/pbtop
-          # Both must come from the tap and say the release version.
           scratch="$(mktemp -d)"
-          for b in playbook pbtop; do
-            out="$(HOME="$scratch" "$(brew --prefix)/bin/$b" --version)"
+          bin="$(brew --prefix)/bin"
+          # The version a binary prints must be the release version.
+          check_version() {
+            out="$(HOME="$scratch" "$bin/$1" --version)"
             [ "${out##* }" = "$VERSION" ] \
-              || { echo "::error::$b --version says '$out', not $VERSION. The tap may not carry the release." >&2; exit 1; }
-            echo "$b: $out"
-          done
+              || { echo "::error::$1 --version says '$out', not $VERSION. The tap may not carry the release." >&2; exit 1; }
+            echo "$1: $out"
+          }
+          # A tap whose pbtop formula conflicts with playbook links pbtop to
+          # playbook (homebrew-tap, issue 1587). An older tap installs both.
+          if grep -q '^ *conflicts_with "playbook"' "$(brew --repository pragmatic-engineer/tap)/Formula/pbtop.rb"; then
+            brew install pragmatic-engineer/tap/pbtop
+            check_version pbtop
+            brew uninstall pragmatic-engineer/tap/pbtop
+            brew install pragmatic-engineer/tap/playbook
+            [ "$(readlink -f "$bin/pbtop")" = "$(readlink -f "$bin/playbook")" ] \
+              || { echo "::error::The playbook formula did not link pbtop to playbook." >&2; exit 1; }
+            for b in playbook pb pbtop; do check_version "$b"; done
+            if brew install pragmatic-engineer/tap/pbtop 2> "$scratch/conflict"; then
+              echo "::error::The pbtop formula installed next to playbook; conflicts_with does not hold." >&2
+              exit 1
+            fi
+            grep -q "brew uninstall pbtop" "$scratch/conflict" \
+              || { echo "::error::The conflict message does not give the migration command." >&2; cat "$scratch/conflict" >&2; exit 1; }
+          else
+            brew install pragmatic-engineer/tap/playbook
+            brew install pragmatic-engineer/tap/pbtop
+            for b in playbook pbtop; do check_version "$b"; done
+          fi
           # In an empty HOME the check has nothing to find and still must run.
           report="$(HOME="$scratch" "$(brew --prefix)/bin/playbook" doctor check)"
           [ -n "$report" ] || { echo "::error::playbook doctor check printed nothing." >&2; exit 1; }

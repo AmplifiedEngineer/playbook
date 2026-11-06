@@ -86,6 +86,7 @@ Keys:
 | `b` | Open the budget window: type the manual monthly budget in dollars, `Enter` saves it to `usage.budget.monthlyUsd`, `0` clears it, `Esc` cancels. |
 | `?` | Open the help window (below). |
 | `z` | Switch every time and day between local time and UTC for this session. The footer and the title name the zone. `usage.timeZone` sets the start-up zone. |
+| `u`, `U` | Pick the account. The view opens on the account of the newest event, and the title names it (a name set with `playbook usage account name`, else the account key). `u` steps to the next account, then to all accounts, then back to the newest. `U` jumps to all accounts and back. The totals, the charts and the budget panel count only the account shown. The agents, skills and health tables read telemetry rows, which carry no account, and stay unfiltered. |
 | `s` | Sort the focused table by the next column. A marker in the header shows the column and the direction. Text columns start ascending and number columns descending. |
 | `S` | Reverse the sort. |
 | `Enter` | Filter the whole view to the selected row: a model, a project or a session id. `Enter` on that row again lifts the filter. |
@@ -524,6 +525,7 @@ Two more views of the projects panel (`4`, then `v` three and four times) read `
 **Starting it for you.** When the settings that `setup` wrote point at the collector, playbook starts `playbook usage collect --idle-seconds 0` itself, detached in its own session, from the `session-init` hook (wired by the hooks part of `setup`), the two hooks wired only on `UserPromptSubmit` (`auto-model-detect` and `context-hygiene`) and most playbook commands, `cc` included. These start nothing: `--version`, `version`, `doctor`, `update`, `uninstall`, `migrate`, `setup` and its old name, `state`, the tool hooks, `statusline`, `json`, `commands` and `usage collect`, `warm`, `prune` and `stop`. A headless run (`PLAYBOOK_HEADLESS` or `CI`) and `usage.telemetry` set to `off` start nothing either.
 
 - A running collector holds `collector.lock`, so it costs a starter one open and one `try_lock`, and parallel starts leave one collector.
+- The session hook prints one line when the settings hold the playbook telemetry keys but this session started without `OTEL_EXPORTER_OTLP_ENDPOINT` in its environment (Claude Code reads `env` once, at start, so the session exports nothing until it restarts). It uses the consent check that starts the collector (`telemetry_points_here`: the user settings files with the home as the working directory, plus `usage.telemetry` and `collector.json`), so a repo's own settings are not read, and it is silent when `usage.telemetry` is `off`, when nothing is set up, in a headless run, and when the keys are present.
 - A spawn holds the next one off for 10 seconds (`collector.spawned`).
 - The session hook waits at most 1.2 seconds for a new one and replaces a collector that holds the lock but does not answer. A prompt or a command waits for nothing.
 - A collector from another playbook version is asked to stop and replaced. `playbook usage stop` stops it.

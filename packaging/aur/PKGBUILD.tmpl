@@ -19,8 +19,11 @@ sha256sums_x86_64=('@SHA256_X86_64@')
 sha256sums_aarch64=('@SHA256_AARCH64@')
 
 package() {
-  # The binaries are static musl builds. Only playbook is installed: no pb
-  # link (playbook setup makes it), no pbtop, no hooks, nothing under $HOME.
+  # The binary is a static musl build. One file is installed, plus pbtop as a
+  # link to it: playbook started as pbtop runs the dashboard, so the two
+  # always share a version. No pb link (playbook setup makes it), no hooks,
+  # nothing under $HOME.
   install -Dm755 "${srcdir}/playbook-${pkgver}-${CARCH}-unknown-linux-musl" \
     "${pkgdir}/usr/bin/playbook"
+  ln -s playbook "${pkgdir}/usr/bin/pbtop"
 }
