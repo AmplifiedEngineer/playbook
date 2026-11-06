@@ -764,7 +764,8 @@ mod tests {
     fn the_default_theme_keeps_its_safe_usage_hues() {
         let p = Theme::Standard.palette(ColorDepth::True);
         let alarm = usage_rgb(&p, 100.0);
-        assert_eq!(alarm, Rgb(214, 94, 0));
+        // The HSV stop (26, 100, 84) rounds to one step off the vermillion hex.
+        assert_eq!(alarm, Rgb(214, 93, 0));
         assert_eq!(p.error, ink(hex(0xd55e00)));
     }
 

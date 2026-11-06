@@ -48,7 +48,7 @@ Both charts use eighth blocks, one bar per UTC day. Idle days are zero and days 
 - **y axis.** Labels at the bottom, middle and top, with a blank column between them and the box, in dollars or tokens with units (`$0`, `$2.5`, `$250`, `$2.5K`, `500K`, `2.5M`). The top is a round value above the peak (1, 1.2, 1.6, 2, 2.5, 3, 4, 5, 6 or 8 times a power of ten), so the labels are round and the middle is half the top. Faint dotted guides mark the top and the middle.
 - **x axis.** With one bar a day (a week, a month that fits, today's seven days) the weekday is on one row and the day of the month, 1 to 31, directly below it, when each cell fits the label and a gap. The weekday row needs a letter and a gap in every cell, so a month in a narrow panel has only the numbers. When the numbers do not fit, every second, third or seventh day is labeled, always with the first and the last bar (a number that would touch the last one is left out). No full dates sit on the axis: the header carries the period's UTC dates (`this week Oct 6 to Oct 12 until 12:00`, `last 30 days Sep 13 to Oct 12, 2026`), and the readout line names the day under the cursor in full. When a bar holds several days (a wide range), the axis keeps the short first, middle and last date. Today's labels are bold and underlined, the peak day's are yellow, and the cursor's are highlighted.
 - **Totals line.** The total, the peak (with its date) and the average per day that has happened, for the range.
-- **Cursor.** `Left` and `Right` move it one bar, `Home` and `End` jump to the first and last bar while a chart has the focus. A readout line gives the day, cost, messages, tokens and top model with its share (the token chart leads with tokens). It starts on today, both charts share it, and a new range resets it.
+- **Cursor.** `Left` and `Right` (or `h` and `l`) move it one bar, `Home` and `End` jump to the first and last bar while a chart has the focus. A readout line gives the day, cost, messages, tokens and top model with its share (the token chart leads with tokens). It starts on today, both charts share it, and a new range resets it.
 - **Legend.** Bar color follows height along the theme gradient (dark to light blue for cost), and the legend in the bottom border says so. The mono theme has neither.
 - **Fill.** A week or more of bars always fills the width of the plot, and fewer bars are never wider than 16 columns.
 - **Wide ranges.** When the range has more days than the chart has columns, days are added up into equal bars (the title says `Spend per 3 days`) and nothing is cut off. The axis, readout and cursor then speak of those bars.
@@ -74,11 +74,13 @@ Keys:
 | `F1` to `F12` | Show a tab by its number. |
 | `e` | Open the layout editor. It draws the tab as rows of cells and keeps a cursor on one panel: `h`, `l` move the cursor along the panels and `j`, `k` between rows, `H`, `L` swap the panel with its neighbour in the row, `J`, `K` with the cell below or above, `f` splits a row of two or joins a row of one with its neighbour, `a` opens a picker of the panels the tab lacks and `Enter` adds one after the cursor, or on a row of its own after the cursor's row in an arranged tab, `d` removes the panel, `u` undoes the last 20 changes, `Left`, `Right` pick the tab, `<`, `>` reorder tabs, `n` adds a tab, `x` deletes one, `r` renames. Every change shows on the tab behind the window and is saved to `usage.ui.layout` within 200 ms, and anything still pending is saved when the editor closes or `pbtop` quits; `Esc` or `q` close the window. A failed write is retried and the footer says why. With no config store the footer shows the command to run, once. `R` asks `[y/N]` and on `y` resets the layout and the saved view settings (`usage.ui.state`: tab, range, views, sorts, filter) to the defaults; the theme and every other setting stay. |
 | `1` to `6`, `]`, `[` | Focus a panel of the current tab by number, or the next or previous one. The focused panel's hint is a badge. |
-| `Left`, `Right` | Move the chart cursor one day (or one bar). `Home`, `End`, `g`, `G` jump to the ends while a chart has the focus. |
+| `Left`, `Right`, `h`, `l` | Move the chart cursor one day (or one bar). `Home`, `End`, `g`, `G` jump to the ends while a chart has the focus. |
 | `Up`, `Down`, `j`, `k`, `PageUp`, `PageDown`, `Home`, `End`, `g`, `G` | Move the selected row of the focused table. |
 | `v` | Change the view of the focused panel, and only that panel. With Spend focused it steps total, by model and daily table. With Projects focused it steps projects, agents, skills, tools and health. On the other four panels it does nothing. The title of Spend and Projects always shows `v view: <name>`, and the other panels show no such tag. |
-| `h`, `?` | Open the help window (below). |
-| `R` | Read new usage now. The view also refreshes by itself. |
+| `R`, `B` | Read new usage and the budget limits now. The view also refreshes by itself. |
+| `b` | Open the budget window: type the manual monthly budget in dollars, `Enter` saves it to `usage.budget.monthlyUsd`, `0` clears it, `Esc` cancels. |
+| `?` | Open the help window (below). |
+| `z` | Switch every time and day between local time and UTC for this session. The footer and the title name the zone. `usage.timeZone` sets the start-up zone. |
 | `s` | Sort the focused table by the next column. A marker in the header shows the column and the direction. Text columns start ascending and number columns descending. |
 | `S` | Reverse the sort. |
 | `Enter` | Filter the whole view to the selected row: a model, a project or a session id. `Enter` on that row again lifts the filter. |
@@ -88,14 +90,14 @@ Keys:
 | `/` | Type a filter, a case insensitive substring of model, repo, branch or session id. `Enter` applies it, `Esc` cancels, `Backspace` edits. While you type, every key is text, so `q` and `r` do not quit or change the range until you press `Enter` or `Esc`. |
 | `c` | Clear the filter. |
 | `p` | Open the [Sessions management view](09-sessions.md#the-sessions-view), a full screen table of recent sessions with their PR, state and suggestions. |
-| `t` | Cycle the theme: default, dark, light, mono. |
+| `t` | Cycle the theme: default, spectrum, dark, light, mono. Spectrum colors usage from green to red. |
 | `q`, `Esc`, `Ctrl-C` | Quit. |
 
 The view is keyboard only, so the terminal's own text selection and scrolling keep working.
 
-**Help window.** `h` or `?` opens a centered window listing every key, grouped (navigation, periods, views, sorting, filtering, refresh, quit), with the panels each acts on. It is sized for 80 by 24. On a shorter screen the arrows, `PageUp`, `PageDown`, `Home` and `End` scroll it. Any other key closes it, and `Ctrl-C` still quits. Data keeps refreshing underneath and nothing the user set (focus, selection, sorts, views, cursor) changes.
+**Help window.** `?` opens a centered window listing every key, grouped (navigation, periods, views, sorting, filtering, refresh, quit), with the panels each acts on. It is sized for 80 by 24. On a shorter screen the arrows, `j`, `k`, `PageUp`, `PageDown`, `Home` and `End` scroll it. Any other key closes it, and `Ctrl-C` still quits. Data keeps refreshing underneath and nothing the user set (focus, selection, sorts, views, cursor) changes.
 
-The key handler, the footer hints and the help window read one table, `BINDINGS` in `crates/telemetry/src/tui/keys.rs`, so the help cannot list a dead key or miss a live one. A test presses every key on every panel and fails if one changes anything without a row in the table. The footer shows each hint with its verb (`m month`, `/ filter`, `h help`). On a narrow screen it drops hints in the table's `drop` order, always keeping `v view`, `/ filter`, `h help` and `q quit`, and `Tab tab` when there is more than one tab.
+The key handler, the footer hints and the help window read one table, `BINDINGS` in `crates/telemetry/src/tui/keys.rs`, so the help cannot list a dead key or miss a live one. A test presses every key on every panel and fails if one changes anything without a row in the table. The footer shows each hint with its verb (`m month`, `/ filter`, `? help`). On a narrow screen it drops hints in the table's `drop` order, always keeping `v view`, `/ filter`, `? help` and `q quit`, and `Tab tab` when there is more than one tab.
 
 ### Ranges
 
@@ -133,7 +135,7 @@ Each period (`today`, `week`, `month`) is compared with the one before it (yeste
 | `light` | The same with darker colors for a white ground. |
 | `mono` | No color. The selected row is shown in reverse video. |
 
-The theme comes from the `usage.theme` config key (`default`, `dark`, `light`, `mono`; see [config keys](../reference/config-keys.md)) and `t` changes it for the session. `NO_COLOR` set to anything but empty forces `mono` and locks it.
+The theme comes from the `usage.theme` config key (`default`, `spectrum`, `dark`, `light`, `mono`; see [config keys](../reference/config-keys.md)) and `t` changes it for the session. `NO_COLOR` set to anything but empty forces `mono` and locks it.
 
 Colors follow the terminal. With `COLORTERM=truecolor` or `24bit` the `default` values are drawn exactly. Otherwise, when `TERM` names `256color`, each value goes to the nearest of the 256 color cube and gray ramp, and with neither to the nearest of the 16 basic colors. The values come from the Okabe and Ito (2008) color universal design palette, which stays readable with common color vision differences.
 
@@ -231,7 +233,7 @@ Notes:
 
 1. A detected monthly limit: a monthly spend limit from the statusline (behind a gateway), or a cached spend limit fetched after that reading, whatever its age.
 2. With no statusline reading, the cached spend limit however old.
-3. `usage.budget.monthlyUsd`, only when nothing is detected. It is not shown beside a detected limit.
+3. `usage.budget.monthlyUsd`, only when nothing is detected. It does not draw a bar beside a detected limit. When both are set and differ, the Budget panel adds a line with both amounts and says the detected one applies.
 
 A cached limit over six hours old, whether it won under item 1 or item 2, is tagged `limit cached <age> ago, used is this machine only`. The cache's used amount is dropped and the bar shows this machine's estimate. A line under the bar then shows the amount Claude Code last reported, with its age and the word stale. A manual budget is tagged `manual, local` for the same reason and gets the same line.
 
@@ -243,7 +245,7 @@ Cache rules:
 - The cache is read again only when the file changes, and a half written file keeps the last good reading.
 - The period of the cached limit is assumed to be the calendar month.
 
-**Plan name.** It comes from the rate limit tier names in the config file. Only the two tiers seen on Max accounts are recognized. Everything else shows as "Enterprise or unknown plan". When a plan has no 5 hour and weekly windows, the Budget (when it has room) and Projection panels say "5 hour and weekly windows: not available for this plan" and add that Pro and Max get them from the playbook statusline. A plan this version cannot tell from Enterprise, such as Pro, gets the same text. On a Max plan with no reading yet they say a reading appears after a session with the playbook statusline. Run `playbook usage doctor` to see which sources exist on a machine.
+**Plan name.** It comes from the rate limit tier names in the config file. The two tiers seen on Max accounts are recognized as Max. An account whose organizationType is claude_enterprise, or whose seatTier names enterprise, is Enterprise: the panels hide the 5 hour and weekly windows and say the whole limit is the monthly extra usage budget. Everything else shows as "Unknown plan". When a plan has no 5 hour and weekly windows, the Budget (when it has room) and Projection panels say "5 hour and weekly windows: not available for this plan" and add that Pro and Max get them from the playbook statusline. An unknown plan, such as Pro, gets the same text. On a Max plan with no reading yet they say a reading appears after a session with the playbook statusline. Run `playbook usage doctor` to see which sources exist on a machine.
 
 **Manual budget.** It covers the UTC calendar month or week (the week starts on `usage.weekStart`). The spend is the estimated cost from your local history, not your bill. Set it with `playbook config set --global usage.budget.monthlyUsd 200`. `0` means no budget.
 
@@ -310,7 +312,7 @@ For the period on screen (today, this week or this month, this week for other ra
 |---|---|
 | `known`, `hint` | `hint` is set when nothing is known. |
 | `snapshot_captured_at`, `snapshot_stale` | Snapshot fields. |
-| `plan`, `plan_label` | `plan` is `max_5x`, `max_20x` or `enterprise_or_unknown`. |
+| `plan`, `plan_label` | `plan` is `max_5x`, `max_20x`, `enterprise` or `unknown`. |
 | `windows_note` | Null when a window is known. |
 | `reason` | Why no limit comes from Claude: `no-reading`, `stale`, `cap-unknown`, `windows-reset` or `rate-limited-seen`, else null. |
 | `comparison` | Null, `skipped` with the reason, or the amount Claude reports and the local estimate with `delta_usd`, `delta_pct`, `disagrees`, `read_at` and `stale`. |
@@ -488,7 +490,7 @@ The pass is idempotent. A failure leaves transcripts as the source.
 
 ## Cost per agent
 
-The Agents view (`4`, then `v`) groups `telemetry_requests` by agent name for the range (`query::load_agents`). The main session has no agent name and shows as `main`. The title note `source telemetry N% of spend` is the telemetry cost over the transcript cost of the range, capped at 100 percent. Only telemetry knows the agent, so a range with no telemetry rows shows `Telemetry off`. Totals are unchanged.
+The Agents view (`4`, then `v`) groups `telemetry_requests` by agent name for the range (`query::load_agents`). The main session has no agent name and shows as `main`. The title note `source telemetry N% of spend` is the telemetry cost over the transcript cost of the range, capped at 100 percent. Only telemetry knows the agent, so a range with no telemetry rows shows `Telemetry off`. Totals are unchanged. Claude Code reports an agent from a plugin it does not list as `custom`. On each ingest, `agent_names::resolve_custom` renames those rows to the `agentType` in the subagent's `meta.json`, found by the request id that the subagent transcript shares with the telemetry row. It reads only request ids and that name, and rows with no transcript keep `custom`.
 
 ## Cost per skill
 
