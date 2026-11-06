@@ -1,6 +1,7 @@
 ---
 name: grounding-research
 description: Evidence rules for investigating code (cite file:line). Use when exploring a codebase, tracing execution, or mapping dependencies. Not for PR review.
+user-invocable: false
 ---
 
 # Research Grounding

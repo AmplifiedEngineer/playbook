@@ -1,6 +1,7 @@
 ---
 name: delegating-subagents
 description: Handoff, roster, routing, and recovery rules for subagents. Use before dispatching any subagent, and when one finishes or goes quiet.
+user-invocable: false
 ---
 
 # Delegating to Subagents
