@@ -271,7 +271,9 @@ pub fn migrate_handoffs(legacy: &Path, new: &Path, slug: &str) -> io::Result<()>
     if slug.is_empty() || !legacy.is_dir() {
         return Ok(());
     }
-    let marker = new.join(".copied").join(slug);
+    // Named by the legacy slug, as before, so a handoff that was consumed is
+    // not copied again after an upgrade changed the key.
+    let marker = new.join(".copied").join(crate::handoff::legacy_slug(slug));
     if marker.exists() {
         return Ok(());
     }

@@ -113,12 +113,12 @@ A release tag installs that release. A branch or commit is refused, because it h
 ### Nix
 
 ```bash
-nix run github:pragmatic-engineer/playbook -- --version
-nix profile install github:pragmatic-engineer/playbook
+nix run github:pragmatic-engineer/nix#playbook -- --version
+nix profile install github:pragmatic-engineer/nix#playbook
 playbook setup
 ```
 
-The flake in this repository fetches the release binary for `x86_64-linux`, `aarch64-linux`, `x86_64-darwin` or `aarch64-darwin` and checks it against a fixed hash. It ships `playbook` only. Run `playbook usage` for the dashboard, or link `pbtop` to `playbook` yourself: the binary starts the dashboard when its name is `pbtop`. After each release a pull request moves `flake.nix` to the new version, so `main` is one release behind for a short while. A tag does not help here: tags are made before the hashes exist, so `github:pragmatic-engineer/playbook/vX.Y.Z` carries the flake of the release before it. To pin a version, use the merge commit of the `chore(release): nix flake X.Y.Z` pull request, for example `github:pragmatic-engineer/playbook/<commit>`. To roll back, pin the commit of the earlier flake pull request. Each release runs the flake on Linux and macOS after the pull request merges. A Nix install is read-only. The automatic update shows a notice that the install directory is not writable, and `playbook update` stops with "cannot write to" the store path. Update with `nix profile upgrade playbook` instead. Your config is not touched.
+The flake lives in [pragmatic-engineer/nix](https://github.com/pragmatic-engineer/nix). It fetches the release binary for `x86_64-linux`, `aarch64-linux`, `x86_64-darwin` or `aarch64-darwin` and checks it against a fixed hash. It has two outputs, `playbook` and `pbtop`, so `nix run github:pragmatic-engineer/nix#pbtop` starts the dashboard. After each release a pull request in that repository moves `flake.nix` to the new version, so `main` is one release behind for a short while. A tag does not help here, because the flake has no release tags. To pin a version, use the merge commit of the `chore(release): nix flake X.Y.Z` pull request, for example `github:pragmatic-engineer/nix/<commit>#playbook`. To roll back, pin the commit of the earlier flake pull request. Each release runs the flake on Linux and macOS after the pull request merges. A Nix install is read-only. The automatic update shows a notice that the install directory is not writable, and `playbook update` stops with "cannot write to" the store path. Update with `nix profile upgrade playbook` instead. Your config is not touched.
 
 ### Optional: pbtop alone
 

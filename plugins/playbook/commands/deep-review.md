@@ -265,15 +265,7 @@ Otherwise, **print every finding first (MUST).** Before asking anything, print a
 
 Then ask **one question at a time**:
 
-- **Q1:** "Post which findings as a pending review?" Offer exactly these six tiers, each a strict superset of the one before, blocking and questions take precedence, suggestions and nitpicks stay optional:
-  - `only blockers` (anything marked `(blocking)`)
-  - `all must-fix` (`(blocking)` + `issue`, `chore`, `todo`, `typo`)
-  - `all must-fix + questions` (the above + `question`)
-  - `all except optional` (the above + `suggestion`)
-  - `all findings` (everything, `nitpick`, `thought` and `polish` included)
-  - `none` (stop, nothing posted)
-
-  If `none`, stop.
+- **Q1:** "Post which findings as a pending review?" Read `skills/grounding-review/references/pick-list.md` in this plugin and follow it: the numbered list with `[x]` and `[ ]` marks, the default selection, the reply forms (`1,3,5-7`, `all except 4`, a tier name) and the one-line confirm. Number the findings in the order of the list above, so a number and its code (F1, F2) match. `--self` and `--no-post` still skip the question. If the choice is `none`, stop.
 - Build the payload at `$REVIEW_JSON` (`{"commit_id": "<HEAD_SHA>", "comments": [{"path","line","side","body"}, ...]}`, no review `body`). Build each inline comment's `body` from that finding's previewed `Draft:` block verbatim, anchored to the finding's `file:line`. Post the previewed bodies as they are, never a rewording. Skip any finding marked `Report-only`. Then create the pending review:
 
 ```bash
