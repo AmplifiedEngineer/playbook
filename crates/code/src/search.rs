@@ -7,7 +7,7 @@
 
 use super::walker::Limits;
 use playbook_common::hash::sha256_hex;
-use rusqlite::Connection;
+use playbook_store::Connection;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -251,7 +251,7 @@ fn fts_rows(
     let total: i64 = conn
         .query_row(
             &format!("SELECT COUNT(*) {base}"),
-            rusqlite::params_from_iter(params.iter()),
+            playbook_store::params_from_iter(params.iter()),
             |r| r.get(0),
         )
         .map_err(|e| super::db::map_sql_error("search failed", &e))?;
@@ -263,7 +263,7 @@ fn fts_rows(
         .prepare(&sql)
         .map_err(|e| super::db::map_sql_error("search failed", &e))?;
     let rows = stmt
-        .query_map(rusqlite::params_from_iter(params.iter()), |r| {
+        .query_map(playbook_store::params_from_iter(params.iter()), |r| {
             Ok(Row {
                 path: r.get(0)?,
                 sha: r.get(1)?,
@@ -373,7 +373,7 @@ pub(super) fn literal_scan(
         .prepare(&sql)
         .map_err(|e| super::db::map_sql_error("search failed", &e))?;
     let files: Vec<(String, String)> = stmt
-        .query_map(rusqlite::params_from_iter(extra_params.iter()), |r| {
+        .query_map(playbook_store::params_from_iter(extra_params.iter()), |r| {
             Ok((r.get(0)?, r.get(1)?))
         })
         .map_err(|e| super::db::map_sql_error("search failed", &e))?

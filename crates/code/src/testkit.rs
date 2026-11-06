@@ -6,7 +6,7 @@
 use super::db;
 use super::index::{self, Options, Report};
 use super::walker::test_repo::{git_in, init, write};
-use rusqlite::Connection;
+use playbook_store::Connection;
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};

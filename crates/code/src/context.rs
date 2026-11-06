@@ -8,7 +8,7 @@
 
 use super::search::{fts_hits, load, Loaded, SearchOptions};
 use super::source::cut_at_boundary;
-use rusqlite::{params, Connection};
+use playbook_store::{params, Connection};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -115,7 +115,7 @@ struct Cand {
     tier: u8,
 }
 
-fn sql_err(e: rusqlite::Error) -> String {
+fn sql_err(e: playbook_store::Error) -> String {
     super::db::map_sql_error("context failed", &e)
 }
 

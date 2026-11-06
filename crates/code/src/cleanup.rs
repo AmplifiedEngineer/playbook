@@ -7,7 +7,7 @@
 //! the write lock waits for one chunk at most.
 
 use super::db::{self, TxHooks};
-use rusqlite::{params, Connection};
+use playbook_store::{params, Connection};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -78,10 +78,10 @@ impl Env<'_> {
         }
     }
 
-    fn check(&self) -> rusqlite::Result<()> {
+    fn check(&self) -> playbook_store::Result<()> {
         if self.hooks.fail_cleanup {
-            return Err(rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            return Err(playbook_store::Error::SqliteFailure(
+                playbook_store::ffi::Error::new(playbook_store::ffi::SQLITE_BUSY),
                 None,
             ));
         }
@@ -103,7 +103,7 @@ const AUTOMERGE_OFF: i64 = 0;
 /// The FTS5 default, restored after a cleanup.
 const AUTOMERGE_DEFAULT: i64 = 4;
 
-fn set_automerge(conn: &mut Connection, env: &Env, value: i64) -> rusqlite::Result<()> {
+fn set_automerge(conn: &mut Connection, env: &Env, value: i64) -> playbook_store::Result<()> {
     let tx = db::write_tx(conn, env.tx)?;
     tx.execute(
         "INSERT INTO chunks_fts(chunks_fts, rank) VALUES ('automerge', ?1)",
@@ -127,7 +127,7 @@ fn automerge_is_off(conn: &Connection) -> bool {
 /// them in one transaction, which held the write lock for hundreds of
 /// milliseconds on a 52 worktree store. The setting is restored afterwards, so
 /// the next index run merges the segments in its own small steps.
-fn clean(conn: &mut Connection, store: &Path, env: &Env) -> rusqlite::Result<()> {
+fn clean(conn: &mut Connection, store: &Path, env: &Env) -> playbook_store::Result<()> {
     let dead = dead_worktrees(conn, env.now_ms)?;
     let work = !dead.is_empty() || any_unreferenced_content(conn)?;
     let left_off = automerge_is_off(conn);
@@ -153,7 +153,7 @@ fn delete_loops(
     store: &Path,
     env: &Env,
     dead: Vec<(i64, String)>,
-) -> rusqlite::Result<()> {
+) -> playbook_store::Result<()> {
     for (id, key) in dead {
         // A held run lock means that worktree is indexing right now, so its
         // row stays whatever its root says.
@@ -178,7 +178,7 @@ fn delete_loops(
 
 /// Returns up to [`VACUUM_PAGES`] free pages to the file. The pragma frees one
 /// page per step, so every row it returns is stepped through.
-fn incremental_vacuum(conn: &Connection) -> rusqlite::Result<()> {
+fn incremental_vacuum(conn: &Connection) -> playbook_store::Result<()> {
     let mut stmt = conn.prepare(&format!("PRAGMA incremental_vacuum({VACUUM_PAGES})"))?;
     let mut rows = stmt.query([])?;
     while rows.next()?.is_some() {}
@@ -187,7 +187,7 @@ fn incremental_vacuum(conn: &Connection) -> rusqlite::Result<()> {
 
 /// Worktree rows whose root is gone and whose last activity is older than
 /// the grace. A root that cannot be checked keeps its row.
-fn dead_worktrees(conn: &Connection, now_ms: i64) -> rusqlite::Result<Vec<(i64, String)>> {
+fn dead_worktrees(conn: &Connection, now_ms: i64) -> playbook_store::Result<Vec<(i64, String)>> {
     let mut stmt = conn.prepare(
         "SELECT id, key, root,
                 MAX(COALESCE(last_run_completed, 0), COALESCE(last_run_started, 0), created_at)
@@ -213,7 +213,7 @@ fn dead_worktrees(conn: &Connection, now_ms: i64) -> rusqlite::Result<Vec<(i64, 
 }
 
 /// Deletes a worktree's manifest rows in chunks, then its row.
-fn drop_worktree(conn: &mut Connection, id: i64, env: &Env) -> rusqlite::Result<()> {
+fn drop_worktree(conn: &mut Connection, id: i64, env: &Env) -> playbook_store::Result<()> {
     loop {
         env.check()?;
         let tx = db::write_tx(conn, env.tx)?;
@@ -233,7 +233,7 @@ fn drop_worktree(conn: &mut Connection, id: i64, env: &Env) -> rusqlite::Result<
     db::commit_tx(tx, env.tx)
 }
 
-fn any_unreferenced_content(conn: &Connection) -> rusqlite::Result<bool> {
+fn any_unreferenced_content(conn: &Connection) -> playbook_store::Result<bool> {
     conn.query_row(
         "SELECT EXISTS (SELECT 1 FROM content c
                         WHERE NOT EXISTS (SELECT 1 FROM manifest m WHERE m.content = c.id))",
@@ -245,7 +245,7 @@ fn any_unreferenced_content(conn: &Connection) -> rusqlite::Result<bool> {
 /// Deletes content no manifest row lists, with its FTS rows first. The ids of
 /// a chunk are selected once into a temporary table, so the FTS delete and
 /// the content delete act on the same rows.
-fn drop_unreferenced_content(conn: &mut Connection, env: &Env) -> rusqlite::Result<()> {
+fn drop_unreferenced_content(conn: &mut Connection, env: &Env) -> playbook_store::Result<()> {
     while any_unreferenced_content(conn)? {
         env.check()?;
         let tx = db::write_tx(conn, env.tx)?;
@@ -502,7 +502,7 @@ mod tests {
             .execute(
                 "INSERT INTO worktrees(key, root, created_at, tool_version, last_run_completed)
                  VALUES (?1, ?2, ?3, 'x', ?4)",
-                rusqlite::params![key, root, created, completed],
+                playbook_store::params![key, root, created, completed],
             )
             .expect("worktree");
     }
@@ -533,7 +533,7 @@ mod tests {
                 conn.execute(
                     "INSERT INTO manifest(worktree, path, sha256, size, mtime_ns, status)
                      VALUES (?1, ?2, '', 0, 0, 'skipped')",
-                    rusqlite::params![id, format!("p{i}")],
+                    playbook_store::params![id, format!("p{i}")],
                 )
                 .expect("manifest");
             }

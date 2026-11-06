@@ -1330,7 +1330,7 @@ dependencies = [
  "insta",
  "playbook-common",
  "playbook-data",
- "rusqlite",
+ "playbook-store",
  "rustix",
  "serde_json",
  "tree-sitter",

@@ -7,7 +7,7 @@
 
 use super::lang::{self, Lang};
 use super::search::{load, Loaded};
-use rusqlite::Connection;
+use playbook_store::Connection;
 use std::path::Path;
 
 /// Default and maximum result counts.
@@ -93,7 +93,9 @@ fn candidate_files(conn: &Connection, name: &str, limit: usize) -> Result<Vec<St
         .map_err(|e| super::db::map_sql_error("refs failed", &e))?;
     let limit = i64::try_from(limit).unwrap_or(i64::MAX);
     let rows = stmt
-        .query_map(rusqlite::params![query, limit], |r| r.get::<_, String>(0))
+        .query_map(playbook_store::params![query, limit], |r| {
+            r.get::<_, String>(0)
+        })
         .map_err(|e| super::db::map_sql_error("refs failed", &e))?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| super::db::map_sql_error("refs failed", &e))

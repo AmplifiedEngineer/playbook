@@ -10,7 +10,7 @@
 
 use super::host;
 use playbook_common::sqlite::{retry_busy, OPEN_BUDGET};
-use rusqlite::{Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior};
+use playbook_store::{Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior};
 use std::fs::{File, OpenOptions, TryLockError};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
@@ -52,9 +52,9 @@ pub struct TxHooks {
     /// Runs each time a write transaction is about to begin.
     pub on_write_tx: Option<Box<dyn Fn() + Send + Sync>>,
     /// Makes the transaction fail at `BEGIN` when it returns an error.
-    pub fail_begin: Option<Box<dyn Fn() -> rusqlite::Result<()> + Send + Sync>>,
+    pub fail_begin: Option<Box<dyn Fn() -> playbook_store::Result<()> + Send + Sync>>,
     /// Makes [`commit_tx`] fail, and roll back, when it returns an error.
-    pub fail_commit: Option<Box<dyn Fn() -> rusqlite::Result<()> + Send + Sync>>,
+    pub fail_commit: Option<Box<dyn Fn() -> playbook_store::Result<()> + Send + Sync>>,
 }
 
 /// Begins a write transaction in `IMMEDIATE` mode. A deferred transaction that
@@ -64,7 +64,7 @@ pub struct TxHooks {
 pub fn write_tx<'c>(
     conn: &'c mut Connection,
     hooks: &TxHooks,
-) -> rusqlite::Result<Transaction<'c>> {
+) -> playbook_store::Result<Transaction<'c>> {
     if let Some(hook) = &hooks.on_write_tx {
         hook();
     }
@@ -76,7 +76,7 @@ pub fn write_tx<'c>(
 
 /// Commits a transaction from [`write_tx`]. When `fail_commit` injects an
 /// error the transaction is dropped, which rolls it back.
-pub fn commit_tx(tx: Transaction<'_>, hooks: &TxHooks) -> rusqlite::Result<()> {
+pub fn commit_tx(tx: Transaction<'_>, hooks: &TxHooks) -> playbook_store::Result<()> {
     if let Some(fail) = &hooks.fail_commit {
         fail()?;
     }
@@ -496,7 +496,7 @@ fn ensure_parent(path: &Path, mode: OpenMode) -> Result<(), DbError> {
     })
 }
 
-pub(crate) fn is_corrupt(err: &rusqlite::Error) -> bool {
+pub(crate) fn is_corrupt(err: &playbook_store::Error) -> bool {
     matches!(
         err.sqlite_error_code(),
         Some(ErrorCode::NotADatabase | ErrorCode::DatabaseCorrupt)
@@ -506,7 +506,7 @@ pub(crate) fn is_corrupt(err: &rusqlite::Error) -> bool {
 /// The text of a query or write error. A corrupt or foreign database (the
 /// primary codes `SQLITE_CORRUPT` and `SQLITE_NOTADB`, `CORRUPT_VTAB` included)
 /// names `--rebuild`; any other error keeps `prefix` and its own text.
-pub fn map_sql_error(prefix: &str, err: &rusqlite::Error) -> String {
+pub fn map_sql_error(prefix: &str, err: &playbook_store::Error) -> String {
     if is_corrupt(err) {
         format!(
             "the code index is not a valid database; run `{}`",
@@ -517,7 +517,7 @@ pub fn map_sql_error(prefix: &str, err: &rusqlite::Error) -> String {
     }
 }
 
-fn step(path: &Path, what: &str, err: &rusqlite::Error) -> DbError {
+fn step(path: &Path, what: &str, err: &playbook_store::Error) -> DbError {
     if is_corrupt(err) {
         DbError::NeedsRebuild(rebuild_hint(path, "is not a valid index database"))
     } else {
@@ -626,7 +626,7 @@ pub fn open_maintenance(path: &Path) -> Result<Store, DbError> {
     }
     let lock = StoreLock::open(path)?;
     lock.share(path, &DbHooks::default())?;
-    let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+    let conn = Connection::open_with_flags(path, playbook_store::OpenFlags::SQLITE_OPEN_READ_WRITE)
         .map_err(|e| step(path, "open the database", &e))?;
     conn.busy_timeout(Duration::from_millis(FORGET_BUSY_MS))
         .map_err(|e| step(path, "set busy_timeout", &e))?;
@@ -644,7 +644,7 @@ pub fn open_maintenance(path: &Path) -> Result<Store, DbError> {
 /// a busy store held by a sibling for one, is returned so a healthy store is
 /// never rebuilt because of it.
 pub fn is_healthy(conn: &Connection) -> Result<bool, String> {
-    let quick: rusqlite::Result<String> =
+    let quick: playbook_store::Result<String> =
         conn.query_row("PRAGMA quick_check(1)", [], |row| row.get(0));
     match quick {
         Ok(result) if result == "ok" => {}
@@ -691,7 +691,7 @@ pub fn create_scope_views(
     conn: &Connection,
     worktree_row_id: i64,
     kind: ScopeKind,
-) -> rusqlite::Result<()> {
+) -> playbook_store::Result<()> {
     let wt = worktree_row_id;
     // The first write to the temp schema opens a temp file; keep it in memory.
     conn.pragma_update(None, "temp_store", "MEMORY")?;
@@ -1176,8 +1176,8 @@ mod tests {
         let seen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let counter = seen.clone();
         let busy = || {
-            Err(rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            Err(playbook_store::Error::SqliteFailure(
+                playbook_store::ffi::Error::new(playbook_store::ffi::SQLITE_BUSY),
                 None,
             ))
         };

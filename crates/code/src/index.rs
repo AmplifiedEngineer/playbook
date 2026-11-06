@@ -12,7 +12,7 @@ use super::db::{self, OpenMode, ScopeKind, TxHooks};
 use super::host;
 use super::lang::{self, Lang};
 use super::walker::{self, Skipped};
-use rusqlite::{params, Connection, OptionalExtension};
+use playbook_store::{params, Connection, OptionalExtension};
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
@@ -460,7 +460,11 @@ struct ManifestRow<'a> {
 /// Stores the content row for `(sha, grammar, parser)` once and returns its
 /// id, with whether this call inserted it. The key is the bytes, so a second
 /// path with the same bytes reuses the row and its children.
-fn ensure_content(conn: &Connection, p: &Prepared, parser: &str) -> rusqlite::Result<(i64, bool)> {
+fn ensure_content(
+    conn: &Connection,
+    p: &Prepared,
+    parser: &str,
+) -> playbook_store::Result<(i64, bool)> {
     let inserted = conn.execute(
         "INSERT INTO content(sha256, grammar, parser, partial) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(sha256, grammar, parser) DO NOTHING",
@@ -476,7 +480,7 @@ fn ensure_content(conn: &Connection, p: &Prepared, parser: &str) -> rusqlite::Re
 
 /// Deletes the symbols, imports, chunks and FTS rows of a content row, so a
 /// rebuild can write them again.
-fn clear_children(conn: &Connection, content: i64) -> rusqlite::Result<()> {
+fn clear_children(conn: &Connection, content: i64) -> playbook_store::Result<()> {
     conn.execute(
         "DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE content = ?1)",
         [content],
@@ -493,7 +497,7 @@ fn clear_children(conn: &Connection, content: i64) -> rusqlite::Result<()> {
 /// Points the manifest row of `a.path` at the stored content with its key.
 /// Returns false, and writes nothing, when a cleanup removed that content
 /// after the hint was read: the file is then parsed.
-fn adopt(conn: &Connection, a: &Adopted, parser: &str, wt: i64) -> rusqlite::Result<bool> {
+fn adopt(conn: &Connection, a: &Adopted, parser: &str, wt: i64) -> playbook_store::Result<bool> {
     let found: Option<(i64, bool)> = conn
         .query_row(
             "SELECT id, partial FROM content WHERE sha256 = ?1 AND grammar = ?2 AND parser = ?3",
@@ -523,7 +527,7 @@ fn adopt(conn: &Connection, a: &Adopted, parser: &str, wt: i64) -> rusqlite::Res
 
 /// Deletes a content row that no manifest row references, with its FTS rows
 /// first. The children go with it through the foreign keys.
-fn drop_unreferenced_content(conn: &Connection, content: i64) -> rusqlite::Result<()> {
+fn drop_unreferenced_content(conn: &Connection, content: i64) -> playbook_store::Result<()> {
     let used: bool = conn.query_row(
         "SELECT EXISTS (SELECT 1 FROM manifest WHERE content = ?1)",
         [content],
@@ -541,7 +545,7 @@ fn drop_unreferenced_content(conn: &Connection, content: i64) -> rusqlite::Resul
 
 /// Writes one manifest row. When it moves to other content, the same
 /// transaction drops the old content row if nothing else uses it.
-fn upsert_manifest(conn: &Connection, wt: i64, row: &ManifestRow) -> rusqlite::Result<()> {
+fn upsert_manifest(conn: &Connection, wt: i64, row: &ManifestRow) -> playbook_store::Result<()> {
     let old: Option<Option<i64>> = conn
         .query_row(
             "SELECT content FROM manifest WHERE worktree = ?1 AND path = ?2",
@@ -576,7 +580,7 @@ fn upsert_manifest(conn: &Connection, wt: i64, row: &ManifestRow) -> rusqlite::R
 }
 
 /// Deletes a manifest row and its content row when nothing else uses it.
-fn delete_manifest(conn: &Connection, wt: i64, path: &str) -> rusqlite::Result<()> {
+fn delete_manifest(conn: &Connection, wt: i64, path: &str) -> playbook_store::Result<()> {
     let content: Option<Option<i64>> = conn
         .query_row(
             "SELECT content FROM manifest WHERE worktree = ?1 AND path = ?2",
@@ -595,7 +599,7 @@ fn delete_manifest(conn: &Connection, wt: i64, path: &str) -> rusqlite::Result<(
 }
 
 /// Stores a file's symbols and imports; `parent_id` follows the extractor's parent index.
-fn insert_syntax(conn: &Connection, content: i64, p: &Prepared) -> rusqlite::Result<()> {
+fn insert_syntax(conn: &Connection, content: i64, p: &Prepared) -> playbook_store::Result<()> {
     let to_i64 = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
     let mut ids: Vec<i64> = Vec::with_capacity(p.symbols.len());
     for sym in &p.symbols {
@@ -633,12 +637,12 @@ fn insert_syntax(conn: &Connection, content: i64, p: &Prepared) -> rusqlite::Res
 /// Why one file of a batch failed. A SQL error is kept as is, so a busy or a
 /// corrupt store can end the batch instead of marking one file failed.
 enum ApplyError {
-    Sql(rusqlite::Error),
+    Sql(playbook_store::Error),
     Msg(String),
 }
 
-impl From<rusqlite::Error> for ApplyError {
-    fn from(e: rusqlite::Error) -> Self {
+impl From<playbook_store::Error> for ApplyError {
+    fn from(e: playbook_store::Error) -> Self {
         ApplyError::Sql(e)
     }
 }
@@ -717,7 +721,7 @@ fn apply(
     Ok(())
 }
 
-fn mark_failed(conn: &Connection, wt: i64, path: &str, error: &str) -> rusqlite::Result<()> {
+fn mark_failed(conn: &Connection, wt: i64, path: &str, error: &str) -> playbook_store::Result<()> {
     // A failed path that had content keeps it, as it keeps its children.
     let changed = conn.execute(
         "UPDATE manifest SET status = 'failed', error = ?3 WHERE worktree = ?1 AND path = ?2",
@@ -763,8 +767,8 @@ fn write_batch(
     unreachable!("the last attempt returns")
 }
 
-fn is_busy(err: &rusqlite::Error) -> bool {
-    err.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy)
+fn is_busy(err: &playbook_store::Error) -> bool {
+    err.sqlite_error_code() == Some(playbook_store::ErrorCode::DatabaseBusy)
 }
 
 fn write_batch_once(
@@ -774,13 +778,13 @@ fn write_batch_once(
     wt: i64,
     replace: bool,
     report: &mut Report,
-) -> rusqlite::Result<Vec<String>> {
+) -> playbook_store::Result<Vec<String>> {
     let hooks = opts.tx_hooks();
     let mut tx = db::write_tx(conn, hooks)?;
     #[cfg(test)]
     if let Some(code) = opts.hooks.fail_write {
-        return Err(rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error::new(code),
+        return Err(playbook_store::Error::SqliteFailure(
+            playbook_store::ffi::Error::new(code),
             None,
         ));
     }
@@ -849,7 +853,7 @@ fn write_batch_once(
 
 /// The content keys of `parser` that the store holds.
 fn load_hint(conn: &Connection, parser: &str) -> Result<Hint, String> {
-    let fail = |e: rusqlite::Error| db::map_sql_error("failed to read the index", &e);
+    let fail = |e: playbook_store::Error| db::map_sql_error("failed to read the index", &e);
     let mut stmt = conn
         .prepare("SELECT sha256, grammar FROM content WHERE parser = ?1")
         .map_err(fail)?;
@@ -2589,8 +2593,11 @@ impl P { fn go(&self) {} }
         );
     }
 
-    fn busy() -> rusqlite::Error {
-        rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY), None)
+    fn busy() -> playbook_store::Error {
+        playbook_store::Error::SqliteFailure(
+            playbook_store::ffi::Error::new(playbook_store::ffi::SQLITE_BUSY),
+            None,
+        )
     }
 
     /// Hooks whose `kind` step fails with SQLITE_BUSY for the first `n` calls.
@@ -2598,7 +2605,7 @@ impl P { fn go(&self) {} }
     fn busy_for(n: usize, at_commit: bool) -> (Hooks, std::sync::Arc<AtomicUsize>) {
         let calls = std::sync::Arc::new(AtomicUsize::new(0));
         let seen = calls.clone();
-        let fail: Box<dyn Fn() -> rusqlite::Result<()> + Send + Sync> = Box::new(move || {
+        let fail: Box<dyn Fn() -> playbook_store::Result<()> + Send + Sync> = Box::new(move || {
             if seen.fetch_add(1, Ordering::SeqCst) < n {
                 Err(busy())
             } else {
@@ -2677,7 +2684,7 @@ impl P { fn go(&self) {} }
         write(&f.root, "a.rs", b"fn a() {}\n");
         let opts = Options {
             hooks: Hooks {
-                fail_write: Some(rusqlite::ffi::SQLITE_CORRUPT),
+                fail_write: Some(playbook_store::ffi::SQLITE_CORRUPT),
                 ..Hooks::default()
             },
             ..Options::default()
@@ -3034,7 +3041,7 @@ impl P { fn go(&self) {} }
         f.run();
         run(&other, &f.index, "other", false, &Options::default()).expect("second worktree");
         {
-            let raw = rusqlite::Connection::open(&f.index).expect("raw");
+            let raw = playbook_store::Connection::open(&f.index).expect("raw");
             let hit = raw
                 .execute(
                     "UPDATE chunks_fts_data SET block = zeroblob(8) WHERE id > 10",

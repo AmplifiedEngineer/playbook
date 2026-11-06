@@ -8,7 +8,7 @@ use super::index::load_existing;
 use super::output::IndexState;
 use super::{db, host, walker};
 use playbook_common::hash::sha256_hex;
-use rusqlite::Connection;
+use playbook_store::Connection;
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
