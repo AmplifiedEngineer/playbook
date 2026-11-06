@@ -15,7 +15,7 @@ path = "src/lib.rs"
 
 [dependencies]
 playbook-common = { path = "../common" }
-rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+playbook-store = { path = "../store" }
 
 [lints]
 workspace = true

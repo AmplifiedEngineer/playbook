@@ -21,16 +21,17 @@ pub const OPEN_BUDGET: Duration = Duration::from_millis(5000);
 /// Retries `op` while SQLite reports BUSY or LOCKED, until `budget` has
 /// elapsed. Any other result, including success, is returned at once.
 pub fn retry_busy<T>(
-    mut op: impl FnMut() -> rusqlite::Result<T>,
+    mut op: impl FnMut() -> playbook_store::Result<T>,
     budget: Duration,
-) -> rusqlite::Result<T> {
+) -> playbook_store::Result<T> {
     let start = Instant::now();
     loop {
         match op() {
-            Err(rusqlite::Error::SqliteFailure(err, _))
+            Err(playbook_store::Error::SqliteFailure(err, _))
                 if matches!(
                     err.code,
-                    rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                    playbook_store::ErrorCode::DatabaseBusy
+                        | playbook_store::ErrorCode::DatabaseLocked
                 ) && start.elapsed() < budget =>
             {
                 std::thread::sleep(BUSY_PAUSE);
@@ -44,8 +45,11 @@ pub fn retry_busy<T>(
 mod tests {
     use super::*;
 
-    fn busy() -> rusqlite::Error {
-        rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY), None)
+    fn busy() -> playbook_store::Error {
+        playbook_store::Error::SqliteFailure(
+            playbook_store::ffi::Error::new(playbook_store::ffi::SQLITE_BUSY),
+            None,
+        )
     }
 
     #[test]
@@ -71,10 +75,10 @@ mod tests {
     fn another_error_is_returned_without_a_retry() {
         let mut calls = 0;
 
-        let got: rusqlite::Result<()> = retry_busy(
+        let got: playbook_store::Result<()> = retry_busy(
             || {
                 calls += 1;
-                Err(rusqlite::Error::QueryReturnedNoRows)
+                Err(playbook_store::Error::QueryReturnedNoRows)
             },
             Duration::from_secs(5),
         );
@@ -87,7 +91,8 @@ mod tests {
     fn a_statement_that_stays_busy_gives_up_after_the_budget() {
         let started = Instant::now();
 
-        let got: rusqlite::Result<()> = retry_busy(|| Err(busy()), Duration::from_millis(100));
+        let got: playbook_store::Result<()> =
+            retry_busy(|| Err(busy()), Duration::from_millis(100));
 
         assert!(got.is_err());
         assert!(started.elapsed() < Duration::from_secs(3));
