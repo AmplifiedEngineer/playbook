@@ -27,6 +27,7 @@ pub mod ingest;
 pub mod limits;
 pub mod limits_history;
 pub mod limits_source;
+pub mod local_total;
 pub mod migrate;
 pub mod monthly_use;
 pub mod otlp;
