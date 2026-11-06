@@ -4,7 +4,7 @@
 //! `playbook usage` and its subcommands: picks the terminal view or the text or
 //! JSON output.
 
-use super::command::{AccountCommand, UsageCommand};
+use super::command::UsageCommand;
 use super::daemon::{self, Stopped};
 use super::period::Period;
 use super::query::{self, Range, WeekStart};
@@ -67,83 +67,6 @@ pub fn json_report(
     serde_json::to_string_pretty(&data).map_err(|e| format!("failed to encode usage data: {e}"))
 }
 
-/// `playbook usage account ...`.
-fn account_run(paths: &Paths, command: &AccountCommand) -> Result<String, String> {
-    use super::account_store as store;
-    let conn = super::db::open_db(&paths.db)?;
-    match command {
-        AccountCommand::List => store::list_text(&conn),
-        AccountCommand::Fingerprint => super::session_account::env_fingerprint().ok_or_else(|| {
-            format!(
-                "{} is not set in this shell",
-                super::session_account::TOKEN_ENV
-            )
-        }),
-        AccountCommand::Name { key, name } => {
-            store::set_name(&conn, key, name)?;
-            let note = if store::has_events(&conn, key)? {
-                ""
-            } else {
-                " (no events carry this key yet, check the spelling)"
-            };
-            Ok(if name.trim().is_empty() {
-                format!("cleared the name of {key}")
-            } else {
-                format!("{key} is shown as {}{note}", name.trim())
-            })
-        }
-        AccountCommand::Assign {
-            from,
-            to,
-            target,
-            was,
-            confirm,
-        } => {
-            use super::account_move as mv;
-            let zone = super::tz::current();
-            let (from, to) = (mv::parse_time(from, zone)?, mv::parse_time(to, zone)?);
-            if from >= to {
-                return Err("--from must be earlier than --to".to_string());
-            }
-            let target = store::resolve(&conn, target)?;
-            let was = was
-                .as_deref()
-                .map(|w| store::resolve(&conn, w))
-                .transpose()?;
-            let span = format!("{} to {}", super::tz::iso(from), super::tz::iso(to));
-            if !confirm {
-                let m = mv::plan(&conn, from, to, &target, was.as_deref())?;
-                return Ok(format!(
-                    "dry run: {} events (${:.2}) and {} skill and agent records from {span} would move to {target}.\nAdd --confirm to apply.",
-                    m.events, m.cost_usd, m.tool_events
-                ));
-            }
-            let now = crate::util::time::now_secs();
-            Ok(
-                match mv::assign(&conn, from, to, &target, was.as_deref(), now)? {
-                    Some((id, m)) => format!(
-                        "move {id}: {} events (${:.2}) and {} skill and agent records from {span} now belong to {target}.\nUndo with: playbook usage account undo {id}",
-                        m.events, m.cost_usd, m.tool_events
-                    ),
-                    None => format!(
-                        "nothing to move from {span}: those events already belong to {target}."
-                    ),
-                },
-            )
-        }
-        AccountCommand::Undo { id } => Ok(match super::account_move::undo(&conn, *id)? {
-            Some((id, n, 0)) => format!("undid move {id}: restored {n} records."),
-            Some((id, n, skipped)) => format!(
-                "undid move {id}: restored {n} records and left {skipped} that were relabeled since."
-            ),
-            None => match id {
-                Some(id) => format!("move {id} does not exist or is already undone."),
-                None => "no applied move to undo.".to_string(),
-            },
-        }),
-    }
-}
-
 /// Runs the command. The returned text, when not empty, is printed on stdout.
 pub fn run(
     sub: Option<UsageCommand>,
@@ -187,7 +110,7 @@ pub fn run(
             let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             super::collector::run_collect(paths, port, idle_seconds, &stop)
         }
-        Some(UsageCommand::Account { command }) => account_run(paths, &command),
+        Some(UsageCommand::Account { command }) => super::account_cmd::run(paths, &command),
         Some(UsageCommand::Prune { dry_run }) => super::collector::run_prune(paths, dry_run),
         Some(UsageCommand::Status { json }) => {
             let status = super::collector::status(paths, super::collector::configured_retention())?;
@@ -264,6 +187,7 @@ pub fn parse_range(value: &str) -> Result<Range, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::AccountCommand;
 
     fn paths(name: &str) -> Paths {
         let dir = crate::util::scratch_dir(name);
@@ -365,8 +289,11 @@ mod tests {
         )
         .unwrap();
         let assign = |confirm| AccountCommand::Assign {
-            from: "1970-01-02".into(),
-            to: "1970-01-03".into(),
+            from: Some("1970-01-02".into()),
+            from_session: None,
+            before_session: None,
+            through_session: None,
+            to: Some("1970-01-03".into()),
             target: "personal".into(),
             was: None,
             confirm,
