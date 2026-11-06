@@ -13,7 +13,11 @@ use rusqlite::Connection;
 const WEEK: i64 = 7 * 86_400;
 
 pub fn run(paths: &Paths, command: &AccountCommand) -> Result<String, String> {
-    let conn = crate::db::open_db(&paths.db)?;
+    run_on(crate::db::open_db(&paths.db)?, command)
+}
+
+/// Runs `command` on an open database.
+pub fn run_on(conn: Connection, command: &AccountCommand) -> Result<String, String> {
     let zone = crate::tz::current();
     let now = crate::util::time::now_secs();
     let time = |text: &str| mv::parse_time(text, zone);

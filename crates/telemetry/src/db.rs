@@ -92,6 +92,19 @@ pub fn open_db(path: &Path) -> Result<Connection, String> {
             .map_err(|e| format!("failed to create directory {}: {e}", parent.display()))?;
     }
     make_db_file_private(path)?;
+    open_prepared(path)
+}
+
+/// Opens a usage database file the user named, as it is: no folder or
+/// permission is changed, and nothing is moved in. Used to rehearse on a copy.
+pub fn open_existing_db(path: &Path) -> Result<Connection, String> {
+    if !path.is_file() {
+        return Err(format!("no usage database at {}", path.display()));
+    }
+    open_prepared(path)
+}
+
+fn open_prepared(path: &Path) -> Result<Connection, String> {
     let conn = Connection::open(path)
         .map_err(|e| format!("failed to open usage database at {}: {e}", path.display()))?;
     // Before any statement that can contend for the write lock; a fresh

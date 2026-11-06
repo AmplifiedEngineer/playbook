@@ -67,6 +67,19 @@ pub fn json_report(
     serde_json::to_string_pretty(&data).map_err(|e| format!("failed to encode usage data: {e}"))
 }
 
+/// True when both paths reach one file: the same path, a symlink to it, or a
+/// hard link to it.
+fn is_same_file(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let (Ok(x), Ok(y)) = (std::fs::metadata(a), std::fs::metadata(b)) {
+            return x.dev() == y.dev() && x.ino() == y.ino();
+        }
+    }
+    matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
+}
+
 /// Runs the command. The returned text, when not empty, is printed on stdout.
 pub fn run(
     sub: Option<UsageCommand>,
@@ -78,6 +91,22 @@ pub fn run(
     // with older data moved in first), so no command errors on a fresh home.
     // This runs before the terminal view takes over the screen.
     super::tz::ensure_init();
+    // A rehearsal on a copy of the data file touches nothing else.
+    if let Some(UsageCommand::Account {
+        command,
+        db: Some(db),
+    }) = &sub
+    {
+        if !db.is_file() {
+            return Err(format!("no usage database at {}", db.display()));
+        }
+        if is_same_file(db, &paths.db) {
+            return Err(
+                "--db names the live usage database; make a copy and name that".to_string(),
+            );
+        }
+        return super::account_cmd::run_on(super::db::open_existing_db(db)?, command);
+    }
     // The doctor only reads files, so it runs before the data file is created.
     if let Some(UsageCommand::Doctor { raw }) = sub {
         let usage_dir = paths
@@ -110,7 +139,7 @@ pub fn run(
             let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             super::collector::run_collect(paths, port, idle_seconds, &stop)
         }
-        Some(UsageCommand::Account { command }) => super::account_cmd::run(paths, &command),
+        Some(UsageCommand::Account { command, .. }) => super::account_cmd::run(paths, &command),
         Some(UsageCommand::Prune { dry_run }) => super::collector::run_prune(paths, dry_run),
         Some(UsageCommand::Status { json }) => {
             let status = super::collector::status(paths, super::collector::configured_retention())?;
@@ -243,7 +272,10 @@ mod tests {
 
     fn account(p: &Paths, args: AccountCommand) -> Result<String, String> {
         run(
-            Some(UsageCommand::Account { command: args }),
+            Some(UsageCommand::Account {
+                command: args,
+                db: None,
+            }),
             &no_opts(),
             p,
             false,
@@ -310,6 +342,92 @@ mod tests {
             .starts_with("nothing to move"));
         let undone = account(&p, AccountCommand::Undo { id: None }).unwrap();
         assert!(undone.contains("restored 1"), "{undone}");
+    }
+
+    #[test]
+    fn the_db_option_runs_an_account_command_on_a_copy_and_leaves_the_default_alone() {
+        let p = paths("entry-account-db");
+        let copy = crate::util::scratch_dir("entry-account-copy").join("copy.db");
+        crate::db::open_db(&copy).unwrap();
+        let on = |db: &Path| {
+            run(
+                Some(UsageCommand::Account {
+                    command: AccountCommand::List,
+                    db: Some(db.to_path_buf()),
+                }),
+                &no_opts(),
+                &p,
+                false,
+            )
+        };
+
+        assert_eq!(on(&copy), Ok("No usage recorded yet.".to_string()));
+        assert!(!p.db.exists(), "the default database was not created");
+        let err = on(&copy.with_file_name("missing.db")).unwrap_err();
+        assert!(err.contains("no usage database at"), "{err}");
+        crate::db::open_db(&p.db).unwrap();
+        let err = on(&p.db).unwrap_err();
+        assert!(err.contains("names the live usage database"), "{err}");
+        let link = copy.with_file_name("hard.db");
+        std::fs::hard_link(&p.db, &link).unwrap();
+        let err = on(&link).unwrap_err();
+        assert!(err.contains("names the live usage database"), "{err}");
+        let sym = copy.with_file_name("sym.db");
+        std::os::unix::fs::symlink(&p.db, &sym).unwrap();
+        assert!(on(&sym).is_err());
+    }
+
+    #[test]
+    fn a_confirmed_move_on_a_copy_leaves_the_live_database_and_its_folder_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let p = paths("entry-account-live");
+        let live = crate::db::open_db(&p.db).unwrap();
+        let seed = |conn: &rusqlite::Connection| {
+            conn.execute(
+                "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
+                    repo, branch, input_tokens, output_tokens, cache_creation_tokens,
+                    cache_read_tokens, cost_usd) VALUES ('e', 100, 's', 'a@b.c', 'm', '', 'r', 'b', 1, 1, 0, 0, 1.0)",
+                [],
+            )
+            .unwrap();
+        };
+        seed(&live);
+        drop(live);
+        let dir = crate::util::scratch_dir("entry-account-copy-dir");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let copy = dir.join("copy.db");
+        std::fs::copy(&p.db, &copy).unwrap();
+        let out = run(
+            Some(UsageCommand::Account {
+                command: AccountCommand::Assign {
+                    from: Some("1970-01-01".into()),
+                    to: Some("1970-01-03".into()),
+                    from_session: None,
+                    before_session: None,
+                    through_session: None,
+                    target: "token:abcd1234".into(),
+                    was: None,
+                    confirm: true,
+                },
+                db: Some(copy.clone()),
+            }),
+            &no_opts(),
+            &p,
+            false,
+        )
+        .unwrap();
+        assert!(out.contains("now belong to token:abcd1234"), "{out}");
+        let account = |db: &Path| -> String {
+            rusqlite::Connection::open(db)
+                .unwrap()
+                .query_row("SELECT account FROM usage_events", [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(account(&copy), "token:abcd1234");
+        assert_eq!(account(&p.db), "a@b.c");
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o755, "the folder of the copy keeps its mode");
     }
 
     #[test]
