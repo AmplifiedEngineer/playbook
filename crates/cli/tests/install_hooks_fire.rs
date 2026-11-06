@@ -314,6 +314,49 @@ fn fires(f: &Fire, name: &str) -> bool {
             .1
             .contains("playbook doc read /tmp/report.docx")
         }
+        "handoff-on-clear" => {
+            let home = scratch(f, "h-handoff-clear");
+            let bin = home.join("bin");
+            fs::create_dir_all(&bin).unwrap();
+            let fake = bin.join("claude");
+            fs::write(
+                &fake,
+                "#!/bin/sh\nprintf '# Session Handoff - fire\\n\\n## Where we are now\\n- a\\n\\n## Decisions made\\n- b. Why: c.\\n\\n## Next steps\\n1. d. Why now: e.\\n'\n",
+            )
+            .unwrap();
+            fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+                .unwrap();
+            playbook::config::write::set(
+                playbook::config::write::Tier::Global,
+                "handoff.onClear",
+                &serde_json::json!(true),
+                &home,
+                None,
+            )
+            .unwrap();
+            let transcript = home.join("t.jsonl");
+            fs::write(&transcript, "{}\n").unwrap();
+            let path = format!("{}:/usr/bin:/bin", bin.display());
+            let payload = format!(
+                "{{\"session_id\":\"fire-clear\",\"reason\":\"clear\",\"transcript_path\":{}}}",
+                json_str(&transcript.display().to_string())
+            );
+            run_hook(
+                &f.playbook,
+                name,
+                &payload,
+                &home,
+                &home,
+                &[("PATH", &path)],
+                &[],
+            );
+            let saved = home.join(".config/playbook/runtime/handoff");
+            fs::read_dir(saved).is_ok_and(|entries| {
+                entries
+                    .flatten()
+                    .any(|e| e.file_name().to_string_lossy().ends_with("_fireclear.md"))
+            })
+        }
         "usage-warm" => {
             let home = scratch(f, "h-usage-warm");
             let (_, out) = run_hook(
