@@ -9,6 +9,7 @@ ref Square pkg/main.py 12
 ref make_square pkg/shapes.py 15
 ref make_square pkg/main.py 3
 ref make_square pkg/main.py 12
+ref total pkg/main.py 6
 negative Square pkg/main.py 4
 negative Square pkg/main.py 7
 negative Square pkg/shapes.py 11
