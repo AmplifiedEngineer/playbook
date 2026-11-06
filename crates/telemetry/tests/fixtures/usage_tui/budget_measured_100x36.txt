@@ -33,4 +33,4 @@
 │                                                ││                                                │
 │                                                ││                                                │
 ╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
- d day w week m month ←/→ day r range v view / filter h help q quit  updated 01:46:40 UTC, every 5s
+ d day w week m month ←/→ day r range v view / filter ? help q quit  updated 01:46:40 UTC, every 5s
