@@ -23,7 +23,7 @@ jobs:
   auto-merge:
     name: auto-merge
     # Holds the GitHub App credentials. Protection rules for them live on this environment.
-    environment: bot-app
+    environment: cicd
     runs-on: ubuntu-latest
     # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
     timeout-minutes: 5
