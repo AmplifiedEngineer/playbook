@@ -1,6 +1,6 @@
 # ADR-0052: Signed apt and dnf Package Repository
 
-- **Status:** Accepted
+- **Status:** Superseded on 2026-11-06. The apt and dnf repository, the `.deb` and `.rpm` packages and their signing were removed. The release ships Homebrew, Nix, `install.sh` and the raw release assets.
 - **Date created:** 2026-10-22
 - **Date modified:** 2026-11-04
 - **Builds on:** [ADR 0039](0039-release-workflow.md), which defines the release workflow and its leaf jobs.

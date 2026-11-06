@@ -1,6 +1,6 @@
 # ADR-0053: Windows Is an Experimental CLI
 
-- **Status:** Accepted
+- **Status:** Accepted. Amended 2026-11-06: the scoop bucket and the winget job were removed. The Windows route is the raw `.exe` release asset, and CI keeps the `windows-smoke` job.
 - **Date created:** 2026-10-22
 - **Date modified:** 2026-11-04
 - **Relates to:** [ADR 0007](0007-rust-binary-for-hooks-and-launcher-quality.md), which listed Windows as a deliberate scope addition with its own go or no-go.
