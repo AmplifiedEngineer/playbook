@@ -379,7 +379,7 @@ mod tests {
         let data = crate::config::root(&home).join("data");
         std::fs::create_dir_all(&data).unwrap();
         let db = playbook_data::config::db_in(&data);
-        let conn = rusqlite::Connection::open(&db).unwrap();
+        let conn = playbook_store::Connection::open(&db).unwrap();
         conn.execute_batch(playbook_data::config::SCHEMA_SQL)
             .unwrap();
         drop(conn);
@@ -395,7 +395,7 @@ mod tests {
         let data = crate::config::root(&home).join("data");
         std::fs::create_dir_all(&data).unwrap();
         let db = playbook_data::config::db_in(&data);
-        let conn = rusqlite::Connection::open(&db).unwrap();
+        let conn = playbook_store::Connection::open(&db).unwrap();
         conn.execute_batch(playbook_data::config::SCHEMA_SQL)
             .unwrap();
         conn.execute(
@@ -415,7 +415,7 @@ mod tests {
         let home = crate::util::scratch_dir(tag);
         let data = crate::config::root(&home).join("data");
         std::fs::create_dir_all(&data).unwrap();
-        let conn = rusqlite::Connection::open(playbook_data::config::db_in(&data)).unwrap();
+        let conn = playbook_store::Connection::open(playbook_data::config::db_in(&data)).unwrap();
         conn.execute_batch(playbook_data::config::SCHEMA_SQL)
             .unwrap();
         home

@@ -14,7 +14,7 @@ use super::limits_source;
 use super::query::Range;
 use super::summary;
 use super::UsageEvent;
-use rusqlite::Connection;
+use playbook_store::Connection;
 use std::path::{Path, PathBuf};
 
 /// Where Claude Code's and Codex's data and playbook's usage store live for one home.

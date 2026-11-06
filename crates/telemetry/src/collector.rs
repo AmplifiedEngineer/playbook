@@ -274,9 +274,9 @@ pub struct Status {
 /// database read-only with a short wait, so a busy collector cannot stall the
 /// caller, and writes nothing. `None` when there is no database or no event.
 pub fn last_event(paths: &Paths) -> Option<i64> {
-    let conn = rusqlite::Connection::open_with_flags(
+    let conn = playbook_store::Connection::open_with_flags(
         &paths.db,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        playbook_store::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .ok()?;
     conn.busy_timeout(Duration::from_millis(300)).ok()?;

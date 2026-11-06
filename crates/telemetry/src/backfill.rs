@@ -9,7 +9,7 @@
 
 use super::db;
 use super::UsageSource;
-use rusqlite::{Connection, Transaction, TransactionBehavior};
+use playbook_store::{Connection, Transaction, TransactionBehavior};
 
 const MARKER: &str = "backfill:repo-and-cache-tier-v1";
 

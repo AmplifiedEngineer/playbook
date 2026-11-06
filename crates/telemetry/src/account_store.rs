@@ -5,7 +5,7 @@
 //! event: an email from `~/.claude.json` or a `token:` fingerprint. A name is
 //! only shown beside it.
 
-use rusqlite::Connection;
+use playbook_store::Connection;
 
 pub const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS account_names (
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS account_names (
 /// The longest account key accepted.
 const MAX_KEY: usize = 120;
 
-pub(crate) fn err(what: &str, e: rusqlite::Error) -> String {
+pub(crate) fn err(what: &str, e: playbook_store::Error) -> String {
     format!("failed to {what}: {e}")
 }
 
@@ -222,7 +222,7 @@ pub(crate) mod tests {
                 "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
                     repo, branch, input_tokens, output_tokens, cache_creation_tokens,
                     cache_read_tokens, cost_usd) VALUES (?1, ?2, ?3, ?4, 'm', '', 'r', 'b', 1, 1, 0, 0, ?5)",
-                rusqlite::params![id, ts, session, account, cost],
+                playbook_store::params![id, ts, session, account, cost],
             )
             .unwrap();
         }
