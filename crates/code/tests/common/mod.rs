@@ -4,6 +4,9 @@
 //! Shared helpers for the fixture tests: each test copies a fixture repo into
 //! a scratch git repo and indexes it through the crate's public API.
 
+// Each test crate compiles this module and uses only part of it.
+#![allow(dead_code)]
+
 use playbook_code::{db, index};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -50,7 +53,7 @@ pub(crate) fn index_fixture(lang: &str) -> Indexed {
     Indexed { root, conn }
 }
 
-fn copy_tree(from: &Path, to: &Path) {
+pub(crate) fn copy_tree(from: &Path, to: &Path) {
     fs::create_dir_all(to).expect("create dir");
     for entry in fs::read_dir(from)
         .expect("read dir")
@@ -64,7 +67,7 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-fn git(dir: &Path, args: &[&str]) {
+pub(crate) fn git(dir: &Path, args: &[&str]) {
     let status = Command::new("git")
         .arg("-C")
         .arg(dir)
