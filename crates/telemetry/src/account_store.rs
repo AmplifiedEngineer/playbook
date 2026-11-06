@@ -23,6 +23,15 @@ pub(crate) fn err(what: &str, e: rusqlite::Error) -> String {
 /// Sets the display name of `key`. An empty name removes it.
 pub fn set_name(conn: &Connection, key: &str, name: &str) -> Result<(), String> {
     let name = name.trim();
+    if name.chars().any(char::is_control) {
+        return Err("a name cannot hold control characters".to_string());
+    }
+    if let Some((other, _)) = names(conn)?
+        .into_iter()
+        .find(|(k, n)| k != key && n.eq_ignore_ascii_case(name))
+    {
+        return Err(format!("{other} already uses the name {name}"));
+    }
     if name.is_empty() {
         conn.execute("DELETE FROM account_names WHERE key = ?1", [key])
     } else {
@@ -185,6 +194,16 @@ pub(crate) mod tests {
         set_name(&conn, "work@x.com", " ").unwrap();
         assert!(names(&conn).unwrap().is_empty());
         assert!(resolve(&conn, "two words").is_err());
+    }
+
+    #[test]
+    fn a_name_cannot_hold_control_characters_or_repeat_another_key_name() {
+        let conn = store();
+        set_name(&conn, "work@x.com", "Company").unwrap();
+        assert!(set_name(&conn, "other@x.com", "bad\x1b[2J").is_err());
+        let err = set_name(&conn, "other@x.com", "company").unwrap_err();
+        assert!(err.contains("work@x.com already uses"), "{err}");
+        set_name(&conn, "work@x.com", "COMPANY").unwrap();
     }
 
     #[test]
