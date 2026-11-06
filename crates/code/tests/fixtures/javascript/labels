@@ -1,0 +1,15 @@
+symbol src/counter.js START const 3
+symbol src/counter.js Counter class 5
+symbol src/counter.js Counter.increment method 10
+symbol src/counter.js reset function 16
+symbol src/app.js run function 5
+ref Counter src/counter.js 5
+ref Counter src/app.js 3
+ref Counter src/app.js 7
+ref START src/counter.js 7
+ref START src/counter.js 17
+ref reset src/counter.js 16
+ref reset src/app.js 9
+negative Counter src/counter.js 9
+negative Counter src/app.js 4
+negative Counter src/app.js 6
