@@ -50,19 +50,27 @@ This adds a line like:
 Signed-off-by: Your Name <your@email.com>
 ```
 
-The DCO check runs on every PR. If any commit is missing the trailer, the bot will comment with instructions. Amend with `git commit --amend --signoff` and force-push.
+The DCO check runs on every PR. If any commit is missing the trailer, the check fails and its summary lists the commits. Amend with `git commit --amend --signoff` and force-push. Commits by bots and merge commits are skipped.
 
 ### 2. Contributor License Agreement (CLA)
 
 First-time contributors must sign a CLA. This grants the project a license to use your contribution and protects both you and the project.
 
-**Individual contributors:** Sign the [Individual CLA](ICLA.md) by commenting on your first PR with:
+**Individual contributors:** Sign the [Individual CLA](ICLA.md) in your first PR. Add your own row to [CONTRIBUTORS.md](CONTRIBUTORS.md) in a commit you author, and put this sentence in that commit message:
 
 ```
 I have read the CLA Document and I hereby sign the CLA.
 ```
 
-The CLA bot will record your signature in [CONTRIBUTORS.md](CONTRIBUTORS.md). You only need to do this once across all repositories maintained by igorjs.
+For example:
+
+```bash
+# edit .github/CONTRIBUTORS.md: add "| @your-login | 2026-11-06 | you@example.com |"
+git add .github/CONTRIBUTORS.md
+git commit --signoff -m "docs(cla): sign the CLA for @your-login" -m "I have read the CLA Document and I hereby sign the CLA."
+```
+
+The `cla-check` job passes when the PR author and every commit author are already listed on the default branch, or your PR adds your own row in a commit you authored. A row added in someone else's commit, or without the sentence, fails. Rows are append-only: a PR cannot edit or remove one. Bot commits are skipped. Every `Co-authored-by:` person must be signed too: they add their own row in a commit they author, in their own PR. Co-authors that are AI tools or bots are ignored. Every contributor signs, maintainers included. Each repository keeps its own list, so copy your row to each repository you contribute to.
 
 **Corporate contributors:** If you are contributing on behalf of your employer, your organisation must sign the [Corporate CLA](CCLA.md). Email the signed document to oss@mail.igorjs.io. Individual employees listed as Designated Employees do not need to sign the Individual CLA separately.
 

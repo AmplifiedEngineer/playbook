@@ -27,4 +27,4 @@
 │                                                                                                  │
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- 1-6 panel d day w week m month a all ←/→ day r range v view / filter s/S sort h help q quit
+ 1-6 panel d day w week m month a all ←/→ day r range v view / filter s/S sort ? help q quit

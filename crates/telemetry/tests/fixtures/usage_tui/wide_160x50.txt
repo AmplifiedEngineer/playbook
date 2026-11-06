@@ -47,4 +47,4 @@
 │                                                                              ││          s-8      gamma              haiku-5               1   23.8K    $0.01│
 │                                                                              ││Sat 08-22 s-11     gamma              haiku-5               1   23.8K    $0.02│
 ╰──────────────────────────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────────────────────────╯
- 1-6 panel d day w week m month a all ←/→ day r range v view / filter s/S sort t theme (default) h help enter select q quit      updated 01:46:40 UTC, every 5s
+ 1-6 panel d day w week m month a all ←/→ day r range v view / filter s/S sort t theme (default) ? help enter select q quit      updated 01:46:40 UTC, every 5s
