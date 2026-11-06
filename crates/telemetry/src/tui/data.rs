@@ -118,6 +118,9 @@ pub struct LimitsView {
     pub cache_age: Option<i64>,
     /// What Claude Code last reported as used this month, as `(read at, USD)`.
     pub reported: Option<(i64, f64)>,
+    /// The cached monthly bar is the stale amount Claude Code read plus this
+    /// machine's messages since, not this machine alone.
+    pub cached_plus_local: bool,
     /// The manual and the detected monthly budget in dollars, when both are
     /// set and differ. The detected one applies.
     pub manual_beside_detected: Option<(f64, f64)>,
@@ -158,6 +161,7 @@ impl Default for LimitsView {
             stale: false,
             cache_age: None,
             reported: None,
+            cached_plus_local: false,
             manual_beside_detected: None,
             windows_note: None,
             period: Period::Week(WeekStart::default()),
@@ -215,6 +219,7 @@ impl LimitsView {
             stale: sources.stale(now),
             cache_age,
             reported: limits_source::billed_anchor(sources, now),
+            cached_plus_local: limits_source::reported_plus_local(sources, now),
             manual_beside_detected: limits_source::manual_beside_detected(sources, now),
             windows_note,
             period,
