@@ -22,7 +22,3 @@ Then run `pbtop`, `pbtop --summary` or `pbtop --json`.
 The script checks the checksum of the `pbtop` archive and its build attestation when `gh` can check it, then installs `pbtop` into `~/.local/bin`. It needs `bash` and `curl`. The [install guide](00-install.md#optional-pbtop-alone) has the details and a route without `curl | sh`.
 
 The code index has no standalone tool. It ships inside `playbook` as `playbook code`.
-
-## Retired playbook-telemetry
-
-The `playbook-telemetry` command and Homebrew formula are deprecated, and its old repository is archived. If you installed the formula, run `brew uninstall playbook-telemetry && brew install pragmatic-engineer/tap/pbtop`, or install playbook and use `playbook usage`. A script that calls `playbook-telemetry` should call `pbtop` with the same arguments.

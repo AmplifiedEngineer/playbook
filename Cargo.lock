@@ -336,6 +336,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
+name = "code-bench"
+version = "0.40.2"
+
+[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1335,6 +1339,13 @@ name = "playbook-plugin-checks"
 version = "0.0.0"
 dependencies = [
  "regex",
+]
+
+[[package]]
+name = "playbook-store"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
 ]
 
 [[package]]

@@ -122,7 +122,7 @@ The flake lives in [pragmatic-engineer/nix](https://github.com/pragmatic-enginee
 
 ### Optional: pbtop alone
 
-You do not need this if you have `playbook`. `playbook usage` runs the same code, because playbook embeds the `playbook-telemetry` crate. The Homebrew formula of `playbook` also links `pbtop` to `playbook`, and the Nix flake has a `pbtop` output. Install `pbtop`, the Agent Budget Dashboard, only on a machine that has no `playbook`. From release 0.35.0 each `vX.Y.Z` release has `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone, and there are two ways to install it:
+You do not need this if you have `playbook`. `playbook usage` runs the same code, because playbook embeds the telemetry crate. The Homebrew formula of `playbook` also links `pbtop` to `playbook`, and the Nix flake has a `pbtop` output. Install `pbtop`, the Agent Budget Dashboard, only on a machine that has no `playbook`. From release 0.35.0 each `vX.Y.Z` release has `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone, and there are two ways to install it:
 
 ```bash
 brew install pragmatic-engineer/tap/pbtop
@@ -137,7 +137,7 @@ A `pbtop` from another source can fall behind `playbook`, for example the instal
 
 `install-pbtop.sh` needs `bash` and `curl`. It downloads `install.sh` from `main` and runs it in its pbtop mode, which checks the archive like the `playbook` binary (its line in `SHA256SUMS`, the build attestation when `gh` can check it, and `pbtop --version`), installs `pbtop` into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`) and puts that folder on `PATH`. It runs nothing else. To pin a release, set `PLAYBOOK_REF` for `sh`, as in `curl -fsSL .../install-pbtop.sh | PLAYBOOK_REF=v0.40.2 sh`. On a release before 0.35.0 it stops, because those have no `pbtop` archive. The old `install.sh --pbtop` still works for one more release and points to `install-pbtop.sh`.
 
-Type `pbtop`, `pbtop --summary`, `pbtop --json` or `pbtop --range 30d`. The [crate README](../../crates/telemetry/README.md) covers `cargo` builds. The `playbook-telemetry` command and formula are retired ([ADR 0041](../adr/0041-retire-playbook-telemetry.md)): with Homebrew, run `brew uninstall playbook-telemetry && brew install pragmatic-engineer/tap/pbtop`, and change a script that calls `playbook-telemetry` to call `pbtop` with the same arguments. Everything stays on your machine.
+Type `pbtop`, `pbtop --summary`, `pbtop --json` or `pbtop --range 30d`. The [crate README](../../crates/telemetry/README.md) covers `cargo` builds. Everything stays on your machine.
 
 The tool shares its data with playbook: the database is `~/.config/playbook/data/usage.db` and the settings are the `usage.*` keys in `~/.config/playbook/data/config.db`. See [Config keys](../reference/config-keys.md).
 

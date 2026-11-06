@@ -15,9 +15,9 @@
 ╰───────────────────│The budget, the limit readings, the account names and the │───────────────────╯
 ╭─┤³Models├─────────│layout stay.                                              │s├─────────────────╮
 │name             ms│                                                          │     cost▼ share   │
-│▟opus-5            │                                                          │    $11.85 ■■■■■···│
-│█sonnet-5          ╰┤ y deletes, any other key cancels ├──────────────────────╯     $8.25 ■■■·····│
-│▒haiku-5            7  166.6K     $0.17 ········││gamma               7  166.6K     $0.17 ········│
+│▓opus-5            │                                                          │    $11.85 ■■■■■···│
+│░sonnet-5          ╰┤ y deletes, any other key cancels ├──────────────────────╯     $8.25 ■■■·····│
+│▞haiku-5            7  166.6K     $0.17 ········││gamma               7  166.6K     $0.17 ········│
 ╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
 ╭─┤⁵Live sessions├─────┤hour $1.25  today $1.25├─╮╭─┤⁶Sessions per day├──────────────────────┤UTC├─╮
 │state project     model       msgs     cost ago▲││day   session  project      model          cost▼│

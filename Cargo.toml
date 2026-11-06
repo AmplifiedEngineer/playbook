@@ -3,7 +3,7 @@
 
 [workspace]
 resolver = "2"
-members = ["crates/cli", "crates/code", "crates/common", "crates/data", "crates/pbdoc", "crates/plugin-checks", "crates/telemetry"]
+members = ["crates/cli", "crates/code", "crates/code-bench", "crates/common", "crates/data", "crates/pbdoc", "crates/plugin-checks", "crates/store", "crates/telemetry"]
 
 [workspace.package]
 version = "0.40.2"
