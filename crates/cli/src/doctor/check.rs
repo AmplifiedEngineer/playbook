@@ -822,9 +822,17 @@ fn worktree_guard_row_from(version: Option<&str>, in_linked_worktree: bool) -> O
     )
 }
 
-/// A linked worktree keeps a `.git` file; the main checkout keeps a folder.
+/// A linked worktree keeps a `.git` file that points into the main checkout's
+/// `worktrees` folder; the main checkout keeps a folder, and a submodule keeps
+/// a file that points into `modules`.
 fn is_linked_worktree(root: &Path) -> bool {
-    root.join(".git").is_file()
+    fs::read_to_string(root.join(".git"))
+        .is_ok_and(|text| text.trim().starts_with("gitdir:") && text.contains("/worktrees/"))
+}
+
+/// The version in `claude --version` output such as `2.1.296 (Claude Code)`.
+fn claude_version(text: &str) -> Option<&str> {
+    text.split_whitespace().next()
 }
 
 fn worktree_guard_row(env: &Env) -> Option<Row> {
@@ -836,7 +844,7 @@ fn worktree_guard_row(env: &Env) -> Option<Row> {
     let mut cmd = Command::new(claude);
     cmd.arg("--version");
     let text = output_of(cmd)?;
-    worktree_guard_row_from(text.split_whitespace().next(), true)
+    worktree_guard_row_from(claude_version(&text), true)
 }
 
 fn stale_worktree_rows(env: &Env) -> Vec<Row> {
@@ -1717,7 +1725,12 @@ mod tests {
 
         // Assert
         assert_eq!(row.level, Level::Warn);
+        assert!(row.message.contains(WORKTREE_GUARD_BAD_CLAUDE_VERSION));
         assert!(row.hint.unwrap().contains("ExitWorktree with action keep"));
+        assert_eq!(
+            claude_version("2.1.318 (Claude Code)\n"),
+            Some(WORKTREE_GUARD_BAD_CLAUDE_VERSION)
+        );
         assert!(worktree_guard_row_from(bad, false).is_none());
         assert!(worktree_guard_row_from(Some("2.1.999"), true).is_none());
         assert!(worktree_guard_row_from(None, true).is_none());
@@ -1733,7 +1746,12 @@ mod tests {
         fs::create_dir_all(&linked).unwrap();
         fs::write(linked.join(".git"), "gitdir: /x/.git/worktrees/linked\n").unwrap();
 
+        let sub = dir.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join(".git"), "gitdir: ../.git/modules/sub\n").unwrap();
+
         // Act and assert
+        assert!(!is_linked_worktree(&sub));
         assert!(is_linked_worktree(&linked));
         assert!(!is_linked_worktree(&main));
     }
