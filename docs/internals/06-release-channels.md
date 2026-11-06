@@ -53,8 +53,6 @@ When the gate still fails on the release commit, land the fix and tag `vX.Y.Z` o
 - `publish` checks every draft asset against that attestation, writes `SHA256SUMS` over every asset, attests it and the notes, and makes the release public and the latest.
 - `verify` downloads the published release, checks the sums and the attestations of a run from `main`, and runs `--version` on the x86_64 Linux binaries.
 
-No release carries the `playbook-telemetry` archive, which [ADR 0041](../adr/0041-retire-playbook-telemetry.md) retires.
-
 Every step can run again: an existing pull request, tag or release is reused, a tag is never moved, and a published release is never rebuilt or uploaded again. After a failed run, run the workflow again with `version=X.Y.Z`. When GitHub refuses to create the tag, the run summary prints the signed `git tag` command to run by hand, and the next run with `version=X.Y.Z` goes on from the tag.
 
 ### Downstream: tap and marketplace
@@ -127,14 +125,13 @@ A published release is not deleted and its tag is not moved, because installs an
 4. Move the formulas back: in `pragmatic-engineer/homebrew-tap`, run `SOURCE_REPO=playbook TAG_PREFIX=v .github/scripts/bump-formula.sh A.B.C Formula/<formula>.rb` for `playbook` and `pbtop`, and open a pull request with the result.
    - The tap's scheduled check never moves a formula back to a lower version, and it skips a pre-release.
    - Before 0.35.0 the tap had no `pbtop` formula: for such an A.B.C, move only `playbook` this way and remove `Formula/pbtop.rb` by hand.
-   - The retired `playbook-telemetry` formula stays on `telemetry-v0.2.0`. When `pbtop.rb` goes, also remove its `disable!` line, since it names `pbtop` as the replacement.
 5. Ship the fix as the next patch release, which moves the tap and the marketplace forward again.
 
 ## Internal tool crates
 
 `playbook-telemetry` and `playbook-code` are workspace members under `crates/`. `playbook` depends on them by path, so there is one `Cargo.lock`.
 
-`playbook-code` is a library of the `playbook` binary and has no release of its own. `playbook-telemetry` uses the workspace version, and its `pbtop` binary ships in the `vX.Y.Z` release (ADR 0038, ADR 0041). The `telemetry-v` tags before 0.34.0 stay as history.
+`playbook-code` is a library of the `playbook` binary and has no release of its own. `playbook-telemetry` uses the workspace version, and its `pbtop` binary ships in the `vX.Y.Z` release (ADR 0038). The `telemetry-v` tags before 0.34.0 stay as history.
 
 Release assets by tool:
 
