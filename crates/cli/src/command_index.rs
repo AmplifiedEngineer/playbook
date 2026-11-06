@@ -350,6 +350,7 @@ pub(crate) const META: &[Meta] = &[
     user("usage account assign"),
     ro("usage account list"),
     user("usage account name"),
+    ro("usage account sessions"),
     user("usage account undo"),
     user("usage collect"),
     ro("usage doctor"),
