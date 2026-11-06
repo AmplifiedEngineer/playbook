@@ -482,7 +482,7 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
         .get("CLAUDE_CONFIG_DIR")
         .map_or_else(|| PathBuf::from(&home), PathBuf::from)
         .join(".claude.json");
-    let budget = budget::build(input, now, &claude_json, Path::new(&home));
+    let budget = budget::build(input, now, &claude_json, Path::new(&home), &cache_dir);
     let opts = Opts {
         show_model: env.flag("STATUSLINE_SHOW_MODEL"),
         show_context: env.flag("STATUSLINE_SHOW_CONTEXT"),

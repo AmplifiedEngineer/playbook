@@ -77,8 +77,9 @@ Keys:
 | `Left`, `Right`, `h`, `l` | Move the chart cursor one day (or one bar). `Home`, `End`, `g`, `G` jump to the ends while a chart has the focus. |
 | `Up`, `Down`, `j`, `k`, `PageUp`, `PageDown`, `Home`, `End`, `g`, `G` | Move the selected row of the focused table. |
 | `v` | Change the view of the focused panel, and only that panel. With Spend focused it steps total, by model and daily table. With Projects focused it steps projects, agents, skills, tools and health. On the other four panels it does nothing. The title of Spend and Projects always shows `v view: <name>`, and the other panels show no such tag. |
+| `R`, `B` | Read new usage and the budget limits now. The view also refreshes by itself. |
+| `b` | Open the budget window: type the manual monthly budget in dollars, `Enter` saves it to `usage.budget.monthlyUsd`, `0` clears it, `Esc` cancels. |
 | `?` | Open the help window (below). |
-| `R` | Read new usage now. The view also refreshes by itself. |
 | `z` | Switch every time and day between local time and UTC for this session. The footer and the title name the zone. `usage.timeZone` sets the start-up zone. |
 | `s` | Sort the focused table by the next column. A marker in the header shows the column and the direction. Text columns start ascending and number columns descending. |
 | `S` | Reverse the sort. |
@@ -89,7 +90,7 @@ Keys:
 | `/` | Type a filter, a case insensitive substring of model, repo, branch or session id. `Enter` applies it, `Esc` cancels, `Backspace` edits. While you type, every key is text, so `q` and `r` do not quit or change the range until you press `Enter` or `Esc`. |
 | `c` | Clear the filter. |
 | `p` | Open the [Sessions management view](09-sessions.md#the-sessions-view), a full screen table of recent sessions with their PR, state and suggestions. |
-| `t` | Cycle the theme: default, dark, light, mono. |
+| `t` | Cycle the theme: default, spectrum, dark, light, mono. Spectrum colors usage from green to red. |
 | `q`, `Esc`, `Ctrl-C` | Quit. |
 
 The view is keyboard only, so the terminal's own text selection and scrolling keep working.
@@ -134,7 +135,7 @@ Each period (`today`, `week`, `month`) is compared with the one before it (yeste
 | `light` | The same with darker colors for a white ground. |
 | `mono` | No color. The selected row is shown in reverse video. |
 
-The theme comes from the `usage.theme` config key (`default`, `dark`, `light`, `mono`; see [config keys](../reference/config-keys.md)) and `t` changes it for the session. `NO_COLOR` set to anything but empty forces `mono` and locks it.
+The theme comes from the `usage.theme` config key (`default`, `spectrum`, `dark`, `light`, `mono`; see [config keys](../reference/config-keys.md)) and `t` changes it for the session. `NO_COLOR` set to anything but empty forces `mono` and locks it.
 
 Colors follow the terminal. With `COLORTERM=truecolor` or `24bit` the `default` values are drawn exactly. Otherwise, when `TERM` names `256color`, each value goes to the nearest of the 256 color cube and gray ramp, and with neither to the nearest of the 16 basic colors. The values come from the Okabe and Ito (2008) color universal design palette, which stays readable with common color vision differences.
 
@@ -232,7 +233,7 @@ Notes:
 
 1. A detected monthly limit: a monthly spend limit from the statusline (behind a gateway), or a cached spend limit fetched after that reading, whatever its age.
 2. With no statusline reading, the cached spend limit however old.
-3. `usage.budget.monthlyUsd`, only when nothing is detected. It is not shown beside a detected limit.
+3. `usage.budget.monthlyUsd`, only when nothing is detected. It does not draw a bar beside a detected limit. When both are set and differ, the Budget panel adds a line with both amounts and says the detected one applies.
 
 A cached limit over six hours old, whether it won under item 1 or item 2, is tagged `limit cached <age> ago, used is this machine only`. The cache's used amount is dropped and the bar shows this machine's estimate. A line under the bar then shows the amount Claude Code last reported, with its age and the word stale. A manual budget is tagged `manual, local` for the same reason and gets the same line.
 
@@ -244,7 +245,7 @@ Cache rules:
 - The cache is read again only when the file changes, and a half written file keeps the last good reading.
 - The period of the cached limit is assumed to be the calendar month.
 
-**Plan name.** It comes from the rate limit tier names in the config file. Only the two tiers seen on Max accounts are recognized. Everything else shows as "Enterprise or unknown plan". When a plan has no 5 hour and weekly windows, the Budget (when it has room) and Projection panels say "5 hour and weekly windows: not available for this plan" and add that Pro and Max get them from the playbook statusline. A plan this version cannot tell from Enterprise, such as Pro, gets the same text. On a Max plan with no reading yet they say a reading appears after a session with the playbook statusline. Run `playbook usage doctor` to see which sources exist on a machine.
+**Plan name.** It comes from the rate limit tier names in the config file. The two tiers seen on Max accounts are recognized as Max. An account whose organizationType is claude_enterprise, or whose seatTier names enterprise, is Enterprise: the panels hide the 5 hour and weekly windows and say the whole limit is the monthly extra usage budget. Everything else shows as "Unknown plan". When a plan has no 5 hour and weekly windows, the Budget (when it has room) and Projection panels say "5 hour and weekly windows: not available for this plan" and add that Pro and Max get them from the playbook statusline. An unknown plan, such as Pro, gets the same text. On a Max plan with no reading yet they say a reading appears after a session with the playbook statusline. Run `playbook usage doctor` to see which sources exist on a machine.
 
 **Manual budget.** It covers the UTC calendar month or week (the week starts on `usage.weekStart`). The spend is the estimated cost from your local history, not your bill. Set it with `playbook config set --global usage.budget.monthlyUsd 200`. `0` means no budget.
 
@@ -311,7 +312,7 @@ For the period on screen (today, this week or this month, this week for other ra
 |---|---|
 | `known`, `hint` | `hint` is set when nothing is known. |
 | `snapshot_captured_at`, `snapshot_stale` | Snapshot fields. |
-| `plan`, `plan_label` | `plan` is `max_5x`, `max_20x` or `enterprise_or_unknown`. |
+| `plan`, `plan_label` | `plan` is `max_5x`, `max_20x`, `enterprise` or `unknown`. |
 | `windows_note` | Null when a window is known. |
 | `reason` | Why no limit comes from Claude: `no-reading`, `stale`, `cap-unknown`, `windows-reset` or `rate-limited-seen`, else null. |
 | `comparison` | Null, `skipped` with the reason, or the amount Claude reports and the local estimate with `delta_usd`, `delta_pct`, `disagrees`, `read_at` and `stale`. |
@@ -352,10 +353,11 @@ A seat billed by usage has no 5 hour or 7 day window. It has a monthly dollar li
 | Under an hour into the month | `$986/$1500 mo` |
 | Cache older than six hours | `$986/$1500 mo (10d14h old)` |
 
-- **Which source wins.** The amount used and the limit come from the first source that has them: the statusline reading when it carries dollars and was read within six hours (a Claude apps gateway sends it), then the cache. The cache must have been fetched this UTC month and not in the future, because a figure from last month says nothing about this one. With neither, the segment is left out, and so is a figure of zero used.
+- **Which source wins.** The amount used and the limit come from the first source that has them: the statusline reading when it carries dollars and was read within six hours (a Claude apps gateway sends it), then the cache. The cache must have been fetched this UTC month and not in the future, because a figure from last month says nothing about this one. With neither, a monthly budget falls back to this machine's usage database (see "A budget alone"); without a budget the segment is left out, and so is a figure of zero used.
 - **A stale cache.** Claude Code writes the cache when it fetches usage, and the `/usage` view does that, so it can be days old. After six hours (`STALE_SECONDS`) the figure is still shown, because spend only grows within a month, but with its age and without a projection. It is red only when the amount already passed the limit.
-- **Your own budget.** `usage.budget.monthlyUsd` replaces the limit when it is lower than the one Claude reports, and the text then says `mo budget` instead of `mo`. It never supplies an amount used, because that needs the local usage database, so a budget alone shows nothing. A higher budget changes nothing.
-- **Not the whole account.** The amount comes from Claude Code, not from this machine's transcripts. Whether it counts the whole organization or only your seat is not documented, so the line never calls it the organization total.
+- **Your own budget.** `usage.budget.monthlyUsd` replaces the limit when it is lower than the one Claude reports, and the text then says `mo budget` instead of `mo`. A higher budget changes nothing.
+- **A budget alone.** With no gateway reading and no cache figure, a monthly budget is measured against this machine's cost for the local calendar month, read from the usage database, and the text says `mo budget (local)` because other machines are not counted. All accounts on the machine are summed. The total is kept for 10 seconds (`LOCAL_TOTAL_CACHE_SECONDS`) in `monthly-local-total` under the statusline cache folder, the database is opened read only and never created, and if it is missing or busy the segment is left out.
+- **Not the whole account.** Apart from the local figure, the amount comes from Claude Code, not from this machine's transcripts. Whether it counts the whole organization or only your seat is not documented, so the line never calls it the organization total.
 - **No 5 hour note.** When the data has no 5 hour window the line says nothing about it.
 - **Narrow terminals.** The words after the figure go first, then the whole segment. The 7 day alarm is kept.
 
@@ -489,7 +491,7 @@ The pass is idempotent. A failure leaves transcripts as the source.
 
 ## Cost per agent
 
-The Agents view (`4`, then `v`) groups `telemetry_requests` by agent name for the range (`query::load_agents`). The main session has no agent name and shows as `main`. The title note `source telemetry N% of spend` is the telemetry cost over the transcript cost of the range, capped at 100 percent. Only telemetry knows the agent, so a range with no telemetry rows shows `Telemetry off`. Totals are unchanged.
+The Agents view (`4`, then `v`) groups `telemetry_requests` by agent name for the range (`query::load_agents`). The main session has no agent name and shows as `main`. The title note `source telemetry N% of spend` is the telemetry cost over the transcript cost of the range, capped at 100 percent. Only telemetry knows the agent, so a range with no telemetry rows shows `Telemetry off`. Totals are unchanged. Claude Code reports an agent from a plugin it does not list as `custom`. On each ingest, `agent_names::resolve_custom` renames those rows to the `agentType` in the subagent's `meta.json`, found by the request id that the subagent transcript shares with the telemetry row. It reads only request ids and that name, and rows with no transcript keep `custom`.
 
 ## Cost per skill
 

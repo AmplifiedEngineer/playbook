@@ -21,10 +21,15 @@ pub fn run(paths: &Paths, command: &AccountCommand) -> Result<String, String> {
         AccountCommand::List => store::list_text(&conn),
         AccountCommand::Name { key, name } => {
             store::set_name(&conn, key, name)?;
+            let note = if store::has_events(&conn, key)? {
+                ""
+            } else {
+                " (no events carry this key yet, check the spelling)"
+            };
             Ok(if name.trim().is_empty() {
                 format!("cleared the name of {key}")
             } else {
-                format!("{key} is shown as {}", name.trim())
+                format!("{key} is shown as {}{note}", name.trim())
             })
         }
         AccountCommand::Sessions { from, to } => {
@@ -82,8 +87,14 @@ pub fn run(paths: &Paths, command: &AccountCommand) -> Result<String, String> {
             )
         }
         AccountCommand::Undo { id } => Ok(match mv::undo(&conn, *id)? {
-            Some((id, n)) => format!("undid move {id}: restored {n} records."),
-            None => "no applied move to undo.".to_string(),
+            Some((id, n, 0)) => format!("undid move {id}: restored {n} records."),
+            Some((id, n, skipped)) => format!(
+                "undid move {id}: restored {n} records and left {skipped} that were relabeled since."
+            ),
+            None => match id {
+                Some(id) => format!("move {id} does not exist or is already undone."),
+                None => "no applied move to undo.".to_string(),
+            },
         }),
     }
 }
