@@ -1632,18 +1632,21 @@ Example: `playbook usage account list`
 - `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 - `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
-Subcommands: `assign`, `list`, `name`, `undo`
+Subcommands: `assign`, `list`, `name`, `reconcile`, `sessions`, `undo`
 
 ### `playbook usage account assign`
 
-Move the events of a time range to another account
+Move events to another account, by time range or by session
 
-Prints how many events and how much cost would move and changes no events until you add `--confirm`. Times are read on your local clock; add `--utc` for UTC. The end is exclusive. An applied move is numbered and `account undo` reverses it. Running the same move again moves nothing.
+Prints how many events and how much cost would move and changes no events until you add `--confirm`. Times are read on your local clock; add `--utc` for UTC. By time, give `--from` and `--to` (the end is not included) and each event moves by its own time. By session, give `--before-session` or `--through-session` with `--from` or `--from-session` as the start, and every event of each session that starts in that span moves. An applied move is numbered and `account undo` reverses it. Running the same move again moves nothing.
 
 Example: `playbook usage account assign --from 2026-11-01T00:00 --to 2026-11-02T12:00 --as personal`
 
 - `--from <FROM>`: First instant to move, like 2026-11-01T00:00 (a bare date means midnight)
 - `--to <TO>`: First instant not to move, like 2026-11-02T12:00
+- `--from-session <SESSION>`: Start with the sessions from this one on (its id from `account sessions`)
+- `--before-session <SESSION>`: End before this session starts
+- `--through-session <SESSION>`: End with this session included
 - `--as <KEY_OR_NAME>`: Account key or name that receives the events
 - `--was <KEY_OR_NAME>`: Move only events now labeled with this account key or name
 - `--confirm`: Apply the move; without it nothing changes
@@ -1665,6 +1668,34 @@ Example: `playbook usage account name you@example.com Company`
 
 - `<KEY>`: Account key shown by `account list`
 - `<NAME>`: Display name to show; empty clears it
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+
+### `playbook usage account reconcile`
+
+Compare cost on each side of session boundaries with a dashboard
+
+Give the daily totals you read from the Claude web dashboard of the account that owns the later sessions, as `YYYY-MM-DD=amount`. For each session that starts in the window, taken as the boundary, it prints the local cost per listed day before it and from it on, and how far the later side is from the dashboard. The closest boundaries print first. Days are on your local clock; add `--utc` for UTC.
+
+Example: `playbook usage account reconcile --from 2026-10-30 --to 2026-11-04 --dashboard 2026-11-03=285.03`
+
+- `--from <FROM>`: Start of the window, like 2026-10-30
+- `--to <TO>`: End of the window (not included)
+- `--dashboard <DAY=AMOUNT>`: Dashboard daily total, like 2026-11-03=285.03; repeat for more days
+- `--top <TOP>`: Print this many results, closest boundary first; 0 prints all
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+
+### `playbook usage account sessions`
+
+List the sessions that start in a window
+
+Shows each session id with its first and last event time, repo, event count, cost and account label, oldest first. Use an id as the boundary of `account assign`. Times are on your local clock; add `--utc` for UTC. The window is the last 7 days unless `--from` and `--to` say otherwise.
+
+Example: `playbook usage account sessions --from 2026-10-30 --to 2026-11-04`
+
+- `--from <FROM>`: Start of the window, like 2026-10-30 or 2026-10-30T08:00
+- `--to <TO>`: End of the window (not included)
 - `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 - `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
