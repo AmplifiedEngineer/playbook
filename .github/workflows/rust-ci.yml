@@ -304,6 +304,7 @@ jobs:
           PKGS: ${{ needs.changes.outputs.pkgs || '--workspace' }}
           SHARD: ${{ matrix.shard }}
           INSTA_UPDATE: "no"
+          FIXTURE_GATE_TIME_FILE: ${{ runner.temp }}/fixture-gate-time.txt
         run: |
           # A hash partition gives each test to exactly one shard. The
           # collector daemon group stays one test at a time inside its shard,
@@ -314,6 +315,17 @@ jobs:
           fi
           # shellcheck disable=SC2086
           cargo nextest run $PKGS --no-tests=pass --config-file .github/nextest.toml --profile ci "${args[@]}"
+
+      # The fixture gate writes its run time here. Only the shard that runs it
+      # has the file, so the others upload nothing.
+      - name: Upload the fixture gate run time
+        if: always() && env.LANE == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fixture-gate-time-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/fixture-gate-time.txt
+          if-no-files-found: ignore
+          retention-days: 30
 
       # The key changes only with Cargo.lock and the toolchain, and almost
       # every change rebuilds the workspace crates, so the cache keeps only

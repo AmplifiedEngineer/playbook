@@ -10,6 +10,7 @@ ref Square shape.go 20
 ref Square main.go 5
 ref Square main.go 15
 ref NewSquare shape.go 20
+ref Total main.go 5
 negative Square main.go 4
 negative Square main.go 6
 negative Square shape.go 15

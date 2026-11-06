@@ -1,0 +1,146 @@
+{
+  "tasks_version": 1,
+  "waivers": [],
+  "repos": [
+    {
+      "repo": "rust",
+      "status": "measured",
+      "cells": [
+        {
+          "kind": "symbol",
+          "tasks": 6,
+          "excluded": 0,
+          "precision_bps": 7500,
+          "recall_bps": 10000,
+          "correct": 6,
+          "bytes": 3790,
+          "tokens": 1910,
+          "bytes_per_correct": 632
+        },
+        {
+          "kind": "refs",
+          "tasks": 3,
+          "excluded": 3,
+          "precision_bps": 5833,
+          "recall_bps": 10000,
+          "correct": 7,
+          "bytes": 2310,
+          "tokens": 1235,
+          "bytes_per_correct": 330
+        }
+      ]
+    },
+    {
+      "repo": "typescript",
+      "status": "measured",
+      "cells": [
+        {
+          "kind": "symbol",
+          "tasks": 6,
+          "excluded": 0,
+          "precision_bps": 7500,
+          "recall_bps": 10000,
+          "correct": 6,
+          "bytes": 3838,
+          "tokens": 1930,
+          "bytes_per_correct": 640
+        },
+        {
+          "kind": "refs",
+          "tasks": 3,
+          "excluded": 3,
+          "precision_bps": 8750,
+          "recall_bps": 10000,
+          "correct": 7,
+          "bytes": 1963,
+          "tokens": 995,
+          "bytes_per_correct": 280
+        }
+      ]
+    },
+    {
+      "repo": "javascript",
+      "status": "measured",
+      "cells": [
+        {
+          "kind": "symbol",
+          "tasks": 5,
+          "excluded": 0,
+          "precision_bps": 10000,
+          "recall_bps": 10000,
+          "correct": 5,
+          "bytes": 2715,
+          "tokens": 1359,
+          "bytes_per_correct": 543
+        },
+        {
+          "kind": "refs",
+          "tasks": 3,
+          "excluded": 2,
+          "precision_bps": 7778,
+          "recall_bps": 10000,
+          "correct": 7,
+          "bytes": 2002,
+          "tokens": 1042,
+          "bytes_per_correct": 286
+        }
+      ]
+    },
+    {
+      "repo": "python",
+      "status": "measured",
+      "cells": [
+        {
+          "kind": "symbol",
+          "tasks": 5,
+          "excluded": 0,
+          "precision_bps": 10000,
+          "recall_bps": 10000,
+          "correct": 5,
+          "bytes": 2633,
+          "tokens": 1336,
+          "bytes_per_correct": 527
+        },
+        {
+          "kind": "refs",
+          "tasks": 3,
+          "excluded": 2,
+          "precision_bps": 7778,
+          "recall_bps": 10000,
+          "correct": 7,
+          "bytes": 2029,
+          "tokens": 1052,
+          "bytes_per_correct": 290
+        }
+      ]
+    },
+    {
+      "repo": "go",
+      "status": "measured",
+      "cells": [
+        {
+          "kind": "symbol",
+          "tasks": 6,
+          "excluded": 0,
+          "precision_bps": 7500,
+          "recall_bps": 10000,
+          "correct": 6,
+          "bytes": 3715,
+          "tokens": 1888,
+          "bytes_per_correct": 619
+        },
+        {
+          "kind": "refs",
+          "tasks": 3,
+          "excluded": 3,
+          "precision_bps": 7000,
+          "recall_bps": 10000,
+          "correct": 7,
+          "bytes": 2288,
+          "tokens": 1198,
+          "bytes_per_correct": 327
+        }
+      ]
+    }
+  ]
+}
