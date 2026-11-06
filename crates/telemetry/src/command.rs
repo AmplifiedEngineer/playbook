@@ -157,6 +157,30 @@ pub enum AccountCommand {
         #[arg(long)]
         to: Option<String>,
     },
+    /// Compare cost on each side of session boundaries with a dashboard
+    ///
+    /// Give the daily totals you read from the Claude web dashboard of the
+    /// account that owns the later sessions, as `YYYY-MM-DD=amount`. For each
+    /// session that starts in the window, taken as the boundary, it prints
+    /// the local cost per listed day before it and from it on, and how far
+    /// the later side is from the dashboard. The closest boundaries print
+    /// first. Days are on your local clock; add `--utc` for UTC.
+    ///
+    /// Example: `playbook usage account reconcile --from 2026-10-30 --to 2026-11-04 --dashboard 2026-11-03=285.03`
+    Reconcile {
+        /// Start of the window, like 2026-10-30
+        #[arg(long)]
+        from: String,
+        /// End of the window (not included)
+        #[arg(long)]
+        to: String,
+        /// Dashboard daily total, like 2026-11-03=285.03; repeat for more days
+        #[arg(long, required = true, value_name = "DAY=AMOUNT")]
+        dashboard: Vec<String>,
+        /// Print this many results, closest boundary first; 0 prints all
+        #[arg(long, default_value_t = 5)]
+        top: usize,
+    },
     /// Move events to another account, by time range or by session
     ///
     /// Prints how many events and how much cost would move and changes
