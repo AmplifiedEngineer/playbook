@@ -165,22 +165,105 @@ pub struct Parsed {
 /// Parses `bytes` as `lang`. A leading UTF-8 byte order mark is blanked with
 /// spaces first, so byte offsets still match the file.
 pub fn parse(lang: Lang, bytes: &[u8]) -> Result<Parsed, String> {
+    let tree = drive(lang, bytes, &mut || std::ops::ControlFlow::Continue(()))?;
+    let partial = tree.root_node().has_error();
+    Ok(Parsed { tree, partial })
+}
+
+/// The deepest syntax tree an indexed file may have, root counted as level 1.
+pub const MAX_NESTING: usize = 200;
+
+/// Progress ticks one parse may spend, a logical and repeatable budget.
+pub const PARSE_TICK_BUDGET: u64 = 200_000;
+
+/// Why the guarded parse gave no tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseStop {
+    Timeout,
+    TooDeep,
+    Failed(String),
+}
+
+pub type Tick<'a> = &'a mut dyn FnMut() -> std::ops::ControlFlow<()>;
+
+/// A parser the index runs a file through. Tests inject one that spends ticks.
+pub type Driver =
+    Box<dyn Fn(Lang, &[u8], Tick<'_>) -> Result<Tree, String> + Send + Sync + 'static>;
+
+fn blank_bom(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        let mut copy = bytes.to_vec();
+        copy[..3].fill(b' ');
+        std::borrow::Cow::Owned(copy)
+    } else {
+        std::borrow::Cow::Borrowed(bytes)
+    }
+}
+
+/// The Tree-sitter driver production uses.
+pub fn drive(lang: Lang, bytes: &[u8], tick: Tick<'_>) -> Result<Tree, String> {
     let mut parser = Parser::new();
     parser
         .set_language(&lang.grammar())
         .map_err(|e| format!("could not load the {} grammar: {e}", lang.name()))?;
-    let blanked;
-    let source = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        let mut copy = bytes.to_vec();
-        copy[..3].fill(b' ');
-        blanked = copy;
-        &blanked[..]
-    } else {
-        bytes
+    let source = blank_bom(bytes);
+    let mut read =
+        |offset: usize, _: tree_sitter::Point| -> &[u8] { source.get(offset..).unwrap_or(&[]) };
+    let mut on_tick = |_: &tree_sitter::ParseState| tick();
+    let options = tree_sitter::ParseOptions::new().progress_callback(&mut on_tick);
+    parser
+        .parse_with_options(&mut read, None, Some(options))
+        .ok_or_else(|| format!("the {} parser gave up", lang.name()))
+}
+
+/// The depth of the deepest node, root counted as level 1, found without
+/// recursion so a pathological tree cannot overflow the stack.
+pub fn tree_depth(tree: &Tree) -> usize {
+    let mut cursor = tree.walk();
+    let (mut depth, mut deepest) = (1usize, 1usize);
+    loop {
+        if cursor.goto_first_child() {
+            depth += 1;
+            deepest = deepest.max(depth);
+            continue;
+        }
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                return deepest;
+            }
+            depth -= 1;
+        }
+    }
+}
+
+/// Parses `bytes` through `driver` under the tick budget and the nesting cap.
+/// Ticks at or below `budget` pass.
+pub fn parse_guarded(
+    driver: &Driver,
+    lang: Lang,
+    bytes: &[u8],
+    budget: u64,
+) -> Result<Parsed, ParseStop> {
+    let mut ticks = 0u64;
+    let mut tick = || {
+        ticks += 1;
+        if ticks > budget {
+            std::ops::ControlFlow::Break(())
+        } else {
+            std::ops::ControlFlow::Continue(())
+        }
     };
-    let tree = parser
-        .parse(source, None)
-        .ok_or_else(|| format!("the {} parser gave up", lang.name()))?;
+    let result = driver(lang, bytes, &mut tick);
+    if ticks > budget {
+        return Err(ParseStop::Timeout);
+    }
+    let tree = result.map_err(ParseStop::Failed)?;
+    if tree_depth(&tree) > MAX_NESTING {
+        return Err(ParseStop::TooDeep);
+    }
     let partial = tree.root_node().has_error();
     Ok(Parsed { tree, partial })
 }

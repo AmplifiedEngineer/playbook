@@ -4,7 +4,7 @@
 //! Index freshness. `quick_check` compares size and mtime only and runs
 //! before every query. `status` is the full check that hashes every file.
 
-use super::index::load_existing;
+use super::index::{load_existing, Existing};
 use super::output::IndexState;
 use super::{db, host, walker};
 use playbook_common::hash::sha256_hex;
@@ -65,6 +65,16 @@ pub fn quick_check(conn: &Connection, root: &Path) -> Result<Drift, String> {
     Ok(drift)
 }
 
+/// Whether a parse guard skip still matches the file by size and mtime. The
+/// fingerprint is checked at index time, so this check never computes it.
+fn guard_skip_unchanged(row: &Existing, root: &Path, path: &str) -> bool {
+    row.error.as_deref().is_some_and(walker::is_guard_reason)
+        && std::fs::symlink_metadata(root.join(path)).is_ok_and(|meta| {
+            i64::try_from(meta.len()).ok() == Some(row.size)
+                && walker::mtime_ns(&meta) == row.mtime_ns
+        })
+}
+
 /// Compares the index with the disk by hashing every listed file.
 pub fn full_check(conn: &Connection, root: &Path) -> Result<Drift, String> {
     let existing = load_existing(conn)?;
@@ -77,8 +87,12 @@ pub fn full_check(conn: &Connection, root: &Path) -> Result<Drift, String> {
             drift.added.push(path.clone());
             continue;
         };
-        let same = (row.status == "ok" || row.status == "partial")
-            && std::fs::read(root.join(path)).is_ok_and(|bytes| sha256_hex(&bytes) == row.sha);
+        let same = if row.status == "skipped" {
+            guard_skip_unchanged(row, root, path)
+        } else {
+            (row.status == "ok" || row.status == "partial")
+                && std::fs::read(root.join(path)).is_ok_and(|bytes| sha256_hex(&bytes) == row.sha)
+        };
         if !same {
             drift.changed.push(path.clone());
         }
