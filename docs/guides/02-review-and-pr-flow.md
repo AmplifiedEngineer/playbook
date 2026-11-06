@@ -48,7 +48,7 @@ A single-pass review under the `grounding-review` discipline, posted as a pendin
 /playbook:quick-review 4265         # PR #4265
 ```
 
-It shows a report with a drafted comment under each finding. Then it asks which findings to post and which verb to use (`approve`, `comment`, `request-changes` or `skip`). It never submits on its own. A PR you authored gets a local report only.
+It shows a report with a drafted comment under each finding. Then it prints the findings as a numbered checklist and asks which to post. Reply with numbers (`1,3,5-7`), `all except 4`, `all`, `none`, or a tier name such as `only blockers`. An empty reply takes the marked findings: the blocking ones, issues and questions. After that it asks which verb to use (`approve`, `comment`, `request-changes` or `skip`). It never submits on its own. A PR you authored gets a local report only.
 
 ## Deep review
 
@@ -111,7 +111,7 @@ Every review ends with a **Verification Summary**: each file, whether it was rea
 /playbook:address-pr-comments -y        # skip the final commit confirmation
 ```
 
-For each comment you choose `[F]ix`, `[R]eply`, `[B]oth`, `[S]kip`, `[Q]uit` or `[E]dit-then-fix`. Replies queue until after the commit. At the end it runs `commit-and-push -A`, then posts the replies. It never resolves threads. Bot authors are skipped unless you pass `--bots`.
+It first lists the comments as a numbered checklist and asks which to work on, with the same reply forms. A comment you leave out is skipped and named in the final summary. With one comment it does not ask. For each comment you then choose `[F]ix`, `[R]eply`, `[B]oth`, `[S]kip`, `[Q]uit` or `[E]dit-then-fix`. Replies queue until after the commit. At the end it runs `commit-and-push -A`, then posts the replies. It never resolves threads. Bot authors are skipped unless you pass `--bots`.
 
 ## Auto mode
 
