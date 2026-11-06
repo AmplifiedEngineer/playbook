@@ -7,7 +7,8 @@
 //! every line says where the number comes from: `measured` is read from Claude
 //! Code's own statusline input, `manual` is a `usage.budget.*` config value,
 //! `cached` is read from the usage numbers Claude Code keeps in its config
-//! file (with how old they are), `local history` is estimated from the session transcripts.
+//! file (with how old they are; past six hours this machine's messages since
+//! the read are added), `local history` is estimated from the session transcripts.
 
 use super::data::{Data, LimitsView};
 use super::fmt::{fit, money};
@@ -142,16 +143,21 @@ fn state_seg(pal: &Palette, icon: Icon, l: &Limit, now: i64) -> (Seg, Option<Sta
 
 /// The source label of a limit: where it came from, and how old when that
 /// matters.
-fn tag(origin: Origin, stale: bool, cache_age: Option<i64>) -> String {
+fn tag(origin: Origin, stale: bool, cache_age: Option<i64>, plus_local: bool) -> String {
     match (origin, stale) {
         (Origin::Measured, true) => "measured, stale".to_string(),
         (Origin::Measured, _) => "measured".to_string(),
         // A manual budget is counted against the transcripts of this machine.
         (Origin::Manual, _) => "manual, local".to_string(),
         (Origin::Cached, _) => match cache_age {
-            // Past the freshness limit the cache's used amount is dropped and
-            // the bar shows this machine's estimate, which misses other
-            // machines and the web apps.
+            // Past the freshness limit the cache's used amount is the floor
+            // and this machine's messages since the read are added; other
+            // machines and the web apps since then are missed.
+            Some(a) if a > STALE_SECONDS && plus_local => {
+                format!("cached {} ago, plus this machine since", elapsed_text(a))
+            }
+            // No usable amount in the cache: the bar is this machine alone,
+            // which misses other machines and the web apps.
             Some(a) if a > STALE_SECONDS => {
                 format!(
                     "limit cached {} ago, used is this machine only",
@@ -169,11 +175,10 @@ fn limit_line(
     icon: Icon,
     l: &Limit,
     now: i64,
-    stale: bool,
-    cache_age: Option<i64>,
+    v: &LimitsView,
     width: usize,
 ) -> Line<'static> {
-    let tag = tag(l.origin, stale, cache_age);
+    let tag = tag(l.origin, v.stale, v.cache_age, v.cached_plus_local);
     let mut segs = vec![Seg {
         drop: 0,
         spans: vec![
@@ -371,15 +376,7 @@ pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette, icon: I
         ));
     }
     for l in v.limits.iter().take(MAX_LIMITS) {
-        lines.push(limit_line(
-            pal,
-            icon,
-            l,
-            data.now,
-            v.stale,
-            v.cache_age,
-            width,
-        ));
+        lines.push(limit_line(pal, icon, l, data.now, v, width));
     }
     if let Some(line) = both_budgets_line(v) {
         lines.push(Line::styled(fit(&line, width), fg(pal, pal.warn)));

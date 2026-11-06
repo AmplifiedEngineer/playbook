@@ -539,6 +539,16 @@ pub fn monthly(s: &Sources, now: i64) -> Monthly {
     }
 }
 
+/// Whether the monthly bar is a stale cached amount plus this machine's
+/// messages since it was read, rather than this machine alone.
+pub fn reported_plus_local(s: &Sources, now: i64) -> bool {
+    matches!(
+        monthly(s, now),
+        Monthly::Cached { used_usd: Some(_), fetched_at, fresh: false, .. }
+            if fetched_at >= utc_month_bounds(now).0
+    )
+}
+
 /// The manual monthly budget and the detected monthly limit in dollars, when
 /// both are set and differ, whichever is higher. The detected one applies.
 /// `None` otherwise, including when the detected limit has no dollar amount.
@@ -623,21 +633,32 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
         ..
     } = choice
     {
-        let mut l = Limit::manual_budget(LimitPeriod::Monthly, limit_usd, events, now, week);
-        l.origin = Origin::Cached;
+        // Claude bills by the UTC month, so the cap's window and this
+        // machine's estimate count that month, not the local one.
+        let (month_start, month_end) = utc_month_bounds(now);
+        let spent_since = |from: i64| {
+            events
+                .iter()
+                .filter(|e| e.timestamp >= from && e.timestamp <= now)
+                .map(|e| e.cost_usd)
+                .sum::<f64>()
+                + 0.0
+        };
         // The cap is a plan property that holds across months, so even a cache
         // from last month gives it; only the used amount is month-guarded.
         // A fresh cache knows the spend of every machine on the account, so
-        // it replaces this machine's estimate, unless it was fetched before
-        // this month began.
-        let (month_start, month_end) = utc_month_bounds(now);
-        if let Some(used) = used_usd.filter(|_| fresh && fetched_at >= month_start) {
-            // The figure counts the UTC month, so the limit's window is that
-            // month too, not the local one.
-            l.start = month_start;
-            l.end = month_end;
-            l.used = used;
-        }
+        // it replaces this machine's estimate. A stale one stays the floor
+        // (spend only grows within a month) and this machine's messages after
+        // the read are added. A cache from before this month gives no amount.
+        let used = match used_usd.filter(|_| fetched_at >= month_start) {
+            Some(reported) if fresh => reported,
+            Some(reported) => reported + spent_since(fetched_at.saturating_add(1)),
+            None => spent_since(month_start),
+        };
+        let mut l = Limit::manual_budget_used(LimitPeriod::Monthly, limit_usd, used, now, week);
+        l.origin = Origin::Cached;
+        l.start = month_start;
+        l.end = month_end;
         out.push(l);
     }
     // On Enterprise the whole limit is the monthly extra usage budget, so a
@@ -1337,8 +1358,45 @@ mod tests {
         assert_eq!(l.len(), 1);
         assert_eq!(l[0].origin, Origin::Cached);
         assert_eq!(l[0].limit, 500.0);
-        // A stale used amount is not trusted, the local estimate stands.
-        assert_eq!(l[0].used, 0.0);
+        // The stale used amount stays as the floor; no local events follow it.
+        assert_eq!(l[0].used, 120.0);
+    }
+
+    #[test]
+    fn a_stale_cached_used_amount_is_kept_and_this_machine_since_the_read_is_added() {
+        let s = Sources {
+            account: cache(48 * 3600, spend(500.0, Some(120.0)), None),
+            ..Sources::default()
+        };
+        // One message before the cache was read (already in its figure) and
+        // one after it.
+        let events = [cost(NOW - 72 * 3600, 50.0), cost(NOW - 3600, 7.0)];
+
+        let l = all_limits(&s, &events, NOW, WeekStart::Monday);
+
+        assert_eq!(l.len(), 1);
+        assert_eq!(l[0].origin, Origin::Cached);
+        assert_eq!(l[0].used, 127.0);
+        assert!(reported_plus_local(&s, NOW));
+    }
+
+    #[test]
+    fn a_stale_cache_without_a_used_amount_counts_this_machine_for_the_utc_month() {
+        let s = Sources {
+            account: cache(48 * 3600, spend(500.0, None), None),
+            ..Sources::default()
+        };
+        // 2027-01-01 00:30 UTC: January in UTC, still December in a zone
+        // behind UTC.
+        let first = 1_798_763_400;
+        let events = [cost(first, 9.0)];
+        crate::tz::set(crate::tz::Zone::Fixed(-3 * 3600));
+
+        let l = all_limits(&s, &events, NOW, WeekStart::Monday);
+
+        crate::tz::set(crate::tz::Zone::Utc);
+        assert_eq!(l[0].used, 9.0);
+        assert!(!reported_plus_local(&s, NOW));
     }
 
     #[test]
@@ -1365,7 +1423,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stale_cached_spend_limit_is_used_when_no_budget_is_set_and_its_spend_is_local() {
+    fn a_stale_cached_spend_limit_is_used_when_no_budget_is_set() {
         let s = Sources {
             account: cache(48 * 3600, spend(500.0, Some(120.0)), None),
             ..Sources::default()
@@ -1376,7 +1434,7 @@ mod tests {
         assert_eq!(l.len(), 1);
         assert_eq!(l[0].origin, Origin::Cached);
         assert_eq!(l[0].limit, 500.0);
-        assert_eq!(l[0].used, 0.0);
+        assert_eq!(l[0].used, 120.0);
     }
 
     #[test]
@@ -1529,8 +1587,8 @@ mod tests {
 
         assert_eq!(l.len(), 1);
         assert_eq!((l[0].origin, l[0].limit), (Origin::Cached, 500.0));
-        // The stale used amount is still not trusted.
-        assert_eq!(l[0].used, 0.0);
+        // The stale used amount stays as the floor.
+        assert_eq!(l[0].used, 120.0);
     }
 
     #[test]

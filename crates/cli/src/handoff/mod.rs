@@ -5,7 +5,7 @@
 //! side (`playbook handoff save`) and the read side (the SessionStart hook)
 //! both key a handoff through `is_handoff_for`, so they can never disagree.
 //!
-//! Files live in `repos/<owner>/<repo>/handoff/<slug>-<epoch>-<pid>.md`, or in
+//! Files live in `repos/<owner>/<repo>/handoff/<key>_<epoch>_<pid>.md`, or in
 //! `runtime_root()/handoff/` outside a repo with an `origin` remote. A handoff
 //! the hook has loaded is tombstoned by gc for `gc.handoffGraceDays`, so `show`
 //! can still print it after the session start consumed it.
@@ -18,6 +18,7 @@ use crate::gc::index::{self, Record, State};
 use crate::gc::lock::NoHook;
 use crate::gc::tombstone::{self, MoveOutcome, MoveRequest};
 use crate::gc::{Clock, Registry};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -54,17 +55,43 @@ fn root_for_dir(dir: &str, slug: &str) -> PathBuf {
     crate::storage::handoff_root(slug, Some(&absolute))
 }
 
-/// Longest key kept. The file name adds an epoch, a pid, and `.md`, and a
-/// file name tops out at 255 bytes, so a very deep path keeps its tail, the
-/// most specific part. Both sides go through `key`, so they still agree.
-const MAX_KEY_LEN: usize = 150;
+/// Longest readable slug kept in a key. The file name adds the hash, an epoch,
+/// a pid, a tag, and `.md`, and a file name tops out at 255 bytes, so a very
+/// deep path keeps its tail, the most specific part.
+const MAX_SLUG_LEN: usize = 150;
 
+/// Separates the parts of a handoff file name. A slug holds only letters,
+/// digits, and `-`, so it can never contain this character, and neither can
+/// the hash, the epoch, the pid, or the tag.
+const NAME_SEPARATOR: char = '_';
+
+/// Hex characters of the path hash that end a key.
+const HASH_HEX_LEN: usize = 8;
+
+/// `<slug>_<hash>`: the readable slug of `path` plus a short hash of the full
+/// path. Two directories whose names differ only in punctuation share a slug
+/// but never a hash. Both sides go through `key`, so they still agree. An
+/// empty path has no key.
 fn key(path: &str) -> String {
-    let slug = crate::cc::project_slug(path);
-    if slug.len() <= MAX_KEY_LEN {
-        return slug;
+    if path.is_empty() {
+        return String::new();
     }
-    slug[slug.len() - MAX_KEY_LEN..].to_string()
+    let slug = crate::cc::project_slug(path);
+    let tail = &slug[slug.len().saturating_sub(MAX_SLUG_LEN)..];
+    let digest = Sha256::digest(path.as_bytes());
+    let hash: String = digest
+        .iter()
+        .take(HASH_HEX_LEN / 2)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("{tail}{NAME_SEPARATOR}{hash}")
+}
+
+/// The slug that older versions used as the whole key. A handoff an older
+/// version saved is still read under it, so an upgrade strands nothing.
+pub(crate) fn legacy_slug(key: &str) -> &str {
+    key.rsplit_once(NAME_SEPARATOR)
+        .map_or(key, |(slug, _)| slug)
 }
 
 /// The key for the directory this process runs in (`$PWD` first, like Claude Code).
@@ -109,28 +136,41 @@ pub fn session_tag(session_id: &str) -> String {
         .collect()
 }
 
-/// `<slug>-<epoch>-<pid>.md`, or `<slug>-<epoch>-<pid>-<tag>.md` for a handoff
+fn all_digits(part: &str) -> bool {
+    !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// `<key>_<epoch>_<pid>.md`, or `<key>_<epoch>_<pid>_<tag>.md` for a handoff
 /// saved on behalf of one session. `Some(None)` is the first form,
-/// `Some(Some(tag))` the second. The rest after the slug must be two digit
-/// runs and at most one tag, so a sibling or child directory whose slug merely
-/// starts with ours never matches.
-fn parse_name(name: &str, slug: &str) -> Option<Option<String>> {
-    let rest = name
-        .strip_prefix(slug)
-        .and_then(|r| r.strip_prefix('-'))
-        .and_then(|r| r.strip_suffix(".md"))?;
-    let mut parts = rest.split('-');
-    let digits =
-        |p: Option<&str>| p.is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
-    if !(digits(parts.next()) && digits(parts.next())) {
-        return None;
+/// `Some(Some(tag))` the second. The key ends in a hash and the separator
+/// cannot occur inside a part, so a sibling or child directory never matches,
+/// whatever its name ends in.
+///
+/// A name from an older version, `<slug>-<epoch>-<pid>.md`, also matches
+/// under the legacy slug. Only that untagged form does: an older tagged name
+/// cannot be told from a sibling directory's, and a tagged handoff expires
+/// after a day anyway.
+fn parse_name(name: &str, key: &str) -> Option<Option<String>> {
+    let stem = name.strip_suffix(".md")?;
+    if let Some(rest) = stem
+        .strip_prefix(key)
+        .and_then(|r| r.strip_prefix(NAME_SEPARATOR))
+    {
+        let mut parts = rest.split(NAME_SEPARATOR);
+        if !(parts.next().is_some_and(all_digits) && parts.next().is_some_and(all_digits)) {
+            return None;
+        }
+        let tag = match parts.next() {
+            None => return Some(None),
+            Some(t) if !t.is_empty() && t.bytes().all(|b| b.is_ascii_alphanumeric()) => t,
+            Some(_) => return None,
+        };
+        return parts.next().is_none().then(|| Some(tag.to_string()));
     }
-    let tag = match parts.next() {
-        None => return Some(None),
-        Some(t) if !t.is_empty() && t.bytes().all(|b| b.is_ascii_alphanumeric()) => t,
-        Some(_) => return None,
-    };
-    parts.next().is_none().then(|| Some(tag.to_string()))
+    let legacy = legacy_slug(key);
+    let rest = stem.strip_prefix(legacy)?.strip_prefix('-')?;
+    let (epoch, pid) = rest.split_once('-')?;
+    (!legacy.is_empty() && all_digits(epoch) && all_digits(pid)).then_some(None)
 }
 
 pub(crate) fn is_handoff_for(name: &str, slug: &str) -> bool {
@@ -251,9 +291,11 @@ fn save_in(
         let suffix = if tag.is_empty() {
             String::new()
         } else {
-            format!("-{tag}")
+            format!("{NAME_SEPARATOR}{tag}")
         };
-        let candidate = dir.join(format!("{slug}-{stamp}-{pid}{suffix}.md"));
+        let candidate = dir.join(format!(
+            "{slug}{NAME_SEPARATOR}{stamp}{NAME_SEPARATOR}{pid}{suffix}.md"
+        ));
         if !candidate.exists() {
             break candidate;
         }
@@ -337,14 +379,12 @@ fn with_production_archive<T>(f: impl FnOnce(&Archive) -> T) -> T {
     })
 }
 
-/// Tombstones a loaded handoff. If the tombstone folder cannot be used the file
-/// is removed instead, so a stuck file can never re-inject on every session
-/// start. A busy gc run, a refusal by the guard or a failed copy leave the file
-/// where it is, and the next start tries again.
+/// Tombstones a loaded handoff. Whatever goes wrong, the file stays where it
+/// is and the next start tries again: the injected text may have been cut to
+/// fit, so the file is the only full copy. A kept file expires with the rest
+/// after `MAX_AGE_DAYS`.
 fn archive(a: &Archive, path: &Path) {
-    if matches!(a.tombstone(path), Moved::NoFolder) {
-        let _ = fs::remove_file(path);
-    }
+    let _ = a.tombstone(path);
 }
 
 /// The read side of a session start: up to `MAX_INJECTED` fresh handoffs for
@@ -776,7 +816,7 @@ mod tests {
     use crate::gc::tombstone::Env;
     use crate::gc::{Action, FixedClock, Limits, Store, SystemClock};
 
-    const SLUG: &str = "-Users-me-repo";
+    const SLUG: &str = "-Users-me-repo_0a1b2c3d";
     const GRACE_DAYS: u32 = 14;
 
     /// The gc folder that goes with the handoff folder `dir`.
@@ -864,19 +904,98 @@ mod tests {
 
         let k = key(&deep);
 
-        assert_eq!(k.len(), MAX_KEY_LEN);
-        assert!(format!("{k}-1790000000-99999.md").len() < 255);
+        assert_eq!(k.len(), MAX_SLUG_LEN + 1 + HASH_HEX_LEN);
+        assert!(format!("{k}_1790000000_99999_{}.md", "a".repeat(MAX_TAG_LEN)).len() < 255);
         assert_eq!(key(&deep), k, "the key is stable");
-        assert!(is_handoff_for(&format!("{k}-1790000000-99999.md"), &k));
+        assert!(is_handoff_for(&format!("{k}_1790000000_99999.md"), &k));
     }
 
     #[test]
     fn only_the_exact_directory_key_matches() {
-        assert!(is_handoff_for("-Users-me-repo-1790000000-42.md", SLUG));
-        assert!(!is_handoff_for("-Users-me-repo-sub-1790000000-42.md", SLUG));
-        assert!(!is_handoff_for("-Users-me-repo2-1790000000-42.md", SLUG));
-        assert!(!is_handoff_for("-Users-me-repo-1790000000-test.md", SLUG));
-        assert!(!is_handoff_for("-Users-me-repo-1790000000-42.txt", SLUG));
+        assert!(is_handoff_for(
+            "-Users-me-repo_0a1b2c3d_1790000000_42.md",
+            SLUG
+        ));
+        assert!(is_handoff_for(
+            "-Users-me-repo_0a1b2c3d_1790000000_42_abc123.md",
+            SLUG
+        ));
+        assert!(!is_handoff_for(
+            "-Users-me-repo-sub_0a1b2c3d_1790000000_42.md",
+            SLUG
+        ));
+        assert!(!is_handoff_for(
+            "-Users-me-repo2_0a1b2c3d_1790000000_42.md",
+            SLUG
+        ));
+        assert!(!is_handoff_for(
+            "-Users-me-repo_ffffffff_1790000000_42.md",
+            SLUG
+        ));
+        assert!(!is_handoff_for(
+            "-Users-me-repo_0a1b2c3d_1790000000_test.md",
+            SLUG
+        ));
+        assert!(!is_handoff_for(
+            "-Users-me-repo_0a1b2c3d_1790000000_42.txt",
+            SLUG
+        ));
+    }
+
+    #[test]
+    fn directories_that_differ_only_in_punctuation_get_different_keys() {
+        let underscore = key("/x/my_app");
+        let dash = key("/x/my-app");
+
+        assert_ne!(underscore, dash);
+        assert!(underscore.starts_with("-x-my-app_"), "{underscore}");
+        let dir = scratch_dir("handoff-punctuation");
+        save_in(&dir, &underscore, "# Underscore", 100, 7, "").unwrap();
+        save_in(&dir, &dash, "# Dash", 100, 8, "").unwrap();
+
+        let taken = take_in(&dir, &dash, SystemTime::now());
+
+        assert_eq!(taken.contents, vec!["# Dash".to_string()]);
+        assert_eq!(unread(&dir, &underscore).len(), 1, "the other one stays");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_sibling_whose_name_ends_in_digits_never_matches_as_a_tagged_handoff() {
+        let repo = key("/x/repo");
+        let sibling = key("/x/repo-2");
+        let dir = scratch_dir("handoff-sibling-digits");
+        let theirs = save_in(&dir, &sibling, "# Sibling", 100, 7, &session_tag(SESSION)).unwrap();
+        backdate(&theirs, 3);
+
+        assert!(!is_handoff_for(
+            theirs.file_name().unwrap().to_str().unwrap(),
+            &repo
+        ));
+        assert!(
+            !is_handoff_for("-x-repo-2-1790000000-42-abc.md", legacy_slug(&repo)),
+            "an older sibling name is not a tagged handoff either"
+        );
+        take_in(&dir, &repo, SystemTime::now());
+        assert!(theirs.is_file(), "pruning must not touch a sibling's file");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_handoff_an_older_version_saved_still_loads_once() {
+        let dir = scratch_dir("handoff-legacy-name");
+        fs::create_dir_all(&dir).unwrap();
+        let old = dir.join("-x-repo-1790000000-42.md");
+        fs::write(&old, "# Written by the previous version").unwrap();
+        let repo = key("/x/repo");
+
+        let first = take_in(&dir, &repo, SystemTime::now());
+        let second = take_in(&dir, &repo, SystemTime::now());
+
+        assert_eq!(first.contents, vec!["# Written by the previous version"]);
+        assert!(second.contents.is_empty(), "it loads once");
+        assert!(!old.exists(), "it is tombstoned like any other");
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -1023,7 +1142,7 @@ mod tests {
     fn a_compact_removes_a_blank_tagged_file_and_loads_nothing() {
         let dir = scratch_dir("handoff-compact-blank");
         fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(format!("{SLUG}-100-7-{}.md", session_tag(SESSION)));
+        let path = dir.join(format!("{SLUG}_100_7_{}.md", session_tag(SESSION)));
         fs::write(&path, "  \n").unwrap();
 
         let taken = take_session_in(&dir, SLUG, SESSION, SystemTime::now());
@@ -1162,15 +1281,18 @@ mod tests {
     }
 
     #[test]
-    fn archive_removes_the_file_when_the_move_fails() {
-        let dir = scratch_dir("handoff-archive-removes");
+    fn archive_keeps_the_file_when_the_move_fails() {
+        let dir = scratch_dir("handoff-archive-keeps");
         let path = save_in(&dir, SLUG, "# a\n", 100, 7, "").unwrap();
         block_tombstones(&dir);
 
         let taken = take_in(&dir, SLUG, SystemTime::now());
 
         assert_eq!(taken.contents.len(), 1);
-        assert!(!path.exists(), "a stuck file must not re-inject");
+        assert!(
+            path.is_file(),
+            "the only full copy must survive a failed move"
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -1279,7 +1401,7 @@ mod tests {
 
         assert_eq!(
             fs::read_to_string(&log).unwrap(),
-            "1970-01-01T00:00:00Z\tclear\tsess 1\t-Users-me-repo\t2\n"
+            "1970-01-01T00:00:00Z\tclear\tsess 1\t-Users-me-repo_0a1b2c3d\t2\n"
         );
         let _ = fs::remove_dir_all(dir);
     }
