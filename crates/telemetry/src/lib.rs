@@ -6,6 +6,7 @@
 //! an agent's own file format, so a second source only implements the trait.
 
 pub mod account;
+pub mod account_move;
 pub mod account_store;
 pub mod aggregate;
 pub mod api;

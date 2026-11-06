@@ -118,6 +118,11 @@ pub fn open_db(path: &Path) -> Result<Connection, String> {
         BUSY_TIMEOUT,
     )
     .map_err(|e| format!("failed to create account names table: {e}"))?;
+    retry_busy(
+        || conn.execute_batch(super::account_move::SCHEMA_SQL),
+        BUSY_TIMEOUT,
+    )
+    .map_err(|e| format!("failed to create account move tables: {e}"))?;
     Ok(conn)
 }
 
