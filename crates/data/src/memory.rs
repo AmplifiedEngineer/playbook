@@ -10,7 +10,7 @@
 //! anchor node has none), `pinned` is 0 or 1, and `signals` is the list of
 //! similarity signals of a `possible_relates_to` edge, comma separated.
 
-use rusqlite::{Connection, OpenFlags};
+use playbook_store::{Connection, OpenFlags};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -131,13 +131,13 @@ pub struct EdgeRow {
 /// Applies [`SCHEMA_SQL`], creates the fact index when the build has FTS5, and
 /// records the schema version. Fails when the file was written by a newer
 /// schema (rebuild it with the newer playbook).
-pub fn init(conn: &Connection) -> rusqlite::Result<()> {
+pub fn init(conn: &Connection) -> playbook_store::Result<()> {
     init_with(conn, Fts5Support::probe(conn))
 }
 
 /// [`init`] with the FTS5 support given, so a test can make a build that has
 /// FTS5 behave as one that has not.
-pub fn init_with(conn: &Connection, fts5: Fts5Support) -> rusqlite::Result<()> {
+pub fn init_with(conn: &Connection, fts5: Fts5Support) -> playbook_store::Result<()> {
     conn.busy_timeout(BUSY)?;
     let conn_was_autocommit = conn.is_autocommit();
     conn.execute_batch(SCHEMA_SQL)?;
@@ -148,8 +148,8 @@ pub fn init_with(conn: &Connection, fts5: Fts5Support) -> rusqlite::Result<()> {
         // A failed create can make SQLite roll the open transaction back by
         // itself; going on would then write the graph outside any transaction.
         if conn.is_autocommit() && !conn_was_autocommit {
-            return Err(rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ABORT),
+            return Err(playbook_store::Error::SqliteFailure(
+                playbook_store::ffi::Error::new(playbook_store::ffi::SQLITE_ABORT),
                 Some("creating the fact index rolled the transaction back".into()),
             ));
         }
@@ -164,7 +164,7 @@ pub fn init_with(conn: &Connection, fts5: Fts5Support) -> rusqlite::Result<()> {
         |r| r.get(0),
     )?;
     match (found.parse::<u32>(), SCHEMA_VERSION.parse::<u32>()) {
-        (Ok(f), Ok(ours)) if f > ours => Err(rusqlite::Error::InvalidParameterName(format!(
+        (Ok(f), Ok(ours)) if f > ours => Err(playbook_store::Error::InvalidParameterName(format!(
             "memory.db has schema version {f}, this build understands {ours}; upgrade"
         ))),
         (Ok(f), Ok(ours)) if f < ours => conn
@@ -184,8 +184,8 @@ pub fn facts_index_present(conn: &Connection) -> bool {
 
 /// [`facts_index_present`], telling "no such table" (`Ok(false)`) from a file
 /// that cannot be read at all (`Err`).
-pub fn facts_index_exists(conn: &Connection) -> rusqlite::Result<bool> {
-    use rusqlite::OptionalExtension;
+pub fn facts_index_exists(conn: &Connection) -> playbook_store::Result<bool> {
+    use playbook_store::OptionalExtension;
     conn.query_row(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'facts_fts' \
          AND sql LIKE 'CREATE VIRTUAL TABLE%'",
@@ -253,7 +253,7 @@ fn write_graph_in_one_pass(
     )
     .map_err(|e| e.to_string())?;
     let tx = conn
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .transaction_with_behavior(playbook_store::TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
     // The schema is made inside the same transaction as the rows, so a reader
     // sees no tables at all or the whole first graph, never empty tables.
@@ -268,7 +268,7 @@ fn write_graph_in_one_pass(
             )
             .map_err(|e| e.to_string())?;
         for r in nodes {
-            n.execute(rusqlite::params![
+            n.execute(playbook_store::params![
                 r.id,
                 r.file,
                 r.scope,
@@ -287,7 +287,7 @@ fn write_graph_in_one_pass(
             .map_err(|e| e.to_string())?;
         for r in edges {
             let signals = r.signals.as_ref().map(|s| s.join(","));
-            e.execute(rusqlite::params![r.from, r.to, r.relation, signals])
+            e.execute(playbook_store::params![r.from, r.to, r.relation, signals])
                 .map_err(|e| e.to_string())?;
         }
     }
@@ -313,7 +313,7 @@ fn write_facts_index(
     conn: &Connection,
     nodes: &[NodeRow],
     fill: IndexFill,
-) -> rusqlite::Result<i64> {
+) -> playbook_store::Result<i64> {
     conn.execute(
         "INSERT INTO meta (key, value) VALUES ('graph_generation', '1') \
          ON CONFLICT (key) DO UPDATE SET value = CAST(value AS INTEGER) + 1",
@@ -335,7 +335,11 @@ fn write_facts_index(
     Ok(generation)
 }
 
-fn fill_facts_index(conn: &Connection, nodes: &[NodeRow], fill: IndexFill) -> rusqlite::Result<()> {
+fn fill_facts_index(
+    conn: &Connection,
+    nodes: &[NodeRow],
+    fill: IndexFill,
+) -> playbook_store::Result<()> {
     conn.execute_batch("DELETE FROM facts_fts; DELETE FROM facts_fts_map;")?;
     // A later row of the same id wins, as it does in `nodes`.
     let facts: std::collections::BTreeMap<&str, &NodeRow> = nodes
@@ -350,12 +354,17 @@ fn fill_facts_index(conn: &Connection, nodes: &[NodeRow], fill: IndexFill) -> ru
         "INSERT INTO facts_fts_map (rowid, fact_id, scope, project) VALUES (?1, ?2, ?3, ?4)",
     )?;
     for (row, node) in (1_i64..).zip(facts.values()) {
-        index.execute(rusqlite::params![
+        index.execute(playbook_store::params![
             row,
             node.name.as_deref().unwrap_or(""),
             node.description.as_deref().unwrap_or("")
         ])?;
-        map.execute(rusqlite::params![row, node.id, node.scope, node.project])?;
+        map.execute(playbook_store::params![
+            row,
+            node.id,
+            node.scope,
+            node.project
+        ])?;
     }
     if fill == IndexFill::Complete {
         mark_facts_index_current(conn)?;
@@ -363,7 +372,7 @@ fn fill_facts_index(conn: &Connection, nodes: &[NodeRow], fill: IndexFill) -> ru
     Ok(())
 }
 
-fn mark_facts_index_current(conn: &Connection) -> rusqlite::Result<()> {
+fn mark_facts_index_current(conn: &Connection) -> playbook_store::Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO meta (key, value) \
          SELECT 'facts_index_generation', value FROM meta WHERE key = 'graph_generation'",
@@ -382,7 +391,7 @@ fn fill_bodies(
     let mut conn = Connection::open(db).map_err(|e| e.to_string())?;
     conn.busy_timeout(BUSY).map_err(|e| e.to_string())?;
     let tx = conn
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .transaction_with_behavior(playbook_store::TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
     let current: Option<i64> = tx
         .query_row(
@@ -422,7 +431,7 @@ fn fill_bodies(
             };
             drop_row.execute([rowid]).map_err(|e| e.to_string())?;
             put_row
-                .execute(rusqlite::params![rowid, name, description, body])
+                .execute(playbook_store::params![rowid, name, description, body])
                 .map_err(|e| e.to_string())?;
         }
     }
