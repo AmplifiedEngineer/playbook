@@ -106,9 +106,9 @@ pub enum UsageCommand {
     },
     /// List the accounts in the usage store and name them
     ///
-    /// Every usage event carries an account key, the email Claude Code was
-    /// signed in to. These commands show the keys and give each one a display
-    /// name.
+    /// Every usage event carries an account key: the email Claude Code was
+    /// signed in to, or a `token:` fingerprint. These commands show the keys
+    /// and give each one a display name.
     ///
     /// Example: `playbook usage account list`
     Account {
@@ -124,7 +124,7 @@ pub enum AccountCommand {
     List,
     /// Give an account key a display name, or clear it with an empty name
     ///
-    /// Example: `playbook usage account name igor@getdigital.com.br Company`
+    /// Example: `playbook usage account name you@example.com Company`
     Name {
         /// Account key shown by `account list`
         key: String,

@@ -1625,7 +1625,7 @@ Subcommands: `account`, `collect`, `doctor`, `prune`, `status`, `stop`
 
 List the accounts in the usage store and name them
 
-Every usage event carries an account key, the email Claude Code was signed in to. These commands show the keys and give each one a display name.
+Every usage event carries an account key: the email Claude Code was signed in to, or a `token:` fingerprint. These commands show the keys and give each one a display name.
 
 Example: `playbook usage account list`
 
@@ -1645,7 +1645,7 @@ List the accounts with their events, cost and time span
 
 Give an account key a display name, or clear it with an empty name
 
-Example: `playbook usage account name igor@getdigital.com.br Company`
+Example: `playbook usage account name you@example.com Company`
 
 - `<KEY>`: Account key shown by `account list`
 - `<NAME>`: Display name to show; empty clears it
