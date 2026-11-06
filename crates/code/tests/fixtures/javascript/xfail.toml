@@ -1,0 +1,2 @@
+["src/counter.js"]
+value = "fields assigned in a constructor are not extracted"
