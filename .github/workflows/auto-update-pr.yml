@@ -68,7 +68,7 @@ jobs:
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
-          permission-checks: read
+          permission-actions: read
       # Only the decision script is read from the checkout, which is main.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.bot.outputs.configured == 'true'
@@ -105,11 +105,13 @@ jobs:
               const behind_by = cmp.data.behind_by;
               let checks_pending = false;
               if (behind_by === 0) {
-                // Pending = any check run on the head that has not completed.
+                // Pending = any workflow run on the head that has not completed.
                 // A head with no runs yet counts as pending: CI is starting.
-                const runs = await github.paginate(github.rest.checks.listForRef, {
-                  owner, repo, ref: pr.head.sha, per_page: 100,
-                });
+                // Workflow runs need only actions:read, which the App holds.
+                const runs = await github.paginate(
+                  github.rest.actions.listWorkflowRunsForRepo,
+                  { owner, repo, head_sha: pr.head.sha, per_page: 100 },
+                );
                 checks_pending = runs.length === 0 || runs.some((r) => r.status !== 'completed');
               }
               candidates.push({ number: pr.number, behind_by, checks_pending });
