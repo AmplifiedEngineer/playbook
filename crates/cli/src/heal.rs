@@ -298,9 +298,16 @@ pub fn needs_you(message: &str, command: Option<&str>) -> String {
 
 /// Runs the heal for `trigger` at `now` (epoch seconds).
 pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
-    run_with(ctx, trigger, now, &|| {
-        crate::doctor::pbtop::note(&std::env::var_os("PATH").unwrap_or_default())
-    })
+    run_with(ctx, trigger, now, &real_pbtop_note)
+}
+
+/// The note for a `pbtop` on the real PATH. Unit tests never start the
+/// `pbtop` of the machine they run on.
+fn real_pbtop_note() -> Option<String> {
+    if cfg!(test) {
+        return None;
+    }
+    crate::doctor::pbtop::note(&std::env::var_os("PATH").unwrap_or_default())
 }
 
 /// `run`, with `pbtop_note` as the check for an older separate `pbtop`. It

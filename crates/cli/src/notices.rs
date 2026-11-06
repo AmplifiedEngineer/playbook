@@ -171,6 +171,7 @@ mod tests {
 
     #[test]
     fn the_pbtop_line_follows_the_release_line_and_never_shows_alone() {
+        // Arrange
         let both = Notices {
             line: Some("playbook updated from 0.1.0 to 0.2.0".into()),
             pbtop: Some("pbtop 0.1.0 is older".into()),
@@ -180,11 +181,15 @@ mod tests {
             pbtop: Some("pbtop 0.1.0 is older".into()),
         };
 
+        // Act
+        let (with_line, without_line) = (both.render(), alone.render());
+
+        // Assert
         assert_eq!(
-            both.render(),
+            with_line,
             "playbook updated from 0.1.0 to 0.2.0\npbtop 0.1.0 is older\n"
         );
-        assert_eq!(alone.render(), "");
+        assert_eq!(without_line, "");
     }
 
     #[test]

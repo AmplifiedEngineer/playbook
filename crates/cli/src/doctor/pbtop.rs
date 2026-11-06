@@ -7,13 +7,15 @@
 //! mentions it once. The probe runs `pbtop --version`, so only doctor and the
 //! first run after an upgrade call it: never a hook or the status line.
 
-use super::check::{on_path_in, version_of, Env, Level, Row};
+use super::check::{on_path_in, Env, Level, Row};
 use crate::fastpath::PBTOP_PROGRAM;
 use crate::update::resolve::compare;
 use crate::update::{is_homebrew, is_system_package};
 use std::cmp::Ordering;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::Duration;
 
 /// The script that installs `pbtop` alone.
 const INSTALL_SCRIPT_FIX: &str = "curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install-pbtop.sh | sh";
@@ -26,11 +28,42 @@ const BREW_UPGRADE_FIX: &str = "brew upgrade pbtop";
 const PACKAGE_FIX: &str =
     "install the latest playbook .deb or .rpm package, which updates both binaries";
 
+/// Longest `pbtop --version` may run. The first command after an upgrade waits
+/// for it, so it is short.
+const VERSION_TIMEOUT: Duration = Duration::from_secs(2);
+/// The folder of the Homebrew playbook formula's keg, which a `pbtop` link
+/// resolves into.
+const PLAYBOOK_KEG: &str = "/Cellar/playbook/";
+/// The folder the `.deb` and `.rpm` packages install into.
+const PACKAGE_BIN_DIR: &str = "/usr/bin";
+/// The Homebrew fix for a `pbtop` link that belongs to an older playbook.
+const BREW_PLAYBOOK_FIX: &str = "brew upgrade playbook";
+
 /// A `pbtop` on PATH that is older than the running playbook.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Skew {
     pub path: PathBuf,
     pub version: String,
+}
+
+/// The version `bin --version` prints, or an empty string when it does not
+/// answer in time or its last word is not a version. The word reaches the
+/// terminal, so only digits, letters and `.+-` after a leading digit count.
+fn probe_version(bin: &Path) -> String {
+    let mut cmd = Command::new(bin);
+    cmd.arg("--version");
+    crate::common::proc::run_with_timeout(&mut cmd, VERSION_TIMEOUT)
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        .and_then(|text| text.split_whitespace().next_back().map(str::to_string))
+        .filter(|word| is_version(word))
+        .unwrap_or_default()
+}
+
+fn is_version(word: &str) -> bool {
+    word.starts_with(|c: char| c.is_ascii_digit())
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-'))
 }
 
 /// The `pbtop` first on `path_var` when `version_of` reports a version below
@@ -40,7 +73,10 @@ pub(crate) fn skew(
     running: &str,
     version_of: &dyn Fn(&Path) -> String,
 ) -> Option<Skew> {
-    let path = on_path_in(path_var, PBTOP_PROGRAM)?;
+    let path = on_path_in(
+        path_var,
+        &format!("{PBTOP_PROGRAM}{}", std::env::consts::EXE_SUFFIX),
+    )?;
     let version = version_of(&path);
     (!version.is_empty() && compare(&version, running) == Ordering::Less)
         .then_some(Skew { path, version })
@@ -48,11 +84,16 @@ pub(crate) fn skew(
 
 /// The command that brings `pbtop` to the version of the playbook at `exe`.
 pub(crate) fn fix(pbtop: &Path, exe: &Path) -> String {
-    if is_homebrew(pbtop) && is_homebrew(exe) {
+    // A Homebrew `pbtop` is often a link in a folder such as /usr/local/bin.
+    let real = std::fs::canonicalize(pbtop).unwrap_or_else(|_| pbtop.to_path_buf());
+    let brew = is_homebrew(&real) || is_homebrew(pbtop);
+    if real.to_string_lossy().contains(PLAYBOOK_KEG) {
+        BREW_PLAYBOOK_FIX.to_string()
+    } else if brew && is_homebrew(exe) {
         BREW_LINK_FIX.to_string()
-    } else if is_homebrew(pbtop) {
+    } else if brew {
         BREW_UPGRADE_FIX.to_string()
-    } else if pbtop.starts_with("/usr/bin") && is_system_package(exe) {
+    } else if pbtop.starts_with(PACKAGE_BIN_DIR) && is_system_package(exe) {
         PACKAGE_FIX.to_string()
     } else {
         INSTALL_SCRIPT_FIX.to_string()
@@ -69,7 +110,7 @@ fn describe(skew: &Skew, running: &str) -> String {
 
 fn current_skew(path_var: &OsStr) -> Option<(Skew, String)> {
     let running = env!("CARGO_PKG_VERSION");
-    let found = skew(path_var, running, &version_of)?;
+    let found = skew(path_var, running, &probe_version)?;
     let exe = std::env::current_exe().unwrap_or_default();
     let fix = fix(&found.path, &exe);
     Some((found, fix))
@@ -149,7 +190,7 @@ mod tests {
 
         let found = skew(&path, "0.41.0", &says("0.41.0-rc.1"));
 
-        assert!(found.is_some(), "{found:?}");
+        assert_eq!(found.map(|s| s.version).as_deref(), Some("0.41.0-rc.1"));
     }
 
     #[test]
@@ -195,6 +236,43 @@ mod tests {
         let fix = fix(Path::new("/usr/bin/pbtop"), Path::new("/usr/bin/playbook"));
 
         assert!(fix.contains(".deb or .rpm"), "{fix}");
+    }
+
+    #[test]
+    fn a_packaged_pbtop_next_to_another_playbook_is_reinstalled_with_the_script() {
+        let fix = fix(
+            Path::new("/usr/bin/pbtop"),
+            Path::new("/home/me/.local/bin/playbook"),
+        );
+
+        assert!(fix.ends_with("install-pbtop.sh | sh"), "{fix}");
+    }
+
+    #[test]
+    fn a_pbtop_link_into_the_playbook_keg_is_fixed_by_upgrading_playbook() {
+        let fix = fix(
+            Path::new("/opt/homebrew/Cellar/playbook/0.40.1/bin/pbtop"),
+            Path::new("/home/me/.local/bin/playbook"),
+        );
+
+        assert_eq!(fix, "brew upgrade playbook");
+    }
+
+    #[test]
+    fn only_a_version_shaped_word_is_trusted() {
+        for word in ["0.40.1", "1.0.0-rc.1", "0.41.0+build5"] {
+            assert!(is_version(word), "{word}");
+        }
+        for word in [
+            "",
+            "usage:",
+            "\u{1b}[31m0.1.0",
+            "0.1.0\u{7}",
+            "v0.1.0",
+            "0 1",
+        ] {
+            assert!(!is_version(word), "{word:?}");
+        }
     }
 
     #[test]
