@@ -174,7 +174,11 @@ fn bench_actions_are_pinned_by_sha() {
 const GATE_VARIABLE: &str = "vars.CODE_CI_PILOT_GATE_RAN == 'true'";
 
 /// (workflow file, command of its own pass or fail step)
-const GATED: [(&str, &str); 1] = [("code-mutants.yml", "code-bench mutants")];
+const GATED: [(&str, &str); 2] = [
+    ("code-fuzz.yml", "fuzz run"),
+    ("code-mutants.yml", "code-bench mutants"),
+];
+const NIGHTLY: &str = "nightly";
 
 #[test]
 fn each_gated_workflow_uploads_after_its_own_pass_or_fail_step() {
@@ -222,4 +226,37 @@ fn gated_actions_are_pinned_by_sha() {
     for (file, _) in GATED {
         assert_pinned(&load(file), file);
     }
+}
+
+#[test]
+fn only_the_fuzz_workflow_uses_nightly_rust() {
+    for file in ["code-bench.yml", "code-mutants.yml", "code-fuzz.yml"] {
+        let uses_nightly = load(file)
+            .iter()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .any(|l| l.to_lowercase().contains(NIGHTLY));
+        assert_eq!(uses_nightly, file == "code-fuzz.yml", "{file}");
+    }
+}
+
+#[test]
+fn fuzz_matrix_lists_every_fuzz_target() {
+    let lines = load("code-fuzz.yml");
+    let list = lines
+        .iter()
+        .find_map(|l| l.trim().strip_prefix("target: ["))
+        .expect("a target list")
+        .trim_end_matches(']');
+    let mut listed: Vec<&str> = list.split(',').map(str::trim).collect();
+    listed.sort_unstable();
+    let dir = root().join("crates/code/fuzz/fuzz_targets");
+    let mut files: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| {
+            let path = e.unwrap().path();
+            path.file_stem().unwrap().to_string_lossy().into_owned()
+        })
+        .collect();
+    files.sort_unstable();
+    assert_eq!(listed, files);
 }
