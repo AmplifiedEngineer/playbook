@@ -18,14 +18,14 @@ The user guides say nothing leaves the machine (`docs/guides/05-what-setup-insta
 
 ## Decision
 
-Take approach C: a storage crate first, then a `libsql` engine behind a feature, then sync code only after an evidence gate passes.
+Take approach C: a storage crate first, then a `libsql` engine behind a feature, then sync code only after an evidence gate passes. The owner has decided the points in the Decisions section below.
 
 1. **Storage crate first.** Every crate imports `playbook-store` in place of `rusqlite`. The crate keeps rusqlite's names. Call sites change their `use` line and little else. A CI guard fails any `rusqlite` import outside the crate. This part ships with no behavior change and helps even if sync never ships.
-2. **Engine behind a feature.** `engine-rusqlite` is the default. `engine-libsql` is a second feature, and building with both fails. The expected result is that only a separate `pbsync` helper uses `libsql`. The `playbook` binary adopts it only if the gate below passes.
-3. **Evidence gate before sync code.** A CI job builds `pbsync` for the five release targets and measures binary size, push time for 10,000 rows, and open overhead on the statusline path against a rusqlite baseline in the same job. A failed bar stops the work and returns to this ADR. No sync code lands before the gate passes.
+2. **Engine behind a feature.** `engine-rusqlite` is the default. `engine-libsql` is a second feature, and building with both fails. `playbook-store` is the one place that depends on the engine, and the target is that it switches from rusqlite to `libsql` for the whole `playbook` binary.
+3. **Evidence gate before sync code.** A CI job builds the `playbook` binary with `engine-libsql` for the five release targets, including musl and Windows. It measures binary size, push time for 10,000 rows, and open overhead on the statusline path against a rusqlite baseline in the same job. If a build fails or the size jump is unacceptable, the work parks and reports back to this ADR. It does not force the port, and fallback B below applies. No sync code lands before the gate passes.
 4. **Opt-in, off by default.** Nothing leaves your machine unless you turn on sync with `playbook sync enable`. A fresh install, an upgrade and a doctor run do not contact a remote.
-5. **What leaves the machine.** Only usage rows (`usage_events`) and a snapshot of shareable config keys. Sync sends no `repo`, `branch`, `cwd`, file path or raw email. The account goes as a salted hash.
-6. **Allowlists.** A per-account list (`sync.accounts`, empty by default) decides which accounts sync. A work account stays local until the owner adds it. An explicit column list picks the row columns, and an explicit key list (`SHARED_KEYS`) picks the config keys. A new column or key stays local until someone adds it to the list. Paths and machine-bound keys stay off the list.
+5. **What leaves the machine.** Only usage rows (`usage_events`) and a snapshot of shareable config keys. The repo goes as a salted hash of the repo name (128 bits, a truncated SHA-256 written as hex) with a per-user salt kept in the remote `shared_meta`, like the account salt. The account goes as a salted hash. Sync sends no `branch`, `cwd`, file path or raw email, and it does not send `session_id` or `agent`.
+6. **Allowlists.** A per-account list (`sync.accounts`, empty by default) decides which accounts sync. The work account syncs too, once the owner adds it to the list. An explicit column list picks the row columns, and an explicit key list (`SHARED_KEYS`) picks the config keys. A new column or key stays local until someone adds it to the list. Paths and machine-bound keys stay off the list.
 7. **Transcripts stay machine-local.** Sync does not read or upload a transcript. Memory facts, the code index, the gate databases and `watch.db` are out of scope for the same reason.
 8. **Remote keys.** The remote primary key is `(machine, local key)`. Rows from two machines cannot collide. A push repeated with the same rows writes nothing new.
 9. **A pulled config is a proposal.** A pull writes a proposal and does not apply it. `playbook sync config apply` shows the diff first.
@@ -37,13 +37,13 @@ The promise to users becomes: nothing leaves your machine unless you turn on syn
 
 ADR 0025 rejected "remote or shared learning across users". Its reason was that one user's habits are not another's and that learning must stay local. This ADR does not share anything across users. It moves one user's own usage between that user's own computers, to a store that user controls. The two decisions do not conflict. ADR 0025 carries a short pointer to this record.
 
-### Threat model of the salted account hash
+### Threat model of the salted hashes
 
-The hash hides the email from someone who opens the remote and reads it casually. It does not hide the email from a determined guess.
+The account hash and the repo-name hash hide the email and the repo name from someone who opens the remote and reads it casually. They do not hide either from a determined guess.
 
-- The salt sits in the same remote as the data (`shared_meta`), because every new machine must fetch it to compute the same hash. Anyone who can read the rows can read the salt.
-- With the salt in hand, a person can hash a list of known emails and compare. Emails are short and guessable. This works against a known candidate.
-- The hash is therefore a pseudonym. Treat the remote as data that identifies the account to anyone who can read it, and protect it with the provider's access controls, not with the hash.
+- The salts sit in the same remote as the data (`shared_meta`), because every new machine must fetch them to compute the same hashes. Anyone who can read the rows can read the salts.
+- With a salt in hand, a person can hash a list of known emails or known repo names and compare. Both are short and guessable. This works against a known candidate, and the repo-name hash has the same limit as the account hash.
+- Each hash is therefore a pseudonym. Treat the remote as data that identifies the account to anyone who can read it, and protect it with the provider's access controls, not with the hash.
 
 ### Revoking access
 
@@ -54,9 +54,9 @@ Data already in the remote stays there until the owner deletes it at the provide
 
 ## Considered alternatives
 
-**A. Port every call site to `libsql` directly.** Rejected. Every call site changes once, then again if the engine changes. The async API and the missing runtime hit hooks and the statusline, which must stay local and synchronous.
+**A. Port every call site to `libsql` directly.** Rejected. Every call site changes once, then again if the engine changes. The storage crate gives the same port in one place.
 
-**B. A separate `pbsync` helper that shares no code with the shipped crates.** Kept as the fallback. It duplicates SQL and the table code.
+**B. A separate `pbsync` helper that shares no code with the shipped crates.** The fallback if the evidence gate fails. It duplicates SQL and the table code, and it adds a second build.
 
 **D. Files only, with JSONL export and import.** Rejected because the owner chose libSQL. The row format keeps this option open.
 
@@ -66,17 +66,20 @@ Data already in the remote stays there until the owner deletes it at the provide
 
 ## Consequences
 
-- The storage crate and the schema check help even if sync is cancelled, and so does the machine scope in pbtop.
+- The storage crate and the schema check help even if the owner cancels sync, and so does the machine scope in pbtop.
 - A failed evidence bar stops the plan at the gate. That is the intended cost control.
 - The remote holds pseudonymous account data, with the limits described above.
-- Two builds exist, `playbook` and `pbsync`, compiled in separate cargo runs so both engines do not link into one binary. The release carries one more file.
+- If the gate passes, one build and one engine ship. If it fails, the fallback adds a second build, `pbsync`, compiled in a separate cargo run so both engines do not link into one binary, and the release carries one more file.
+- Sync runs off the hook and statusline paths. Local reads and hooks do not wait on the network.
 - Doctor and the guides need a sync section once sync exists.
 
-## Open questions for the owner
+## Decisions
 
-This ADR leaves both open.
+The owner answered the earlier open questions.
 
-1. **Hosting.** Turso Cloud or a self-hosted `sqld`. This sets who can read the remote, what it costs, and how you issue and rotate a token.
-2. **The libsql and rusqlite link outcome.** Whether the `playbook` binary can adopt the `libsql` engine, or only `pbsync` does. The gate measures it and records the answer.
+1. **Hosting: Turso Cloud.** The URL stays a setting. The token comes from an environment variable whose name sits in config. Playbook stores no token.
+2. **Link: port everything to `libsql`.** There is no separate `pbsync` helper unless the gate fails. `playbook-store` switches from rusqlite to `libsql`. The evidence gate measures binary size and the musl and Windows builds first. If a build fails or the size jump is unacceptable, the work parks and reports instead of forcing it. Local reads and hooks do not wait on the network, because sync runs off the hook and statusline paths.
+3. **Privacy: sync a salted repo-name hash.** The hash is 128 bits of hex from a truncated SHA-256, with a per-user salt in the remote `shared_meta`. Sync still sends no branch or working directory, no raw email, and no `session_id` or `agent`.
+4. **Work account: it syncs too.** The explicit per-account allowlist `sync.accounts` stays in config and starts empty. The owner adds accounts. Enabling sync stays a visible opt-in with a consent prompt, because company policy still applies.
 
 The Status stays Proposed until the owner accepts this record.
