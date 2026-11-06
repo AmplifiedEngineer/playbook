@@ -239,6 +239,8 @@ pub struct StoreSpan {
 pub struct Data {
     pub now: i64,
     pub range: Range,
+    /// The time zone the days were grouped in.
+    pub zone: crate::tz::Zone,
     pub filter: String,
     pub totals: Totals,
     /// Per day, oldest first. Idle days are absent.
@@ -345,6 +347,8 @@ impl Data {
         range: Range,
         filter: &str,
     ) -> Data {
+        // Read first: a zone switched while this runs makes the snapshot stale.
+        let zone = crate::tz::current();
         let (inside, _) = query::in_range(window, &[], now, range);
         let inside: Vec<UsageEvent> = inside.into_iter().filter(|e| matches(e, filter)).collect();
         let models = group_usage(&inside, Dimension::Model);
@@ -377,6 +381,7 @@ impl Data {
         Data {
             now,
             range,
+            zone,
             filter: filter.to_string(),
             totals: Totals::of(&inside),
             days: group_usage(&inside, Dimension::Day),
@@ -541,6 +546,20 @@ mod tests {
             back, "2026-09-02",
             "switching back regroups the same events"
         );
+    }
+
+    #[test]
+    fn a_snapshot_remembers_the_zone_its_days_were_grouped_in() {
+        use crate::tz::{self, Zone};
+        let events = vec![event(NOW - 60, "opus", "a", 1.0)];
+
+        tz::set(Zone::Fixed(3600));
+        let east = Data::build(&events, LiveView::default(), NOW, Range::All, "");
+        tz::set(Zone::Utc);
+        let utc = Data::build(&events, LiveView::default(), NOW, Range::All, "");
+
+        assert_eq!(east.zone, Zone::Fixed(3600));
+        assert_eq!(utc.zone, Zone::Utc);
     }
 
     #[test]
