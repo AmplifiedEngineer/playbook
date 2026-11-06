@@ -1,0 +1,14 @@
+symbol pkg/shapes.py SCALE variable 1
+symbol pkg/shapes.py Square class 4
+symbol pkg/shapes.py Square.area method 8
+symbol pkg/shapes.py make_square function 13
+symbol pkg/main.py total function 4
+ref Square pkg/shapes.py 4
+ref Square pkg/main.py 1
+ref Square pkg/main.py 10
+ref make_square pkg/shapes.py 13
+ref make_square pkg/main.py 1
+ref make_square pkg/main.py 10
+negative Square pkg/main.py 2
+negative Square pkg/main.py 5
+negative Square pkg/shapes.py 9

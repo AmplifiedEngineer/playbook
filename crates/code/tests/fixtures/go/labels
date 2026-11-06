@@ -1,0 +1,15 @@
+symbol shape.go Shape interface 5
+symbol shape.go Shape.Area method 6
+symbol shape.go Square struct 9
+symbol shape.go Square.Area method 14
+symbol shape.go NewSquare function 18
+symbol main.go Total function 3
+ref Square shape.go 9
+ref Square shape.go 14
+ref Square shape.go 18
+ref Square main.go 3
+ref Square main.go 13
+ref NewSquare shape.go 18
+negative Square main.go 2
+negative Square main.go 4
+negative Square shape.go 13

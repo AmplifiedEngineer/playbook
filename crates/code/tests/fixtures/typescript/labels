@@ -1,0 +1,16 @@
+symbol src/shapes.ts SCALE const 1
+symbol src/shapes.ts Shape interface 3
+symbol src/shapes.ts Shape.area method 5
+symbol src/shapes.ts Square class 13
+symbol src/shapes.ts Square.area method 17
+symbol src/main.ts makeSquare function 3
+ref Square src/shapes.ts 13
+ref Square src/main.ts 1
+ref Square src/main.ts 3
+ref Square src/main.ts 5
+ref Square src/main.ts 8
+ref SCALE src/shapes.ts 18
+negative Square src/main.ts 2
+negative Square src/main.ts 4
+negative Square src/shapes.ts 16
+negative area src/shapes.ts 16
