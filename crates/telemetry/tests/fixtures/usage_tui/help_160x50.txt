@@ -13,8 +13,8 @@
 │total $20.27  peak $6.01 on 08-25  avg $│PgUp       Move five rows up                        tables                  │ 20.6K/day                              │
 │Thu 2026-09-03 today  $1.25  2 msgs  47.│Home, g    First row, or first day of a chart       tables, charts          │  2 msgs                                │
 │ $8┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│End, G     Last row, or last day of a chart         tables, charts          │┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▅▅┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▅▅┄┄┄▅▅┄│
-│   │                                    │Left       Move the chart cursor one bar back       charts                  │               ██               ██   ██ │
-│   │                                    │Right      Move the chart cursor one bar forward    charts                  │               ██               ██   ██ │
+│   │                                    │Left, h    Move the chart cursor one bar back       charts                  │               ██               ██   ██ │
+│   │                                    │Right, l   Move the chart cursor one bar forward    charts                  │               ██               ██   ██ │
 │   │                                    │                                                                            │               ██               ██   ██ │
 │ $4┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│Periods                                                                     │┄▂┄▂┄▂▂┄▂┄┄┄┄┄┄██┄▂┄▂┄┄┄┄▂┄▂▂┄┄┄██┄┄┄██┄│
 │   │                                    │d          Show today                               all panels              │ █ █ ██ █      ██ █ █    █ ██   ██   ██ │
@@ -31,7 +31,7 @@
 │■ haiku-5                               │t          Next color theme (off with NO_COLOR)     all panels              │            7  166.6K     $0.17 ········│
 │                                        │p          Open the full screen Sessions list       all panels              │                                        │
 │                                        │e          Edit the tabs and the panels on each     all panels              │                                        │
-│                                        │h, ?       Show this help                           all panels              │                                        │
+│                                        │?          Show this help                           all panels              │                                        │
 │                                        │                                                                            │                                        │
 ╰────────────────────────────────────────│Sorting                                                                     │────────────────────────────────────────╯
 ╭─┤⁵Live sessions├───────────────────────│s          Sort by the next column                  tables                  │──────────────────────────────────┤UTC├─╮
@@ -46,5 +46,5 @@
 │                                        │R          Read new usage now (also automatic)      all panels              │opus-5                1   23.8K    $6.00│
 │                                        │                                                                            │haiku-5               1   23.8K    $0.01│
 │                                        │Quit                                                                        │haiku-5               1   23.8K    $0.02│
-╰────────────────────────────────────────╰┤ ↑/↓ scroll, any other key closes ├────────────────────────────────────────╯────────────────────────────────────────╯
- 1-6 panel d day w week m month a all ←/→ day r range v view / filter s/S sort t theme (default) h help enter select q quit      updated 01:46:40 UTC, every 5s
+╰────────────────────────────────────────╰┤ ↑/↓ j/k scroll, any other key closes ├────────────────────────────────────╯────────────────────────────────────────╯
+ 1-6 panel d day w week m month a all ←/→ day r range v view / filter s/S sort t theme (default) ? help enter select q quit      updated 01:46:40 UTC, every 5s

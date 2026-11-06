@@ -21,4 +21,4 @@
 │                                      ││09-01 s-old    beta    sonne~    $1.25│
 │                                      ││      s-1      beta    sonne~    $0.55│
 ╰──────────────────────────────────────╯╰──────────────────────────────────────╯
- w week m month r range v view / filter h help q quit      updated 01:46:40 UTC
+ w week m month r range v view / filter ? help q quit      updated 01:46:40 UTC
