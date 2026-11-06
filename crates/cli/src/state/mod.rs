@@ -12,7 +12,7 @@
 
 use crate::common::slug::slugify;
 use crate::config::store;
-use rusqlite::{params, Connection, OptionalExtension};
+use playbook_store::{params, Connection, OptionalExtension};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -293,12 +293,12 @@ pub fn list_read_only(root: &Path, prefix: &str) -> Result<Vec<(String, String)>
 /// A read-only connection that leaves no file behind. With no `-wal` file
 /// every row is in the main file, so it opens as immutable and SQLite makes
 /// no `-wal` or `-shm` file; with one, a plain read-only open reads it.
-pub(crate) fn open_read_only(path: &Path) -> rusqlite::Result<rusqlite::Connection> {
-    use rusqlite::OpenFlags;
+pub(crate) fn open_read_only(path: &Path) -> playbook_store::Result<playbook_store::Connection> {
+    use playbook_store::OpenFlags;
     let mut wal = path.as_os_str().to_owned();
     wal.push("-wal");
     if Path::new(&wal).exists() {
-        return rusqlite::Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY);
+        return playbook_store::Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY);
     }
     let encoded: String = path
         .to_string_lossy()
@@ -310,7 +310,7 @@ pub(crate) fn open_read_only(path: &Path) -> rusqlite::Result<rusqlite::Connecti
             c => c.to_string(),
         })
         .collect();
-    rusqlite::Connection::open_with_flags(
+    playbook_store::Connection::open_with_flags(
         format!("file:{encoded}?immutable=1"),
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
     )

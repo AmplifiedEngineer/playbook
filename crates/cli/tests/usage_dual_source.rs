@@ -7,7 +7,7 @@
 //! transcript sessions and hand written telemetry rows. The real `~/.claude`
 //! is never read.
 
-use rusqlite::Connection;
+use playbook_store::Connection;
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -84,7 +84,7 @@ fn add_request(conn: &Connection, session: &str, id: &str, tokens: (u64, u64), c
          (session_id, request_id, timestamp, model, effort, agent_name, skill_name,
           input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost_usd, duration_ms)
          VALUES (?1, ?2, 1788000000, 'claude-sonnet-5', '', 'reviewer', '', ?3, ?4, 0, 0, ?5, 10)",
-        rusqlite::params![session, id, tokens.0 as i64, tokens.1 as i64, cost],
+        playbook_store::params![session, id, tokens.0 as i64, tokens.1 as i64, cost],
     )
     .unwrap();
 }
@@ -92,7 +92,7 @@ fn add_request(conn: &Connection, session: &str, id: &str, tokens: (u64, u64), c
 fn transcript_cost(conn: &Connection, session: &str, id: &str) -> f64 {
     conn.query_row(
         "SELECT cost_usd FROM usage_events WHERE session_id = ?1 AND event_id LIKE ?2",
-        rusqlite::params![session, format!("%{id}%")],
+        playbook_store::params![session, format!("%{id}%")],
         |r| r.get(0),
     )
     .unwrap()

@@ -109,12 +109,13 @@ fn scrub_tokens(text: &str) -> String {
 /// The rows of every table in a SQLite file, one line each, with times
 /// replaced by `{TIME}`, since the raw pages differ from run to run.
 fn dump(path: &Path) -> String {
-    use rusqlite::types::ValueRef;
+    use playbook_store::types::ValueRef;
     // Opened immutable and read only, so the dump writes no `-wal` or `-shm`
     // file into the folder the walk is listing.
     let uri = format!("file:{}?immutable=1", path.display());
-    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI;
-    let db = rusqlite::Connection::open_with_flags(uri, flags).expect("open db");
+    let flags = playbook_store::OpenFlags::SQLITE_OPEN_READ_ONLY
+        | playbook_store::OpenFlags::SQLITE_OPEN_URI;
+    let db = playbook_store::Connection::open_with_flags(uri, flags).expect("open db");
     let mut tables = db
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
         .expect("list tables");
