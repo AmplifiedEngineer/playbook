@@ -147,7 +147,7 @@ pub enum AccountCommand {
         /// First instant not to move, like 2026-11-02T12:00
         #[arg(long)]
         to: String,
-        /// The account key or name that receives the events
+        /// Account key or name that receives the events
         #[arg(long = "as", value_name = "KEY_OR_NAME")]
         target: String,
         /// Move only events now labeled with this account key or name
@@ -159,7 +159,7 @@ pub enum AccountCommand {
     },
     /// Reverse the newest applied move, or the one with this number
     Undo {
-        /// The move number printed by `account assign`
+        /// Move number printed by `account assign`
         id: Option<i64>,
     },
 }
