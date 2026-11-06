@@ -520,6 +520,29 @@ mod tests {
         assert_eq!(opus.models[0].key, "opus");
     }
 
+    // 2026-09-02 23:46:40 UTC is already 09-03 on a clock five hours east.
+    #[test]
+    fn an_event_near_midnight_lands_on_the_day_of_the_chosen_zone() {
+        use crate::tz::{self, Zone};
+        let events = vec![event(NOW - 7_200, "opus", "a", 1.0)];
+        let first_day = |zone: Zone| {
+            tz::set(zone);
+            let series = day_series(&events, NOW, Range::All);
+            crate::aggregate::date_key(series[0].day)
+        };
+
+        let utc = first_day(Zone::Utc);
+        let east = first_day(Zone::Fixed(5 * 3600));
+        let back = first_day(Zone::Utc);
+
+        assert_eq!(utc, "2026-09-02");
+        assert_eq!(east, "2026-09-03");
+        assert_eq!(
+            back, "2026-09-02",
+            "switching back regroups the same events"
+        );
+    }
+
     #[test]
     fn the_series_fills_idle_days_up_to_today() {
         let events = vec![
