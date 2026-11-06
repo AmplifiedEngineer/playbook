@@ -879,6 +879,8 @@ impl App {
                     _ => crate::tz::Zone::Utc,
                 };
                 crate::tz::set(to);
+                // The cursor is a day number in the old zone.
+                self.cursor = None;
                 self.note = Some(match to {
                     crate::tz::Zone::Utc => "Showing UTC".to_string(),
                     _ => "Showing local time".to_string(),
@@ -1075,6 +1077,7 @@ mod tests {
         use crate::tz::{self, Zone};
         tz::set(Zone::Utc);
         let mut app = loaded();
+        app.cursor = Some(NOW.div_euclid(86_400));
 
         let first = app.key(press(KeyCode::Char('z')));
         let after_first = tz::current();
@@ -1083,6 +1086,10 @@ mod tests {
 
         assert_eq!((first, second), (Effect::Requery, Effect::Requery));
         assert_eq!(after_first, Zone::Local);
+        assert_eq!(
+            app.cursor, None,
+            "a day number from the old zone is dropped"
+        );
         assert_eq!(note_first.as_deref(), Some("Showing local time"));
         assert_eq!(tz::current(), Zone::Utc);
         assert_eq!(app.note.as_deref(), Some("Showing UTC"));
