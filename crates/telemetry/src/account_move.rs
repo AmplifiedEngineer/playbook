@@ -185,8 +185,8 @@ pub fn assign(
 
 /// Puts the old labels back for move `id`, or the newest move not undone.
 /// A row whose label changed since the move is left as it is. Returns the id
-/// and the rows restored, or `None` when there is no move to undo.
-pub fn undo(conn: &Connection, id: Option<i64>) -> Result<Option<(i64, usize)>, String> {
+/// the rows restored and the rows skipped, or `None` when there is no move to undo.
+pub fn undo(conn: &Connection, id: Option<i64>) -> Result<Option<(i64, usize, usize)>, String> {
     let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
         .map_err(|e| err("begin the undo", e))?;
     let row: Option<(i64, String)> = tx
@@ -215,13 +215,26 @@ pub fn undo(conn: &Connection, id: Option<i64>) -> Result<Option<(i64, usize)>, 
             )
             .map_err(|e| err("restore the labels", e))?;
     }
+    let recorded: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM account_assignment_rows WHERE assignment_id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .map_err(|e| err("count the moved records", e))?;
     tx.execute(
         "UPDATE account_assignments SET undone = 1 WHERE id = ?1",
         [id],
     )
     .map_err(|e| err("mark the move undone", e))?;
     tx.commit().map_err(|e| err("commit the undo", e))?;
-    Ok(Some((id, restored)))
+    Ok(Some((
+        id,
+        restored,
+        usize::try_from(recorded)
+            .unwrap_or(0)
+            .saturating_sub(restored),
+    )))
 }
 
 #[cfg(test)]
@@ -305,8 +318,8 @@ mod tests {
         let before = labels(&conn);
         assign(&conn, Scope::time(0, 1000), "personal", None, 1).unwrap();
         assert!(labels(&conn).iter().all(|l| l == "personal"));
-        let (_, restored) = undo(&conn, None).unwrap().unwrap();
-        assert_eq!(restored, 5);
+        let (_, restored, skipped) = undo(&conn, None).unwrap().unwrap();
+        assert_eq!((restored, skipped), (5, 0));
         assert_eq!(labels(&conn), before);
         assert!(undo(&conn, None).unwrap().is_none());
     }
@@ -320,9 +333,27 @@ mod tests {
             [],
         )
         .unwrap();
-        undo(&conn, None).unwrap();
+        let (_, restored, skipped) = undo(&conn, None).unwrap().unwrap();
+        assert_eq!((restored, skipped), (4, 1));
         assert_eq!(labels(&conn)[0], "later");
         assert_eq!(labels(&conn)[1], "work@x.com");
+    }
+
+    #[test]
+    fn undo_by_id_picks_that_move_and_an_overlapping_later_move_skips_its_rows() {
+        let conn = store();
+        let before = labels(&conn);
+        let (first, _) = assign(&conn, Scope::time(0, 1000), "personal", None, 1)
+            .unwrap()
+            .unwrap();
+        assign(&conn, Scope::time(0, 1000), "team", Some("personal"), 2).unwrap();
+        let (id, restored, skipped) = undo(&conn, Some(first)).unwrap().unwrap();
+        assert_eq!((id, restored, skipped), (first, 0, 5));
+        assert!(labels(&conn).iter().all(|l| l == "team"));
+        assert!(undo(&conn, Some(first)).unwrap().is_none());
+        undo(&conn, None).unwrap().unwrap();
+        assert!(labels(&conn).iter().all(|l| l == "personal"));
+        assert_ne!(labels(&conn), before);
     }
 
     #[test]

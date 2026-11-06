@@ -1,36 +1,30 @@
 # SPDX-License-Identifier: Apache-2.0
 name: CLA & DCO
 
-# Calls the shared checks in dco-cla.yml and the signing job in cla-sign.yml.
-# Other repos copy this file and call
-# `pragmatic-engineer/.github/.github/workflows/<name>.yml@<commit>` instead of
-# the local paths. Pin the commit like any other action and bump it when the
-# shared workflows change. The job id must stay `cla-dco` so the required checks
-# read `cla-dco / dco` and `cla-dco / cla-check` in every repo.
+# Calls the shared checks in cla-dco-checks.yml of pragmatic-engineer/.github,
+# pinned by commit like any other action. Bump the commit and tooling-ref
+# together when the shared workflow changes. A contributor signs the CLA by adding
+# a row to .github/CONTRIBUTORS.md in a commit of their own, so this workflow
+# needs no comment trigger, no write permission and no secret. The job id must
+# stay `cla-dco` so the required checks read `cla-dco / dco` and
+# `cla-dco / cla-check`.
 on:
   pull_request:
     types: [opened, synchronize, reopened]
   merge_group:
-  issue_comment:
-    types: [created]
 
 permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.comment.id || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   cla-dco:
-    if: github.event_name != 'issue_comment'
+    name: cla-dco
     permissions:
-      contents: read # read the commits to check the sign-off
-      pull-requests: read # list the commits and authors of the PR
-    uses: pragmatic-engineer/.github/.github/workflows/dco-cla.yml@2ca0eee10318bdfc1fbc44cc26fad9875c0ed79b # main
-
-  cla-sign:
-    if: github.event_name == 'issue_comment'
-    permissions:
-      contents: write # commit the signature to the cla-signatures branch
-      pull-requests: write # post the thank-you comment on the PR
-    uses: pragmatic-engineer/.github/.github/workflows/cla-sign.yml@2ca0eee10318bdfc1fbc44cc26fad9875c0ed79b # main
+      contents: read # the called jobs fetch the pull request commits
+      pull-requests: read # the called jobs list the commits with their logins
+    uses: pragmatic-engineer/.github/.github/workflows/cla-dco-checks.yml@c05ff4d8c6afd0f6a4506fdbddc35aacb8667160 # v0.1.0
+    with:
+      tooling-ref: c05ff4d8c6afd0f6a4506fdbddc35aacb8667160 # same commit as v0.1.0

@@ -106,13 +106,13 @@ pub enum UsageCommand {
     },
     /// List the accounts in the usage store, name them and move events
     ///
-    /// Every usage event carries an account key, the email Claude Code was
-    /// signed in to. These commands show the keys, give each one a display
-    /// name and relabel events recorded under the wrong account.
+    /// Every usage event carries an account key: the email Claude Code was
+    /// signed in to, or a `token:` fingerprint. These commands show the keys,
+    /// give each one a display name and relabel events recorded under the wrong account.
     ///
     /// Example: `playbook usage account list`
     Account {
-        /// Usage database file to use instead of the default, such as a copy made to rehearse on
+        /// Usage database file to use instead of the default, such as a copy made with `sqlite3 usage.db ".backup copy.db"`
         #[arg(long, global = true, value_name = "FILE")]
         db: Option<std::path::PathBuf>,
         #[command(subcommand)]
@@ -127,7 +127,7 @@ pub enum AccountCommand {
     List,
     /// Give an account key a display name, or clear it with an empty name
     ///
-    /// Example: `playbook usage account name igor@getdigital.com.br Company`
+    /// Example: `playbook usage account name you@example.com Company`
     Name {
         /// Account key shown by `account list`
         key: String,
@@ -178,7 +178,7 @@ pub enum AccountCommand {
     /// Move events to another account, by time range or by session
     ///
     /// Prints how many events and how much cost would move and changes
-    /// nothing until you add `--confirm`. Times are read on your local clock;
+    /// no events until you add `--confirm`. Times are read on your local clock;
     /// add `--utc` for UTC. By time, give `--from` and `--to` (the end is not
     /// included) and each event moves by its own time. By session, give
     /// `--before-session` or `--through-session` with `--from` or

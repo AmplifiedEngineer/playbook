@@ -13,7 +13,11 @@ use rusqlite::Connection;
 const WEEK: i64 = 7 * 86_400;
 
 pub fn run(paths: &Paths, command: &AccountCommand) -> Result<String, String> {
-    let conn = crate::db::open_db(&paths.db)?;
+    run_on(crate::db::open_db(&paths.db)?, command)
+}
+
+/// Runs `command` on an open database.
+pub fn run_on(conn: Connection, command: &AccountCommand) -> Result<String, String> {
     let zone = crate::tz::current();
     let now = crate::util::time::now_secs();
     let time = |text: &str| mv::parse_time(text, zone);
@@ -21,10 +25,15 @@ pub fn run(paths: &Paths, command: &AccountCommand) -> Result<String, String> {
         AccountCommand::List => store::list_text(&conn),
         AccountCommand::Name { key, name } => {
             store::set_name(&conn, key, name)?;
+            let note = if store::has_events(&conn, key)? {
+                ""
+            } else {
+                " (no events carry this key yet, check the spelling)"
+            };
             Ok(if name.trim().is_empty() {
                 format!("cleared the name of {key}")
             } else {
-                format!("{key} is shown as {}", name.trim())
+                format!("{key} is shown as {}{note}", name.trim())
             })
         }
         AccountCommand::Sessions { from, to } => {
@@ -42,7 +51,18 @@ pub fn run(paths: &Paths, command: &AccountCommand) -> Result<String, String> {
                 .iter()
                 .map(|d| sess::parse_dashboard(d))
                 .collect::<Result<Vec<_>, _>>()?;
-            sess::reconcile(&conn, time(from)?, time(to)?, &days, *top)
+            let mut seen = std::collections::BTreeSet::new();
+            if let Some((day, _)) = days.iter().find(|(day, _)| !seen.insert(*day)) {
+                return Err(format!(
+                    "{} is listed twice in --dashboard",
+                    crate::aggregate::date_key(*day)
+                ));
+            }
+            let (from, to) = (time(from)?, time(to)?);
+            if from >= to {
+                return Err("--from must be earlier than --to".to_string());
+            }
+            sess::reconcile(&conn, from, to, &days, *top)
         }
         AccountCommand::Assign {
             from,
@@ -94,8 +114,14 @@ pub fn run(paths: &Paths, command: &AccountCommand) -> Result<String, String> {
             )
         }
         AccountCommand::Undo { id } => Ok(match mv::undo(&conn, *id)? {
-            Some((id, n)) => format!("undid move {id}: restored {n} records."),
-            None => "no applied move to undo.".to_string(),
+            Some((id, n, 0)) => format!("undid move {id}: restored {n} records."),
+            Some((id, n, skipped)) => format!(
+                "undid move {id}: restored {n} records and left {skipped} that were relabeled since."
+            ),
+            None => match id {
+                Some(id) => format!("move {id} does not exist or is already undone."),
+                None => "no applied move to undo.".to_string(),
+            },
         }),
     }
 }

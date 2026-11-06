@@ -20,11 +20,63 @@ pub(crate) fn err(what: &str, e: rusqlite::Error) -> String {
     format!("failed to {what}: {e}")
 }
 
+/// The longest display name accepted.
+const MAX_NAME: usize = 40;
+
+/// Invisible formatting characters (zero width marks, bidi overrides).
+fn is_format_char(c: char) -> bool {
+    matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+}
+
+/// A key is a single word of at most `MAX_KEY` characters.
+fn check_key(key: &str) -> Result<(), String> {
+    if key.is_empty()
+        || key != key.trim()
+        || key
+            .chars()
+            .any(|c| c.is_control() || c.is_whitespace() || is_format_char(c))
+    {
+        return Err("an account is a single word without spaces".to_string());
+    }
+    if key.len() > MAX_KEY {
+        return Err(format!("an account key is at most {MAX_KEY} characters"));
+    }
+    Ok(())
+}
+
+/// True when `text` is already the key of an event or of a named account.
+fn key_in_use(conn: &Connection, text: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM usage_events WHERE account = ?1)
+             OR EXISTS(SELECT 1 FROM account_names WHERE key = ?1)",
+        [text],
+        |r| r.get(0),
+    )
+    .map_err(|e| err("check the account keys", e))
+}
+
+/// True when some event carries `key`.
+pub fn has_events(conn: &Connection, key: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM usage_events WHERE account = ?1)",
+        [key],
+        |r| r.get(0),
+    )
+    .map_err(|e| err("check the account keys", e))
+}
+
 /// Sets the display name of `key`. An empty name removes it.
 pub fn set_name(conn: &Connection, key: &str, name: &str) -> Result<(), String> {
+    check_key(key)?;
     let name = name.trim();
-    if name.chars().any(char::is_control) {
-        return Err("a name cannot hold control characters".to_string());
+    if name.chars().any(|c| c.is_control() || is_format_char(c)) {
+        return Err("a name cannot hold control or invisible characters".to_string());
+    }
+    if name.chars().count() > MAX_NAME {
+        return Err(format!("a name is at most {MAX_NAME} characters"));
+    }
+    if !name.is_empty() && key_in_use(conn, name)? && name != key {
+        return Err(format!("{name} is already an account key"));
     }
     if let Some((other, _)) = names(conn)?
         .into_iter()
@@ -204,6 +256,19 @@ pub(crate) mod tests {
         let err = set_name(&conn, "other@x.com", "company").unwrap_err();
         assert!(err.contains("work@x.com already uses"), "{err}");
         set_name(&conn, "work@x.com", "COMPANY").unwrap();
+    }
+
+    #[test]
+    fn a_bad_key_or_a_name_that_is_another_key_is_refused() {
+        let conn = store();
+        assert!(set_name(&conn, "two words", "X").is_err());
+        assert!(set_name(&conn, "", "X").is_err());
+        assert!(set_name(&conn, "work@x.com", "other@x.com").is_err());
+        assert!(set_name(&conn, "work@x.com", "a\u{202E}b").is_err());
+        assert!(set_name(&conn, "work@x.com", &"n".repeat(41)).is_err());
+        assert!(names(&conn).unwrap().is_empty());
+        assert!(has_events(&conn, "work@x.com").unwrap());
+        assert!(!has_events(&conn, "work@x.cm").unwrap());
     }
 
     #[test]

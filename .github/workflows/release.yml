@@ -164,6 +164,8 @@ jobs:
   # A pull request that is already open or merged is reused.
   prepare:
     name: prepare
+    # Holds the GitHub App credentials. Protection rules for them live on this environment.
+    environment: cicd
     needs: plan
     if: needs.plan.outputs.state == 'prepare'
     runs-on: ubuntu-latest
@@ -270,6 +272,8 @@ jobs:
   # refuses, the run stops with the command a maintainer runs instead.
   tag:
     name: tag
+    # Holds the GitHub App credentials. Protection rules for them live on this environment.
+    environment: cicd
     needs: [plan, prepare, macos]
     if: ${{ !cancelled() && !failure() && (needs.plan.outputs.state == 'prepare' || needs.plan.outputs.state == 'tag') }}
     runs-on: ubuntu-latest
@@ -1470,6 +1474,8 @@ jobs:
   # hand. A dry run prints the changes and opens nothing.
   downstream:
     name: downstream
+    # Holds the GitHub App credentials. Protection rules for them live on this environment.
+    environment: cicd
     needs: [plan, formulas]
     if: >-
       ${{ !cancelled()
@@ -1815,6 +1821,8 @@ jobs:
   # SHA256SUMS, prints the diff and opens nothing.
   nix:
     name: nix
+    # Holds the GitHub App credentials. Protection rules for them live on this environment.
+    environment: cicd
     needs: [plan, verify]
     if: >-
       ${{ !cancelled()
@@ -2086,6 +2094,8 @@ jobs:
   # passes. A dry run renders from a stand-in SHA256SUMS and opens nothing.
   scoop:
     name: scoop
+    # Holds the GitHub App credentials. Protection rules for them live on this environment.
+    environment: cicd
     needs: [plan, verify]
     if: >-
       ${{ !cancelled()

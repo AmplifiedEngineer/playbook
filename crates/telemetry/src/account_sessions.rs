@@ -53,17 +53,38 @@ pub fn sessions(conn: &Connection, from: i64, to: i64) -> Result<Vec<SessionRow>
         .map_err(|e| err("list the sessions", e))
 }
 
-/// The time of the first event of session `id`.
+/// The time of the first event of session `id`. A boundary is a second, so a
+/// session that shares its first second with another session is refused: the
+/// list order between the two would not decide which side of the boundary
+/// each falls on.
 pub fn session_start(conn: &Connection, id: &str) -> Result<i64, String> {
-    conn.query_row(
-        "SELECT MIN(timestamp) FROM usage_events WHERE session_id = ?1",
-        [id],
-        |r| r.get::<_, Option<i64>>(0),
-    )
-    .optional()
-    .map_err(|e| err("find the session", e))?
-    .flatten()
-    .ok_or_else(|| format!("no session {id} in the usage store; list them with `account sessions`"))
+    let start = conn
+        .query_row(
+            "SELECT MIN(timestamp) FROM usage_events WHERE session_id = ?1",
+            [id],
+            |r| r.get::<_, Option<i64>>(0),
+        )
+        .optional()
+        .map_err(|e| err("find the session", e))?
+        .flatten()
+        .ok_or_else(|| {
+            format!("no session {id} in the usage store; list them with `account sessions`")
+        })?;
+    let other: Option<String> = conn
+        .query_row(
+            "SELECT session_id FROM usage_events WHERE session_id <> ?1
+             GROUP BY session_id HAVING MIN(timestamp) = ?2 LIMIT 1",
+            rusqlite::params![id, start],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| err("find the session", e))?;
+    match other {
+        Some(other) => Err(format!(
+            "session {id} starts in the same second as session {other}; give --from and --to times instead"
+        )),
+        None => Ok(start),
+    }
 }
 
 /// The text of `playbook usage account sessions`.
@@ -103,23 +124,19 @@ pub fn parse_dashboard(text: &str) -> Result<(i64, f64), String> {
     Ok((crate::tz::day_of(start), amount))
 }
 
-/// A session starting from the window start: its first time and cost per day.
+/// A session: its first time and cost per day.
 struct Costed {
     id: String,
     first: i64,
     days: BTreeMap<i64, f64>,
 }
 
-fn costed(conn: &Connection, from: i64) -> Result<Vec<Costed>, String> {
+fn costed(conn: &Connection) -> Result<Vec<Costed>, String> {
     let mut stmt = conn
-        .prepare(
-            "SELECT session_id, timestamp, cost_usd FROM usage_events
-             WHERE session_id IN (SELECT session_id FROM usage_events GROUP BY session_id
-                                  HAVING MIN(timestamp) >= ?1)",
-        )
+        .prepare("SELECT session_id, timestamp, cost_usd FROM usage_events")
         .map_err(|e| err("read the costs", e))?;
     let rows = stmt
-        .query_map([from], |r| {
+        .query_map([], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, i64>(1)?,
@@ -142,7 +159,7 @@ fn costed(conn: &Connection, from: i64) -> Result<Vec<Costed>, String> {
 }
 
 /// Takes each session that starts in `[from, to)` as the boundary. For each,
-/// it sums the cost of the listed days over the sessions that start before it
+/// it sums the cost of the listed days over all sessions that start before it
 /// and over those that start at or after it, and sets the later side against
 /// the dashboard amounts of the account that owns the later sessions. The
 /// best `top` boundaries by total difference print, or all when `top` is 0.
@@ -153,11 +170,14 @@ pub fn reconcile(
     dashboard: &[(i64, f64)],
     top: usize,
 ) -> Result<String, String> {
-    let all = costed(conn, from)?;
+    let all = costed(conn)?;
     let mut scored = Vec::new();
     for boundary in all
         .iter()
-        .filter(|s| s.first < to && s.days.values().sum::<f64>() > 0.0)
+        .filter(|s| s.first >= from && s.first < to && s.days.values().sum::<f64>() > 0.0)
+        // A boundary is a second, so a start shared with another session
+        // cannot be applied by `assign`.
+        .filter(|b| all.iter().all(|s| s.id == b.id || s.first != b.first))
     {
         let mut sides = [vec![0.0; dashboard.len()], vec![0.0; dashboard.len()]];
         for s in &all {
@@ -250,6 +270,21 @@ mod tests {
     }
 
     #[test]
+    fn a_boundary_session_that_shares_its_start_second_is_refused() {
+        let conn = store();
+        conn.execute(
+            "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
+                repo, branch, input_tokens, output_tokens, cache_creation_tokens,
+                cache_read_tokens, cost_usd) VALUES ('9', ?1, 'd', 'w', 'm', '', 'r', 'b', 1, 1, 0, 0, 1.0)",
+            [2 * DAY + 300],
+        )
+        .unwrap();
+        let err = session_start(&conn, "c").unwrap_err();
+        assert!(err.contains("same second as session d"), "{err}");
+        assert!(session_start(&conn, "b").is_ok());
+    }
+
+    #[test]
     fn a_session_move_takes_whole_sessions_that_start_in_the_window() {
         let conn = store();
         // Sessions starting before b: only a, including its event after b's start.
@@ -284,8 +319,55 @@ mod tests {
 
     #[test]
     fn a_dashboard_value_must_be_a_date_and_a_non_negative_amount() {
-        for bad in ["1970-01-03", "x=1", "1970-01-03=-1", "1970-01-03=abc"] {
+        for bad in [
+            "1970-01-03",
+            "x=1",
+            "1970-01-03=-1",
+            "1970-01-03=abc",
+            "1970-01-03=NaN",
+            "1970-01-03=inf",
+            "1970-13-40=1",
+        ] {
             assert!(parse_dashboard(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn sessions_before_the_window_count_on_the_before_side() {
+        let conn = store();
+        // The window starts at c, so a and b start before it.
+        let day2 = parse_dashboard("1970-01-03=8.00").unwrap();
+        let text = reconcile(&conn, 2 * DAY + 300, 3 * DAY, &[day2], 0).unwrap();
+        assert!(
+            text.contains("before $6.00  from here $8.00  dashboard $8.00"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_boundary_that_shares_its_second_with_another_session_is_not_offered() {
+        let conn = store();
+        conn.execute(
+            "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
+                repo, branch, input_tokens, output_tokens, cache_creation_tokens,
+                cache_read_tokens, cost_usd) VALUES ('9', ?1, 'd', 'w', 'm', '', 'r', 'b', 1, 1, 0, 0, 1.0)",
+            [2 * DAY + 300],
+        )
+        .unwrap();
+        let day2 = parse_dashboard("1970-01-03=12.00").unwrap();
+        let text = reconcile(&conn, 0, 3 * DAY, &[day2], 0).unwrap();
+        assert!(text.contains("boundary b ("), "{text}");
+        assert!(!text.contains("boundary c"), "{text}");
+        assert!(!text.contains("boundary d"), "{text}");
+    }
+
+    #[test]
+    fn an_empty_store_has_no_boundary() {
+        let conn = open_db(&scratch_dir("account-sessions-empty").join("u.db")).unwrap();
+        let day = parse_dashboard("1970-01-03=1").unwrap();
+        assert_eq!(
+            reconcile(&conn, 0, DAY, &[day], 0).unwrap(),
+            "No sessions start in that window."
+        );
     }
 }
