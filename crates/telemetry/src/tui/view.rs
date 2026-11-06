@@ -321,6 +321,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     if let Some(scroll) = app.help {
         render_help(frame, area, scroll, &pal);
     }
+    if let Some(popup) = &app.budget_popup {
+        super::budget_popup::render(frame, area, popup, &pal);
+    }
     if let Some(editor) = &app.editor {
         super::editor_view::render(frame, area, editor, &pal, app.icon);
     }

@@ -10,6 +10,7 @@ mod a11y;
 pub mod app;
 pub mod arrange;
 pub mod budget;
+pub mod budget_popup;
 pub mod burnup;
 pub mod chart;
 pub mod data;
@@ -195,6 +196,10 @@ fn event_loop(
                     Effect::Requery => worker.ask(app.range, &app.filter),
                     Effect::Sessions => sessions.open(),
                     Effect::SaveLayout(text) => autosave.push(text),
+                    Effect::SaveBudget(usd) => {
+                        app.note = Some(save_budget(&home, usd));
+                        worker.ask(app.range, &app.filter);
+                    }
                     Effect::ResetPrefs => {
                         let cleared = ui_state::reset(&home).map(|_| ());
                         let reset = Reset {
@@ -245,6 +250,20 @@ fn event_loop(
         crate::say::notice(&why);
     }
     Ok(())
+}
+
+/// Stores the manual monthly budget and says what happened.
+fn save_budget(home: &std::path::Path, usd: f64) -> String {
+    let value = serde_json::Value::from(usd);
+    match crate::config::save_app(home, budget_popup::KEY, &value) {
+        Ok(true) if usd > 0.0 => format!("Manual monthly budget set to {}", fmt::money(usd)),
+        Ok(true) => "Manual monthly budget cleared".to_string(),
+        Ok(false) => {
+            "No config store yet: run playbook config set --global usage.budget.monthlyUsd <usd>"
+                .to_string()
+        }
+        Err(why) => format!("Budget not saved: {why}"),
+    }
 }
 
 type Loaded = Result<(Vec<crate::session_view::Record>, i64), String>;
@@ -336,6 +355,24 @@ mod tests {
             range: range.map(str::to_string),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn the_budget_is_stored_in_the_app_tier_and_a_zero_clears_it() {
+        let home = crate::util::scratch_dir("tui-save-budget");
+        let data = crate::config::root(&home).join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let conn = rusqlite::Connection::open(playbook_data::config::db_in(&data)).unwrap();
+        conn.execute_batch(playbook_data::config::SCHEMA_SQL)
+            .unwrap();
+
+        let said = save_budget(&home, 1000.0);
+        let stored = crate::config::resolve(&home, budget_popup::KEY);
+        let cleared = save_budget(&home, 0.0);
+
+        assert_eq!(said, "Manual monthly budget set to $1,000.00");
+        assert_eq!(stored, Some(serde_json::Value::from(1000.0)));
+        assert_eq!(cleared, "Manual monthly budget cleared");
     }
 
     #[test]
