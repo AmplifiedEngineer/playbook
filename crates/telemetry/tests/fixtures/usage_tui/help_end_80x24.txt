@@ -1,24 +1,24 @@
 ╭─┤Agent Budget Dashboard├──┤UTC├──────────────────────────────────────────────╮
 │╭┤ Help: keys by group ├─────────────────────────────────────────────────────╮│
-││e          Edit the tabs and the panels on each     all panels              ││
-││?          Show this help                           all panels              ││
-││                                                                            ││
-╰│Sorting                                                                     │╯
-╭│s          Sort by the next column                  tables                  │╮
+││Sorting                                                                     ││
+││s          Sort by the next column                  tables                  ││
 ││S          Reverse the sort order                   tables                  ││
-││                                                                            ││
-││Filtering                                                                   ││
+╰│                                                                            │╯
+╭│Filtering                                                                   │╮
 ││u, U       Next account; U shows all, or the newest all panels              ││
 ││/          Type a filter on any field               all panels              ││
-╰│Enter      Filter to selected row; again to undo    tables 3-6              │╯
-╭│c          Clear the filter                         all panels              │╮
+││Enter      Filter to selected row; again to undo    tables 3-6              ││
+││c          Clear the filter                         all panels              ││
 ││                                                                            ││
-││Refresh                                                                     ││
-╰│R, B       Read usage and budget limits now         all panels              │╯
-╭│b          Set the manual monthly budget            all panels              │╮
+╰│Refresh                                                                     │╯
+╭│R, B       Read usage and budget limits now         all panels              │╮
+││b          Set the manual monthly budget            all panels              ││
 ││                                                                            ││
-││Quit                                                                        ││
-││q, Esc     Quit                                     all panels              ││
+╰│Quit                                                                        │╯
+╭│q, Esc     Quit                                     all panels              │╮
 ││Ctrl-C     Quit, also while typing a filter         all panels              ││
+││                                                                            ││
+││Marks                                                                       ││
+││~          Tools: count only, from transcripts                              ││
 ╰╰┤ ↑/↓ j/k scroll, any other key closes ├────────────────────────────────────╯╯
  w week m month r range v view / filter ? help q quit      updated 01:46:40 UTC

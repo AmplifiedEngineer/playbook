@@ -532,7 +532,8 @@ const GROUPS: [Group; 7] = [
     Group::Quit,
 ];
 
-/// The help window's lines, grouped, built from `BINDINGS`.
+/// The help window's lines, grouped, built from `BINDINGS`, then the marks
+/// the tables use (no key triggers a mark).
 pub fn help_lines() -> Vec<HelpLine> {
     let mut out = Vec::new();
     for group in GROUPS {
@@ -548,6 +549,13 @@ pub fn help_lines() -> Vec<HelpLine> {
             });
         }
     }
+    out.push(HelpLine::Blank);
+    out.push(HelpLine::Heading("Marks"));
+    out.push(HelpLine::Key {
+        shown: "~",
+        text: "Tools: count only, from transcripts",
+        panels: "",
+    });
     out
 }
 
