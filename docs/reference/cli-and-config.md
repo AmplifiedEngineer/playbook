@@ -1619,7 +1619,38 @@ Example: `playbook usage --range today`
 - `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 - `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
-Subcommands: `collect`, `doctor`, `prune`, `status`, `stop`
+Subcommands: `account`, `collect`, `doctor`, `prune`, `status`, `stop`
+
+### `playbook usage account`
+
+List the accounts in the usage store and name them
+
+Every usage event carries an account key, the email Claude Code was signed in to. These commands show the keys and give each one a display name.
+
+Example: `playbook usage account list`
+
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+
+Subcommands: `list`, `name`
+
+### `playbook usage account list`
+
+List the accounts with their events, cost and time span
+
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+
+### `playbook usage account name`
+
+Give an account key a display name, or clear it with an empty name
+
+Example: `playbook usage account name igor@getdigital.com.br Company`
+
+- `<KEY>`: Account key shown by `account list`
+- `<NAME>`: Display name to show; empty clears it
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
 ### `playbook usage collect`
 
