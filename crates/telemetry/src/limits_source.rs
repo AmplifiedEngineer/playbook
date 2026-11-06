@@ -539,6 +539,26 @@ pub fn monthly(s: &Sources, now: i64) -> Monthly {
     }
 }
 
+/// The manual monthly budget and the detected monthly limit in dollars, when
+/// both are set and differ, whichever is higher. The detected one applies.
+/// `None` otherwise, including when the detected limit has no dollar amount.
+pub fn manual_beside_detected(s: &Sources, now: i64) -> Option<(f64, f64)> {
+    let (_, manual) = s.budgets.iter().find(|(p, _)| *p == LimitPeriod::Monthly)?;
+    let detected = match monthly(s, now) {
+        Monthly::Cached { limit_usd, .. } => limit_usd,
+        Monthly::Measured => {
+            s.snapshot
+                .as_ref()?
+                .limits(now)
+                .into_iter()
+                .find(|l| l.period == LimitPeriod::Monthly && l.unit == Unit::Dollars)?
+                .limit
+        }
+        _ => return None,
+    };
+    ((detected - manual).abs() > 0.005).then_some((*manual, detected))
+}
+
 /// Every known limit at `now`: measured first, then cached, then manual.
 /// Empty when nothing is known, which the views show as the "limit unknown"
 /// empty state.
@@ -1572,6 +1592,54 @@ mod tests {
 
         assert_eq!(none, Monthly::Unset);
         assert_eq!(manual, Monthly::Manual(100.0));
+    }
+
+    #[test]
+    fn a_manual_budget_beside_a_detected_one_is_reported_with_both_amounts() {
+        let mut s = Sources {
+            account: cache(7200, spend(2000.0, Some(1.0)), None),
+            budgets: vec![(LimitPeriod::Monthly, 1000.0)],
+            ..Sources::default()
+        };
+
+        let both = manual_beside_detected(&s, NOW);
+        s.budgets.clear();
+        let none = manual_beside_detected(&s, NOW);
+
+        assert_eq!(both, Some((1000.0, 2000.0)));
+        assert_eq!(none, None);
+    }
+
+    #[test]
+    fn a_manual_budget_beside_a_gateway_limit_is_reported_with_both_amounts() {
+        let s = Sources {
+            snapshot: Some(gateway_snapshot()),
+            budgets: vec![(LimitPeriod::Monthly, 50.0)],
+            ..Sources::default()
+        };
+
+        assert_eq!(manual_beside_detected(&s, NOW), Some((50.0, 100.0)));
+    }
+
+    #[test]
+    fn a_manual_budget_equal_to_the_detected_one_is_not_reported() {
+        let s = Sources {
+            snapshot: Some(gateway_snapshot()),
+            budgets: vec![(LimitPeriod::Monthly, 100.0)],
+            ..Sources::default()
+        };
+
+        assert_eq!(manual_beside_detected(&s, NOW), None);
+    }
+
+    #[test]
+    fn a_manual_budget_with_nothing_detected_is_not_reported_as_overridden() {
+        let s = Sources {
+            budgets: vec![(LimitPeriod::Monthly, 1000.0)],
+            ..Sources::default()
+        };
+
+        assert_eq!(manual_beside_detected(&s, NOW), None);
     }
 
     #[test]
