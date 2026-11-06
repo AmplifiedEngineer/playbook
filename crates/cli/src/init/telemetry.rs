@@ -489,6 +489,181 @@ pub fn remove(
     Ok(out)
 }
 
+/// The one-sentence purpose of each key playbook owns, for the change summary.
+const PURPOSES: &[(&str, &str)] = &[
+    (
+        "CLAUDE_CODE_ENABLE_TELEMETRY",
+        "lets Claude Code export OpenTelemetry data",
+    ),
+    (
+        "OTEL_LOGS_EXPORTER",
+        "sends Claude Code's event log over OTLP",
+    ),
+    (
+        "OTEL_METRICS_EXPORTER",
+        "sends Claude Code's counters over OTLP",
+    ),
+    (
+        "OTEL_TRACES_EXPORTER",
+        "keeps traces off, playbook does not use them",
+    ),
+    (
+        "OTEL_EXPORTER_OTLP_PROTOCOL",
+        "sends JSON over HTTP, which the collector reads",
+    ),
+    (
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "points the export at the collector on this machine",
+    ),
+    (
+        "OTEL_EXPORTER_OTLP_HEADERS",
+        "logs in to the local collector with its token",
+    ),
+    (
+        "OTEL_METRICS_INCLUDE_ACCOUNT_UUID",
+        "keeps your account id out of the counters",
+    ),
+];
+
+/// Why OTEL_LOG_TOOL_DETAILS is not among the keys.
+const TOOL_DETAILS_LINE: &str = "OTEL_LOG_TOOL_DETAILS stays off: it would send Bash commands, file paths and tool inputs to the collector";
+
+/// The owned keys of an env block, in the order playbook writes them.
+fn owned_env(env: &Map<String, Value>) -> Vec<(String, String)> {
+    PURPOSES
+        .iter()
+        .filter_map(|(k, _)| {
+            let v = env.get(*k)?;
+            let text = match v {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            Some(((*k).to_string(), text))
+        })
+        .collect()
+}
+
+fn env_block(settings_path: &Path) -> Result<Map<String, Value>, String> {
+    let root = load(settings_path).map_err(|e| {
+        format!("{e}; nothing was changed. Fix the file, then run: playbook setup --only telemetry")
+    })?;
+    Ok(root
+        .get("env")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default())
+}
+
+/// A value for display. The token never prints.
+fn shown(key: &str, value: &str) -> String {
+    if key == "OTEL_EXPORTER_OTLP_HEADERS" {
+        "Authorization=Bearer <token>".to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+/// Makes Claude Code's settings follow the `usage.telemetry` setting and
+/// returns the lines that say what changed, where and why. `on` is whether the
+/// setting is now `auto`. Only the keys playbook owns are written or removed.
+pub fn sync_setting(
+    home: &Path,
+    claude_home: &Path,
+    cwd: &Path,
+    epoch: u64,
+    on: bool,
+) -> Result<Vec<String>, String> {
+    sync_with(
+        home,
+        claude_home,
+        cwd,
+        epoch,
+        on,
+        process_configured_beyond_settings(claude_home),
+    )
+}
+
+fn sync_with(
+    home: &Path,
+    claude_home: &Path,
+    cwd: &Path,
+    epoch: u64,
+    on: bool,
+    process_configured: bool,
+) -> Result<Vec<String>, String> {
+    let path = claude_home.join("settings.json");
+    let before = owned_env(&env_block(&path)?);
+    if on {
+        let step = apply(home, claude_home, cwd, epoch, process_configured, true);
+        match step.status {
+            crate::init::run::StepStatus::Failed => return Err(step.detail),
+            crate::init::run::StepStatus::Skipped => {
+                return Ok(vec![format!("telemetry: not written: {}", step.detail)]);
+            }
+            _ => {}
+        }
+    } else {
+        remove(home, &path, epoch, false)?;
+    }
+    let after = owned_env(&env_block(&path)?);
+    let find = |set: &[(String, String)], k: &str| {
+        set.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone())
+    };
+    let mut diff = Vec::new();
+    for (key, purpose) in PURPOSES {
+        match (find(&before, key), find(&after, key)) {
+            (None, Some(new)) => {
+                diff.push(format!("  + {key}={}  ({purpose})", shown(key, &new)));
+            }
+            (Some(old), Some(new)) if old != new => diff.push(format!(
+                "  ~ {key}: {} -> {}  ({purpose})",
+                shown(key, &old),
+                shown(key, &new)
+            )),
+            (Some(old), None) => {
+                diff.push(format!("  - {key}={}  ({purpose})", shown(key, &old)));
+            }
+            _ => {}
+        }
+    }
+    let mut lines = Vec::new();
+    let backup = path.with_file_name(format!("settings.json.bak.{epoch}"));
+    if diff.is_empty() {
+        lines.push(format!(
+            "telemetry: no change, {} already {}",
+            path.display(),
+            if on {
+                "holds every key playbook owns"
+            } else {
+                "has none of the keys playbook owns"
+            }
+        ));
+    } else {
+        lines.push(format!(
+            "telemetry: {} {}",
+            if on { "changed" } else { "removed keys from" },
+            path.display()
+        ));
+        lines.extend(diff);
+        if backup.is_file() {
+            lines.push(format!("  the old file is saved as {}", backup.display()));
+        }
+        if !on {
+            lines.push("  every other key was kept".to_string());
+        }
+    }
+    if on {
+        lines.push(format!("telemetry: {TOOL_DETAILS_LINE}"));
+        lines.push("telemetry: to undo, run: playbook config set usage.telemetry off".to_string());
+    } else {
+        lines.push(
+            "telemetry: to turn it on again, run: playbook config set usage.telemetry auto"
+                .to_string(),
+        );
+    }
+    Ok(lines)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -937,5 +1112,109 @@ mod tests {
         remove(&home, &settings, 3, false).unwrap();
 
         assert!(!env_of(&claude).contains_key("CLAUDE_CODE_ENABLE_TELEMETRY"));
+    }
+
+    fn text(lines: &[String]) -> String {
+        lines.join("\n")
+    }
+
+    #[test]
+    fn turning_it_on_in_a_fresh_home_adds_every_key_and_explains_each() {
+        let (home, claude, cwd) = setup("init-tel-sync-fresh", "{}");
+        fs::remove_file(claude.join("settings.json")).unwrap();
+
+        let out = text(&sync_with(&home, &claude, &cwd, 100, true, false).unwrap());
+
+        let path = claude.join("settings.json").display().to_string();
+        assert!(out.contains(&path), "{out}");
+        assert!(
+            out.contains("+ CLAUDE_CODE_ENABLE_TELEMETRY=1  (lets Claude Code export"),
+            "{out}"
+        );
+        assert!(
+            out.contains("+ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <token>"),
+            "{out}"
+        );
+        assert!(out.contains("OTEL_LOG_TOOL_DETAILS stays off"), "{out}");
+        assert!(
+            out.contains("playbook config set usage.telemetry off"),
+            "{out}"
+        );
+        assert_eq!(env_of(&claude)["OTEL_METRICS_EXPORTER"], "otlp");
+    }
+
+    #[test]
+    fn turning_it_on_keeps_the_other_env_keys_and_never_prints_the_token() {
+        let (home, claude, cwd) = setup(
+            "init-tel-sync-others",
+            r#"{"model":"opus","env":{"FOO":"1","DISABLE_TELEMETRY":"1"}}"#,
+        );
+
+        let out = text(&sync_with(&home, &claude, &cwd, 100, true, false).unwrap());
+
+        let env = env_of(&claude);
+        assert_eq!(env["FOO"], "1");
+        assert_eq!(env["DISABLE_TELEMETRY"], "1");
+        assert!(!out.contains("FOO"), "{out}");
+        assert!(out.contains("settings.json.bak.100"), "{out}");
+        let header = env["OTEL_EXPORTER_OTLP_HEADERS"].as_str().unwrap();
+        let token = header.replace("Authorization=Bearer ", "");
+        assert!(!out.contains(&token), "the token must not print: {out}");
+    }
+
+    #[test]
+    fn keys_already_in_place_report_no_change() {
+        let (home, claude, cwd) = setup("init-tel-sync-same", "{}");
+        sync_with(&home, &claude, &cwd, 100, true, false).unwrap();
+
+        let out = text(&sync_with(&home, &claude, &cwd, 101, true, false).unwrap());
+
+        assert!(out.contains("no change"), "{out}");
+        assert!(!out.contains("  + "), "{out}");
+        assert!(!claude.join("settings.json.bak.101").exists());
+    }
+
+    #[test]
+    fn turning_it_off_removes_only_the_keys_playbook_owns() {
+        let (home, claude, cwd) = setup("init-tel-sync-off", r#"{"env":{"FOO":"1"}}"#);
+        sync_with(&home, &claude, &cwd, 100, true, false).unwrap();
+
+        let out = text(&sync_with(&home, &claude, &cwd, 101, false, false).unwrap());
+
+        let env = env_of(&claude);
+        assert_eq!(env.len(), 1, "{env:?}");
+        assert_eq!(env["FOO"], "1");
+        assert!(out.contains("removed keys from"), "{out}");
+        assert!(out.contains("  - OTEL_LOGS_EXPORTER=otlp"), "{out}");
+        assert!(out.contains("every other key was kept"), "{out}");
+        assert!(
+            out.contains("playbook config set usage.telemetry auto"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn turning_it_off_with_nothing_written_says_so() {
+        let (home, claude, cwd) = setup("init-tel-sync-off-none", r#"{"env":{"FOO":"1"}}"#);
+
+        let out = text(&sync_with(&home, &claude, &cwd, 100, false, false).unwrap());
+
+        assert!(out.contains("no change"), "{out}");
+        assert_eq!(env_of(&claude)["FOO"], "1");
+    }
+
+    #[test]
+    fn a_settings_file_that_is_not_json_stops_and_is_left_alone() {
+        let (home, claude, cwd) = setup("init-tel-sync-bad", "{ not json");
+
+        for on in [true, false] {
+            let err = sync_with(&home, &claude, &cwd, 100, on, false).unwrap_err();
+            assert!(err.contains("nothing was changed"), "{err}");
+            assert!(err.contains("settings.json"), "{err}");
+        }
+        assert_eq!(
+            fs::read_to_string(claude.join("settings.json")).unwrap(),
+            "{ not json"
+        );
     }
 }

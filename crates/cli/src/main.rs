@@ -1543,7 +1543,26 @@ fn real_main() {
                     };
                     let shown = value_json.to_string();
                     match config::write::set(tier, &key, &value_json, &home, repo_slug) {
-                        Ok(()) => println!("config set: {key} updated to {shown}"),
+                        Ok(()) => {
+                            println!("config set: {key} updated to {shown}");
+                            if key == "usage.telemetry" {
+                                let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
+                                let epoch = common::time::now_epoch_secs();
+                                match init::telemetry::sync_setting(
+                                    &home,
+                                    &home.join(".claude"),
+                                    &cwd,
+                                    epoch,
+                                    shown == "\"auto\"",
+                                ) {
+                                    Ok(lines) => lines.iter().for_each(|l| println!("{l}")),
+                                    Err(err) => {
+                                        eprintln!("config set: telemetry: {err}");
+                                        std::process::exit(1);
+                                    }
+                                }
+                            }
+                        }
                         Err(err) => {
                             eprintln!("config set: {err}");
                             std::process::exit(1);
