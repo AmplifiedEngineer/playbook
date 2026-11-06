@@ -531,14 +531,14 @@ fn a_release_is_created_only_when_missing() {
 #[test]
 fn waiting_reports_the_merge_commit_or_why_it_stopped() {
     // Arrange
-    let merged = FakeGh::new(&[("pr view 34 *", 0, &format!("MERGED {A}"))]);
-    let closed = FakeGh::new(&[("pr view 34 *", 0, "CLOSED ")]);
-    let open = FakeGh::new(&[("pr view 34 *", 0, "OPEN ")]);
+    let merged = FakeGh::new(&[("pr view 34 *", 0, &format!("MERGED CLEAN {A}"))]);
+    let closed = FakeGh::new(&[("pr view 34 *", 0, "CLOSED CLEAN ")]);
+    let open = FakeGh::new(&[("pr view 34 *", 0, "OPEN CLEAN ")]);
     // A failed poll prints nothing on stdout, like gh.
     let failing = FakeGh::new(&[("pr view 34 *", 1, "")]);
     let recovered = FakeGh::new(&[
         ("1x pr view 34 *", 1, ""),
-        ("pr view 34 *", 0, &format!("MERGED {A}")),
+        ("pr view 34 *", 0, &format!("MERGED CLEAN {A}")),
     ]);
 
     // Act
