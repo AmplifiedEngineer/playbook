@@ -47,6 +47,6 @@ libsql is async and has no direct counterpart for several items. "Unverified" ma
 | `Error::SqliteFailure`, `ErrorCode`, `ffi` codes (about 30) | none, libsql wraps the code in its own error type | unverified |
 | FTS5 `MATCH` (code index, memory search) | the bundled SQLite supports it, no API involved | unverified |
 
-## Not in this change
+## Golden file
 
-The golden file of the SQL text and `PRAGMA` values of the open functions is not part of it. Those functions live in the crates that still use rusqlite, so the file arrives with the first port.
+`crates/data/tests/golden/memory-open.txt` holds the `journal_mode` and the SQL of every schema object that the `memory.db` write path leaves on disk. `crates/data/tests/open_golden.rs` compares a fresh capture with it, so a change of engine cannot alter the schema or the pragma silently. Set `UPDATE_GOLDEN=1` to rewrite it after an intended change.
