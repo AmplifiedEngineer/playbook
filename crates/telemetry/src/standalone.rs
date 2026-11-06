@@ -65,6 +65,13 @@ impl Host for Standalone {
         super::config::resolve(home, key)
     }
 
+    fn set_config_value(&self, key: &str, value: &Value, home: &Path) -> Result<(), String> {
+        match super::config::save_app(home, key, value)? {
+            true => Ok(()),
+            false => Err("no config store yet".to_string()),
+        }
+    }
+
     fn state_dir_from(&self, home: &Path) -> PathBuf {
         super::data::data_dir(home)
     }
@@ -81,6 +88,23 @@ impl Host for Standalone {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_setting_written_by_the_standalone_host_is_read_back_by_it() {
+        let home = crate::util::scratch_dir("standalone-set");
+        let data = crate::config::root(&home).join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let conn = rusqlite::Connection::open(playbook_data::config::db_in(&data)).unwrap();
+        conn.execute_batch(playbook_data::config::SCHEMA_SQL)
+            .unwrap();
+
+        let wrote =
+            Standalone.set_config_value("usage.budget.monthlyUsd", &Value::from(800.0), &home);
+        let read = Standalone.config_value("usage.budget.monthlyUsd", &home);
+
+        assert_eq!(wrote, Ok(()));
+        assert_eq!(read, Some(Value::from(800.0)));
+    }
 
     #[test]
     fn command_drops_the_usage_word() {
