@@ -104,12 +104,11 @@ pub enum UsageCommand {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Name accounts and move past usage between them
+    /// List the accounts in the usage store and name them
     ///
-    /// Every usage event carries an account key: the email Claude Code is
-    /// signed in to, or a `token:` fingerprint. Use these commands to see the
-    /// accounts, give a key a display name, and relabel a time range recorded
-    /// under the wrong account.
+    /// Every usage event carries an account key, the email Claude Code was
+    /// signed in to. These commands show the keys and give each one a display
+    /// name.
     ///
     /// Example: `playbook usage account list`
     Account {
