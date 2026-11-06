@@ -10,6 +10,7 @@ ref Square src/main.ts 5
 ref Square src/main.ts 7
 ref Square src/main.ts 10
 ref SCALE src/shapes.ts 20
+ref makeSquare src/main.ts 5
 negative Square src/main.ts 4
 negative Square src/main.ts 6
 negative Square src/shapes.ts 18

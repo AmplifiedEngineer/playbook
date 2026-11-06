@@ -5,9 +5,11 @@
 //! the JSON report. It needs network for the first clone and never downloads
 //! an oracle: a repo without an answers file reports no refs truth.
 //! `code-bench gate` judges a report against the committed baseline.
+//! `code-bench fixtures --write-baseline` rewrites the fixture baseline.
 
 use code_bench::corpus::{fetch, GitTransport, Manifest, ThreadSleeper, Tier};
-use code_bench::gate::{evaluate, Baseline, Floor, Inputs, Overrides};
+use code_bench::fixtures;
+use code_bench::gate::{evaluate, Baseline, Floor, Inputs, Overrides, MIN_TASKS_PER_CELL};
 use code_bench::oracle::rg::Candidate;
 use code_bench::runner::{self, PlaybookBinary, RepoJob, Report};
 use code_bench::scope::scope_to_language;
@@ -19,8 +21,9 @@ const DEFAULT_PROGRAM: &str = "playbook";
 const ANSWERS_DIR: &str = "crates/code-bench/data/oracle-answers";
 const HOME_DIR: &str = "home";
 const DATA_DIR: &str = "crates/code-bench/data";
+const WRITE_BASELINE_FLAG: &str = "--write-baseline";
 const LANGUAGE_FLAG: &str = "--language";
-const USAGE: &str = "usage: code-bench pilot [--language LANG] CACHE_DIR REPORT_FILE [PLAYBOOK_BINARY]\n       code-bench gate [--language LANG] REPORT_FILE RUN_DATE";
+const USAGE: &str = "usage: code-bench pilot [--language LANG] CACHE_DIR REPORT_FILE [PLAYBOOK_BINARY]\n       code-bench gate [--language LANG] REPORT_FILE RUN_DATE\n       code-bench fixtures --write-baseline";
 
 struct Args {
     language: Option<String>,
@@ -126,6 +129,7 @@ fn gate(args: &[String]) -> Result<(), String> {
         run_date,
         prior_task_ids: &ids,
         task_ids: &ids,
+        min_tasks_per_cell: MIN_TASKS_PER_CELL,
     });
     for failure in &failures {
         eprintln!("{failure}");
@@ -137,11 +141,24 @@ fn gate(args: &[String]) -> Result<(), String> {
     }
 }
 
+/// Runs the fixtures through the real binary and writes `gate-baseline.json`.
+fn write_fixture_baseline() -> Result<(), String> {
+    let scratch = std::env::temp_dir().join(format!("code-bench-fixtures-{}", std::process::id()));
+    let report = fixtures::binary(&scratch)
+        .and_then(|binary| fixtures::measure(&binary, &scratch))
+        .and_then(|report| fixtures::baseline_text(&report));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::write(fixtures::baseline_path(), report?).map_err(|e| e.to_string())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.split_first() {
         Some((command, rest)) if command == "pilot" => parse_args(rest).and_then(|a| pilot(&a)),
         Some((command, rest)) if command == "gate" => gate(rest),
+        Some((command, [flag])) if command == "fixtures" && flag == WRITE_BASELINE_FLAG => {
+            write_fixture_baseline()
+        }
         _ => Err(USAGE.to_string()),
     };
     if let Err(message) = result {

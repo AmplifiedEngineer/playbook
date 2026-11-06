@@ -209,6 +209,9 @@ pub struct Inputs<'a> {
     pub run_date: &'a str,
     pub prior_task_ids: &'a BTreeSet<String>,
     pub task_ids: &'a BTreeSet<String>,
+    /// Fewest tasks a measured cell needs. Production passes
+    /// [`MIN_TASKS_PER_CELL`].
+    pub min_tasks_per_cell: u32,
 }
 
 fn waived(i: &Inputs<'_>, repo: &str, kind: Option<QueryKind>) -> bool {
@@ -330,7 +333,7 @@ fn repo_failures(i: &Inputs<'_>, repo: &RepoReport) -> Vec<Failure> {
     }
     let mut found = Vec::new();
     for cell in &repo.cells {
-        if cell.tasks >= MIN_TASKS_PER_CELL {
+        if cell.tasks >= i.min_tasks_per_cell {
             found.extend(cell_failures(i, &repo.repo, cell));
         } else if !waived(i, &repo.repo, Some(cell.kind)) {
             found.push(Failure::Unmeasured {
@@ -431,6 +434,7 @@ mod tests {
             run_date: RUN_DATE,
             prior_task_ids: &ids,
             task_ids: &ids,
+            min_tasks_per_cell: MIN_TASKS_PER_CELL,
         };
         evaluate(&inputs)
     }
@@ -615,6 +619,7 @@ mod tests {
                 run_date: RUN_DATE,
                 prior_task_ids: &prior,
                 task_ids: &now,
+                min_tasks_per_cell: MIN_TASKS_PER_CELL,
             };
             evaluate(&inputs)
         };

@@ -6,6 +6,7 @@
 
 pub mod corpus;
 pub mod ctags;
+pub mod fixtures;
 pub mod gate;
 pub mod merge_base;
 pub mod metrics;
