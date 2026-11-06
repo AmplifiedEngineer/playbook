@@ -126,9 +126,9 @@ pub enum AccountCommand {
     ///
     /// Example: `playbook usage account name igor@getdigital.com.br Company`
     Name {
-        /// The account key shown by `account list`
+        /// Account key shown by `account list`
         key: String,
-        /// The name to show; empty clears it
+        /// Display name to show; empty clears it
         name: String,
     },
 }
