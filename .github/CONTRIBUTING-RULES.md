@@ -70,7 +70,7 @@ git add .github/CONTRIBUTORS.md
 git commit --signoff -m "docs(cla): sign the CLA for @your-login" -m "I have read the CLA Document and I hereby sign the CLA."
 ```
 
-The `cla-check` job passes when the PR author and every commit author are already listed on the default branch, or your PR adds their row in a commit they authored. A row added in someone else's commit, or without the sentence, fails. Rows are append-only: a PR cannot edit or remove one. Bot commits are skipped. Every `Co-authored-by:` person must be signed too: they add their own row in a commit they author, in your PR or their own. Co-authors that are AI tools or bots are ignored. Every contributor signs, maintainers included. Each repository keeps its own list, so copy your row to each repository you contribute to.
+The `cla-check` job passes when the PR author and every commit author are already listed on the default branch, or your PR adds your own row in a commit you authored. A row added in someone else's commit, or without the sentence, fails. Rows are append-only: a PR cannot edit or remove one. Bot commits are skipped. Every `Co-authored-by:` person must be signed too: they add their own row in a commit they author, in their own PR. Co-authors that are AI tools or bots are ignored. Every contributor signs, maintainers included. Each repository keeps its own list, so copy your row to each repository you contribute to.
 
 **Corporate contributors:** If you are contributing on behalf of your employer, your organisation must sign the [Corporate CLA](CCLA.md). Email the signed document to oss@mail.igorjs.io. Individual employees listed as Designated Employees do not need to sign the Individual CLA separately.
 

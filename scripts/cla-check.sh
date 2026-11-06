@@ -12,7 +12,10 @@
 #   --base REF        the default branch (signatures already accepted)
 #   --head REF        the tip of the pull request
 #   --file PATH       signatures file (default .github/CONTRIBUTORS.md)
-#   --pr-author LOGIN the pull request author; must be signed
+#   --pr-author LOGIN the pull request author; must be signed. Only this
+#                     person can add a signature row in the pull request.
+#   --pr-author-id ID the numeric account id of the pull request author, so a
+#                     renamed account still matches its row
 #   --logins FILE     optional TSV from the host API, one line per commit:
 #                     sha, author login, author type, committer login,
 #                     committer type. Without it the script reads logins from
@@ -28,10 +31,13 @@
 #
 # Co-authors: every Co-authored-by trailer in a pull request commit names a
 # person who must be signed, like an author. A pattern in the ignore list skips
-# AI tools and bots. A pattern with "@" or "[" is a substring of the email or
-# name ("[bot]", "noreply@anthropic.com"). Any other pattern is a whole word in
-# the name or email ("claude", "copilot"). A trailer that is not
-# "Name <email>" and does not match the list fails.
+# AI tools and bots, and it matches the trailer EMAIL only, never the display
+# name, because a name is free text anyone can write. Pattern forms:
+#   "[bot]"            the email contains "[bot]@" (a GitHub App account)
+#   "@domain" or "+x@domain"   the email ends with it
+#   "name@domain"      the email is exactly this address
+#   "domain"           the email domain is exactly this
+# A trailer that is not "Name <email>" always fails.
 #
 # Run it inside a clone. It reads git objects and the optional TSV only; it
 # uses no network and no credentials. Prints a Markdown report. Exit 0 when
@@ -43,7 +49,7 @@ EXIT_FAIL=1
 EXIT_USAGE=2
 DEFAULT_FILE='.github/CONTRIBUTORS.md'
 DEFAULT_STATEMENT='I have read the CLA Document and I hereby sign the CLA.'
-DEFAULT_IGNORED_COAUTHORS='[bot],noreply@anthropic.com,noreply@github.com,github-actions,dependabot,renovate,claude,anthropic,copilot,chatgpt,openai,codex,gemini,cursor,devin,aider,windsurf,codeium,tabnine,sweep'
+DEFAULT_IGNORED_COAUTHORS='[bot],noreply@anthropic.com,noreply@github.com,noreply@openai.com,noreply@aider.chat,cursoragent@cursor.com,+copilot@users.noreply.github.com'
 US=$'\037'
 TAB=$'\t'
 
@@ -58,7 +64,7 @@ case "$mode" in
   *) die "first argument must be cla or dco" ;;
 esac
 
-base='' head='' file="$DEFAULT_FILE" pr_author='' logins='' bots=''
+base='' head='' file="$DEFAULT_FILE" pr_author='' pr_author_id='' logins='' bots=''
 statement="$DEFAULT_STATEMENT" cla_url=''
 ignored_co="$DEFAULT_IGNORED_COAUTHORS" extra_co=''
 while [ "$#" -gt 0 ]; do
@@ -68,6 +74,7 @@ while [ "$#" -gt 0 ]; do
     --head) head="$2" ;;
     --file) file="$2" ;;
     --pr-author) pr_author="$2" ;;
+    --pr-author-id) pr_author_id="$2" ;;
     --logins) logins="$2" ;;
     --bots) bots="$2" ;;
     --statement) statement="$2" ;;
@@ -95,7 +102,11 @@ trap 'rm -rf "$TMP"' EXIT
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 norm_space() { tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//'; }
 
-# is_bot LOGIN TYPE NAME EMAIL: true for an automation account.
+# is_bot LOGIN TYPE NAME EMAIL MAPPED: true for an automation account. When
+# MAPPED is 1 a host list was given, and only its answer counts (a commit
+# missing from it, as past the API limit of 250 commits, is not trusted as a bot):
+# the git name and email are free text and prove nothing. Without the host
+# answer (a local run) the name and email are used.
 is_bot() {
   local l n e extra item
   l="$(lower "$1")"
@@ -103,8 +114,10 @@ is_bot() {
   e="$(lower "$4")"
   [ "$2" = "Bot" ] && return 0
   case "$l" in *'[bot]') return 0 ;; esac
-  case "$n" in *'[bot]') return 0 ;; esac
-  case "$e" in *'[bot]@'*) return 0 ;; esac
+  if [ "${5:-0}" != 1 ]; then
+    case "$n" in *'[bot]') return 0 ;; esac
+    case "$e" in *'[bot]@'*) return 0 ;; esac
+  fi
   extra="$(lower "$bots")"
   while [ -n "$extra" ]; do
     item="${extra%%,*}"
@@ -124,6 +137,7 @@ keys() {
   l="$(lower "$1")"
   e="$(lower "$2")"
   l="${l#@}"
+  [ "$e" != '-' ] || e=''
   [ -z "$l" ] || echo "l:$l"
   if [ -n "$e" ]; then
     echo "e:$e"
@@ -140,7 +154,8 @@ keys() {
 }
 
 # parse_rows MARKERS: reads text on stdin, prints canonical rows
-# "login<TAB>date<TAB>email" (lowercase login and email). With MARKERS=1 only
+# "login<TAB>date<TAB>email" (lowercase login and email). An empty date or email
+# is written as "-" so that tab splitting never shifts a field. With MARKERS=1 only
 # the lines between CLA-BOT:START and CLA-BOT:END count.
 parse_rows() {
   awk -v markers="$1" -F'|' '
@@ -152,11 +167,14 @@ parse_rows() {
       login = trim($2)
       if (login !~ /^@[A-Za-z0-9][A-Za-z0-9-]*$/) next
       date = trim($3); email = trim($4)
+      if (date == "") date = "-"
+      if (email == "") email = "-"
       printf "%s\t%s\t%s\n", tolower(login), date, tolower(email)
     }'
 }
 
 rows_at() {
+  git cat-file -e "$1:$file" 2>/dev/null || return 0
   git show "$1:$file" 2>/dev/null | parse_rows 1 | sort -u
 }
 
@@ -197,8 +215,9 @@ if [ "$mode" = dco ]; then
     IFS="$US" read -r an ae cn ce < <(git log -1 --format="%an$US%ae$US%cn$US%ce" "$sha")
     al="$(from_map "$sha" 2)"; at="$(from_map "$sha" 3)"
     cl="$(from_map "$sha" 4)"; ct="$(from_map "$sha" 5)"
+    mapped=0; [ -z "$logins" ] || mapped=1
     # Bot commits (dependabot, the update bot) cannot carry a trailer.
-    if is_bot "$al" "$at" "$an" "$ae" || is_bot "$cl" "$ct" "$cn" "$ce"; then
+    if is_bot "$al" "$at" "$an" "$ae" "$mapped" || is_bot "$cl" "$ct" "$cn" "$ce" "$mapped"; then
       continue
     fi
     if ! git log -1 --format=%B "$sha" | grep -Eq '^Signed-off-by: .+'; then
@@ -240,17 +259,31 @@ while IFS="$TAB" read -r l d e; do
   keys "$l" "$e" >>"$TMP/base_keys"
 done <"$TMP/base_rows"
 
+# pr_author_matches LOGIN EMAIL: true when the row is for the pull request
+# author, by login or by account id. The author comes from the host, so it is
+# the one identity in a pull request that a commit cannot fake.
+pr_author_matches() {
+  local pl
+  pl="$(lower "${pr_author#@}")"
+  [ "$(lower "${1#@}")" = "$pl" ] && return 0
+  if [ -n "$pr_author_id" ]; then
+    keys '' "$2" | grep -Fxq "g:$pr_author_id" && return 0
+  fi
+  return 1
+}
+
 statement_n="$(printf '%s' "$statement" | norm_space | tr '[:upper:]' '[:lower:]')"
 
 for sha in $(commits_in_range); do
   short="$(printf '%.7s' "$sha")"
   IFS="$US" read -r an ae < <(git log -1 --format="%an$US%ae" "$sha")
   al="$(from_map "$sha" 2)"; at="$(from_map "$sha" 3)"
-  if is_bot "$al" "$at" "$an" "$ae"; then
+  mapped=0; [ -z "$logins" ] || mapped=1
+  if is_bot "$al" "$at" "$an" "$ae" "$mapped"; then
     continue
   fi
   keys "$al" "$ae" | sort -u >"$TMP/c_keys"
-  printf '%s\t%s\t%s\n' "$an" "$ae" "$al" >>"$TMP/people"
+  printf '%s\037%s\037%s\n' "$an" "$ae" "$al" >>"$TMP/people"
   cat "$TMP/c_keys" >>"$TMP/author_keys"
 
   msg_ok=0
@@ -264,8 +297,27 @@ for sha in $(commits_in_range); do
     row="$l$TAB$d$TAB$e"
     grep -Fxq -- "$row" "$TMP/added" || continue
     keys "$l" "$e" | sort -u >"$TMP/r_keys"
-    if ! grep -Fxq -f "$TMP/r_keys" "$TMP/c_keys"; then
+    # The row's own login must belong to the commit author (host login or
+    # noreply address), or the row email must be the commit author email.
+    keys "$l" '' | sort -u >"$TMP/r_login_keys"
+    r_email_ok=1
+    if [ "$e" != '-' ]; then
+      case "$e" in
+        *@users.noreply.github.com) ;;
+        *) [ "$e" = "$(lower "$ae")" ] || r_email_ok=0 ;;
+      esac
+    fi
+    bind_ok=0
+    if grep -Fxq -f "$TMP/r_login_keys" "$TMP/c_keys"; then bind_ok=1; fi
+    # An author email that the host cannot link to an account still binds when
+    # it is the very email written on the row.
+    if [ "$e" != '-' ] && [ "$e" = "$(lower "$ae")" ]; then bind_ok=1; fi
+    if [ "$bind_ok" -ne 1 ]; then
       printf '%s\037%s\n' "$row" "$l was added in commit $short, which $an <$ae> authored; only the person signing may add their row" >>"$TMP/reasons"
+    elif [ "$r_email_ok" -ne 1 ]; then
+      printf '%s\037%s\n' "$row" "the email on the row for $l is not the author email of commit $short; sign with the email you commit with" >>"$TMP/reasons"
+    elif [ -n "$pr_author" ] && ! pr_author_matches "$l" "$e"; then
+      printf '%s\037%s\n' "$row" "$l is not the pull request author; only the pull request author can sign in this pull request (others sign in their own pull request)" >>"$TMP/reasons"
     elif [ "$msg_ok" -ne 1 ]; then
       printf '%s\037%s\n' "$row" "commit $short adds $l but its message lacks the sentence: $statement" >>"$TMP/reasons"
     else
@@ -294,30 +346,35 @@ touch "$TMP/signed_keys"
 # a valid row of this pull request.
 signed() {
   keys "$3" "$2" | sort -u >"$TMP/p_keys"
+  [ -z "${4:-}" ] || echo "g:$4" >>"$TMP/p_keys"
   [ -s "$TMP/p_keys" ] || return 1
   grep -Fxq -f "$TMP/p_keys" "$TMP/signed_keys"
 }
 
-if [ -n "$pr_author" ] && ! is_bot "$pr_author" '' '' ''; then
-  if ! signed '' '' "$pr_author"; then
+if [ -n "$pr_author" ] && ! is_bot "$pr_author" '' '' '' 1; then
+  if ! signed '' '' "$pr_author" "$pr_author_id"; then
     add_error "@$(lower "${pr_author#@}") (the pull request author) has not signed the CLA"
   fi
 fi
-sort -u "$TMP/people" | while IFS="$TAB" read -r an ae al; do
+sort -u "$TMP/people" >"$TMP/people.sorted"
+while IFS="$US" read -r an ae al; do
   if ! signed "$an" "$ae" "$al"; then
     who="$an <$ae>"
     [ -z "$al" ] || who="$who (@$al)"
     add_error "$who authored a commit but has not signed the CLA"
   fi
-done >>"$TMP/errors.more" || true
-[ ! -s "$TMP/errors.more" ] || cat "$TMP/errors.more" >>"$TMP/errors"
+done <"$TMP/people.sorted"
 
-# is_ignored_coauthor NAME EMAIL: true for an AI tool or bot on the ignore list.
+# is_ignored_coauthor EMAIL: true when the trailer email is an AI tool or bot
+# address on the ignore list. The display name is never looked at: it is free
+# text, so a name match would let anyone hide a human co-author behind "Claude".
+# An address on the list names no person who could sign, so trusting the email
+# alone is safe: a human is always identified by their own address.
 is_ignored_coauthor() {
-  local n e words rest p
-  n="$(lower "$1")"
-  e="$(lower "$2")"
-  words=" $(printf '%s %s' "$n" "$e" | tr -c 'a-z0-9' ' ' | tr -s ' ') "
+  local e rest p domain
+  e="$(lower "$1")"
+  [ -n "$e" ] || return 1
+  domain="${e#*@}"
   rest="$(lower "$ignored_co")"
   while [ -n "$rest" ]; do
     p="${rest%%,*}"
@@ -325,13 +382,10 @@ is_ignored_coauthor() {
     p="$(printf '%s' "$p" | tr -d ' ')"
     [ -n "$p" ] || continue
     case "$p" in
-      *@* | *'['*)
-        case "$e" in *"$p"*) return 0 ;; esac
-        case "$n" in *"$p"*) return 0 ;; esac
-        ;;
-      *)
-        case "$words" in *" $p "*) return 0 ;; esac
-        ;;
+      '[bot]') case "$e" in *'[bot]@'*) return 0 ;; esac ;;
+      @* | +*) case "$e" in *"$p") return 0 ;; esac ;;
+      *@*) [ "$e" = "$p" ] && return 0 ;;
+      *) [ "$domain" = "$p" ] && return 0 ;;
     esac
   done
   return 1
@@ -348,11 +402,10 @@ for sha in $(commits_in_range); do
     cemail="$(printf '%s' "$val" | sed -nE 's/^.*<([^<>[:space:]@]+@[^<>[:space:]@]+)>$/\1/p')"
     cname="$(printf '%s' "$val" | sed -E 's/[[:space:]]*<[^<>]*>$//')"
     if [ -z "$cemail" ]; then
-      if is_ignored_coauthor "$val" ''; then continue; fi
       printf '%s\n' "commit $short has a Co-authored-by trailer that is not in the form \`Co-authored-by: Name <email>\`: \"$val\". Fix the trailer in the commit message, or remove it." >>"$TMP/co_errors"
       continue
     fi
-    if is_ignored_coauthor "$cname" "$cemail"; then continue; fi
+    if is_ignored_coauthor "$cemail"; then continue; fi
     keys '' "$cemail" | sort -u >"$TMP/co_keys"
     # The same person as an author is checked as an author.
     if grep -Fxq -f "$TMP/co_keys" "$TMP/author_keys"; then continue; fi

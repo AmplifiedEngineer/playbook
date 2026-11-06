@@ -29,16 +29,17 @@ A person matches a row by login, by email, or by the numeric account id in a Git
 - Squash merges: the merged commit carries the same row, and later pull requests read it from the default branch.
 - Merge commits are skipped in both checks. They only combine commits that were checked on their own pull requests.
 - Fork pull requests: the same, since the job needs only a read-only token.
+- Only the pull request author can sign in a pull request (others sign in their own). The pull request author is matched by login or account id from GitHub. A bot is decided by the GitHub account type, not by the git name or email, and a commit missing from the GitHub list (past 250 commits) is not treated as a bot.
 - Renamed login: the account id and the optional email on the row still match. If neither is there, add a new row under the new login. Two rows for one person are allowed.
 - No API data (another Git host): the script falls back to the commit email and noreply addresses. The row must then carry that email.
 
 ## Co-authors
 
-Every line that starts with `Co-authored-by:` in any pull request commit (key in any case, many per commit, bot-authored commits included) names a person who must be signed, matched by email or by the account id or login in a noreply address. The same person as a commit author is checked once, as an author. A co-author who is not on the default branch list, and does not add their own row in a commit they author in this pull request, fails the check. The message names the person and says that they add a row in a commit they author. Their own pull request is enough.
+Every line that starts with `Co-authored-by:` in any pull request commit (key in any case, many per commit, bot-authored commits included) names a person who must be signed, matched by email or by the account id or login in a noreply address. The same person as a commit author is checked once, as an author. A co-author who is not on the default branch list, and has not signed in their own pull request first, fails the check. The message names the person and says that they add a row in a commit they author. They sign in their own pull request, which must merge first.
 
 A trailer that is not `Name <email>` fails closed with a clear message, unless it matches the ignore list.
 
-AI tools and bots are ignored. The built-in list is `[bot]`, `noreply@anthropic.com`, `noreply@github.com`, and the words `github-actions`, `dependabot`, `renovate`, `claude`, `anthropic`, `copilot`, `chatgpt`, `openai`, `codex`, `gemini`, `cursor`, `devin`, `aider`, `windsurf`, `codeium`, `tabnine` and `sweep`. A pattern with `@` or `[` is a substring of the email or name. Any other pattern is a whole word in the name or email, so a person named Claude is also skipped. Treat the trailer as a declaration, not proof: anyone can write any name in it.
+AI tools and bots are ignored by email address only; the display name is never used, because anyone can write any name in a trailer, so a person named Claude is still checked. The built-in list is `[bot]` (a GitHub App address), `noreply@anthropic.com`, `noreply@github.com`, `noreply@openai.com`, `noreply@aider.chat`, `cursoragent@cursor.com` and the suffix `+copilot@users.noreply.github.com`. A pattern is `[bot]`, a suffix starting with `@` or `+`, an exact address, or a bare domain.
 
 To add tools, set the `extra-ignored-coauthors` input (comma separated). To replace the whole list, set `ignored-coauthors`.
 
@@ -48,7 +49,7 @@ The register keeps every existing row, and the change adds an empty email cell t
 
 ## Limits
 
-A pull request that edits the workflow or the script runs its own copy. The `.github/` path and the repository default require maintainer review in `CODEOWNERS`, and that review is the control. The shared workflow used to be pinned to a commit in another repository, which a pull request could not change.
+A pull request that edits the workflow or the script runs its own copy. The `.github/` path and the repository default require maintainer review in `CODEOWNERS`, and that review is the control (`* @igorjs` covers `.github/` and `scripts/`, and it blocks a merge only while the ruleset requires code owner review). The shared workflow used to be pinned to a commit in another repository, which a pull request could not change.
 
 ## Reuse in another repository
 

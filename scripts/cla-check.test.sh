@@ -288,18 +288,18 @@ commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
 
 Co-authored-by: Jane Roe <jane@example.com>"
 run_cla --pr-author alice
-expect "co-author signs in the same PR" "$EXIT_PASS"
+expect "row for a person other than the PR author" "$EXIT_FAIL" "only the pull request author can sign"
 
 repo co-ai '| @alice | 2026-01-02 | |'
 work
 commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
 
 Co-authored-by: Claude <noreply@anthropic.com>
-Co-authored-by: Copilot <copilot@github.com>
-Co-authored-by: ChatGPT Codex <codex@example.com>
-Co-authored-by: Gemini <gemini@example.com>
+Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+Co-authored-by: ChatGPT Codex <noreply@openai.com>
+Co-authored-by: Gemini <gemini-code-assist[bot]@users.noreply.github.com>
 Co-authored-by: Cursor Agent <cursoragent@cursor.com>
-Co-authored-by: Devin AI <devin@example.com>"
+Co-authored-by: Devin AI <devin-ai-integration[bot]@users.noreply.github.com>"
 run_cla --pr-author alice
 expect "AI co-authors ignored" "$EXIT_PASS"
 
@@ -319,7 +319,7 @@ commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
 Co-authored-by: Mystery Tool <mystery@tool.example>"
 run_cla --pr-author alice
 expect "unknown tool fails by default" "$EXIT_FAIL" "Mystery Tool"
-run_cla --pr-author alice --extra-ignored-coauthors 'mystery'
+run_cla --pr-author alice --extra-ignored-coauthors '@tool.example'
 expect "extra ignore pattern" "$EXIT_PASS"
 run_cla --pr-author alice --ignored-coauthors 'only-this'
 expect "replaced ignore list" "$EXIT_FAIL" "Mystery Tool"
@@ -346,7 +346,7 @@ commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
 
 Co-authored-by: Claude"
 run_cla --pr-author alice
-expect "AI trailer without email ignored" "$EXIT_PASS"
+expect "AI trailer without email fails closed" "$EXIT_FAIL" "not in the form"
 
 repo co-many '| @alice | 2026-01-02 | |' '| @jane | 2026-01-03 | jane@example.com |'
 work
@@ -390,6 +390,115 @@ commit_as "dependabot[bot]" "49699333+dependabot[bot]@users.noreply.github.com" 
 Co-authored-by: Jane Roe <jane@example.com>"
 run_cla --pr-author alice
 expect "co-author on a bot commit is checked" "$EXIT_FAIL" "Jane Roe"
+
+# ---- CLA: security regressions
+# A row for another login that borrows the committer's own email.
+repo forge-email '| @mallory | 2026-01-02 | |'
+add_row '| @alice | 2026-11-06 | mallory@example.com |'
+commit_as "Mallory" "mallory@example.com" "docs(cla): sign
+
+$STATEMENT"
+run_cla --pr-author mallory
+expect "row for another login with own email" "$EXIT_FAIL" "only"
+
+# A row for another login, with a spoofed noreply address on the commit.
+repo forge-noreply '| @mallory | 2026-01-02 | |'
+add_row '| @alice | 2026-11-06 | |'
+commit_as "Alice" "9+alice@users.noreply.github.com" "docs(cla): sign
+
+$STATEMENT"
+run_cla --pr-author mallory
+expect "row for another login via noreply" "$EXIT_FAIL" "only the pull request author can sign"
+
+# The email on the row must be the email of the commit that adds it.
+repo row-email-borrowed
+add_row '| @alice | 2026-11-06 | bob@example.com |'
+commit_as "Alice" "alice@example.com" "docs(cla): sign
+
+$STATEMENT"
+run_cla --pr-author alice
+expect "row email not the commit email" "$EXIT_FAIL" "only the person signing"
+
+# A git name ending in [bot] does not make a person a bot when the host says User.
+repo bot-name
+work
+commit_as "me[bot]" "me@example.com" "feat: sneaky"
+sha="$(git -C "$REPO" rev-parse pr)"
+printf '%s\tme\tUser\tme\tUser\n' "$sha" >"$TMP/logins.tsv"
+run_cla --logins "$TMP/logins.tsv"
+expect "bot-looking name, host says User (cla)" "$EXIT_FAIL" "has not signed"
+RC=0
+(cd "$REPO" && bash "$SCRIPT" dco --base main --head pr --logins "$TMP/logins.tsv") >"$TMP/out" 2>&1 || RC=$?
+OUT="$(cat "$TMP/out")"
+expect "bot-looking name, host says User (dco)" "$EXIT_FAIL" "no Signed-off-by"
+# A commit missing from the host list (more than 250 commits) is not trusted as a bot.
+: >"$TMP/logins.tsv"
+run_cla --logins "$TMP/logins.tsv"
+expect "bot-looking name, commit not in host list" "$EXIT_FAIL" "has not signed"
+# The host says Bot: skipped.
+printf '%s\tdependabot[bot]\tBot\tweb-flow\tUser\n' "$sha" >"$TMP/logins.tsv"
+run_cla --logins "$TMP/logins.tsv"
+expect "host says Bot" "$EXIT_PASS"
+
+# A renamed PR author is matched by account id.
+repo renamed-author '| @oldname | 2026-01-02 | 77+oldname@users.noreply.github.com |'
+work
+commit_as "New" "77+newname@users.noreply.github.com" "feat: a change"
+run_cla --pr-author newname --pr-author-id 77
+expect "renamed PR author by id" "$EXIT_PASS"
+
+# A row with an empty date still signs.
+repo empty-date
+add_row '| @alice | | alice@example.com |'
+commit_as "Alice" "alice@example.com" "docs(cla): sign
+
+$STATEMENT"
+run_cla --pr-author alice
+expect "empty date" "$EXIT_PASS"
+
+# The branch point predates the signature file.
+REPO="$TMP/old-branch"
+mkdir -p "$REPO"
+git -C "$REPO" init -q -b main
+git -C "$REPO" config commit.gpgsign false
+git -C "$REPO" config core.hooksPath /dev/null
+commit_as "Maintainer" "maint@example.com" "chore: first"
+git -C "$REPO" checkout -q -b pr
+git -C "$REPO" checkout -q main
+mkdir -p "$REPO/.github"
+printf '<!-- CLA-BOT:START -->\n| @alice | 2026-01-02 | |\n<!-- CLA-BOT:END -->\n' >"$REPO/$FILE"
+commit_as "Maintainer" "maint@example.com" "docs: add the list"
+git -C "$REPO" checkout -q pr
+work
+commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change"
+run_cla --pr-author alice
+expect "branch point without the file" "$EXIT_PASS"
+
+# The pull request deletes the signature file.
+repo deletes-file '| @alice | 2026-01-02 | |'
+git -C "$REPO" rm -q "$FILE"
+commit_as "Alice" "1234+alice@users.noreply.github.com" "chore: remove"
+run_cla --pr-author alice
+expect "file deleted by the PR" "$EXIT_FAIL" "append-only"
+
+# A human co-author with an AI-like display name is still checked.
+repo co-human-claude '| @alice | 2026-01-02 | |'
+work
+commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
+
+Co-authored-by: Claude Smith <bob@example.com>
+Co-authored-by: Copilot <carol@example.com>"
+run_cla --pr-author alice
+expect "AI-like name with a human email" "$EXIT_FAIL" "Claude Smith <bob@example.com>"
+
+# An AI-vendor address cannot be extended by suffix tricks.
+repo co-vendor-lookalike '| @alice | 2026-01-02 | |'
+work
+commit_as "Alice" "1234+alice@users.noreply.github.com" "feat: a change
+
+Co-authored-by: Bob <noreply@anthropic.com.evil.example>"
+run_cla --pr-author alice
+expect "lookalike vendor address" "$EXIT_FAIL" "Bob"
 
 # ---- usage errors
 repo usage

@@ -37,7 +37,7 @@ on:
         type: string
         default: ""
       ignored-coauthors:
-        description: Comma separated patterns for AI and bot co-authors to ignore. Empty uses the list built into the script (documented in the CLA and DCO notes). A pattern with @ or [ is a substring of the email or name; any other is a whole word in the name or email.
+        description: Comma separated patterns for AI and bot co-authors to ignore. Empty uses the list built into the script (documented in the CLA and DCO notes). Patterns match the trailer email only, never the display name. Forms are [bot], @domain or +name@domain (suffix), name@domain (exact address), or a bare domain.
         type: string
         default: ""
       extra-ignored-coauthors:
@@ -64,7 +64,7 @@ jobs:
   # unambiguous.
   dco:
     name: dco
-    if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
     timeout-minutes: 5
@@ -118,6 +118,8 @@ jobs:
           SCRIPT: ${{ inputs.tooling-ref != '' && format('.cla-tooling/{0}', inputs.script) || inputs.script }}
           EXTRA_BOTS: ${{ inputs.extra-bots }}
         run: |
+          # The default shell has no pipefail, and tee would hide a failure.
+          set -o pipefail
           bash "$SCRIPT" dco \
             --base "origin/$BASE_BRANCH" --head "$HEAD_SHA" \
             --logins "$RUNNER_TEMP/commit-accounts.tsv" \
@@ -125,7 +127,7 @@ jobs:
 
   cla-check:
     name: cla-check
-    if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -176,6 +178,7 @@ jobs:
           BASE_BRANCH: ${{ github.event.repository.default_branch }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_AUTHOR_ID: ${{ github.event.pull_request.user.id }}
           CLA_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.event.repository.default_branch }}/${{ inputs.cla-path }}
           SIGNATURES_FILE: ${{ inputs.signatures-file }}
           STATEMENT: ${{ inputs.statement }}
@@ -184,9 +187,12 @@ jobs:
           SCRIPT: ${{ inputs.tooling-ref != '' && format('.cla-tooling/{0}', inputs.script) || inputs.script }}
           EXTRA_BOTS: ${{ inputs.extra-bots }}
         run: |
+          # The default shell has no pipefail, and tee would hide a failure.
+          set -o pipefail
           bash "$SCRIPT" cla \
             --base "origin/$BASE_BRANCH" --head "$HEAD_SHA" \
             --file "$SIGNATURES_FILE" --pr-author "$PR_AUTHOR" \
+            --pr-author-id "$PR_AUTHOR_ID" \
             --logins "$RUNNER_TEMP/commit-accounts.tsv" \
             --bots "$EXTRA_BOTS" --statement "$STATEMENT" \
             --ignored-coauthors "$IGNORED_COAUTHORS" \
