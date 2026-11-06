@@ -1607,7 +1607,7 @@ Example: `playbook usage --range today`
 - `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 - `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
-Subcommands: `account`, `collect`, `doctor`, `prune`, `status`, `stop`
+Subcommands: `account`, `collect`, `doctor`, `machine`, `prune`, `status`, `stop`
 
 ### `playbook usage account`
 
@@ -1736,6 +1736,18 @@ Lists which sources exist: the plan fields and cached usage numbers in the Claud
 Example: `playbook usage doctor --raw`
 
 - `--raw`: Also print the plan field values and the cached spend limit
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+
+### `playbook usage machine`
+
+Show this machine's id and name, or rename it
+
+The id is a random UUID made once and kept in the data folder, so it survives a changed hostname or home folder. The name defaults to the hostname. Both stay on this machine.
+
+Example: `playbook usage machine --name laptop`
+
+- `--name <NAME>`: Display name to keep for this machine; an empty name restores the hostname
 - `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 - `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 

@@ -118,6 +118,18 @@ pub enum UsageCommand {
         #[command(subcommand)]
         command: AccountCommand,
     },
+    /// Show this machine's id and name, or rename it
+    ///
+    /// The id is a random UUID made once and kept in the data folder, so it
+    /// survives a changed hostname or home folder. The name defaults to the
+    /// hostname. Both stay on this machine.
+    ///
+    /// Example: `playbook usage machine --name laptop`
+    Machine {
+        /// Display name to keep for this machine; an empty name restores the hostname
+        #[arg(long)]
+        name: Option<String>,
+    },
 }
 
 /// `playbook usage account` subcommands.

@@ -20,6 +20,7 @@
 | `playbook usage account name <KEY> <NAME>` | Gives an account key a display name. An empty name clears it. It warns when no event carries the key. Names show only in `account list`. |
 | `playbook usage account assign --from <T> --to <T> --as <KEY_OR_NAME> [--was <KEY_OR_NAME>] [--confirm]` | Moves the events in a time range to another account. Without `--confirm` it only prints how many events and how much cost would move. The end of the range is exclusive. Times use your zone, or UTC with `--utc`. Running the same move again moves nothing. It also moves the skill and agent records. |
 | `playbook usage account undo [ID]` | Reverses the newest applied move, or the one with this number. It leaves records that were relabeled since. |
+| `playbook usage machine [--name NAME]` | Prints this machine's id and name. The id is a random UUID made on first use and kept in `machine.json` in the data folder (owner-only). The name defaults to the hostname; `--name` changes it and an empty name restores the hostname. Neither leaves this machine. A damaged `machine.json` is an error and is never overwritten. |
 
 Every command that shows data, except `account`, reads new history first. You never ingest by hand.
 
