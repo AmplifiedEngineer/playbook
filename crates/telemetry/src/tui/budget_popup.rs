@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The window `b` opens to set the manual monthly budget. The amount goes to
-//! `usage.budget.monthlyUsd` through `config::save_app`, the same path as the
-//! other settings pbtop writes. A detected limit still wins over it.
+//! `usage.budget.monthlyUsd` through the host, so each program stores it in
+//! its own config. A detected limit still wins over it.
 
 use super::theme::Palette;
 use ratatui::crossterm::event::KeyCode;

@@ -637,6 +637,10 @@ impl App {
                 self.quit = true;
                 return Effect::None;
             }
+            // A Ctrl chord is not text.
+            if ctrl {
+                return Effect::None;
+            }
             return match popup.key(key.code) {
                 super::budget_popup::Outcome::Stay => Effect::None,
                 super::budget_popup::Outcome::Close => {
@@ -1116,6 +1120,16 @@ mod tests {
         assert!(!app.quit, "typing q must not quit");
         assert_eq!(app.key(press(KeyCode::Esc)), Effect::None);
         assert!(app.budget_popup.is_none());
+    }
+
+    #[test]
+    fn a_ctrl_chord_does_not_type_into_the_budget_window() {
+        let mut app = loaded();
+        app.key(press(KeyCode::Char('b')));
+        app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        assert_eq!(app.budget_popup.as_ref().map(|p| p.text.as_str()), Some(""));
+        app.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(app.quit);
     }
 
     #[test]
