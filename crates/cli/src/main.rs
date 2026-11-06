@@ -326,10 +326,10 @@ fn real_main() {
                     if json {
                         println!("{}", choice.to_json());
                     } else {
-                        println!(
-                            "{}",
-                            choice.dispatch.as_deref().unwrap_or("no dispatch type")
-                        );
+                        match &choice.effort {
+                            Some(effort) => println!("{} {effort}", choice.dispatch),
+                            None => println!("{}", choice.dispatch),
+                        }
                         if let Some(note) = &choice.note {
                             eprintln!("{note}");
                         }

@@ -79,28 +79,30 @@ fn on_raises_a_risky_diff_and_logs_it() {
     let v = h.choose(&["--path", "src/auth/login.rs", "--lines", "5"]);
     assert_eq!(v["mode"], "on");
     assert_eq!(v["deviates"], true);
-    assert_eq!(v["chosen"]["level"], "xhigh");
-    assert_eq!(v["dispatch"], "reviewer-xhigh");
+    assert_eq!(v["chosen"]["level"], "high");
+    assert_eq!(v["dispatch"], "playbook:reviewer");
+    assert_eq!(v["effort"], "high");
     assert!(v["note"].as_str().unwrap().contains("instead of"));
 
     let log = h.run(&["effort", "log", "--json"]);
     let rows: Value = serde_json::from_slice(&log.stdout).unwrap();
     assert_eq!(rows.as_array().unwrap().len(), 1);
     assert_eq!(rows[0]["component"], "reviewer");
-    assert_eq!(rows[0]["chosen"], "xhigh");
+    assert_eq!(rows[0]["chosen"], "high");
 }
 
 #[test]
-fn a_ceiling_below_xhigh_holds_the_choice() {
+fn a_ceiling_at_the_default_holds_the_choice() {
     let h = Home::new("ceiling");
     assert!(h
         .run(&["config", "set", "--global", "effort.auto", "on"])
         .status
         .success());
-    assert!(h.run(&["effort", "high"]).status.success());
+    assert!(h.run(&["effort", "medium"]).status.success());
     let v = h.choose(&["--path", "src/auth/login.rs"]);
-    assert_eq!(v["chosen"]["level"], "high");
-    assert_eq!(v["dispatch"], "reviewer-high");
+    assert_eq!(v["chosen"]["level"], "medium");
+    assert_eq!(v["effort"], "medium");
+    assert_eq!(v["dispatch"], "playbook:reviewer");
 }
 
 #[test]

@@ -7,12 +7,10 @@
 //! `off` does nothing at all. `suggest` works out the choice and logs it, and
 //! the dispatch still uses the default. `on` also uses the choice.
 //!
-//! The mechanism is the one the orchestrator already uses: an agent's effort
-//! is fixed by its file, so a choice is the name of an existing variant
-//! (`reviewer-low`, `reviewer-xhigh`) and its `subagent_type`. The candidates
-//! are exactly `Resolution::allowed`, the files at or under every ceiling in
-//! play (Claude Code's, playbook's, the component key and the model cap), so a
-//! choice can never exceed a ceiling. A level below the default must also be
+//! A choice is a level, which the orchestrator passes as the `effort`
+//! parameter of the `Agent` call on the base agent. The candidates are the
+//! levels at or under every ceiling in play (Claude Code's, playbook's, the
+//! component key and the model cap), so a choice can never exceed a ceiling. A level below the default must also be
 //! at or above the agent's quality floor (`floor.rs`), and an agent marked
 //! costly to miss is never lowered, only raised.
 //!
@@ -23,7 +21,7 @@
 
 use super::component::Resolution;
 use super::floor::floor_of;
-use super::rank;
+use super::{rank, LEVELS};
 use crate::common::atomic::atomic_append;
 use crate::common::time::iso_utc;
 use crate::config;
@@ -45,7 +43,7 @@ pub const BIG_BYTES: u64 = 60 * 1024;
 pub const SMALL_LINES: u64 = 300;
 pub const SMALL_FILES: u64 = 10;
 /// The level a raise aims for, capped by what is allowed.
-const RAISE_TO: &str = "xhigh";
+const RAISE_TO: &str = "high";
 /// The level a lowering aims for, held at the floor.
 const LOWER_TO: &str = "low";
 
@@ -302,30 +300,14 @@ pub fn evidence_from(report: &super::suggest::Report, agent: &str) -> Result<Evi
     })
 }
 
-/// One candidate file: its name, level and `subagent_type`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Candidate {
-    level: String,
-    subagent_type: String,
-}
-
-fn candidates(res: &Resolution) -> Vec<Candidate> {
-    let types = res.allowed_types();
-    res.allowed
+/// The levels the agent may run at: every level up to the lowest ceiling.
+fn candidates(res: &Resolution) -> Vec<String> {
+    let limit = res.ceiling.as_deref().and_then(rank);
+    LEVELS
         .iter()
-        .zip(types)
-        .filter_map(|(name, subagent_type)| {
-            let level = if *name == res.name {
-                res.shipped.clone()?
-            } else {
-                name.strip_prefix(&format!("{}-", res.name))?.to_string()
-            };
-            rank(&level)?;
-            Some(Candidate {
-                level,
-                subagent_type,
-            })
-        })
+        .skip(1)
+        .filter(|l| limit.is_none_or(|m| rank(l).is_some_and(|r| r <= m)))
+        .map(|l| (*l).to_string())
         .collect()
 }
 
@@ -333,7 +315,6 @@ fn candidates(res: &Resolution) -> Vec<Candidate> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Decision {
     pub level: String,
-    pub subagent_type: Option<String>,
     pub reason: String,
 }
 
@@ -348,22 +329,18 @@ pub fn decide(
     lens: Option<&str>,
     evidence: Option<&Evidence>,
 ) -> Decision {
-    let default_level = level_of_file(res);
+    let default_level = default_of(res);
     let keep = |why: &str| Decision {
         level: default_level.clone(),
-        subagent_type: res.subagent_type.clone(),
         reason: why.to_string(),
     };
     let Some(default_rank) = rank(&default_level) else {
         return keep("no default level to compare with, so the default stands");
     };
     let cands = candidates(res);
-    let pick = |want: &dyn Fn(usize) -> bool, highest: bool| -> Option<&Candidate> {
-        let mut found: Vec<&Candidate> = cands
-            .iter()
-            .filter(|c| rank(&c.level).is_some_and(want))
-            .collect();
-        found.sort_by_key(|c| rank(&c.level));
+    let pick = |want: &dyn Fn(usize) -> bool, highest: bool| -> Option<&String> {
+        let mut found: Vec<&String> = cands.iter().filter(|c| rank(c).is_some_and(want)).collect();
+        found.sort_by_key(|c| rank(c));
         if highest {
             found.last().copied()
         } else {
@@ -387,13 +364,12 @@ pub fn decide(
         };
         // Highest allowed level up to the aim, never below the default.
         return match pick(&|r| r >= default_rank && r <= aim, true) {
-            Some(c) if rank(&c.level) > Some(default_rank) => Decision {
-                level: c.level.clone(),
-                subagent_type: Some(c.subagent_type.clone()),
-                reason: format!("raised from {default_level} to {}: {why}", c.level),
+            Some(c) if rank(c) > Some(default_rank) => Decision {
+                level: c.clone(),
+                reason: format!("raised from {default_level} to {c}: {why}"),
             },
             _ => keep(&format!(
-                "{why}, but no higher variant is allowed under the ceilings, so the default stands"
+                "{why}, but no higher level is allowed under the ceilings, so the default stands"
             )),
         };
     }
@@ -418,14 +394,13 @@ pub fn decide(
         .max(rank(floor.floor).unwrap_or(default_rank));
     match pick(&|r| r >= lowest && r < default_rank, false) {
         Some(c) => Decision {
-            level: c.level.clone(),
-            subagent_type: Some(c.subagent_type.clone()),
+            level: c.clone(),
             reason: format!(
-                "lowered from {default_level} to {}: a small diff ({} changed lines in {} files) with no risk signal, and {} is not below the floor {}",
-                c.level, shape.lines, shape.files, c.level, floor.floor
+                "lowered from {default_level} to {c}: a small diff ({} changed lines in {} files) with no risk signal, and {c} is not below the floor {}",
+                shape.lines, shape.files, floor.floor
             ),
         },
-        None => keep("a small diff, but no lower variant is allowed at or above the floor"),
+        None => keep("a small diff, but no lower level is allowed at or above the floor"),
     }
 }
 
@@ -434,12 +409,13 @@ pub fn decide(
 pub struct Choice {
     pub agent: String,
     pub mode: Mode,
-    pub default_type: Option<String>,
     pub default_level: String,
     pub chosen_level: String,
-    pub chosen_type: Option<String>,
-    /// The `subagent_type` to spawn: the choice when `on`, else the default.
-    pub dispatch: Option<String>,
+    /// The `subagent_type` to spawn: always the base agent.
+    pub dispatch: String,
+    /// The level to pass as the `Agent` tool `effort` parameter: the choice
+    /// when `on`, else the default. `None` when the agent has no known effort.
+    pub effort: Option<String>,
     pub deviates: bool,
     pub applied: bool,
     pub reason: String,
@@ -452,9 +428,10 @@ impl Choice {
         json!({
             "agent": self.agent,
             "mode": self.mode.as_str(),
-            "default": { "level": self.default_level, "subagentType": self.default_type },
-            "chosen": { "level": self.chosen_level, "subagentType": self.chosen_type },
+            "default": { "level": self.default_level },
+            "chosen": { "level": self.chosen_level },
             "dispatch": self.dispatch,
+            "effort": self.effort,
             "deviates": self.deviates,
             "applied": self.applied,
             "reason": self.reason,
@@ -464,15 +441,14 @@ impl Choice {
     }
 }
 
-fn level_of_file(res: &Resolution) -> String {
-    match res.file.as_deref() {
-        Some(f) if f == res.name => res.shipped.clone().unwrap_or_default(),
-        Some(f) => f
-            .strip_prefix(&format!("{}-", res.name))
-            .unwrap_or_default()
-            .to_string(),
-        None => String::new(),
-    }
+/// The level without a choice: the shipped effort lowered by every ceiling.
+fn default_of(res: &Resolution) -> String {
+    res.effective.clone().unwrap_or_default()
+}
+
+/// The `subagent_type` to spawn: always the base agent.
+fn base_type(res: &Resolution) -> String {
+    format!("playbook:{}", res.name)
 }
 
 /// The append only log of automatic choices.
@@ -496,15 +472,14 @@ pub fn choose(
     now: i64,
 ) -> Choice {
     let mode = mode(home);
-    let default_level = level_of_file(res);
+    let default_level = default_of(res);
     let base = |reason: String, inputs: Value| Choice {
         agent: res.name.clone(),
         mode,
-        default_type: res.subagent_type.clone(),
         default_level: default_level.clone(),
         chosen_level: default_level.clone(),
-        chosen_type: res.subagent_type.clone(),
-        dispatch: res.subagent_type.clone(),
+        dispatch: base_type(res),
+        effort: Some(default_level.clone()).filter(|l| !l.is_empty()),
         deviates: false,
         applied: false,
         reason,
@@ -557,11 +532,10 @@ pub fn choose(
             let deviates = d.level != default_level;
             let mut c = base(d.reason.clone(), inputs);
             c.chosen_level = d.level.clone();
-            c.chosen_type = d.subagent_type.clone();
             c.deviates = deviates;
             c.applied = mode == Mode::On && deviates;
             if mode == Mode::On {
-                c.dispatch = d.subagent_type;
+                c.effort = Some(d.level.clone());
             }
             if deviates {
                 c.note = Some(if mode == Mode::On {
@@ -650,23 +624,8 @@ mod tests {
     use crate::common::test_support::scratch_dir;
     use crate::effort::component::Kind;
 
-    fn res(name: &str, shipped: &str, ceiling: Option<&str>, files: &[&str]) -> Resolution {
-        // `files` are the variant tiers the session has, lowest first.
-        let limit = ceiling.and_then(rank);
-        let mut allowed: Vec<String> = Vec::new();
-        let mut all: Vec<(String, String)> = files
-            .iter()
-            .map(|t| (format!("{name}-{t}"), t.to_string()))
-            .collect();
-        all.push((name.to_string(), shipped.to_string()));
-        all.sort_by_key(|(_, e)| rank(e));
-        for (f, e) in &all {
-            if limit.is_none_or(|l| rank(e) <= Some(l)) {
-                allowed.push(f.clone());
-            }
-        }
-        let want = rank(shipped).min(limit.or(rank(shipped)));
-        let pick = all.iter().rev().find(|(_, e)| rank(e) <= want).unwrap();
+    fn res(name: &str, shipped: &str, ceiling: Option<&str>) -> Resolution {
+        let effective = crate::effort::lower(Some(shipped), ceiling).map(str::to_string);
         Resolution {
             kind: Kind::Agent,
             name: name.to_string(),
@@ -678,14 +637,10 @@ mod tests {
             global: "auto".into(),
             claude: None,
             ceiling: ceiling.map(str::to_string),
-            effective: Some(shipped.to_string()),
-            file: Some(pick.0.clone()),
-            subagent_type: Some(if pick.0 == name {
-                format!("playbook:{name}")
-            } else {
-                pick.0.clone()
-            }),
-            allowed,
+            effective,
+            file: Some(name.to_string()),
+            subagent_type: Some(format!("playbook:{name}")),
+            allowed: vec![name.to_string()],
             satisfied: true,
             variants_plugin: None,
         }
@@ -826,41 +781,27 @@ mod tests {
             elevated: true,
             reasons: vec!["src/auth.rs looks security sensitive (auth)".into()],
         };
-        let open = res("reviewer", "medium", None, &["low", "high", "xhigh"]);
+        let open = res("reviewer", "medium", None);
         let d = decide(&open, &small(), &r, None, None);
-        assert_eq!(d.level, "xhigh");
-        assert_eq!(d.subagent_type.as_deref(), Some("reviewer-xhigh"));
-        let capped = res(
-            "reviewer",
-            "medium",
-            Some("high"),
-            &["low", "high", "xhigh"],
-        );
+        assert_eq!(d.level, "high");
+        let capped = res("reviewer", "medium", Some("high"));
         let d = decide(&capped, &small(), &r, None, None);
         assert_eq!(d.level, "high", "{}", d.reason);
-        let at_default = res(
-            "reviewer",
-            "medium",
-            Some("medium"),
-            &["low", "high", "xhigh"],
-        );
+        let at_default = res("reviewer", "medium", Some("medium"));
         let d = decide(&at_default, &small(), &r, None, None);
         assert_eq!(d.level, "medium");
-        assert!(d.reason.contains("no higher variant"), "{}", d.reason);
+        assert!(d.reason.contains("no higher level"), "{}", d.reason);
     }
 
     #[test]
     fn large_diffs_and_the_security_lens_raise() {
-        let r = res("reviewer", "medium", None, &["xhigh"]);
+        let r = res("reviewer", "medium", None);
         let big = Shape {
             lines: 2000,
             files: 3,
             ..Shape::default()
         };
-        assert_eq!(
-            decide(&r, &big, &Risk::default(), None, None).level,
-            "xhigh"
-        );
+        assert_eq!(decide(&r, &big, &Risk::default(), None, None).level, "high");
         let heavy = Shape {
             lines: 5,
             files: 1,
@@ -869,29 +810,29 @@ mod tests {
         };
         assert_eq!(
             decide(&r, &heavy, &Risk::default(), None, None).level,
-            "xhigh"
+            "high"
         );
         assert_eq!(
             decide(&r, &small(), &Risk::default(), Some("security"), None).level,
-            "xhigh"
+            "high"
         );
     }
 
     #[test]
     fn small_clean_diffs_are_lowered_only_to_the_floor() {
         // analyst: floor medium, so a small diff stays at medium.
-        let a = res("analyst", "high", None, &["low", "medium"]);
+        let a = res("analyst", "high", None);
         let ev = ok_ev().unwrap();
         let d = decide(&a, &small(), &Risk::default(), None, Some(&ev));
         assert_eq!(d.level, "medium", "{}", d.reason);
         // cheap-checker: floor low and already low, nothing below.
-        let c = res("cheap-checker", "low", None, &[]);
+        let c = res("cheap-checker", "low", None);
         assert_eq!(
             decide(&c, &small(), &Risk::default(), None, Some(&ev)).level,
             "low"
         );
         // collector: floor low, shipped medium, may go to low.
-        let col = res("collector", "medium", None, &["low"]);
+        let col = res("collector", "medium", None);
         assert_eq!(
             decide(&col, &small(), &Risk::default(), None, Some(&ev)).level,
             "low"
@@ -902,7 +843,7 @@ mod tests {
     fn a_costly_to_miss_agent_is_never_lowered() {
         let ev = ok_ev().unwrap();
         for name in ["reviewer", "auditor"] {
-            let r = res(name, "high", None, &["low", "medium"]);
+            let r = res(name, "high", None);
             let d = decide(&r, &small(), &Risk::default(), None, Some(&ev));
             assert_eq!(d.level, "high", "{name}: {}", d.reason);
         }
@@ -910,7 +851,7 @@ mod tests {
 
     #[test]
     fn missing_or_holding_evidence_stops_a_lowering() {
-        let col = res("collector", "medium", None, &["low"]);
+        let col = res("collector", "medium", None);
         assert_eq!(
             decide(&col, &small(), &Risk::default(), None, None).level,
             "medium"
@@ -926,7 +867,7 @@ mod tests {
 
     #[test]
     fn an_agent_without_a_floor_row_is_not_lowered() {
-        let r = res("mystery", "high", None, &["low"]);
+        let r = res("mystery", "high", None);
         let ev = ok_ev().unwrap();
         assert_eq!(
             decide(&r, &small(), &Risk::default(), None, Some(&ev)).level,
@@ -938,10 +879,10 @@ mod tests {
     fn auto_is_off_by_default_and_logs_nothing() {
         let h = home("auto-off");
         assert_eq!(mode(&h), Mode::Off);
-        let r = res("reviewer", "medium", None, &["xhigh"]);
+        let r = res("reviewer", "medium", None);
         let c = choose(&h, &r, Ok(small()), None, Some("security"), &ok_ev, 100);
         assert!(!c.deviates && !c.applied);
-        assert_eq!(c.dispatch.as_deref(), Some("playbook:reviewer"));
+        assert_eq!(c.dispatch, "playbook:reviewer");
         assert!(!log_path(&h).exists());
     }
 
@@ -949,7 +890,7 @@ mod tests {
     fn on_uses_the_choice_logs_it_and_says_so() {
         let h = home("auto-on");
         set_mode(&h, "on");
-        let r = res("reviewer", "medium", None, &["low", "xhigh"]);
+        let r = res("reviewer", "medium", None);
         let c = choose(
             &h,
             &r,
@@ -960,32 +901,33 @@ mod tests {
             1_791_676_800,
         );
         assert!(c.deviates && c.applied);
-        assert_eq!(c.dispatch.as_deref(), Some("reviewer-xhigh"));
+        assert_eq!(c.dispatch, "playbook:reviewer");
+        assert_eq!(c.effort.as_deref(), Some("high"));
         assert!(c
             .note
             .as_deref()
             .unwrap()
-            .contains("reviewer at xhigh instead of medium"));
+            .contains("reviewer at high instead of medium"));
         let rows = read_log(&h, 10);
         assert_eq!(rows.len(), 1);
         let row = &rows[0];
         assert_eq!(row["ts"], "2026-10-11T00:00:00Z");
         assert_eq!(row["component"], "reviewer");
-        assert_eq!(row["chosen"], "xhigh");
+        assert_eq!(row["chosen"], "high");
         assert_eq!(row["inputs"]["lines"], 15);
         assert!(row["reason"].as_str().unwrap().contains("security"));
-        assert!(log_text(&rows).contains("reviewer medium -> xhigh"));
+        assert!(log_text(&rows).contains("reviewer medium -> high"));
     }
 
     #[test]
     fn suggest_logs_but_dispatches_the_default() {
         let h = home("auto-suggest");
         set_mode(&h, "suggest");
-        let r = res("reviewer", "medium", None, &["xhigh"]);
+        let r = res("reviewer", "medium", None);
         let c = choose(&h, &r, Ok(small()), None, Some("security"), &ok_ev, 100);
         assert!(c.deviates && !c.applied);
-        assert_eq!(c.dispatch.as_deref(), Some("playbook:reviewer"));
-        assert_eq!(c.chosen_level, "xhigh");
+        assert_eq!(c.dispatch, "playbook:reviewer");
+        assert_eq!(c.chosen_level, "high");
         assert!(c.note.as_deref().unwrap().contains("Not applied"));
         assert_eq!(read_log(&h, 10).len(), 1);
     }
@@ -994,10 +936,10 @@ mod tests {
     fn bad_input_falls_back_to_the_default_and_is_logged() {
         let h = home("auto-bad");
         set_mode(&h, "on");
-        let r = res("reviewer", "medium", None, &["xhigh"]);
+        let r = res("reviewer", "medium", None);
         let c = choose(&h, &r, Err("git failed".into()), None, None, &ok_ev, 100);
         assert!(!c.deviates && !c.applied);
-        assert_eq!(c.dispatch.as_deref(), Some("playbook:reviewer"));
+        assert_eq!(c.dispatch, "playbook:reviewer");
         assert!(c.reason.contains("git failed"));
         assert!(read_log(&h, 10)[0]["reason"]
             .as_str()
@@ -1009,10 +951,10 @@ mod tests {
     fn a_panic_in_the_decision_falls_back_to_the_default() {
         let h = home("auto-panic");
         set_mode(&h, "on");
-        let r = res("collector", "medium", None, &["low"]);
+        let r = res("collector", "medium", None);
         let boom = || -> Result<Evidence, String> { panic!("store exploded") };
         let c = choose(&h, &r, Ok(small()), None, None, &boom, 100);
-        assert_eq!(c.dispatch.as_deref(), Some("playbook:collector"));
+        assert_eq!(c.dispatch, "playbook:collector");
         assert!(!c.deviates);
         assert!(c.reason.contains("fell back"));
     }
