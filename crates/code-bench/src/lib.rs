@@ -5,5 +5,7 @@
 //! depends on this crate; `tests/dependency_tree.rs` keeps it that way.
 
 pub mod corpus;
+pub mod ctags;
 pub mod metrics;
+pub mod process;
 pub mod tokenizer;

@@ -341,6 +341,7 @@ version = "0.40.2"
 dependencies = [
  "playbook-common",
  "serde",
+ "serde_json",
  "thiserror",
  "toml",
 ]
