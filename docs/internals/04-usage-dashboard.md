@@ -490,7 +490,7 @@ The pass is idempotent. A failure leaves transcripts as the source.
 
 ## Cost per agent
 
-The Agents view (`4`, then `v`) groups `telemetry_requests` by agent name for the range (`query::load_agents`). The main session has no agent name and shows as `main`. The title note `source telemetry N% of spend` is the telemetry cost over the transcript cost of the range, capped at 100 percent. Only telemetry knows the agent, so a range with no telemetry rows shows `Telemetry off`. Totals are unchanged.
+The Agents view (`4`, then `v`) groups `telemetry_requests` by agent name for the range (`query::load_agents`). The main session has no agent name and shows as `main`. The title note `source telemetry N% of spend` is the telemetry cost over the transcript cost of the range, capped at 100 percent. Only telemetry knows the agent, so a range with no telemetry rows shows `Telemetry off`. Totals are unchanged. Claude Code reports an agent from a plugin it does not list as `custom`. On each ingest, `agent_names::resolve_custom` renames those rows to the `agentType` in the subagent's `meta.json`, found by the request id that the subagent transcript shares with the telemetry row. It reads only request ids and that name, and rows with no transcript keep `custom`.
 
 ## Cost per skill
 
