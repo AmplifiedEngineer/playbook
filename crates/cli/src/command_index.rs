@@ -347,6 +347,7 @@ pub(crate) const META: &[Meta] = &[
     user("update").for_users(),
     ro("usage").for_users(),
     ro("usage account"),
+    ro("usage account fingerprint"),
     ro("usage account list"),
     user("usage account name"),
     user("usage collect"),
