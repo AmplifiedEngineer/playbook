@@ -40,13 +40,7 @@ const ALLOW_FILES: [&str; 18] = [
 
 /// Top-level directories any tracked file may live under.
 const ALLOW_DIRS: [&str; 7] = [
-    "seed",
-    "plugins",
-    "scripts",
-    "docs",
-    ".github",
-    "crates",
-    ".cargo",
+    "seed", "plugins", "scripts", "docs", ".github", "crates", ".cargo",
 ];
 
 /// A personal settings.json must never track, at the root or inside an
