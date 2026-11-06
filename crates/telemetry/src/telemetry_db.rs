@@ -10,7 +10,7 @@
 //! effort, agent name). Prompts, tool content, paths, emails and user ids are
 //! never stored; the receiver strips them before a row reaches this module.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use playbook_store::{params, Connection, OptionalExtension};
 
 pub(super) const UP_SQL: &str = "
 CREATE TABLE IF NOT EXISTS telemetry_requests (
@@ -408,7 +408,7 @@ pub fn tool_stats(conn: &Connection, since: i64, until: i64) -> Result<Vec<ToolS
         .map_err(|e| format!("failed to read telemetry tools: {e}"))?;
     let rows = stmt
         .query_map(params![since, until], |r| {
-            let n = |i: usize| -> rusqlite::Result<u64> {
+            let n = |i: usize| -> playbook_store::Result<u64> {
                 Ok(u64::try_from(r.get::<_, i64>(i)?).unwrap_or(0))
             };
             Ok(ToolStat {
@@ -592,7 +592,7 @@ pub fn prune(
     let cutoff = (retention.days > 0).then(|| now - to_i64(retention.days).saturating_mul(86_400));
     let mut out = [0u64; 4];
     for (slot, table) in out.iter_mut().zip(PRUNED_TABLES) {
-        let fail = |e: rusqlite::Error| format!("failed to prune {table}: {e}");
+        let fail = |e: playbook_store::Error| format!("failed to prune {table}: {e}");
         let total: i64 = conn
             .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
             .map_err(fail)?;
@@ -747,7 +747,7 @@ fn groups(
         .map_err(|e| format!("failed to read telemetry groups: {e}"))?;
     let rows = stmt
         .query_map(params![since, until, empty_as], |r| {
-            let n = |i: usize| -> rusqlite::Result<u64> {
+            let n = |i: usize| -> playbook_store::Result<u64> {
                 Ok(u64::try_from(r.get::<_, i64>(i)?).unwrap_or(0))
             };
             Ok(super::aggregate::Group {

@@ -17,7 +17,7 @@
 
 use crate::claude_code::read_lines;
 use crate::otlp::safe_text;
-use rusqlite::{params, Connection};
+use playbook_store::{params, Connection};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;

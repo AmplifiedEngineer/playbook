@@ -16,7 +16,7 @@
 //! An old file that cannot be read is left alone with a warning. A second run
 //! finds nothing to do.
 
-use rusqlite::Connection;
+use playbook_store::Connection;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -341,7 +341,7 @@ pub fn run_standard(target: &Path) {
 mod tests {
     use super::*;
     use crate::util::scratch_dir;
-    use rusqlite::params;
+    use playbook_store::params;
 
     fn make(path: &Path, ids: &[&str]) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();

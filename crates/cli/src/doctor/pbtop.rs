@@ -76,10 +76,16 @@ pub(crate) fn skew(
         .then_some(Skew { path, version })
 }
 
+fn follow_links(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 /// The command that brings `pbtop` to the version of the playbook at `exe`.
-pub(crate) fn fix(pbtop: &Path, exe: &Path) -> String {
-    // A Homebrew `pbtop` is often a link in a folder such as /usr/local/bin.
-    let real = std::fs::canonicalize(pbtop).unwrap_or_else(|_| pbtop.to_path_buf());
+///
+/// `resolve` follows links: a Homebrew `pbtop` is often a link in a folder such
+/// as /usr/local/bin, and only the real path says which formula owns it.
+pub(crate) fn fix(pbtop: &Path, exe: &Path, resolve: &dyn Fn(&Path) -> PathBuf) -> String {
+    let real = resolve(pbtop);
     let brew = is_homebrew(&real) || is_homebrew(pbtop);
     if real.to_string_lossy().contains(PLAYBOOK_KEG) {
         BREW_PLAYBOOK_FIX.to_string()
@@ -104,7 +110,7 @@ fn current_skew(path_var: &OsStr) -> Option<(Skew, String)> {
     let running = env!("CARGO_PKG_VERSION");
     let found = skew(path_var, running, &probe_version)?;
     let exe = std::env::current_exe().unwrap_or_default();
-    let fix = fix(&found.path, &exe);
+    let fix = fix(&found.path, &exe, &follow_links);
     Some((found, fix))
 }
 
@@ -151,6 +157,11 @@ mod tests {
         let dir = scratch_dir(name);
         std::fs::write(dir.join(PBTOP_PROGRAM), "").unwrap();
         dir.into_os_string()
+    }
+
+    /// A link resolver for a machine with no links, so paths stay as written.
+    fn as_is(path: &Path) -> PathBuf {
+        path.to_path_buf()
     }
 
     fn says(version: &'static str) -> impl Fn(&Path) -> String {
@@ -208,6 +219,7 @@ mod tests {
         let fix = fix(
             Path::new("/opt/homebrew/bin/pbtop"),
             Path::new("/opt/homebrew/Cellar/playbook/0.41.0/bin/playbook"),
+            &as_is,
         );
 
         assert_eq!(fix, "brew uninstall pbtop && brew reinstall playbook");
@@ -218,6 +230,7 @@ mod tests {
         let fix = fix(
             Path::new("/opt/homebrew/bin/pbtop"),
             Path::new("/home/me/.local/bin/playbook"),
+            &as_is,
         );
 
         assert_eq!(fix, "brew upgrade pbtop");
@@ -228,6 +241,7 @@ mod tests {
         let fix = fix(
             Path::new("/usr/bin/pbtop"),
             Path::new("/home/me/.local/bin/playbook"),
+            &as_is,
         );
 
         assert!(fix.ends_with("install-pbtop.sh | sh"), "{fix}");
@@ -238,6 +252,20 @@ mod tests {
         let fix = fix(
             Path::new("/opt/homebrew/Cellar/playbook/0.40.1/bin/pbtop"),
             Path::new("/home/me/.local/bin/playbook"),
+            &as_is,
+        );
+
+        assert_eq!(fix, "brew upgrade playbook");
+    }
+
+    #[test]
+    fn a_pbtop_link_that_resolves_into_the_playbook_keg_is_fixed_by_upgrading_playbook() {
+        let into_keg = |_: &Path| PathBuf::from("/opt/homebrew/Cellar/playbook/0.40.1/bin/pbtop");
+
+        let fix = fix(
+            Path::new("/opt/homebrew/bin/pbtop"),
+            Path::new("/home/me/.local/bin/playbook"),
+            &into_keg,
         );
 
         assert_eq!(fix, "brew upgrade playbook");
@@ -265,6 +293,7 @@ mod tests {
         let fix = fix(
             Path::new("/home/me/.local/bin/pbtop"),
             Path::new("/home/me/.local/bin/playbook"),
+            &as_is,
         );
 
         assert!(fix.ends_with("install-pbtop.sh | sh"), "{fix}");

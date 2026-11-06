@@ -14,7 +14,7 @@ use super::otlp::Parsed;
 use super::telemetry_db::{
     insert_error, insert_metric, insert_request, insert_tool, prune, Retention, TelemetryMetric,
 };
-use rusqlite::Connection;
+use playbook_store::Connection;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TryRecvError};
@@ -169,7 +169,7 @@ mod tests {
 
     const FAR: Duration = Duration::from_secs(3600);
 
-    fn db(name: &str) -> (rusqlite::Connection, rusqlite::Connection) {
+    fn db(name: &str) -> (playbook_store::Connection, playbook_store::Connection) {
         let path = scratch_dir(name).join("usage.db");
         let writer = crate::db::open_db(&path).unwrap();
         migrate_up(&writer).unwrap();
@@ -295,7 +295,7 @@ mod tests {
     }
 
     fn spawn_with(
-        conn: rusqlite::Connection,
+        conn: playbook_store::Connection,
         p: &Parts,
     ) -> (
         std::sync::mpsc::SyncSender<Job>,

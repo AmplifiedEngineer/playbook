@@ -8,7 +8,7 @@
 
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};
 use crate::util::atomic::{ensure_private_dir, make_db_file_private};
-use rusqlite::{params, Connection, OptionalExtension};
+use playbook_store::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::time::Duration;
 
@@ -59,14 +59,15 @@ const BUSY_PAUSE: Duration = Duration::from_millis(20);
 /// handler is skipped when waiting could deadlock (for example while another
 /// opener switches to WAL), so `busy_timeout` alone returns BUSY at once.
 fn retry_busy<T>(
-    mut op: impl FnMut() -> rusqlite::Result<T>,
+    mut op: impl FnMut() -> playbook_store::Result<T>,
     budget: Duration,
-) -> rusqlite::Result<T> {
+) -> playbook_store::Result<T> {
     let start = std::time::Instant::now();
     loop {
         match op() {
-            Err(rusqlite::Error::SqliteFailure(err, _))
-                if err.code == rusqlite::ErrorCode::DatabaseBusy && start.elapsed() < budget =>
+            Err(playbook_store::Error::SqliteFailure(err, _))
+                if err.code == playbook_store::ErrorCode::DatabaseBusy
+                    && start.elapsed() < budget =>
             {
                 std::thread::sleep(BUSY_PAUSE);
             }
@@ -297,7 +298,7 @@ pub fn backfilled_files(
 pub fn record_backfilled_file(conn: &Connection, path: &str, mtime: i64) -> Result<(), String> {
     conn.execute(
         "INSERT OR REPLACE INTO usage_backfill_files (path, mtime) VALUES (?1, ?2)",
-        rusqlite::params![path, mtime],
+        playbook_store::params![path, mtime],
     )
     .map(|_| ())
     .map_err(|e| format!("failed to record the backfill progress: {e}"))
@@ -315,8 +316,11 @@ pub fn clear_backfilled_files(conn: &Connection) -> Result<(), String> {
 /// account names and the telemetry rows stay. A reader sees the history
 /// before the call or none of it, never a part.
 pub fn reset_usage(conn: &Connection) -> Result<(), String> {
-    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
-        .map_err(|e| format!("failed to begin the usage reset: {e}"))?;
+    let tx = playbook_store::Transaction::new_unchecked(
+        conn,
+        playbook_store::TransactionBehavior::Immediate,
+    )
+    .map_err(|e| format!("failed to begin the usage reset: {e}"))?;
     for table in RESET_TABLES {
         tx.execute(&format!("DELETE FROM {table}"), [])
             .map_err(|e| format!("failed to clear {table}: {e}"))?;
@@ -405,7 +409,7 @@ fn tail_of_sessions(marks: &str) -> String {
 fn query_usage(
     conn: &Connection,
     tail: &str,
-    params: &[&dyn rusqlite::ToSql],
+    params: &[&dyn playbook_store::ToSql],
 ) -> Result<Vec<UsageEvent>, String> {
     let mut stmt = conn
         .prepare(&format!("SELECT {USAGE_COLUMNS} FROM usage_events {tail}"))
@@ -463,8 +467,10 @@ pub fn load_usage_events_of_sessions(
         return Ok(Vec::new());
     }
     let marks = vec!["?"; sessions.len()].join(",");
-    let params: Vec<&dyn rusqlite::ToSql> =
-        sessions.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+    let params: Vec<&dyn playbook_store::ToSql> = sessions
+        .iter()
+        .map(|s| s as &dyn playbook_store::ToSql)
+        .collect();
     query_usage(conn, &tail_of_sessions(&marks), &params)
 }
 
@@ -563,9 +569,9 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
-    fn busy() -> rusqlite::Error {
-        rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+    fn busy() -> playbook_store::Error {
+        playbook_store::Error::SqliteFailure(
+            playbook_store::ffi::Error::new(playbook_store::ffi::SQLITE_BUSY),
             Some("database is locked".into()),
         )
     }
@@ -591,7 +597,7 @@ mod tests {
     #[test]
     fn a_busy_answer_that_never_clears_gives_up_and_other_errors_are_not_retried() {
         let tries = std::cell::Cell::new(0);
-        let out: rusqlite::Result<()> = retry_busy(
+        let out: playbook_store::Result<()> = retry_busy(
             || {
                 tries.set(tries.get() + 1);
                 Err(busy())
@@ -602,10 +608,10 @@ mod tests {
         assert!(tries.get() > 1, "a busy answer is retried before giving up");
 
         let tries = std::cell::Cell::new(0);
-        let out: rusqlite::Result<()> = retry_busy(
+        let out: playbook_store::Result<()> = retry_busy(
             || {
                 tries.set(tries.get() + 1);
-                Err(rusqlite::Error::QueryReturnedNoRows)
+                Err(playbook_store::Error::QueryReturnedNoRows)
             },
             Duration::from_secs(5),
         );
@@ -756,7 +762,7 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
-    fn plan(conn: &Connection, tail: &str, params: &[&dyn rusqlite::ToSql]) -> String {
+    fn plan(conn: &Connection, tail: &str, params: &[&dyn playbook_store::ToSql]) -> String {
         let sql = format!("EXPLAIN QUERY PLAN SELECT {USAGE_COLUMNS} FROM usage_events {tail}");
         let mut stmt = conn.prepare(&sql).unwrap();
         let rows: Vec<String> = stmt
@@ -778,8 +784,10 @@ mod tests {
             upsert_usage_event(&conn, &e).unwrap();
         }
         let ids = ["s1".to_string(), "s2".to_string()];
-        let id_params: Vec<&dyn rusqlite::ToSql> =
-            ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+        let id_params: Vec<&dyn playbook_store::ToSql> = ids
+            .iter()
+            .map(|s| s as &dyn playbook_store::ToSql)
+            .collect();
 
         let all = plan(&conn, TAIL_ALL, &[]);
         let since = plan(&conn, TAIL_SINCE, &[&10_i64]);
