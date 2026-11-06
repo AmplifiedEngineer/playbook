@@ -1,10 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
 # Config for zizmor (CI: .github/workflows/zizmor.yml, local: `just zizmor`).
-# Every ignore is narrow: one rule, one workflow file, with the reason.
-rules:
-  secrets-outside-env:
-    ignore:
-      # The repo has no deployment environments; these are repo-level secrets by design.
-      - auto-update-pr.yml
-      - dependabot-auto-merge.yml
-      - release.yml
+# No findings are ignored. Fix the cause of each finding instead of adding an ignore here.
+rules: {}
