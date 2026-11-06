@@ -1,0 +1,102 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+#
+# Nightly fuzz run of the code index targets (crates/code/fuzz). This is the
+# only workflow that uses nightly Rust, because cargo-fuzz needs sanitizer
+# flags. Runs on a schedule and on demand only, never on a pull request, and
+# stays off until the repository variable CODE_CI_PILOT_GATE_RAN is "true".
+# The owner sets it after the benchmark pilot gate has run once.
+#
+# The duration values below mirror the constants in crates/code/fuzz/src/lib.rs
+# (NIGHTLY_SECONDS, INPUT_TIMEOUT_SECONDS and MAX_INPUT_BYTES).
+
+name: code-fuzz
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: code-fuzz-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: "0"
+  NIGHTLY_TOOLCHAIN: nightly-2026-10-01
+  CARGO_FUZZ_VERSION: 0.13.2
+  MAX_TOTAL_TIME: "600"
+  INPUT_TIMEOUT: "10"
+  MAX_LEN: "65536"
+
+jobs:
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    if: vars.CODE_CI_PILOT_GATE_RAN == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [parse_extract, index_file]
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            crates.io:443
+            github.com:443
+            index.crates.io:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            static.crates.io:443
+            static.rust-lang.org:443
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Cache cargo registry and the fuzz tool
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-fuzz
+          key: code-fuzz-v1-${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}-${{ env.CARGO_FUZZ_VERSION }}-${{ hashFiles('crates/code/fuzz/Cargo.toml') }}
+          restore-keys: |
+            code-fuzz-v1-${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}-${{ env.CARGO_FUZZ_VERSION }}-
+
+      - name: Install the pinned nightly toolchain
+        run: rustup toolchain install "$NIGHTLY_TOOLCHAIN" --profile minimal --no-self-update
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
+
+      - name: Fuzz
+        working-directory: crates/code
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fuzz"
+          cargo "+$NIGHTLY_TOOLCHAIN" fuzz run "$TARGET" -- \
+            "-max_total_time=$MAX_TOTAL_TIME" \
+            "-timeout=$INPUT_TIMEOUT" \
+            "-max_len=$MAX_LEN" 2>&1 | tee "$RUNNER_TEMP/fuzz/$TARGET.log"
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: code-fuzz-report-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/fuzz
+            crates/code/fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: warn
+          retention-days: 30
