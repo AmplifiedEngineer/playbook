@@ -39,6 +39,7 @@ pub mod repo;
 pub mod run;
 pub mod say;
 pub mod service;
+pub mod session_account;
 pub mod session_view;
 pub mod spend;
 pub mod standalone;

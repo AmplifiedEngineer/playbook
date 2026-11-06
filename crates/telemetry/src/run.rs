@@ -86,6 +86,9 @@ pub fn ingest_into(
 ) -> Result<IngestStats, String> {
     let source = ClaudeCodeSource::new(paths.claude_projects.clone());
     backfill::run_once(&source, conn)?;
+    if let Some(dir) = paths.db.parent() {
+        super::session_account::import(conn, dir)?;
+    }
     let account = account_label(&paths.claude_json);
     let mut stats = ingest_claude(&source, &account, conn, on_batch)?;
     if paths.codex_sessions.is_dir() {

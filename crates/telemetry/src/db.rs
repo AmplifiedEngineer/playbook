@@ -118,6 +118,11 @@ pub fn open_db(path: &Path) -> Result<Connection, String> {
         BUSY_TIMEOUT,
     )
     .map_err(|e| format!("failed to create account names table: {e}"))?;
+    retry_busy(
+        || conn.execute_batch(super::session_account::SCHEMA_SQL),
+        BUSY_TIMEOUT,
+    )
+    .map_err(|e| format!("failed to create the session accounts table: {e}"))?;
     Ok(conn)
 }
 
@@ -554,6 +559,7 @@ mod tests {
             tables,
             vec![
                 "account_names",
+                "session_accounts",
                 "session_reconcile",
                 "session_sources",
                 "telemetry_errors",

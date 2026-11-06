@@ -73,6 +73,12 @@ fn account_run(paths: &Paths, command: &AccountCommand) -> Result<String, String
     let conn = super::db::open_db(&paths.db)?;
     match command {
         AccountCommand::List => store::list_text(&conn),
+        AccountCommand::Fingerprint => super::session_account::env_fingerprint().ok_or_else(|| {
+            format!(
+                "{} is not set in this shell",
+                super::session_account::TOKEN_ENV
+            )
+        }),
         AccountCommand::Name { key, name } => {
             store::set_name(&conn, key, name)?;
             Ok(if name.trim().is_empty() {
