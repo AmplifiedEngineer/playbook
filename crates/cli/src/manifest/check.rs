@@ -39,7 +39,7 @@ const ALLOW_FILES: [&str; 18] = [
 ];
 
 /// Top-level directories any tracked file may live under.
-const ALLOW_DIRS: [&str; 8] = [
+const ALLOW_DIRS: [&str; 7] = [
     "seed",
     "plugins",
     "scripts",
@@ -47,7 +47,6 @@ const ALLOW_DIRS: [&str; 8] = [
     ".github",
     "crates",
     ".cargo",
-    "packaging",
 ];
 
 /// A personal settings.json must never track, at the root or inside an
@@ -194,13 +193,6 @@ mod tests {
         assert_eq!(violations(&tracked).len(), 1);
     }
 
-    /// Package manifest templates (scoop) live under `packaging/`.
-    #[test]
-    fn packaging_templates_are_allowlisted() {
-        let tracked = vec!["packaging/scoop/playbook.json.tmpl".to_string()];
-        assert!(violations(&tracked).is_empty());
-    }
-
     #[test]
     fn allowlisted_top_level_directory_passes() {
         let tracked = vec!["scripts/check-links.sh".to_string()];
@@ -208,9 +200,9 @@ mod tests {
     }
 
     #[test]
-    fn the_packaging_directory_passes() {
+    fn the_retired_packaging_directory_is_an_offender() {
         let tracked = vec!["packaging/aur/PKGBUILD.tmpl".to_string()];
-        assert!(violations(&tracked).is_empty());
+        assert_eq!(violations(&tracked), tracked);
     }
 
     #[test]
