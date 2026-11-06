@@ -235,8 +235,11 @@ fn event_loop(
         while let Ok(update) = worker.updates.try_recv() {
             match update {
                 Update::Data(data) => {
-                    // A reply for an earlier range may still be in flight.
-                    if data.range == app.range && data.filter == app.filter {
+                    // A reply for an earlier range or time zone may still be in flight.
+                    if data.range == app.range
+                        && data.filter == app.filter
+                        && data.zone == crate::tz::current()
+                    {
                         app.refresh(*data);
                         app.telemetry = Some(super::telemetry_status::detect_here(paths));
                     }

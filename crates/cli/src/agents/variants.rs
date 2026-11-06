@@ -28,7 +28,7 @@ pub const TIERS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 /// Every base agent with the tiers it can be rendered at. A tier equal to the
 /// base file's own effort renders nothing. `playbook agents check` fails when
 /// an agent file has no entry here.
-pub const VARIANTS: [(&str, &[&str]); 11] = [
+pub const VARIANTS: [(&str, &[&str]); 12] = [
     ("analyst", &TIERS),
     ("auditor", &TIERS),
     ("cheap-checker", &TIERS),
@@ -40,6 +40,7 @@ pub const VARIANTS: [(&str, &[&str]); 11] = [
     ("review-triage", &TIERS),
     ("reviewer", &TIERS),
     ("test-reviewer", &TIERS),
+    ("writer", &TIERS),
 ];
 
 /// Agents whose work gets harder with the diff, so a session also gets the

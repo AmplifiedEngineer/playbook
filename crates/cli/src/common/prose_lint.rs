@@ -41,6 +41,9 @@ pub enum Class {
     AbsoluteWord,
     Intensifier,
     ThreeItemList,
+    PassiveVoice,
+    UnknownToken,
+    OverLimit,
 }
 
 impl Class {
@@ -64,6 +67,9 @@ impl Class {
             Class::AbsoluteWord => "absolute word",
             Class::Intensifier => "intensifier",
             Class::ThreeItemList => "three-item list",
+            Class::PassiveVoice => "passive voice",
+            Class::UnknownToken => "token not in the facts",
+            Class::OverLimit => "over the length limit",
         }
     }
 
@@ -73,7 +79,7 @@ impl Class {
     pub fn hard(self) -> bool {
         !matches!(
             self,
-            Class::AbsoluteWord | Class::Intensifier | Class::ThreeItemList
+            Class::AbsoluteWord | Class::Intensifier | Class::ThreeItemList | Class::PassiveVoice
         )
     }
 
@@ -96,6 +102,9 @@ impl Class {
             Class::AbsoluteWord => "Name the real scope, or keep it only in a technical rule.",
             Class::Intensifier => "Cut the intensifier.",
             Class::ThreeItemList => "Use two items or one, unless all three are required.",
+            Class::PassiveVoice => "Name who acts and use an active verb.",
+            Class::UnknownToken => "Cut it, or use the value from the facts.",
+            Class::OverLimit => "Cut the text to the limit.",
         }
     }
 }
@@ -197,6 +206,140 @@ static CODE_SPAN: LazyLock<Regex> = LazyLock::new(|| static_regex(r"`[^`\n]*`"))
 static URL: LazyLock<Regex> = LazyLock::new(|| static_regex(r"https?://\S+"));
 static PATH: LazyLock<Regex> = LazyLock::new(|| static_regex(r"[\w.~*-]*(?:/[\w.*~-]+)+"));
 
+/// A form of "be", up to two light adverbs, then the next word. Only the
+/// next word decides whether the phrase is a passive (`is_participle`).
+static PASSIVE: LazyLock<Regex> = LazyLock::new(|| {
+    static_regex(
+        r"(?i)\b(is|are|am|was|were|be|been|being)\s+(?:(?:not|also|now|then|already|only|still|never|always|just|later|first|again|often)\s+)?([a-z]+)\b",
+    )
+});
+
+/// Past participles that do not end in "ed".
+const IRREGULAR_PARTICIPLES: &[&str] = &[
+    "done",
+    "made",
+    "given",
+    "taken",
+    "shown",
+    "known",
+    "written",
+    "built",
+    "found",
+    "kept",
+    "sent",
+    "seen",
+    "chosen",
+    "driven",
+    "held",
+    "lost",
+    "thrown",
+    "told",
+    "understood",
+    "begun",
+    "drawn",
+    "hidden",
+    "spoken",
+    "stolen",
+    "torn",
+    "worn",
+    "broken",
+    "left",
+];
+
+/// Words that end in "ed" and are not participles, or name a feeling. "Is
+/// tired" and "were interested" describe a state of a person, not an action
+/// done to a thing.
+const NOT_PARTICIPLES: &[&str] = &[
+    "hundred",
+    "naked",
+    "wicked",
+    "sacred",
+    "hatred",
+    "kindred",
+    "tired",
+    "excited",
+    "interested",
+    "concerned",
+    "surprised",
+    "pleased",
+    "worried",
+    "annoyed",
+    "bored",
+    "scared",
+];
+
+/// Participles that read as a status when they follow a present-tense "is",
+/// "are" or "am": "the flag is deprecated", "the PR is merged". The same
+/// word after "was", "were", "be", "been" or "being" is an event and is
+/// still flagged ("the flag was deprecated", "will be merged").
+const STATUS_WORDS: &[&str] = &[
+    "deprecated",
+    "required",
+    "supported",
+    "unsupported",
+    "enabled",
+    "disabled",
+    "merged",
+    "unmerged",
+    "closed",
+    "expired",
+    "named",
+    "called",
+    "based",
+    "located",
+    "installed",
+    "configured",
+    "signed",
+    "pinned",
+    "locked",
+    "stuck",
+    "unused",
+    "unchanged",
+    "archived",
+    "released",
+    "unreleased",
+    "ignored",
+    "done",
+    "broken",
+    "known",
+];
+
+fn is_participle(word: &str) -> bool {
+    if NOT_PARTICIPLES.contains(&word) {
+        return false;
+    }
+    IRREGULAR_PARTICIPLES.contains(&word)
+        || (word.len() >= 4 && word.ends_with("ed") && !word.ends_with("eed"))
+}
+
+/// The passive-voice findings of the masked text. A heuristic: a form of
+/// "be" followed by a past participle. It skips what it cannot tell apart
+/// from an adjective, so some passives pass.
+fn passive_findings(masked: &str, newlines: &[usize]) -> Vec<Finding> {
+    let mut found = Vec::new();
+    for caps in PASSIVE.captures_iter(masked) {
+        let be = caps[1].to_lowercase();
+        let word = caps[2].to_lowercase();
+        if !is_participle(&word) {
+            continue;
+        }
+        let present = matches!(be.as_str(), "is" | "are" | "am");
+        if present && STATUS_WORDS.contains(&word.as_str()) {
+            continue;
+        }
+        let Some(whole) = caps.get(0) else {
+            continue;
+        };
+        let line = newlines.partition_point(|&n| n < whole.start()) + 1;
+        found.push(Finding {
+            line,
+            class: Class::PassiveVoice,
+            text: whole.as_str().chars().take(48).collect(),
+        });
+    }
+    found
+}
+
 /// One problem, with where it is and what to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Finding {
@@ -237,7 +380,7 @@ fn is_trailer(line: &str) -> bool {
 
 /// The text with everything that is not prose replaced by spaces, so byte
 /// offsets and line numbers stay the same.
-fn mask(text: &str) -> String {
+pub(super) fn mask(text: &str) -> String {
     let mut out: Vec<String> = Vec::new();
     let mut fenced = false;
     // An indented block is code only after a blank line. An indented line
@@ -291,6 +434,7 @@ pub fn lint(text: &str) -> Vec<Finding> {
             });
         }
     }
+    found.extend(passive_findings(&masked, &newlines));
     found.sort_by(|a, b| (a.line, a.text.as_str()).cmp(&(b.line, b.text.as_str())));
     found.dedup();
     found
@@ -336,7 +480,7 @@ mod tests {
 
     #[test]
     fn an_emphasis_crutch_is_found() {
-        let text = "The lock is held twice. Let that sink in.";
+        let text = "The lock blocks twice. Let that sink in.";
 
         assert_eq!(classes(text), vec![Class::EmphasisCrutch]);
     }
@@ -441,7 +585,7 @@ mod tests {
     #[test]
     fn a_finding_is_reported_on_the_line_where_its_words_start() {
         let so = "Done.\n\nSo we changed the order.";
-        let look = "The lock is held.\nLook, it is wrong.";
+        let look = "The lock blocks.\nLook, it is wrong.";
 
         let (a, b) = (lint(so), lint(look));
 
@@ -468,7 +612,7 @@ mod tests {
     #[test]
     fn a_paragraph_starting_with_so_is_found_but_a_mid_paragraph_so_is_not() {
         let opener = "Done.\n\nSo we changed the order.";
-        let inside = "We changed the order\nso the lock is taken first.";
+        let inside = "We changed the order\nso the lock comes first.";
 
         assert_eq!(classes(opener), vec![Class::SoOpener]);
         assert!(classes(inside).is_empty());
@@ -508,6 +652,92 @@ mod tests {
 
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].class, Class::ThreeItemList);
+        assert!(!has_hard(&found));
+    }
+
+    #[test]
+    fn passive_voice_is_found_in_each_tense() {
+        for text in [
+            "The retry was added.",
+            "The timeout is handled by the client.",
+            "The bug has been fixed.",
+            "The branch will be merged today.",
+            "The cache is also cleared on exit.",
+            "These rows were written twice.",
+            "The file should be removed.",
+            "The call is not retried.",
+        ] {
+            assert!(
+                classes(text).contains(&Class::PassiveVoice),
+                "{text}: {:?}",
+                lint(text)
+            );
+        }
+    }
+
+    #[test]
+    fn active_voice_and_adjectives_are_not_passive() {
+        for text in [
+            "I added the retry.",
+            "The client handles the timeout.",
+            "The speed is high and the need is clear.",
+            "The list is empty.",
+            "It is a hundred lines long.",
+            "The result is red.",
+            "Is the build green?",
+            "They were happy with the result.",
+        ] {
+            assert!(
+                !classes(text).contains(&Class::PassiveVoice),
+                "{text}: {:?}",
+                lint(text)
+            );
+        }
+    }
+
+    #[test]
+    fn a_present_tense_status_word_is_allowed_but_the_same_word_as_an_event_is_not() {
+        for text in [
+            "The flag is deprecated.",
+            "The option is required.",
+            "The PR is merged.",
+            "The feature is disabled in tests.",
+            "The key is named id.",
+        ] {
+            assert!(
+                !classes(text).contains(&Class::PassiveVoice),
+                "{text}: {:?}",
+                lint(text)
+            );
+        }
+        for text in [
+            "The flag was deprecated last week.",
+            "The option will be required next year.",
+            "The PR was merged.",
+        ] {
+            assert!(
+                classes(text).contains(&Class::PassiveVoice),
+                "{text}: {:?}",
+                lint(text)
+            );
+        }
+    }
+
+    #[test]
+    fn passive_voice_in_code_quotes_and_paths_is_skipped() {
+        let text = "Run `was_added` now.\n\n```\nit was added\n```\n\n> it was added\n";
+
+        assert!(!classes(text).contains(&Class::PassiveVoice));
+    }
+
+    #[test]
+    fn passive_voice_is_a_soft_finding_and_names_its_line() {
+        let text = "Done.\nThe retry was added.";
+
+        let found = lint(text);
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].line, 2);
         assert!(!has_hard(&found));
     }
 

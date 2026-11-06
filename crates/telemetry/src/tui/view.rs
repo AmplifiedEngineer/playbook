@@ -370,7 +370,7 @@ fn render_help(frame: &mut Frame, area: Rect, scroll: usize, pal: &Palette) {
     let top = scroll.min(lines.len().saturating_sub(page));
     let edge = Style::default().fg(pal.color(pal.hi));
     let more = if lines.len() > page {
-        "\u{2191}/\u{2193} scroll, any other key closes"
+        "\u{2191}/\u{2193} j/k scroll, any other key closes"
     } else {
         "any key closes"
     };
@@ -1110,12 +1110,12 @@ mod tests {
 
     #[test]
     fn the_help_window_fits_every_supported_size_and_names_the_panels() {
-        for (w, h) in [(80, 24), (100, 30), (160, 50)] {
+        for (w, h) in [(80, 24), (100, 30), (160, 60)] {
             let mut app = app_with(&[event("claude-opus-5", "alpha", 1.0)]);
             app.help = Some(0);
             let text = screen(&app, w, h);
             assert!(text.contains("Navigation"), "{w}x{h}: {text}");
-            if h >= 50 {
+            if h >= 60 {
                 // The whole table fits on a tall screen.
                 for group in [
                     "Periods",
@@ -1156,12 +1156,12 @@ mod tests {
     fn the_footer_names_what_each_key_does_and_always_keeps_help_and_quit() {
         let app = App::new(Range::All);
         let wide = screen(&app, 140, 30);
-        for hint in ["m month", "w week", "d day", "a all", "h help", "q quit"] {
+        for hint in ["m month", "w week", "d day", "a all", "? help", "q quit"] {
             assert!(wide.contains(hint), "{hint}");
         }
         for width in [80, 90, 100] {
             let text = screen(&app, width, 24);
-            assert!(text.contains("h help") && text.contains("q quit"), "{text}");
+            assert!(text.contains("? help") && text.contains("q quit"), "{text}");
         }
     }
 
@@ -1345,7 +1345,7 @@ mod tests {
         let narrow = screen(&app, 80, 24);
         assert!(wide.contains("t theme"), "{wide}");
         assert!(!narrow.contains("t theme"), "{narrow}");
-        for kept in ["m month", "v view", "/ filter", "h help", "q quit"] {
+        for kept in ["m month", "v view", "/ filter", "? help", "q quit"] {
             assert!(narrow.contains(kept), "{kept}:\n{narrow}");
         }
     }

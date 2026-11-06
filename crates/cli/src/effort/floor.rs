@@ -37,7 +37,7 @@ pub struct Floor {
 const DOC: &str = "docs/internals/02-model-routing-and-memory.md";
 
 /// Every agent, sorted by name.
-pub const FLOORS: [Floor; 11] = [
+pub const FLOORS: [Floor; 12] = [
     Floor {
         agent: "analyst",
         floor: "medium",
@@ -114,6 +114,13 @@ pub const FLOORS: [Floor; 11] = [
         costly_to_miss: false,
         fan_out: false,
         source: "already the lowest effort; Haiku low 86/90, misses were false alarms on clean controls (bench campaign #714)",
+    },
+    Floor {
+        agent: "writer",
+        floor: "medium",
+        costly_to_miss: false,
+        fan_out: true,
+        source: "writer pilot 2026-11-06: Haiku medium, 18 cases, 0 invented facts and 0 hard prose findings; a thin pilot, so pinned at the shipped medium",
     },
 ];
 

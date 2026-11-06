@@ -730,14 +730,14 @@ impl App {
         self.go_tab(tab as isize);
     }
 
-    /// Keys while the help window is open: the arrows scroll it, Ctrl-C quits
+    /// Keys while the help window is open: the arrows and j and k scroll it, Ctrl-C quits
     /// and any other key closes it. The data keeps refreshing underneath.
     fn help_key(&mut self, code: KeyCode, ctrl: bool) -> Effect {
         let at = self.help.unwrap_or(0);
         let page = self.help_page();
         let to = match code {
-            KeyCode::Down => Some(at + 1),
-            KeyCode::Up => Some(at.saturating_sub(1)),
+            KeyCode::Down | KeyCode::Char('j') => Some(at + 1),
+            KeyCode::Up | KeyCode::Char('k') => Some(at.saturating_sub(1)),
             KeyCode::PageDown => Some(at + page),
             KeyCode::PageUp => Some(at.saturating_sub(page)),
             KeyCode::Home => Some(0),
@@ -896,6 +896,20 @@ impl App {
             }
             Cmd::Help => self.help = Some(0),
             Cmd::Budget => self.budget_popup = Some(super::budget_popup::BudgetPopup::default()),
+            Cmd::Zone => {
+                let to = match crate::tz::current() {
+                    crate::tz::Zone::Utc => crate::tz::Zone::Local,
+                    _ => crate::tz::Zone::Utc,
+                };
+                crate::tz::set(to);
+                // The cursor is a day number in the old zone.
+                self.cursor = None;
+                self.note = Some(match to {
+                    crate::tz::Zone::Utc => "Showing UTC".to_string(),
+                    _ => "Showing local time".to_string(),
+                });
+                return Effect::Requery;
+            }
             Cmd::Refresh => return Effect::Requery,
         }
         Effect::None
@@ -1108,6 +1122,29 @@ mod tests {
     fn capital_b_reads_the_budget_again_like_capital_r() {
         let mut app = loaded();
         assert_eq!(app.key(press(KeyCode::Char('B'))), Effect::Requery);
+    }
+
+    #[test]
+    fn z_switches_between_local_time_and_utc_and_asks_for_a_new_read() {
+        use crate::tz::{self, Zone};
+        tz::set(Zone::Utc);
+        let mut app = loaded();
+        app.cursor = Some(NOW.div_euclid(86_400));
+
+        let first = app.key(press(KeyCode::Char('z')));
+        let after_first = tz::current();
+        let note_first = app.note.clone();
+        let second = app.key(press(KeyCode::Char('z')));
+
+        assert_eq!((first, second), (Effect::Requery, Effect::Requery));
+        assert_eq!(after_first, Zone::Local);
+        assert_eq!(
+            app.cursor, None,
+            "a day number from the old zone is dropped"
+        );
+        assert_eq!(note_first.as_deref(), Some("Showing local time"));
+        assert_eq!(tz::current(), Zone::Utc);
+        assert_eq!(app.note.as_deref(), Some("Showing UTC"));
     }
 
     #[test]
@@ -1456,6 +1493,18 @@ mod tests {
         assert_eq!(app.cursor, Some(today() - 29), "stops on the oldest day");
     }
 
+    #[test]
+    fn h_and_l_move_the_chart_cursor_like_left_and_right() {
+        let mut app = charted(Range::LastDays(30), 30);
+        app.key(press(KeyCode::Char('h')));
+        assert_eq!(app.cursor, Some(today() - 1));
+        app.key(press(KeyCode::Char('h')));
+        assert_eq!(app.cursor, Some(today() - 2));
+        app.key(press(KeyCode::Char('l')));
+        assert_eq!(app.cursor, Some(today() - 1));
+        assert!(app.help.is_none(), "h no longer opens the help");
+    }
+
     // NOW is Thursday 2026-09-03, so the Monday week has bars from today - 3
     // to today + 3 and the cursor starts on today, not on the last bar.
     #[test]
@@ -1591,7 +1640,7 @@ mod tests {
     #[test]
     fn an_unbound_key_does_nothing() {
         let mut app = App::new(Range::All);
-        assert_eq!(app.key(press(KeyCode::Char('z'))), Effect::None);
+        assert_eq!(app.key(press(KeyCode::Char('x'))), Effect::None);
         assert!(!app.quit);
     }
 
@@ -1616,18 +1665,16 @@ mod tests {
     }
 
     #[test]
-    fn h_and_question_mark_open_the_help_and_any_other_key_closes_it() {
-        for open in ['h', '?'] {
-            let mut app = loaded();
-            app.key(press(KeyCode::Char(open)));
-            assert_eq!(app.help, Some(0));
-            // A key that would change the range only closes the window.
-            assert_eq!(app.key(press(KeyCode::Char('a'))), Effect::None);
-            assert_eq!((app.help, app.range), (None, Range::All));
-        }
+    fn question_mark_opens_the_help_and_any_other_key_closes_it() {
+        let mut app = loaded();
+        app.key(press(KeyCode::Char('?')));
+        assert_eq!(app.help, Some(0));
+        // A key that would change the range only closes the window.
+        assert_eq!(app.key(press(KeyCode::Char('a'))), Effect::None);
+        assert_eq!((app.help, app.range), (None, Range::All));
         for close in [KeyCode::Esc, KeyCode::Char('h'), KeyCode::Char('x')] {
             let mut app = loaded();
-            app.key(press(KeyCode::Char('h')));
+            app.key(press(KeyCode::Char('?')));
             app.key(press(close));
             assert_eq!(app.help, None, "{close:?}");
             assert!(!app.quit, "{close:?}");
@@ -1638,7 +1685,7 @@ mod tests {
     fn the_help_scrolls_with_the_arrows_and_stops_at_its_ends() {
         let mut app = loaded();
         app.area = Rect::new(0, 0, 80, 24);
-        app.key(press(KeyCode::Char('h')));
+        app.key(press(KeyCode::Char('?')));
         app.key(press(KeyCode::Up));
         assert_eq!(app.help, Some(0));
         app.key(press(KeyCode::Down));
@@ -1653,11 +1700,22 @@ mod tests {
     }
 
     #[test]
+    fn the_help_scrolls_with_j_and_k() {
+        let mut app = loaded();
+        app.area = Rect::new(0, 0, 80, 24);
+        app.key(press(KeyCode::Char('?')));
+        app.key(press(KeyCode::Char('j')));
+        assert_eq!(app.help, Some(1));
+        app.key(press(KeyCode::Char('k')));
+        assert_eq!(app.help, Some(0));
+    }
+
+    #[test]
     fn a_refresh_while_the_help_is_open_keeps_it_and_the_selection() {
         let mut app = loaded();
         app.key(press(KeyCode::Char('3')));
         app.key(press(KeyCode::Down));
-        app.key(press(KeyCode::Char('h')));
+        app.key(press(KeyCode::Char('?')));
         app.key(press(KeyCode::Down));
         app.refresh(data_with([5.0, 1.0, 3.0]));
         assert_eq!(app.help, Some(1));
@@ -1668,7 +1726,7 @@ mod tests {
     #[test]
     fn ctrl_c_quits_while_the_help_is_open() {
         let mut app = loaded();
-        app.key(press(KeyCode::Char('h')));
+        app.key(press(KeyCode::Char('?')));
         app.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(app.quit);
     }
@@ -1760,6 +1818,7 @@ mod tests {
             EditLayout,
             Help,
             Refresh,
+            Zone,
         ] {
             assert!(keys::BINDINGS.iter().any(|b| b.cmd == cmd), "{cmd:?}");
         }

@@ -1317,11 +1317,11 @@ Example: `playbook review triage-merge --lenses security,logic --tiers triage.js
 
 Say which model, effort and agent a kind of task goes to
 
-One routing table for every command that dispatches agents. Kinds: mechanical, classify, check, review, implement, design. Only `implement` reads `--tier` (low, medium or high). The answer includes whether the user must approve first (the top model, the high tier, or a task that failed twice). `routing.escalate` decides what happens then: `ask` (default) tells you to ask the user, `auto` proceeds (auto mode and `auto.budgetUsd` still cap the spend), `deny` returns the cheaper route. Your effort ceiling always wins.
+One routing table for every command that dispatches agents. Kinds: mechanical, classify, check, review, write, implement, design. Only `implement` reads `--tier` (low, medium or high). The answer includes whether the user must approve first (the top model, the high tier, or a task that failed twice). `routing.escalate` decides what happens then: `ask` (default) tells you to ask the user, `auto` proceeds (auto mode and `auto.budgetUsd` still cap the spend), `deny` returns the cheaper route. Your effort ceiling always wins.
 
 Example: `playbook route implement --tier medium --json`
 
-- `<KIND>`: One of mechanical, classify, check, review, implement or design
+- `<KIND>`: One of mechanical, classify, check, review, write, implement or design
 - `--tier <TIER>`: One of low, medium or high. Only `implement` reads it
 - `--failures <FAILURES>`: How many times this task already failed
 - `--json`: Print the decision as JSON

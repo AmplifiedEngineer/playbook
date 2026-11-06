@@ -2,7 +2,7 @@
 │╭┤ Help: keys by group ├─────────────────────────────────────────────────────╮│
 ││p          Open the full screen Sessions list       all panels              ││
 ││e          Edit the tabs and the panels on each     all panels              ││
-││h, ?       Show this help                           all panels              ││
+││?          Show this help                           all panels              ││
 ╰│                                                                            │╯
 ╭│Sorting                                                                     │╮
 ││s          Sort by the next column                  tables                  ││
@@ -20,5 +20,5 @@
 ││Quit                                                                        ││
 ││q, Esc     Quit                                     all panels              ││
 ││Ctrl-C     Quit, also while typing a filter         all panels              ││
-╰╰┤ ↑/↓ scroll, any other key closes ├────────────────────────────────────────╯╯
- w week m month r range v view / filter h help q quit      updated 01:46:40 UTC
+╰╰┤ ↑/↓ j/k scroll, any other key closes ├────────────────────────────────────╯╯
+ w week m month r range v view / filter ? help q quit      updated 01:46:40 UTC
