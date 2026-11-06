@@ -357,6 +357,46 @@ fn symbol_text_output_and_filters_work_end_to_end() {
 }
 
 #[test]
+fn symbol_and_search_accept_the_go_language_filter() {
+    // Arrange
+    let fx = Fixture::new("lang-go", true);
+    fx.write("a.go", "package a\n\nfunc Target() {}\n");
+    fx.write("b.py", "def Target():\n    pass\n");
+    assert!(fx.playbook(&["code", "index"]).status.success());
+
+    // Act
+    let symbol = fx.playbook(&["code", "symbol", "Target", "--lang", "go", "--json"]);
+    let search = fx.playbook(&["code", "search", "Target", "--lang", "go", "--json"]);
+
+    // Assert
+    for out in [&symbol, &search] {
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let doc = json_of(out);
+        let results = doc["results"].as_array().expect("results");
+        assert!(!results.is_empty());
+        for r in results {
+            assert!(r["path"].as_str().expect("path").ends_with(".go"), "{r}");
+        }
+    }
+}
+
+#[test]
+fn an_unknown_language_is_still_rejected() {
+    // Arrange
+    let fx = Fixture::new("lang-foo", true);
+
+    // Act
+    let out = fx.playbook(&["code", "symbol", "x", "--lang", "foo"]);
+
+    // Assert
+    assert!(!out.status.success());
+}
+
+#[test]
 fn ranked_search_without_the_text_flag_finds_symbols() {
     // Arrange
     let fx = Fixture::new("ranked", true);
