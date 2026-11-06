@@ -28,7 +28,7 @@ Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mod
 | `implement` (`--tier low\|medium\|high`) | sonnet, low, medium or high | `implementer` |
 | `design` | opus, xhigh | `critic` (stress-tests the design at its own Sonnet medium; the design itself runs in the command on Opus) |
 
-Approval is needed for the top model, the high implement tier, and a task that has failed twice (`--failures 2`). `routing.escalate` decides what happens then: `ask` (default) tells the orchestrator to ask you, `auto` proceeds (auto mode and `auto.budgetUsd` still cap the spend), `deny` returns the next cheaper route. Your effort ceiling always wins. `--json` prints the decision for scripts.
+Approval is needed for the top model, the high implement tier, and a task that has failed twice (`--failures 2`). `routing.escalate` decides what happens then: `ask` tells the orchestrator to ask you, `auto` (default) proceeds (auto mode and `auto.budgetUsd` still cap the spend), `deny` returns the next cheaper route. Your effort ceiling always wins. `--json` prints the decision for scripts.
 
 ### auto-model-detect
 

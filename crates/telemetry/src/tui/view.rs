@@ -321,6 +321,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     if let Some(scroll) = app.help {
         render_help(frame, area, scroll, &pal);
     }
+    if let Some(popup) = &app.budget_popup {
+        super::budget_popup::render(frame, area, popup, &pal);
+    }
     if let Some(editor) = &app.editor {
         super::editor_view::render(frame, area, editor, &pal, app.icon);
     }
@@ -1060,7 +1063,7 @@ mod tests {
             first: Some(NOW - 90_000),
             last: Some(NOW - 80_000),
         };
-        for (w, h) in [(80, 24), (100, 30), (160, 52)] {
+        for (w, h) in [(80, 24), (100, 30), (160, 50)] {
             let text = screen(&app, w, h);
             assert!(text.contains("The store has 3 messages from"), "{text}");
             assert!(text.contains("Press a to show all time"), "{text}");
@@ -1111,12 +1114,12 @@ mod tests {
 
     #[test]
     fn the_help_window_fits_every_supported_size_and_names_the_panels() {
-        for (w, h) in [(80, 24), (100, 30), (160, 52)] {
+        for (w, h) in [(80, 24), (100, 30), (160, 60)] {
             let mut app = app_with(&[event("claude-opus-5", "alpha", 1.0)]);
             app.help = Some(0);
             let text = screen(&app, w, h);
             assert!(text.contains("Navigation"), "{w}x{h}: {text}");
-            if h >= 50 {
+            if h >= 60 {
                 // The whole table fits on a tall screen.
                 for group in [
                     "Periods",

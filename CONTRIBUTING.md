@@ -3,6 +3,7 @@
 This project follows the standard igorjs contribution rules. Start here:
 
 - **[.github/CONTRIBUTING-RULES.md](.github/CONTRIBUTING-RULES.md)**: DCO, CLA, commit conventions, PR process, and the code style baseline (SPDX headers, dependency policy, commit signing). These rules are shared across all igorjs repos.
+- **First pull request:** sign the CLA by adding your own row to [.github/CONTRIBUTORS.md](.github/CONTRIBUTORS.md) in a commit you author. A person named in a `Co-authored-by:` trailer signs the same way. The steps are in the rules above, and [the internals note](docs/internals/18-cla-and-dco-checks.md) explains the checks.
 - **[README](README.md)**: project description and install.
 - **[SECURITY.md](SECURITY.md)**: vulnerability disclosure process.
 
@@ -74,7 +75,7 @@ gh workflow run release.yml -f bump=patch -f dry_run=true   # rehearse
 gh workflow run release.yml -f bump=patch                   # or minor, major, or -f version=X.Y.Z
 ```
 
-It opens the release pull request with `scripts/bump-version.sh` and the changelog section, waits for the merge queue, tags the merged commit, builds and attests the assets, publishes the release as the latest and checks it, then opens the release pull requests in the Homebrew tap and the marketplace and waits for their own `vX.Y.Z` releases. When a run fails, run it again with `-f version=X.Y.Z`: it goes on from where it stopped. [Release channels](docs/internals/06-release-channels.md) has the details and the rollback steps.
+It opens the release pull request with `scripts/bump-version.sh` and the changelog section, waits for the merge queue, tags the merged commit, builds and attests the assets, publishes the release as the latest and checks it, then opens the release pull requests in the Homebrew tap and the marketplace and waits for their own `vX.Y.Z` releases. It also opens the Nix flake pull request, publishes the AUR package, the Scoop manifest, a winget pull request and the signed apt and dnf repository. Each of those is a leaf job: a red leaf job fails the run but leaves the release published. When a run fails, run it again with `-f version=X.Y.Z`: it goes on from where it stopped. [Release channels](docs/internals/06-release-channels.md) has the details and the rollback steps.
 
 ### Breaking changes before 1.0
 
@@ -129,6 +130,10 @@ Unsafe code is not allowed: the workspace sets `unsafe_code = "forbid"`, which a
 
 See the [justfile](justfile) for test commands. `just check` runs the checks CI runs, apart from the cross builds and `cargo audit`.
 
-A change under `.github/` also needs `just zizmor` to pass (`brew install zizmor`). It lints the workflows the way the `zizmor` workflow does, and fails on findings of medium severity and above. The workflow itself only reports and never blocks a merge. Ignores go in `.github/zizmor.yml`, one rule and one file each, with the reason. This is dev tooling only, not part of the `playbook` binary or the plugin.
+A change under `.github/` also needs `just zizmor` to pass (`brew install zizmor`). It lints the workflows the way the `zizmor` workflow does, and fails on any finding of any severity. Ignores go in `.github/zizmor.yml`, one rule and one file each, with the reason. This is dev tooling only, not part of the `playbook` binary or the plugin.
+
+Workflows follow a few shared rules. Every job has a name and a timeout. A newer push to a pull request cancels the older run of the same check. A draft pull request skips the heavy `rust-ci` jobs, and the macOS leg of `shell-ci` runs as a no-op on Linux. Marking the pull request ready runs the full set. The `ci-auto-rerun` workflow looks for failed runs every 10 minutes and reruns once a run that failed from an infrastructure problem. It never reruns `release`, and it skips fork runs.
+
+The `Auto-Update PRs` workflow keeps armed PRs (auto-merge on, not draft) up to date with main one at a time. It runs on every push to main, every 15 minutes and on demand, updates at most the oldest armed PR that is behind, and does nothing while an up to date armed PR is still waiting on its checks. `scripts/pick-pr-to-update.js` holds the decision and `scripts/pick-pr-to-update.test.sh` tests it. It never force-pushes. A repo owner turns the workflow on in the Actions settings.
 
 A test that starts the built `playbook` gives it a scratch home: use `isolated::playbook()` from `crates/cli/tests/support/isolated.rs`, or set `HOME` yourself. `test_isolation.rs` fails for a spawn that does neither. As a second net, a debug build started by cargo or nextest does not run migrations, the upgrade heal or the real `launchctl` and `systemctl` against the real home of your account, and prints a note instead. Other writes are not covered by that net, so the scratch home stays the rule. Set `PLAYBOOK_ALLOW_REAL_HOME=1` to run a dev build against your real home on purpose.

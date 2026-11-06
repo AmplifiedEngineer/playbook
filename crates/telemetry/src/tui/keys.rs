@@ -43,6 +43,7 @@ pub enum Cmd {
     EditLayout,
     Help,
     Refresh,
+    Budget,
     Zone,
     Account,
 }
@@ -458,12 +459,22 @@ pub const BINDINGS: &[Binding] = &[
     },
     Binding {
         cmd: Cmd::Refresh,
-        keys: &[c('R')],
+        keys: &[c('R'), c('B')],
         ctrl: false,
-        shown: "R",
+        shown: "R, B",
         group: Group::Refresh,
         panels: ALL_PANELS,
-        text: "Read new usage now (also automatic)",
+        text: "Read usage and budget limits now",
+        hint: None,
+    },
+    Binding {
+        cmd: Cmd::Budget,
+        keys: &[c('b')],
+        ctrl: false,
+        shown: "b",
+        group: Group::Refresh,
+        panels: ALL_PANELS,
+        text: "Set the manual monthly budget",
         hint: None,
     },
     Binding {
