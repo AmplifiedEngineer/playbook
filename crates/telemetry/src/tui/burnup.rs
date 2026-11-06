@@ -37,8 +37,6 @@ const HEADROOM: f64 = 1.05;
 /// The thresholds drawn, in percent of the limit.
 const NEAR: f64 = 80.0;
 const PERCENT: f64 = 100.0;
-/// Percent of the limit where the used area turns from green to yellow.
-const RAMP_YELLOW: f64 = 60.0;
 /// The glyph in the legend for the used area drawn as dots.
 const DOT_ACTUAL: char = '\u{28ff}';
 
@@ -313,9 +311,8 @@ fn solid_rows(b: &Burnup, pal: &Palette, plot: &Plot) -> Vec<Vec<Span<'static>>>
 /// outranks the projection, which outranks the used area.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Dot {
-    Green,
-    Yellow,
-    Red,
+    /// The used area at this whole percent of the limit.
+    Used(u8),
     Half,
     Near,
     Projection,
@@ -325,23 +322,16 @@ enum Dot {
 impl Dot {
     fn ink(self, pal: &Palette) -> Ink {
         match self {
-            Dot::Green => pal.live,
-            Dot::Yellow => pal.caution,
-            Dot::Red | Dot::Limit => pal.error,
+            Dot::Used(pct) => pal.usage_ink(f64::from(pct)),
+            Dot::Limit => pal.error,
             Dot::Half | Dot::Near => pal.inactive,
             Dot::Projection => pal.hi,
         }
     }
 
-    /// The color stop of the used area at `percent` of the limit.
-    fn ramp(percent: f64) -> Dot {
-        if percent >= NEAR {
-            Dot::Red
-        } else if percent >= RAMP_YELLOW {
-            Dot::Yellow
-        } else {
-            Dot::Green
-        }
+    /// The used area at `percent` of the limit, to the nearest whole percent.
+    fn used(percent: f64) -> Dot {
+        Dot::Used(percent.clamp(0.0, 255.0).round() as u8)
     }
 }
 
@@ -405,11 +395,12 @@ fn connect(edge: &[Option<usize>]) -> Vec<(usize, usize)> {
 /// line never reads denser than the half-filled area beside it.
 const LINE_DOTS: u32 = 4;
 
-/// `ch` with dots dropped from a green or yellow cell that holds more than
+/// `ch` with dots dropped from a cell below `NEAR` that holds more than
 /// `LINE_DOTS`, so a steep rise stays lighter than the danger zone.
 fn thin(ch: char, dot: Dot) -> char {
     let mut mask = (ch as u32).saturating_sub(0x2800) as u8;
-    while dot != Dot::Red && mask.count_ones() > LINE_DOTS {
+    let danger = matches!(dot, Dot::Used(pct) if f64::from(pct) >= NEAR);
+    while !danger && mask.count_ones() > LINE_DOTS {
         mask &= mask - 1;
     }
     braille(mask)
@@ -433,8 +424,8 @@ fn dot_rows(b: &Burnup, pal: &Palette, plot: &Plot) -> Vec<Vec<Span<'static>>> {
             match role {
                 Role::Actual => {
                     let percent = b.limit.map_or(0.0, |l| fine.value(y) / l * PERCENT);
-                    let dot = Dot::ramp(percent);
-                    if dot == Dot::Red || (x + y) % 2 == 0 {
+                    let dot = Dot::used(percent);
+                    if percent >= NEAR || (x + y) % 2 == 0 {
                         dots.set(x, y, dot);
                     }
                 }
@@ -454,7 +445,7 @@ fn dot_rows(b: &Burnup, pal: &Palette, plot: &Plot) -> Vec<Vec<Span<'static>>> {
     // so a line cell is never denser than the fill beside it.
     let mut edge = DotGrid::new(plot.width, plot.height);
     for (x, y) in connect(&used_edge(b, &fine)) {
-        edge.set(x, y, Dot::ramp(percent(y)));
+        edge.set(x, y, Dot::used(percent(y)));
     }
     for (x, y) in connect(&projection_edge(b, &fine)) {
         if x % 3 != 2 {
@@ -628,41 +619,27 @@ pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette, dots: b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::a11y::{confusable, contrast, rgb_of, NON_TEXT_CONTRAST};
+    use crate::tui::a11y::{contrast, rgb_of, NON_TEXT_CONTRAST};
     use crate::tui::theme::{ColorDepth, Theme};
 
     #[test]
-    fn the_ramp_colors_meet_the_non_text_contrast_on_the_ground() {
-        // Arrange
+    fn the_used_area_takes_its_ink_from_the_usage_gradient() {
         let pal = Theme::Standard.palette(ColorDepth::True);
-        let bg = rgb_of(pal.bg);
-
-        // Act
-        let ratios: Vec<(Dot, f64)> = [Dot::Green, Dot::Yellow, Dot::Red]
-            .into_iter()
-            .map(|dot| (dot, contrast(rgb_of(dot.ink(&pal)), bg)))
-            .collect();
-
-        // Assert
-        for (i, (_, ratio)) in ratios.iter().enumerate() {
-            assert!(*ratio >= NON_TEXT_CONTRAST, "stop {i} is {ratio:.2}");
-        }
+        assert_eq!(Dot::used(0.0).ink(&pal), pal.usage_ink(0.0));
+        assert_eq!(Dot::used(69.6).ink(&pal), pal.usage_ink(70.0));
+        assert_eq!(Dot::used(400.0).ink(&pal), pal.usage_ink(255.0));
+        assert!(Dot::used(255.0) < Dot::Projection);
+        assert!(Dot::Projection < Dot::Limit);
     }
 
     #[test]
-    fn the_ramp_stops_stay_apart_under_each_color_vision_type() {
-        // Arrange
+    fn the_used_area_stays_readable_on_a_dark_ground() {
         let pal = Theme::Standard.palette(ColorDepth::True);
-        let stops: Vec<_> = [Dot::Green, Dot::Yellow, Dot::Red]
-            .into_iter()
-            .map(|dot| rgb_of(dot.ink(&pal)))
-            .collect();
-
-        // Act
-        let pair = confusable(&stops);
-
-        // Assert
-        assert_eq!(pair, None);
+        let bg = rgb_of(pal.bg);
+        for pct in [0.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0] {
+            let ratio = contrast(rgb_of(Dot::used(pct).ink(&pal)), bg);
+            assert!(ratio >= NON_TEXT_CONTRAST, "{pct}% is {ratio:.2}");
+        }
     }
 
     fn line(points: Vec<(i64, f64)>, now: i64) -> Burnup {
@@ -779,19 +756,10 @@ mod tests {
     }
 
     #[test]
-    fn a_steep_cell_below_the_danger_zone_keeps_four_dots_and_a_red_one_all() {
-        assert_eq!(thin('\u{28ff}', Dot::Green).to_string(), "\u{28f0}");
-        assert_eq!(thin('\u{28ff}', Dot::Yellow).to_string(), "\u{28f0}");
-        assert_eq!(thin('\u{28ff}', Dot::Red), '\u{28ff}');
-        assert_eq!(thin('\u{2807}', Dot::Green), '\u{2807}');
-    }
-
-    #[test]
-    fn the_ramp_runs_green_then_yellow_then_red_by_percent() {
-        assert!(Dot::ramp(0.0) == Dot::Green);
-        assert!(Dot::ramp(RAMP_YELLOW - 0.1) == Dot::Green);
-        assert!(Dot::ramp(RAMP_YELLOW) == Dot::Yellow);
-        assert!(Dot::ramp(NEAR - 0.1) == Dot::Yellow);
-        assert!(Dot::ramp(NEAR) == Dot::Red);
+    fn a_steep_cell_below_the_danger_zone_keeps_four_dots_and_a_danger_one_all() {
+        assert_eq!(thin('\u{28ff}', Dot::used(10.0)).to_string(), "\u{28f0}");
+        assert_eq!(thin('\u{28ff}', Dot::used(70.0)).to_string(), "\u{28f0}");
+        assert_eq!(thin('\u{28ff}', Dot::used(90.0)), '\u{28ff}');
+        assert_eq!(thin('\u{2807}', Dot::used(10.0)), '\u{2807}');
     }
 }
