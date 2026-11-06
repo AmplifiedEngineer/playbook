@@ -432,6 +432,12 @@ jobs:
         if: env.LANE == 'true'
         run: cargo fmt --all --check
 
+      - name: Check rusqlite is named only in the store crate
+        if: env.LANE == 'true'
+        run: |
+          bash scripts/check-no-rusqlite.sh
+          bash scripts/check-no-rusqlite.test.sh
+
       - name: cargo clippy
         if: env.LANE == 'true'
         env:
