@@ -43,7 +43,6 @@
 # Each target gives two assets: the raw `playbook` binary and
 # pbtop-X.Y.Z-<target>.tar.gz with pbtop alone. The four unix targets add a
 # third, pbdoc-X.Y.Z-<target>.tar.gz with the pbdoc helper and NOTICE-pbdoc.
-# The playbook-telemetry archive is retired (ADR 0041).
 #
 # rusqlite's `bundled` feature compiles SQLite's C source and needs a real C
 # compiler, which is why both musl legs install `musl-tools` and still link
@@ -866,7 +865,7 @@ jobs:
             done > "$sums/SHA256SUMS"
             export DOWNLOAD_BASE="file://$sums"
           fi
-          # The tap retires playbook-telemetry (ADR 0041), so it is not bumped.
+          # The tap has only the playbook and pbtop formulas.
           for f in playbook pbtop; do
             (cd downstream/tap && SOURCE_REPO=playbook TAG_PREFIX=v \
               .github/scripts/bump-formula.sh "$VERSION" "Formula/$f.rb")

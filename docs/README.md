@@ -19,7 +19,7 @@ Task-oriented workflows.
 - [The policy guard](guides/08-policy-guard.md): the optional guard that is off by default, exactly what it denies, how to turn it on and off and its pitfalls.
 - [The launcher](guides/09-launcher.md): `playbook cc`, `playbook ccd`, the `pb` alias and worktrees.
 - [Telemetry](guides/10-telemetry.md): the local collector, what setup writes and how to turn it on or off.
-- [pbtop](guides/11-pbtop.md): the Agent Budget Dashboard on its own, and the retired `playbook-telemetry`.
+- [pbtop](guides/11-pbtop.md): the Agent Budget Dashboard on its own.
 - [Settings](guides/12-settings.md): `playbook config`, tiers and examples.
 - [Security defaults](guides/13-security-defaults.md): the opt-in `permissions` block and its limits.
 - [Models and effort](guides/14-models-and-effort.md): the model tiers, fallbacks, effort ceiling and routing.
