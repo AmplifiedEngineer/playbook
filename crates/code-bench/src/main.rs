@@ -4,30 +4,47 @@
 //! `code-bench pilot` runs the pilot repos through the real binary and writes
 //! the JSON report. It needs network for the first clone and never downloads
 //! an oracle: a repo without an answers file reports no refs truth.
+//! `code-bench gate` judges a report against the committed baseline.
 
 use code_bench::corpus::{fetch, GitTransport, Manifest, ThreadSleeper, Tier};
+use code_bench::gate::{evaluate, Baseline, Floor, Inputs, Overrides};
 use code_bench::oracle::rg::Candidate;
-use code_bench::runner::{self, PlaybookBinary, RepoJob};
+use code_bench::runner::{self, PlaybookBinary, RepoJob, Report};
+use code_bench::scope::scope_to_language;
 use code_bench::tasks::{TaskSet, TASKS_VERSION};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 const DEFAULT_PROGRAM: &str = "playbook";
 const ANSWERS_DIR: &str = "crates/code-bench/data/oracle-answers";
 const HOME_DIR: &str = "home";
-const USAGE: &str = "usage: code-bench pilot CACHE_DIR REPORT_FILE [PLAYBOOK_BINARY]";
+const DATA_DIR: &str = "crates/code-bench/data";
+const LANGUAGE_FLAG: &str = "--language";
+const USAGE: &str = "usage: code-bench pilot [--language LANG] CACHE_DIR REPORT_FILE [PLAYBOOK_BINARY]\n       code-bench gate [--language LANG] REPORT_FILE RUN_DATE";
 
 struct Args {
+    language: Option<String>,
     cache: PathBuf,
     out: PathBuf,
     program: PathBuf,
 }
 
+/// Splits an optional leading `--language LANG` from the positional values.
+fn split_language(args: &[String]) -> Result<(Option<String>, &[String]), String> {
+    match args {
+        [flag, language, rest @ ..] if flag == LANGUAGE_FLAG => Ok((Some(language.clone()), rest)),
+        [flag] if flag == LANGUAGE_FLAG => Err(USAGE.to_string()),
+        _ => Ok((None, args)),
+    }
+}
+
 fn parse_args(args: &[String]) -> Result<Args, String> {
+    let (language, args) = split_language(args)?;
     let [cache, out, rest @ ..] = args else {
         return Err(USAGE.to_string());
     };
     Ok(Args {
+        language,
         cache: PathBuf::from(cache),
         out: PathBuf::from(out),
         program: PathBuf::from(rest.first().map_or(DEFAULT_PROGRAM, String::as_str)),
@@ -49,7 +66,8 @@ fn pilot(args: &Args) -> Result<(), String> {
     let manifest = Manifest::bundled().map_err(|e| e.to_string())?;
     let tasks = TaskSet::bundled().map_err(|e| e.to_string())?;
     let mut jobs = Vec::new();
-    for repo in manifest.tier(Tier::Pilot) {
+    let wanted = |language: &str| args.language.as_deref().is_none_or(|l| l == language);
+    for repo in manifest.tier(Tier::Pilot).filter(|r| wanted(&r.language)) {
         jobs.push(RepoJob {
             repo: repo.name.clone(),
             checkout: fetch(repo, &args.cache, &GitTransport, &ThreadSleeper)
@@ -72,14 +90,97 @@ fn pilot(args: &Args) -> Result<(), String> {
     std::fs::write(&args.out, text).map_err(|e| e.to_string())
 }
 
+fn read_data(name: &str) -> Result<String, String> {
+    let path = Path::new(DATA_DIR).join(name);
+    std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Judges a report against the committed baseline, floor and overrides. A
+/// language narrows the baseline to the repos of that language.
+fn gate(args: &[String]) -> Result<(), String> {
+    let (language, rest) = split_language(args)?;
+    let [report_file, run_date] = rest else {
+        return Err(USAGE.to_string());
+    };
+    let report: Report = serde_json::from_str(
+        &std::fs::read_to_string(report_file).map_err(|e| format!("{report_file}: {e}"))?,
+    )
+    .map_err(|e| format!("{report_file}: {e}"))?;
+    let baseline = Baseline::parse(&read_data("baseline.json")?).map_err(|e| e.to_string())?;
+    let floor = Floor::parse(&read_data("floor.json")?).map_err(|e| e.to_string())?;
+    let overrides = Overrides::parse(&read_data("overrides.json")?).map_err(|e| e.to_string())?;
+    let (baseline, floor) = match language {
+        Some(language) => {
+            let manifest = Manifest::bundled().map_err(|e| e.to_string())?;
+            scope_to_language(&manifest, &language, baseline, floor)
+        }
+        None => (baseline, floor),
+    };
+    let tasks = TaskSet::bundled().map_err(|e| e.to_string())?;
+    let ids: BTreeSet<String> = tasks.tasks.iter().map(|t| t.id.clone()).collect();
+    let failures = evaluate(&Inputs {
+        baseline: &baseline,
+        floor: &floor,
+        overrides: &overrides,
+        report: &report,
+        run_date,
+        prior_task_ids: &ids,
+        task_ids: &ids,
+    });
+    for failure in &failures {
+        eprintln!("{failure}");
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("the gate found {} failures", failures.len()))
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.split_first() {
         Some((command, rest)) if command == "pilot" => parse_args(rest).and_then(|a| pilot(&a)),
+        Some((command, rest)) if command == "gate" => gate(rest),
         _ => Err(USAGE.to_string()),
     };
     if let Err(message) = result {
         eprintln!("{message}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strings(items: &[&str]) -> Vec<String> {
+        items.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn a_leading_language_flag_is_split_off() {
+        let args = strings(&["--language", "go", "cache", "out"]);
+        let (language, rest) = split_language(&args).unwrap();
+        assert_eq!(language.as_deref(), Some("go"));
+        assert_eq!(rest, strings(&["cache", "out"]));
+    }
+
+    #[test]
+    fn no_flag_keeps_every_value() {
+        let args = strings(&["cache", "out"]);
+        let (language, rest) = split_language(&args).unwrap();
+        assert_eq!(language, None);
+        assert_eq!(rest, args);
+    }
+
+    #[test]
+    fn a_flag_without_a_language_fails() {
+        assert!(split_language(&strings(&["--language"])).is_err());
+    }
+
+    #[test]
+    fn pilot_needs_a_cache_and_a_report() {
+        assert!(parse_args(&strings(&["cache"])).is_err());
     }
 }

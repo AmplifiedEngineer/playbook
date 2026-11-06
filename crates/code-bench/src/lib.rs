@@ -12,5 +12,6 @@ pub mod metrics;
 pub mod oracle;
 pub mod process;
 pub mod runner;
+pub mod scope;
 pub mod tasks;
 pub mod tokenizer;
