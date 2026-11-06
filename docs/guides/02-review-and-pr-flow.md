@@ -75,12 +75,13 @@ A PR outside a stack is reviewed with no extra question. When the PR sits in a s
 2. Whole stack, quick review.
 3. Whole stack, deep review.
 
-Pass `--this-pr` or `--whole-stack` to skip the question, to any of the three commands. In auto mode the command takes option 1 and logs the assumption. Either way it first says which PRs are below and above and which branch the PR's own diff is taken against.
+Pass `--this-pr` or `--whole-stack` to skip the question, to any of the three commands. In auto mode the command takes option 1 and logs the assumption. With option 1 the PR gets its own size budget and a short digest of what the PRs above change, so the review skips code that is rewritten higher up. Either way it first says which PRs are below and above and which branch the PR's own diff is taken against.
 
 ```bash
 /playbook:quick-review 123 --whole-stack   # quick review of the stack PR #123 belongs to
 /playbook:deep-review 123 --this-pr        # only PR #123, even if it is stacked
 playbook pr stack 123 --json               # what the commands read: the PRs, their state and size
+playbook pr stack 123 --digest             # what the open PRs above #123 change, per file
 ```
 
 What a whole-stack review does:
@@ -88,6 +89,7 @@ What a whole-stack review does:
 - **One shared context.** Open PRs are read in full. Merged PRs are read as a short summary (title, description, file list) so the reviewer understands the code below.
 - **Merged PRs are never reviewed or commented on.** A PR closed without merging is skipped.
 - **Findings go to the PR that holds the line.** `playbook pr stack map` matches each finding's `file:line` against the diff hunks of the open PRs and creates one pending review per PR. A finding no open PR changes is shown in the report and not posted.
+- **Fixed higher up is dropped.** A finding on code that an open PR above changes or removes is not posted. The report lists it as `fixed above in #<n>`. `playbook pr stack map` does the check and returns it as `fixed_above`.
 - **Safe against change.** If a PR was pushed to, retargeted or closed after the review started, its findings are held back and listed as stale.
 - **Cost guard.** The command asks again before it starts when the open PRs exceed `review.stackMaxPrs` (default 6) or `review.stackMaxLines` (default 3000). See [Config keys](../reference/config-keys.md).
 

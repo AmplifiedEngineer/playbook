@@ -89,3 +89,11 @@ fn routing_scores_a_whole_stack_on_the_union_of_the_open_files() {
     assert!(text.contains("union of the open PRs' files"));
     assert!(text.contains("review.stackMaxPrs"));
 }
+
+#[test]
+fn this_pr_review_reads_the_digest_and_drops_findings_fixed_above() {
+    let text = read("skills/grounding-review/references/stack-review.md");
+    assert!(text.contains("\"<PR_NUMBER> --digest\""), "no digest call");
+    assert!(text.contains("fixed above in #<n>"), "no fixed-above report");
+    assert!(text.contains("`over_line_budget`"), "no per-PR budget");
+}

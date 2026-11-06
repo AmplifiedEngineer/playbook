@@ -45,7 +45,11 @@ When the scope is a whole stack and `over_budget` is true, ask once more before 
 
 ## 2b. This PR only
 
-Review only this PR's own diff against its real base, the parent PR's branch from `prs`, never the default branch. `gh pr diff <PR_NUMBER>` already gives exactly that, so use it and do not run `git diff` against the default branch or read the lower PRs' changes as part of this PR. Tell the reviewer the base branch and that the lower PRs are out of scope. A finding that needs a lower or upper PR to make sense is raised as a `question:` naming that PR, not as a defect in this one. Then skip section 3 and go on with Steps 2 to 4 of the command.
+Review only this PR's own diff against its real base, the parent PR's branch from `prs`, never the default branch. `gh pr diff <PR_NUMBER>` already gives exactly that, so use it and do not run `git diff` against the default branch or read the lower PRs' changes as part of this PR. Tell the reviewer the base branch and that the lower PRs are out of scope. A finding that needs a lower or upper PR to make sense is raised as a `question:` naming that PR, not as a defect in this one. Each PR has its own budget: the review size limit applies to this PR's own lines, never to the stack's total. Its entry in `prs` has `over_line_budget`; when it is true, say so and follow the command's size rules for one PR.
+
+Then read what the open PRs above change. Intent: pr-stack. If the session's tool map lists it, use that command with the arguments as one quoted string: `"<PR_NUMBER> --digest"`. It prints one line per file and upper PR, with the line numbers it changes in this PR's code, cut at 60 lines. Otherwise do this: for each open PR above, read `gh pr diff <n>` and note the old-side line ranges of its hunks per file. Nothing is above when it prints `No open PR above this one.`
+
+Give the digest to the reviewers with the diff. It is the only view of the upper PRs: do not read their full files. Then skip section 3 and go on with Steps 2 to 4 of the command, applying the fixed-above rule of section 4.
 
 ## 3. Build the shared context
 
@@ -67,11 +71,15 @@ Tell the reviewers:
 
 The Verification Sweep checks the anchor: the finding must sit on the PR that owns the line. Show each finding with its PR number.
 
+Fixed-above rule, for every scope with an open PR above the one the finding is on. Before a finding is kept, check whether an open PR above changes or removes the same lines: its old-side hunk range holds the finding's `file:line` (the digest lists them). If it does, drop the finding and list it in the report as `fixed above in #<n>`. Post nothing for it. Do not drop a finding because the PR above only adds lines near it. A finding that stays valid in the final state of the stack is kept on the PR that owns the code. Line numbers after the first PR above can drift by the lines the PRs between them add or remove, so when a range is close but not exact, keep the finding and add `also touched in #<n>` to its body.
+
 ## 5. Post
 
 Not in `SELF_MODE` (report only, set only by `--self` or `--no-post`). Otherwise, after the tier question, write the kept findings as JSON (`file`, `line`, `body`, `pr`) and map them:
 
 Intent: pr-stack. If the session's tool map (printed at session start) lists it, use its findings mapping with the one quoted string `"map --stack <stack_file> --findings <findings.json> --out <mapped.json>"`. `mapped.json` has `by_pr`, `unmapped` and `stale`. Otherwise do this: re-read each open PR with `gh pr view <n> --json state,headRefOid,baseRefName`. A PR that is no longer open, has a new head SHA, or has a new base is stale. Then place each finding by the new side of the hunks in each open PR's `diff_file`. A finding that names a PR goes to that PR when its diff holds the `file:line`; otherwise it is unmapped. A finding that names none goes to the topmost open PR whose diff holds the line. A finding with no file or line, on a line no open PR changes, or naming a merged, closed or unknown PR is unmapped. A finding placed on a stale PR is held. The rest form `by_pr`, each comment as `{"path", "line", "side": "RIGHT", "body"}`.
+
+`mapped.json` also has `fixed_above` (`finding`, `pr`, `fixed_by`): the findings dropped by the rule in section 4. Show them as `fixed above in #<fixed_by>` and post none.
 
 Show `unmapped` and `stale` to the user with their reasons and post none of those: a line no open PR changes, a merged or closed PR, a PR pushed to or retargeted since the review started. Offer to re-run detection when anything is `stale`.
 
