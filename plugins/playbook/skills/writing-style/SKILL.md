@@ -1,6 +1,7 @@
 ---
 name: writing-style
 description: "One plain, simple-English standard for prose a human reads: chat, PR descriptions, commit messages, review comments, tickets, Confluence, Slack, ADRs. Cuts filler, binary contrasts and dashes. Use before writing or posting any."
+user-invocable: false
 ---
 
 # Writing Style

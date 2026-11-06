@@ -1,6 +1,7 @@
 ---
 name: atlassian
 description: Use when reaching Jira work items, Confluence pages or Teamwork Graph data, choosing between the Atlassian MCP server, acli and twg, or when /playbook:learn-project or a ticket-driven plan needs Atlassian access.
+user-invocable: false
 ---
 
 # Atlassian access
