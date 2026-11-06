@@ -196,3 +196,50 @@ fn two_sessions_starting_at_once_bring_up_one_collector() {
     assert!(live.is_some(), "no collector came up");
     assert_eq!(log.matches("listening on").count(), 1, "{log}");
 }
+
+impl Home {
+    /// The hook's stdout for a session that starts with `env` added.
+    fn session_start_stdout(&self, env: &[(&str, &str)]) -> String {
+        let mut cmd = self.cmd();
+        cmd.args(["hook", "session-init"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        let mut child = cmd.spawn().unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(br#"{"session_id":"s1","source":"startup"}"#)
+            .unwrap();
+        String::from_utf8_lossy(&child.wait_with_output().unwrap().stdout).into_owned()
+    }
+}
+
+const MISSING: &str = "without the OpenTelemetry keys";
+
+#[test]
+fn a_session_that_started_without_the_keys_gets_one_warning_line() {
+    let home = Home::new("warn");
+    assert!(home.init_telemetry().status.success());
+
+    let out = home.session_start_stdout(&[]);
+
+    assert_eq!(out.matches(MISSING).count(), 1, "{out}");
+}
+
+#[test]
+fn a_session_that_has_the_keys_or_no_setup_hears_nothing() {
+    let home = Home::new("quiet");
+    let none = home.session_start_stdout(&[]);
+    assert!(!none.contains(MISSING), "{none}");
+
+    assert!(home.init_telemetry().status.success());
+    let port = home.state().unwrap()["port"].as_u64().unwrap();
+    let endpoint = format!("http://127.0.0.1:{port}");
+    let fine = home.session_start_stdout(&[("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint.as_str())]);
+    assert!(!fine.contains(MISSING), "{fine}");
+}

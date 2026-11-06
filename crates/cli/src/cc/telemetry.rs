@@ -154,6 +154,28 @@ pub fn telemetry_points_here(home: &Path) -> bool {
     configured_from_files(home, home, port) == Configured::Playbook
 }
 
+/// The line the session-init hook prints when this session started without
+/// the OpenTelemetry keys that Claude Code settings now hold. Claude Code
+/// reads `env` once at start, so a session begun before `setup` wrote the
+/// keys exports nothing until it restarts. It reads one config key, the
+/// settings files (as doctor does) and one variable of the hook's own
+/// environment, which is the session's.
+pub fn missing_keys_line(home: &Path) -> Option<&'static str> {
+    if !telemetry_auto(home) || !telemetry_points_here(home) {
+        return None;
+    }
+    let endpoint = std::env::var_os("OTEL_EXPORTER_OTLP_ENDPOINT");
+    keys_line(true, endpoint.is_some_and(|v| !v.is_empty()))
+}
+
+const MISSING_KEYS: &str = "playbook: this session started without the OpenTelemetry keys, so it will not send telemetry. Restart it to load them.";
+
+/// `settings_point_here` says the settings files hold the playbook keys and
+/// `session_has_endpoint` says the session's environment does too.
+fn keys_line(settings_point_here: bool, session_has_endpoint: bool) -> Option<&'static str> {
+    (settings_point_here && !session_has_endpoint).then_some(MISSING_KEYS)
+}
+
 /// Makes sure a collector at this version runs for the user's home, as
 /// `trigger` allows. Never panics on its own and never prints.
 pub fn ensure_for(trigger: Trigger) -> Ensured {
@@ -262,6 +284,24 @@ pub fn on_start(command: &crate::Command) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_warning_shows_only_when_settings_have_the_keys_and_the_session_does_not() {
+        assert!(keys_line(true, false).is_some_and(|l| l.contains("Restart")));
+        assert_eq!(keys_line(true, true), None, "all fine stays quiet");
+        assert_eq!(
+            keys_line(false, false),
+            None,
+            "no setup, nothing to warn about"
+        );
+        assert_eq!(keys_line(false, true), None);
+    }
+
+    #[test]
+    fn the_warning_is_one_plain_line() {
+        let line = keys_line(true, false).unwrap();
+        assert!(!line.contains('\n') && !line.contains('\u{2014}') && !line.contains('\u{2013}'));
+    }
 
     fn live() -> State {
         // Our own pid is alive; a bound listener makes the port answer.
