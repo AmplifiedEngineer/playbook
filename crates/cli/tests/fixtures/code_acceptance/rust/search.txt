@@ -1,0 +1,9 @@
+exit: 0
+src/lib.rs:18-22  function area  pub fn area(p: &Point) -> i32
+src/shape.rs:3-3  crate: area, Point
+src/lib.rs:19-19  // area is computed from the point
+src/lib.rs:20-20  let note = "area";
+src/lib.rs:30-30  format!("{}", area(self))
+src/shape.rs:13-13  pub fn double_area() -> i32 {
+src/shape.rs:14-14  // area doubled
+src/shape.rs:15-15  area(&corner()) * 2

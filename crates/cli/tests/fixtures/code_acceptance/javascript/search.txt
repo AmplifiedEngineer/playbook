@@ -1,0 +1,7 @@
+exit: 0
+src/counter.js:5-14  class Counter  export class Counter
+src/app.js:3-3  ./counter.js: Counter, reset
+src/app.js:4-4  // Counter demo
+src/app.js:6-6  const note = "Counter";
+src/app.js:7-7  const c = new Counter();
+src/counter.js:9-9  // Counter increments the value

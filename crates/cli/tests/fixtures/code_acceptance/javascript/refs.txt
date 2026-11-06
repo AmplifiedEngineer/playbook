@@ -1,0 +1,4 @@
+exit: 0
+src/app.js:3:10  import (candidate)  import { Counter, reset } from "./counter.js";
+src/app.js:7:17  use (candidate)  const c = new Counter();
+src/counter.js:5:14  declaration (candidate)  export class Counter {
