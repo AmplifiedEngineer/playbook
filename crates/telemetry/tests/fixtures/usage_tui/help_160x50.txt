@@ -24,27 +24,27 @@
 │    W T F  S S  M T  W T  F S  S M  T W │M          Show last month                          all panels              │ W T F  S S  M T  W T F  S S  M T  W T  │
 │    5   7    9    11   13   15   17   19│a          Show all time                            all panels              │ 19  21   23   25   27   29   31   2 3  │
 ╰────────────────────────────────────────│r          Switch between today and this week       all panels              │────────────────┤tokens low ■■■■■ high├─╯
-╭─┤³Models├──────────────────────────────│                                                                            │────────────────────────────────────────╮
-│name                                    │Views                                                                       │         msgs  tokens     cost▼ share   │
-│■ opus-5                                │v          Next view of the focused panel           Spend, Projects         │           10  238.0K    $11.85 ■■■■■···│
-│■ sonnet-5                              │t          Next color theme (off with NO_COLOR)     all panels              │            9  214.2K     $8.25 ■■■·····│
-│■ haiku-5                               │p          Open the full screen Sessions list       all panels              │            7  166.6K     $0.17 ········│
+╭─┤³Models├──────────────────────────────│z          Switch between local time and UTC        all panels              │────────────────────────────────────────╮
+│name                                    │                                                                            │         msgs  tokens     cost▼ share   │
+│■ opus-5                                │Views                                                                       │           10  238.0K    $11.85 ■■■■■···│
+│■ sonnet-5                              │v          Next view of the focused panel           Spend, Projects         │            9  214.2K     $8.25 ■■■·····│
+│■ haiku-5                               │t          Next color theme (off with NO_COLOR)     all panels              │            7  166.6K     $0.17 ········│
+│                                        │p          Open the full screen Sessions list       all panels              │                                        │
 │                                        │e          Edit the tabs and the panels on each     all panels              │                                        │
 │                                        │?          Show this help                           all panels              │                                        │
 │                                        │                                                                            │                                        │
-│                                        │Sorting                                                                     │                                        │
-╰────────────────────────────────────────│s          Sort by the next column                  tables                  │────────────────────────────────────────╯
-╭─┤⁵Live sessions├───────────────────────│S          Reverse the sort order                   tables                  │──────────────────────────────────┤UTC├─╮
-│state project                    model  │                                                                            │model              msgs  tokens    cost▼│
-│live  alpha                      opus-5 │Filtering                                                                   │opus-5                2   47.6K    $1.25│
-│                                        │/          Type a filter on any field               all panels              │sonnet-5              1   23.8K    $1.25│
-│                                        │Enter      Filter to selected row; again to undo    tables 3-6              │sonnet-5              1   23.8K    $0.55│
-│                                        │c          Clear the filter                         all panels              │opus-5                1   23.8K    $0.80│
-│                                        │                                                                            │sonnet-5              1   23.8K    $0.95│
-│                                        │Refresh                                                                     │opus-5                1   23.8K    $1.40│
-│                                        │R          Read new usage now (also automatic)      all panels              │sonnet-5              1   23.8K    $0.20│
-│                                        │                                                                            │opus-5                1   23.8K    $6.00│
-│                                        │Quit                                                                        │haiku-5               1   23.8K    $0.01│
-│                                        │q, Esc     Quit                                     all panels              │haiku-5               1   23.8K    $0.02│
+╰────────────────────────────────────────│Sorting                                                                     │────────────────────────────────────────╯
+╭─┤⁵Live sessions├───────────────────────│s          Sort by the next column                  tables                  │──────────────────────────────────┤UTC├─╮
+│state project                    model  │S          Reverse the sort order                   tables                  │model              msgs  tokens    cost▼│
+│live  alpha                      opus-5 │                                                                            │opus-5                2   47.6K    $1.25│
+│                                        │Filtering                                                                   │sonnet-5              1   23.8K    $1.25│
+│                                        │/          Type a filter on any field               all panels              │sonnet-5              1   23.8K    $0.55│
+│                                        │Enter      Filter to selected row; again to undo    tables 3-6              │opus-5                1   23.8K    $0.80│
+│                                        │c          Clear the filter                         all panels              │sonnet-5              1   23.8K    $0.95│
+│                                        │                                                                            │opus-5                1   23.8K    $1.40│
+│                                        │Refresh                                                                     │sonnet-5              1   23.8K    $0.20│
+│                                        │R          Read new usage now (also automatic)      all panels              │opus-5                1   23.8K    $6.00│
+│                                        │                                                                            │haiku-5               1   23.8K    $0.01│
+│                                        │Quit                                                                        │haiku-5               1   23.8K    $0.02│
 ╰────────────────────────────────────────╰┤ ↑/↓ j/k scroll, any other key closes ├────────────────────────────────────╯────────────────────────────────────────╯
  1-6 panel d day w week m month a all ←/→ day r range v view / filter s/S sort t theme (default) ? help enter select q quit      updated 01:46:40 UTC, every 5s
