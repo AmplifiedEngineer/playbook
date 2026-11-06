@@ -42,12 +42,10 @@ Should You wish to submit work that is not Your original creation, You may submi
 
 ## How to Sign
 
-To sign this CLA, comment on your first pull request with:
+To sign this CLA, add your own row (GitHub username, date and, if you like, the email you commit with) to the [contributors file](CONTRIBUTORS.md) in a commit that you author, in your first pull request. Put this sentence in that commit message:
 
 ```
 I have read the CLA Document and I hereby sign the CLA.
 ```
 
-The CLA bot will record your agreement. Your GitHub username and the date will be added to the [contributors file](CONTRIBUTORS.md).
-
-Alternatively, you may submit a pull request adding your name to the [contributors file](CONTRIBUTORS.md) directly.
+That commit is the record of your agreement. It stays in the repository history, so the record does not depend on any hosting service.

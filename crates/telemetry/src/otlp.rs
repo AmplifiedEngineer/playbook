@@ -84,7 +84,7 @@ struct Fields {
 }
 
 /// A name or id value: ASCII letters, digits and `. _ - : /` only, within `max`.
-fn safe_text(value: &str, max: usize) -> Option<String> {
+pub(crate) fn safe_text(value: &str, max: usize) -> Option<String> {
     let ok = !value.is_empty()
         && value.len() <= max
         && value

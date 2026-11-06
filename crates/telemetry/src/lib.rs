@@ -7,6 +7,7 @@
 
 pub mod account;
 pub mod account_store;
+pub mod agent_names;
 pub mod aggregate;
 pub mod api;
 pub mod backfill;

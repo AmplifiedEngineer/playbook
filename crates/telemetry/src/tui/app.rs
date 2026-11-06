@@ -152,6 +152,8 @@ pub struct App {
     pub area: Rect,
     /// The help window, with the line it is scrolled to, when it is open.
     pub help: Option<usize>,
+    /// The budget window, when it is open.
+    pub budget_popup: Option<super::budget_popup::BudgetPopup>,
     /// Files read and files to read while a first read runs.
     pub indexing: Option<(usize, usize)>,
     /// Where transcripts are read from, named in the empty states.
@@ -171,7 +173,7 @@ pub struct App {
 }
 
 /// What the loop must do after a key.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum Effect {
     None,
     /// The range or filter changed: re-query now.
@@ -180,6 +182,8 @@ pub enum Effect {
     Sessions,
     /// Store the layout text (empty means back to the default).
     SaveLayout(String),
+    /// Store the manual monthly budget in dollars (0 clears it), then re-query.
+    SaveBudget(f64),
     /// Clear the stored layout and screen setup, then call `reset_done`.
     ResetPrefs,
 }
@@ -212,6 +216,7 @@ impl App {
             sorts: PANELS.map(Panel::default_sort),
             area: Rect::new(0, 0, 100, 30),
             help: None,
+            budget_popup: None,
             indexing: None,
             sources: String::new(),
             telemetry: None,
@@ -627,6 +632,27 @@ impl App {
         if self.editing {
             return self.edit(key.code, ctrl);
         }
+        if let Some(popup) = self.budget_popup.as_mut() {
+            if ctrl && key.code == KeyCode::Char('c') {
+                self.quit = true;
+                return Effect::None;
+            }
+            // A Ctrl chord is not text.
+            if ctrl {
+                return Effect::None;
+            }
+            return match popup.key(key.code) {
+                super::budget_popup::Outcome::Stay => Effect::None,
+                super::budget_popup::Outcome::Close => {
+                    self.budget_popup = None;
+                    Effect::None
+                }
+                super::budget_popup::Outcome::Save(usd) => {
+                    self.budget_popup = None;
+                    Effect::SaveBudget(usd)
+                }
+            };
+        }
         if self.help.is_some() {
             return self.help_key(key.code, ctrl);
         }
@@ -873,6 +899,7 @@ impl App {
                 self.editor = Some(super::editor::Editor::new(&self.layout, self.tab));
             }
             Cmd::Help => self.help = Some(0),
+            Cmd::Budget => self.budget_popup = Some(super::budget_popup::BudgetPopup::default()),
             Cmd::Zone => {
                 let to = match crate::tz::current() {
                     crate::tz::Zone::Utc => crate::tz::Zone::Local,
@@ -1033,6 +1060,8 @@ mod tests {
         let mut app = App::new(Range::All);
         assert_eq!(app.theme, Theme::Standard);
         app.key(press(KeyCode::Char('t')));
+        assert_eq!(app.theme, Theme::Spectrum);
+        app.key(press(KeyCode::Char('t')));
         assert_eq!(app.theme, Theme::Dark);
     }
 
@@ -1070,6 +1099,45 @@ mod tests {
         let mut app = App::new(Range::All);
         app.data = Some(data_with([5.0, 1.0, 3.0]));
         app
+    }
+
+    #[test]
+    fn b_opens_the_budget_window_and_enter_asks_to_store_the_amount() {
+        let mut app = loaded();
+        app.key(press(KeyCode::Char('b')));
+        assert!(app.budget_popup.is_some());
+        for c in "1,000".chars() {
+            app.key(press(KeyCode::Char(c)));
+        }
+        let effect = app.key(press(KeyCode::Enter));
+        assert_eq!(effect, Effect::SaveBudget(1000.0));
+        assert!(app.budget_popup.is_none());
+    }
+
+    #[test]
+    fn escape_closes_the_budget_window_without_a_save_and_keys_do_not_leak() {
+        let mut app = loaded();
+        app.key(press(KeyCode::Char('b')));
+        app.key(press(KeyCode::Char('q')));
+        assert!(!app.quit, "typing q must not quit");
+        assert_eq!(app.key(press(KeyCode::Esc)), Effect::None);
+        assert!(app.budget_popup.is_none());
+    }
+
+    #[test]
+    fn a_ctrl_chord_does_not_type_into_the_budget_window() {
+        let mut app = loaded();
+        app.key(press(KeyCode::Char('b')));
+        app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        assert_eq!(app.budget_popup.as_ref().map(|p| p.text.as_str()), Some(""));
+        app.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(app.quit);
+    }
+
+    #[test]
+    fn capital_b_reads_the_budget_again_like_capital_r() {
+        let mut app = loaded();
+        assert_eq!(app.key(press(KeyCode::Char('B'))), Effect::Requery);
     }
 
     #[test]
