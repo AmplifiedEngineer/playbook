@@ -1,0 +1,66 @@
+{
+  "tasks_version": 1,
+  "waivers": [
+    {
+      "repo": "trpc",
+      "kind": null,
+      "reason": "not yet in the corpus"
+    },
+    {
+      "repo": "nx",
+      "kind": null,
+      "reason": "not yet in the corpus"
+    },
+    {
+      "repo": "pandas",
+      "kind": null,
+      "reason": "not yet in the corpus"
+    },
+    {
+      "repo": "transformers",
+      "kind": null,
+      "reason": "not yet in the corpus"
+    },
+    {
+      "repo": "hugo",
+      "kind": null,
+      "reason": "not yet in the corpus"
+    },
+    {
+      "repo": "webpack",
+      "kind": null,
+      "reason": "not yet in the corpus"
+    },
+    {
+      "repo": "ripgrep",
+      "kind": "symbol",
+      "reason": "unmeasured: the first pilot run needs real clones and an oracle indexer"
+    },
+    {
+      "repo": "ripgrep",
+      "kind": "refs",
+      "reason": "unmeasured: the first pilot run needs real clones and an oracle indexer"
+    },
+    {
+      "repo": "cobra",
+      "kind": "symbol",
+      "reason": "unmeasured: the first pilot run needs real clones and an oracle indexer"
+    },
+    {
+      "repo": "cobra",
+      "kind": "refs",
+      "reason": "unmeasured: the first pilot run needs real clones and an oracle indexer"
+    },
+    {
+      "repo": "express",
+      "kind": "symbol",
+      "reason": "unmeasured: the first pilot run needs real clones and an oracle indexer"
+    },
+    {
+      "repo": "express",
+      "kind": "refs",
+      "reason": "unmeasured: the first pilot run needs real clones and an oracle indexer"
+    }
+  ],
+  "repos": []
+}

@@ -217,8 +217,9 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
           # HEAD^1 is the main tip of a pull_request merge commit, the base of
-          # the help lint guard below.
-          fetch-depth: 2
+          # the help lint guard below. The code-bench data test needs the merge
+          # base with origin/main, so it gets the full history.
+          fetch-depth: 0
 
       # The commit under test, which a release gate hands back to release.yml.
       - name: Record the commit under test
