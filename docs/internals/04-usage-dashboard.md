@@ -310,7 +310,7 @@ For the period on screen (today, this week or this month, this week for other ra
 |---|---|
 | `known`, `hint` | `hint` is set when nothing is known. |
 | `snapshot_captured_at`, `snapshot_stale` | Snapshot fields. |
-| `plan`, `plan_label` | `plan` is `max_5x`, `max_20x` or `enterprise` or `unknown`. |
+| `plan`, `plan_label` | `plan` is `max_5x`, `max_20x`, `enterprise` or `unknown`. |
 | `windows_note` | Null when a window is known. |
 | `reason` | Why no limit comes from Claude: `no-reading`, `stale`, `cap-unknown`, `windows-reset` or `rate-limited-seen`, else null. |
 | `comparison` | Null, `skipped` with the reason, or the amount Claude reports and the local estimate with `delta_usd`, `delta_pct`, `disagrees`, `read_at` and `stale`. |

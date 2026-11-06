@@ -9,10 +9,9 @@
 //! documented by Anthropic, so every read can come back empty and every
 //! caller treats empty as "unknown".
 //!
-//! The plan is a guess from the rate limit tier names. Only the two tiers seen
-//! on real Max accounts are recognized. Any other value, including every
-//! Enterprise value, maps to [`Plan::Unknown`] instead of being
-//! guessed at.
+//! The plan comes from the rate limit tier names (the two tiers seen on real
+//! Max accounts), then from `organizationType` or `seatTier` for Enterprise.
+//! Any other value maps to [`Plan::Unknown`] instead of being guessed at.
 
 use crate::claude_code::parse_iso8601_utc;
 use crate::limits::{LimitPeriod, Unit};

@@ -698,9 +698,10 @@ pub fn compare_billed(
 }
 
 /// The line for the 5 hour and weekly windows when none is known. A plan
-/// known to have them asks for a reading. Any other plan, including one this
-/// version cannot tell apart from Enterprise, is told they are not available
-/// and where Pro and Max plans get them. `None` when one is known.
+/// known to have them asks for a reading. Enterprise is told the whole limit
+/// is the monthly extra usage budget, and always gets that line. Any other
+/// plan is told they are not available and where Pro and Max plans get them.
+/// `None` when a window is known on a plan that has them.
 pub fn windows_note(s: &Sources, limits: &[Limit]) -> Option<&'static str> {
     if s.account.plan == crate::plan::Plan::Enterprise {
         return Some("5 hour and weekly windows: not used on Enterprise, the whole limit is the monthly extra usage budget");
@@ -846,8 +847,10 @@ pub fn reason(s: &Sources, now: i64) -> Option<Reason> {
     if has_limit {
         return None;
     }
+    // Enterprise drops the windows, so a held window is not a reset one there.
+    let windows = s.account.plan != crate::plan::Plan::Enterprise;
     let held = s.snapshot.as_ref().is_some_and(|sn| {
-        sn.five_hour.is_some() || sn.seven_day.is_some() || sn.spend_limit.is_some()
+        (windows && (sn.five_hour.is_some() || sn.seven_day.is_some())) || sn.spend_limit.is_some()
     });
     Some(if held {
         Reason::WindowsReset
@@ -1604,6 +1607,17 @@ mod tests {
             .iter()
             .all(|x| !matches!(x.period, LimitPeriod::FiveHour | LimitPeriod::SevenDay)));
         assert!(l.iter().any(|x| x.period == LimitPeriod::Monthly));
+    }
+
+    #[test]
+    fn an_enterprise_reading_of_only_windows_is_not_called_a_reset() {
+        let s = Sources {
+            snapshot: Some(window_snapshot(3600)),
+            account: enterprise(),
+            ..Sources::default()
+        };
+
+        assert_eq!(reason(&s, NOW), Some(Reason::CapUnknown));
     }
 
     #[test]
