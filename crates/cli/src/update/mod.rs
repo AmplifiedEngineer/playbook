@@ -208,7 +208,7 @@ pub fn is_homebrew(exe: &Path) -> bool {
         .any(|m| text.contains(m))
 }
 
-/// Whether `exe` sits in `/usr/bin`, where the .deb and .rpm packages put it.
+/// Whether `exe` sits in `/usr/bin`, where the retired .deb and .rpm packages put it.
 pub fn is_system_package(exe: &Path) -> bool {
     exe.parent() == Some(Path::new("/usr/bin"))
 }
@@ -232,9 +232,9 @@ fn refusals(env: &Env) -> Result<(), String> {
     }
     if is_system_package(&env.exe) {
         return Err(format!(
-            "{} was installed from a .deb or .rpm package; update it with your package manager: \
-             sudo apt install --only-upgrade playbook, or sudo dnf upgrade playbook. Or install a \
-             standalone copy with install.sh and put it first on PATH.",
+            "{} is in /usr/bin, where the retired .deb and .rpm packages put it, and playbook no \
+             longer publishes them. Install a standalone copy with install.sh or Homebrew and put \
+             it first on PATH.",
             env.exe.display()
         ));
     }
@@ -1380,7 +1380,7 @@ echo ran\n",
     }
 
     #[test]
-    fn a_usr_bin_binary_is_refused_with_the_package_manager_commands() {
+    fn a_usr_bin_binary_is_refused_with_the_install_routes() {
         let mut env = env_in("up-usr-bin");
         env.exe = PathBuf::from("/usr/bin/playbook");
         let err = run(
@@ -1391,8 +1391,9 @@ echo ran\n",
             &swap::run_version,
         )
         .unwrap_err();
-        assert!(err.contains("apt install --only-upgrade playbook"), "{err}");
-        assert!(err.contains("dnf upgrade playbook"), "{err}");
+        assert!(err.contains("retired .deb and .rpm packages"), "{err}");
+        assert!(err.contains("install.sh or Homebrew"), "{err}");
+        assert!(!err.contains("apt install"), "{err}");
     }
 
     #[test]
