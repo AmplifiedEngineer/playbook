@@ -4,7 +4,7 @@ A release reaches users through three channels: the GitHub release assets (built
 
 After a release is published and checked, the `downstream` job of `release.yml` opens a pull request in the tap and in the marketplace, as the section on the release workflow describes. The tap also checks every 30 minutes for a newer release and bumps a formula itself when the `downstream` job has not done it within an hour.
 
-A release attaches ten assets (two per target), four Linux packages, `release-notes.json` and `SHA256SUMS`, which lists the other fifteen. It builds no plugin archive. The plugin in `plugins/playbook` ships with the same `vX.Y.Z`, as described next.
+A release attaches five `playbook` binaries, five `pbtop` archives, four `pbdoc` archives (macOS and Linux only), four Linux packages, `release-notes.json` and `SHA256SUMS`, which lists the other nineteen. It builds no plugin archive. The plugin in `plugins/playbook` ships with the same `vX.Y.Z`, as described next.
 
 ## The plugin release
 
@@ -49,7 +49,7 @@ When the gate still fails on the release commit, land the fix and tag `vX.Y.Z` o
 ### After the tag
 
 - `draft` creates a draft release with the notes and attaches `release-notes.json`.
-- `build` compiles the five targets with `--locked` and attaches two assets per target: the `playbook` binary and `pbtop-X.Y.Z-<target>.tar.gz` with `pbtop` alone. Each build job first runs its binaries with `--version` (all but the cross built x86_64 macOS one) and attests the assets it built.
+- `build` compiles the five targets with `--locked` and attaches the `playbook` binary and `pbtop-X.Y.Z-<target>.tar.gz` for each target. The four macOS and Linux targets also get `pbdoc-X.Y.Z-<target>.tar.gz`. Each build job first runs its binaries with `--version` (all but the cross built x86_64 macOS one), checks the pbdoc size budget and attests the assets it built.
 - `publish` checks every draft asset against that attestation, writes `SHA256SUMS` over every asset, attests it and the notes, and makes the release public and the latest.
 - `verify` downloads the published release, checks the sums and the attestations of a run from `main`, and runs `--version` on the x86_64 Linux binaries.
 
@@ -190,6 +190,7 @@ The workflow uses two tokens:
 The app secrets and their guards:
 
 - `BOT_APP_CLIENT_ID` and `BOT_APP_PRIVATE_KEY` are organization secrets that the playbook, tap and marketplace repositories can read.
+- The jobs that read these secrets run in the `cicd` environment: `prepare`, `tag`, `downstream`, `nix` and `scoop` in `release.yml`, and `auto-update-pr.yml`. The Dependabot auto-merge job runs in the `dependabot` environment. The secrets stay shared. The environments are where protection rules go, and the workflow change alone adds none.
 - Each step asks the app only for the permissions it needs. `downstream` mints one token per repository.
 - The workflow runs only from `workflow_dispatch`, anything but a dry run only from `main`, and `downstream` only from `main`.
 - Any workflow in those three repositories can read the key. The guards are the rulesets and the checks in each workflow: the downstream release workflows act only on a merged pull request from the app on a `release/v*` branch.
@@ -227,7 +228,7 @@ The Homebrew tap maps each formula to its asset.
 
 ### Linux packages
 
-Each package holds `playbook`, the `pb` link and `pbtop` in `/usr/bin`, and the license. It has no dependencies, no config file and no install or remove script, so an upgrade or a removal never touches user config.
+Each package holds `playbook`, the `pb` link and `pbtop` in `/usr/bin`, the shell completion files in `/usr/share`, and the license. It has no dependencies, no config file and no install or remove script, so an upgrade or a removal never touches user config.
 
 - `scripts/nfpm.yaml` describes it. `scripts/package-linux.sh` builds it with a pinned nfpm (version and SHA-256 are in the script; bump both together).
 - The two Linux build legs build the packages from their own static binaries, install them in Debian, Ubuntu and Fedora containers with `scripts/package-smoke.sh`, and attest them with the other assets. A bad package stops the release before the draft is published.
