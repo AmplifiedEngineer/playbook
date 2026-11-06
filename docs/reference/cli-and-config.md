@@ -1638,7 +1638,7 @@ Subcommands: `assign`, `list`, `name`, `undo`
 
 Move the events of a time range to another account
 
-Prints how many events and how much cost would move and changes nothing until you add `--confirm`. Times are read on your local clock; add `--utc` for UTC. The end is exclusive. An applied move is numbered and `account undo` reverses it. Running the same move again moves nothing.
+Prints how many events and how much cost would move and changes no events until you add `--confirm`. Times are read on your local clock; add `--utc` for UTC. The end is exclusive. An applied move is numbered and `account undo` reverses it. Running the same move again moves nothing.
 
 Example: `playbook usage account assign --from 2026-11-01T00:00 --to 2026-11-02T12:00 --as personal`
 

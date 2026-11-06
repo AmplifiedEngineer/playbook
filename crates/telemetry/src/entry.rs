@@ -126,8 +126,14 @@ fn account_run(paths: &Paths, command: &AccountCommand) -> Result<String, String
             )
         }
         AccountCommand::Undo { id } => Ok(match super::account_move::undo(&conn, *id)? {
-            Some((id, n)) => format!("undid move {id}: restored {n} records."),
-            None => "no applied move to undo.".to_string(),
+            Some((id, n, 0)) => format!("undid move {id}: restored {n} records."),
+            Some((id, n, skipped)) => format!(
+                "undid move {id}: restored {n} records and left {skipped} that were relabeled since."
+            ),
+            None => match id {
+                Some(id) => format!("move {id} does not exist or is already undone."),
+                None => "no applied move to undo.".to_string(),
+            },
         }),
     }
 }
