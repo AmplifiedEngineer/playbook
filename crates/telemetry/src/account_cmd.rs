@@ -8,7 +8,7 @@ use crate::account_sessions as sess;
 use crate::account_store as store;
 use crate::command::AccountCommand;
 use crate::run::Paths;
-use rusqlite::Connection;
+use playbook_store::Connection;
 
 const WEEK: i64 = 7 * 86_400;
 

@@ -50,7 +50,7 @@ const PARTIAL_EVERY: Duration = Duration::from_secs(1);
 
 /// Reads the store into a snapshot.
 fn snapshot(
-    conn: &rusqlite::Connection,
+    conn: &playbook_store::Connection,
     paths: &Paths,
     query: &(Range, String, AccountSel),
 ) -> Update {
@@ -208,7 +208,7 @@ mod tests {
 
     const BOUND: Duration = Duration::from_secs(20);
 
-    fn count(conn: &rusqlite::Connection, sql: &str) -> i64 {
+    fn count(conn: &playbook_store::Connection, sql: &str) -> i64 {
         conn.query_row(sql, [], |r| r.get(0)).unwrap()
     }
 

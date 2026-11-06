@@ -14,7 +14,7 @@
 
 use super::otlp;
 use super::writer::{self, Job, Kind};
-use rusqlite::Connection;
+use playbook_store::Connection;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};

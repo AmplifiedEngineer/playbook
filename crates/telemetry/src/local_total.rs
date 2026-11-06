@@ -10,7 +10,7 @@
 use crate::db;
 use crate::limits::{Limit, LimitPeriod};
 use crate::query::WeekStart;
-use rusqlite::{Connection, OpenFlags};
+use playbook_store::{Connection, OpenFlags};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 

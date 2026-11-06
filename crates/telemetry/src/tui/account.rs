@@ -7,7 +7,7 @@
 
 use crate::account::UNKNOWN_ACCOUNT;
 use crate::UsageEvent;
-use rusqlite::Connection;
+use playbook_store::Connection;
 
 /// What the user picked.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

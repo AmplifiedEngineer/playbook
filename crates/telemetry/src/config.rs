@@ -172,7 +172,7 @@ fn stored(home: &Path, key: &str) -> Option<Value> {
 }
 
 fn read_store(db: &Path, key: &str) -> Result<Option<Value>, String> {
-    use rusqlite::{Connection, OpenFlags, OptionalExtension};
+    use playbook_store::{Connection, OpenFlags, OptionalExtension};
     let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|e| e.to_string())?;
     conn.busy_timeout(std::time::Duration::from_millis(2000))
@@ -263,7 +263,7 @@ mod tests {
     }
 
     fn put_store(home: &Path, key: &str, json: &str) {
-        let conn = rusqlite::Connection::open(root(home).join("playbook.db")).unwrap();
+        let conn = playbook_store::Connection::open(root(home).join("playbook.db")).unwrap();
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS config (tier TEXT NOT NULL, scope TEXT NOT NULL, key TEXT NOT NULL, value_json TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (tier, scope, key)) WITHOUT ROWID;",
         )
@@ -306,7 +306,7 @@ mod tests {
         put_store(&h, "usage.theme", "\"light\"");
         let data = root(&h).join("data");
         std::fs::create_dir_all(&data).unwrap();
-        let conn = rusqlite::Connection::open(playbook_data::config::db_in(&data)).unwrap();
+        let conn = playbook_store::Connection::open(playbook_data::config::db_in(&data)).unwrap();
         conn.execute_batch(playbook_data::config::SCHEMA_SQL)
             .unwrap();
         conn.execute_batch(
