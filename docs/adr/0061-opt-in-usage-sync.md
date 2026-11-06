@@ -43,7 +43,7 @@ The hash hides the email from someone who opens the remote and reads it casually
 
 - The salt sits in the same remote as the data (`shared_meta`), because every new machine must fetch it to compute the same hash. Anyone who can read the rows can read the salt.
 - With the salt in hand, a person can hash a list of known emails and compare. Emails are short and guessable. This works against a known candidate.
-- The hash is therefore a pseudonym, and treat the remote as data that identifies the account to anyone who can read it. Protect it with the provider's access controls, not with the hash.
+- The hash is therefore a pseudonym. Treat the remote as data that identifies the account to anyone who can read it, and protect it with the provider's access controls, not with the hash.
 
 ### Revoking access
 
