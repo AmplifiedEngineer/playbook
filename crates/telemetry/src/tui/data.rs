@@ -117,6 +117,9 @@ pub struct LimitsView {
     pub cache_age: Option<i64>,
     /// What Claude Code last reported as used this month, as `(read at, USD)`.
     pub reported: Option<(i64, f64)>,
+    /// The manual and the detected monthly budget in dollars, when both are
+    /// set and differ. The detected one applies.
+    pub manual_beside_detected: Option<(f64, f64)>,
     /// Why the 5 hour and weekly windows are missing, when they are.
     pub windows_note: Option<&'static str>,
     pub period: Period,
@@ -154,6 +157,7 @@ impl Default for LimitsView {
             stale: false,
             cache_age: None,
             reported: None,
+            manual_beside_detected: None,
             windows_note: None,
             period: Period::Week(WeekStart::default()),
             burn: Burn::new(0.0, 0),
@@ -210,6 +214,7 @@ impl LimitsView {
             stale: sources.stale(now),
             cache_age,
             reported: limits_source::billed_anchor(sources, now),
+            manual_beside_detected: limits_source::manual_beside_detected(sources, now),
             windows_note,
             period,
             burn,
