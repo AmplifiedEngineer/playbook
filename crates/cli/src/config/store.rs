@@ -12,6 +12,7 @@
 
 use super::write::Tier;
 use super::{keys, ConfigError};
+use playbook_store::schema::{self, SchemaError};
 use playbook_store::{params, Connection, OptionalExtension};
 use serde_json::{Map, Value};
 use std::fs;
@@ -19,6 +20,13 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use playbook_data::config::SCHEMA_SQL;
+
+/// The `config.db` layout this build writes. A database without the row counts
+/// as version 0 and is stamped on open.
+pub const SCHEMA_VERSION: i64 = 1;
+
+/// The name `config.db` carries in version errors.
+const DB_NAME: &str = "config.db";
 
 /// The meta row that records the legacy JSON import ran.
 const IMPORTED_FLAG: &str = "legacy_imported";
@@ -100,12 +108,13 @@ pub fn open(root: &Path) -> Result<Connection, ConfigError> {
     let conn = init_connection(root).map_err(|e| match e {
         // Securing or opening the file failed (permissions, read-only
         // volume): say so, rather than calling the store malformed.
-        playbook_store::Error::SqliteFailure(f, _)
+        SchemaError::Store(playbook_store::Error::SqliteFailure(f, _))
             if f.code == playbook_store::ErrorCode::CannotOpen =>
         {
             ConfigError::DirectoryUnwritable(data.clone())
         }
-        other => broken(root)(other),
+        SchemaError::Store(other) => broken(root)(other),
+        refused => ConfigError::SchemaRefused(refused.to_string()),
     })?;
     import_legacy_once(&conn, root)?;
     Ok(conn)
@@ -114,8 +123,8 @@ pub fn open(root: &Path) -> Result<Connection, ConfigError> {
 /// Open the file and apply pragmas and schema. Switching a fresh file to WAL
 /// and creating tables from several processes at once can report "busy"
 /// without waiting, so that one error is retried for a short while.
-fn init_connection(root: &Path) -> playbook_store::Result<Connection> {
-    let attempt = || -> playbook_store::Result<Connection> {
+fn init_connection(root: &Path) -> Result<Connection, SchemaError> {
+    let attempt = || -> Result<Connection, SchemaError> {
         // While the move is deferred (a lock is held, a writer is busy) the
         // old file is used as it is, instead of starting an empty new one.
         let path = if !db_path(root).exists() && legacy_db_path(root).is_file() {
@@ -139,13 +148,15 @@ fn init_connection(root: &Path) -> playbook_store::Result<Connection> {
         // In WAL mode NORMAL cannot corrupt the file, and it skips an fsync
         // per commit. A power cut can lose the last write, never the store.
         conn.pragma_update(None, "synchronous", "NORMAL")?;
+        // Before any table is created, so a newer database is left untouched.
+        schema::check_and_stamp(&conn, DB_NAME, SCHEMA_VERSION)?;
         conn.execute_batch(SCHEMA_SQL)?;
         Ok(conn)
     };
     let mut tries = 0;
     loop {
         match attempt() {
-            Err(playbook_store::Error::SqliteFailure(err, _))
+            Err(SchemaError::Store(playbook_store::Error::SqliteFailure(err, _)))
                 if tries < 200
                     && matches!(
                         err.code,
@@ -1267,6 +1278,62 @@ mod tests {
         assert_eq!(got.global, Some(json!("auto")));
         let mode = fs::metadata(db_path(&r)).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    fn stored_schema_version(r: &Path) -> Option<String> {
+        let conn = Connection::open(db_path(r)).unwrap();
+        conn.query_row(
+            "SELECT value FROM meta WHERE key = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .ok()
+    }
+
+    #[test]
+    fn a_new_store_is_stamped_and_one_without_the_row_opens_and_is_stamped() {
+        // Arrange
+        let r = root("store-schema-stamp");
+        put(&r, Tier::Global, None, "mode", &json!("auto")).unwrap();
+        Connection::open(db_path(&r))
+            .unwrap()
+            .execute("DELETE FROM meta WHERE key = 'schema_version'", [])
+            .unwrap();
+
+        // Act
+        let got = lookup(&r, "mode", None).unwrap();
+        drop(open(&r).unwrap());
+
+        // Assert
+        assert_eq!(got.global, Some(json!("auto")));
+        assert_eq!(stored_schema_version(&r), Some(SCHEMA_VERSION.to_string()));
+    }
+
+    #[test]
+    fn a_newer_store_is_refused_naming_both_versions_and_stays_as_it_was() {
+        // Arrange
+        let r = root("store-schema-newer");
+        put(&r, Tier::Global, None, "mode", &json!("auto")).unwrap();
+        let newer = (SCHEMA_VERSION + 1).to_string();
+        Connection::open(db_path(&r))
+            .unwrap()
+            .execute(
+                "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+                [&newer],
+            )
+            .unwrap();
+
+        // Act
+        let err = open(&r).unwrap_err().to_string();
+
+        // Assert
+        assert!(err.contains(&format!("version {newer}")), "{err}");
+        assert!(
+            err.contains(&format!("understands {SCHEMA_VERSION}")),
+            "{err}"
+        );
+        assert!(err.contains("playbook update"), "{err}");
+        assert_eq!(stored_schema_version(&r), Some(newer));
     }
 
     #[test]
