@@ -14,8 +14,10 @@
 //! Any other value maps to [`Plan::Unknown`] instead of being guessed at.
 
 use crate::claude_code::parse_iso8601_utc;
+use crate::data::USAGE_DB_FILE;
 use crate::limits::{LimitPeriod, Unit};
 use crate::limits_source::{self, Window};
+use crate::local_total::LocalTotal;
 use crate::monthly_use;
 use crate::period::elapsed_text;
 use crate::spend::SpendFigure;
@@ -598,9 +600,15 @@ fn raw_cache_lines(root: &Value) -> Vec<String> {
 }
 
 /// What the statusline budget line will show, and which source decided it.
-fn budget_lines(s: &limits_source::Sources, now: i64, raw: bool) -> Vec<String> {
+fn budget_lines(s: &limits_source::Sources, usage_dir: &Path, now: i64, raw: bool) -> Vec<String> {
     let mut out = vec!["What the statusline budget line will show".to_string()];
-    let figure = monthly_use::monthly_use(s.snapshot.as_ref(), &s.account, &s.budgets, now);
+    let local = LocalTotal {
+        db: usage_dir.join(USAGE_DB_FILE),
+        cache: None,
+    };
+    let figure = monthly_use::monthly_use(s.snapshot.as_ref(), &s.account, &s.budgets, now, || {
+        local.month_used(now)
+    });
     match &figure {
         None => out.push(
             "  monthly: nothing to show (no dollar limit with an amount used this month)"
@@ -615,13 +623,18 @@ fn budget_lines(s: &limits_source::Sources, now: i64, raw: bool) -> Vec<String> 
                     "  monthly: from the Claude Code cache, {} old (fresh)",
                     elapsed_text(age)
                 ),
+                monthly_use::Source::Local => {
+                    "  monthly: from the usage database of this machine only (local)".to_string()
+                }
                 monthly_use::Source::Cache { age, fresh: false } => format!(
                     "  monthly: from the Claude Code cache, {} old (stale: shown with its age and no projection; Claude Code writes the cache when it fetches usage, which the /usage view does)",
                     elapsed_text(age)
                 ),
             });
             let in_force = limits_source::amount(Unit::Dollars, m.limit.limit);
-            out.push(if m.own_budget {
+            out.push(if m.source == monthly_use::Source::Local {
+                format!("  limit in force: {in_force}, your usage.budget.monthlyUsd")
+            } else if m.own_budget {
                 format!(
                     "  limit in force: {in_force}, your usage.budget.monthlyUsd, which is lower than the {} Claude reports",
                     limits_source::amount(Unit::Dollars, m.reported_usd)
@@ -631,7 +644,10 @@ fn budget_lines(s: &limits_source::Sources, now: i64, raw: bool) -> Vec<String> 
             });
         }
     }
-    if figure.as_ref().is_some_and(|m| m.own_budget) {
+    if figure
+        .as_ref()
+        .is_some_and(|m| m.own_budget && m.source != monthly_use::Source::Local)
+    {
         out.push("  your usage.budget.monthlyUsd is lower than that limit: pbtop keeps the Claude limit and the statusline budget line uses yours".to_string());
     }
     if figure.is_some() {
@@ -646,7 +662,7 @@ fn budget_lines(s: &limits_source::Sources, now: i64, raw: bool) -> Vec<String> 
         out.push("  5 hour window: absent in the data, so the line leaves it out".to_string());
     }
     out.push(
-        "  order: statusline reading, then the Claude Code cache from this month, then nothing. Your monthly budget replaces the limit only when it is lower, and never supplies an amount used.".to_string(),
+        "  order: statusline reading, then the Claude Code cache from this month, then, with a monthly budget set, this machine's cost for the month from the usage database, then nothing. Your monthly budget replaces the limit only when it is lower.".to_string(),
     );
     if let (true, Some(m)) = (raw, &figure) {
         let own = s
@@ -778,7 +794,7 @@ pub fn report(
     out.push(String::new());
     out.extend(verdict_lines(&sources, now));
     out.push(String::new());
-    out.extend(budget_lines(&sources, now, raw));
+    out.extend(budget_lines(&sources, usage_dir, now, raw));
     if !raw {
         out.push(String::new());
         out.push(

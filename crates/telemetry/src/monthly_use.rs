@@ -13,15 +13,17 @@
 //!    still used but marked stale with its age, since spend only grows within
 //!    a month and a last month figure says nothing about this one.
 //!
-//! The manual `usage.budget.monthlyUsd` is a limit only. It has no amount used
-//! (that needs the local usage database), so it never supplies a figure. It
-//! does replace the reported limit when it is lower: your own budget may be
-//! stricter than the organization's.
+//! 3. with neither of those, the manual `usage.budget.monthlyUsd` as the limit
+//!    and this machine's cost for the month from the usage database. It covers
+//!    this machine only, so it is the last resort.
+//!
+//! The manual budget also replaces a reported limit when it is lower: your own
+//! budget may be stricter than the organization's.
 
 use crate::limits::{Limit, LimitPeriod, Origin, Unit};
 use crate::limits_source::{Snapshot, STALE_SECONDS};
 use crate::plan::Account;
-use crate::query::utc_month_bounds;
+use crate::query::{utc_month_bounds, WeekStart};
 
 /// Where the amount used came from.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -31,6 +33,9 @@ pub enum Source {
     /// The Claude Code usage cache, `age` seconds old. `fresh` is false past
     /// [`STALE_SECONDS`].
     Cache { age: i64, fresh: bool },
+    /// The usage database of this machine, against the manual budget. Other
+    /// machines on the account are not counted.
+    Local,
 }
 
 /// The monthly dollar figure and where it stands.
@@ -88,13 +93,19 @@ pub fn detect(snapshot: Option<&Snapshot>, account: &Account, now: i64) -> Optio
 }
 
 /// [`detect`], then the manual monthly budget in `budgets` if it is lower.
+/// When `detect` finds nothing and a monthly budget is set, `local_used` is
+/// asked for the dollars this machine spent this month; it is not called
+/// otherwise.
 pub fn monthly_use(
     snapshot: Option<&Snapshot>,
     account: &Account,
     budgets: &[(LimitPeriod, f64)],
     now: i64,
+    local_used: impl FnOnce() -> Option<f64>,
 ) -> Option<MonthlyUse> {
-    let (mut limit, source) = detect(snapshot, account, now)?;
+    let Some((mut limit, source)) = detect(snapshot, account, now) else {
+        return local(budgets, now, local_used);
+    };
     let reported_usd = limit.limit;
     let own = budgets
         .iter()
@@ -107,6 +118,30 @@ pub fn monthly_use(
         source,
         reported_usd,
         own_budget: own.is_some(),
+    })
+}
+
+/// The manual monthly budget against this machine's cost for the month.
+fn local(
+    budgets: &[(LimitPeriod, f64)],
+    now: i64,
+    local_used: impl FnOnce() -> Option<f64>,
+) -> Option<MonthlyUse> {
+    let (_, budget) = budgets
+        .iter()
+        .find(|(p, usd)| *p == LimitPeriod::Monthly && *usd > 0.0)?;
+    let used = local_used().filter(|used| *used > 0.0)?;
+    Some(MonthlyUse {
+        limit: Limit::manual_budget_used(
+            LimitPeriod::Monthly,
+            *budget,
+            used,
+            now,
+            WeekStart::default(),
+        ),
+        source: Source::Local,
+        reported_usd: *budget,
+        own_budget: true,
     })
 }
 
@@ -126,6 +161,17 @@ mod tests {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/spend/enterprise-usage-based.json");
         plan::read(&path)
+    }
+
+    /// [`super::monthly_use`] with no local total, for the tests of the Claude
+    /// sources.
+    fn monthly_use(
+        snapshot: Option<&Snapshot>,
+        account: &Account,
+        budgets: &[(LimitPeriod, f64)],
+        now: i64,
+    ) -> Option<MonthlyUse> {
+        super::monthly_use(snapshot, account, budgets, now, || None)
     }
 
     fn gateway(now: i64, used: f64, limit: f64) -> Snapshot {
@@ -200,10 +246,59 @@ mod tests {
         assert!(monthly_use(None, &a, &[], FETCHED).is_none());
     }
 
+    const BUDGETS: [(LimitPeriod, f64); 1] = [(LimitPeriod::Monthly, 1000.0)];
+
     #[test]
-    fn a_manual_budget_alone_supplies_no_figure() {
-        let budgets = [(LimitPeriod::Monthly, 1000.0)];
-        assert!(monthly_use(None, &Account::default(), &budgets, FETCHED).is_none());
+    fn a_manual_budget_alone_supplies_no_figure_without_a_local_total() {
+        assert!(monthly_use(None, &Account::default(), &BUDGETS, FETCHED).is_none());
+    }
+
+    #[test]
+    fn a_manual_budget_with_local_spend_gives_a_local_figure() {
+        let m = super::monthly_use(None, &Account::default(), &BUDGETS, FETCHED, || Some(412.0))
+            .unwrap();
+        assert_eq!(used_of(&m), (412.0, 1000.0));
+        assert_eq!(m.source, Source::Local);
+        assert!(m.own_budget);
+        assert_eq!(m.limit.origin, Origin::Manual);
+        let (start, end) = LimitPeriod::Monthly.containing(FETCHED, WeekStart::default());
+        assert_eq!((m.limit.start, m.limit.end), (start, end));
+    }
+
+    #[test]
+    fn local_spend_without_a_monthly_budget_is_never_read() {
+        for budgets in [&[][..], &[(LimitPeriod::Weekly, 10.0)][..]] {
+            let m = super::monthly_use(None, &Account::default(), budgets, FETCHED, || {
+                panic!("read the local total without a monthly budget")
+            });
+            assert!(m.is_none());
+        }
+    }
+
+    #[test]
+    fn no_local_spend_or_none_used_gives_no_figure() {
+        for used in [None, Some(0.0)] {
+            let m = super::monthly_use(None, &Account::default(), &BUDGETS, FETCHED, || used);
+            assert!(m.is_none(), "{used:?}");
+        }
+    }
+
+    #[test]
+    fn the_gateway_and_the_cache_win_over_local_spend_and_it_is_not_read() {
+        let no_read = || panic!("read the local total beside a reported figure");
+        let now = FETCHED + HOUR;
+        let m = super::monthly_use(
+            Some(&gateway(now, 410.0, 500.0)),
+            &account(),
+            &BUDGETS,
+            now,
+            no_read,
+        )
+        .unwrap();
+        assert_eq!(m.source, Source::Statusline);
+        let m = super::monthly_use(None, &account(), &BUDGETS, now, no_read).unwrap();
+        assert_eq!(used_of(&m), (986.4, 1000.0));
+        assert!(matches!(m.source, Source::Cache { .. }));
     }
 
     #[test]
