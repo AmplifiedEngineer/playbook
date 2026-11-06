@@ -84,4 +84,5 @@ An implementer brief is the per-Work-Unit file. Intent: work-unit-briefs. If the
 - Is `subagent_type` set, with the `playbook:` prefix for plugin agents?
 - Could the child do this task if it saw only the brief? If not, add what it lacks, by path first.
 - Is the output file named, for an agent that can write?
+- Does the agent run shell commands, and did the session enter a worktree? Then set `isolation: worktree` on the spawn and name the base branch and delivery path in the brief, or call `ExitWorktree` with `keep` first (see "Worktree guard" in `SKILL.md`).
 - For a reviewer or implementer: are the diff or excerpts, the test command and the limit sentence in the brief?
