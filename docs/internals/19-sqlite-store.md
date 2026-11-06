@@ -11,6 +11,8 @@ The crate holds the two bounded busy-retry helpers, kept as they were in their c
 
 `scripts/check-port-diff.sh` checks a porting change: only imports and type paths may differ, and a test file may change `use` lines only. `scripts/check-port-diff.test.sh` runs it on temp repositories.
 
+`scripts/check-no-rusqlite.sh` fails CI when `rusqlite` appears in a Rust file or `Cargo.toml` outside `crates/store`. `scripts/check-no-rusqlite.test.sh` runs it on temp trees. Clippy's `disallowed_types` cannot do this job: it resolves a re-export to the engine path, so it flags `playbook_store::Connection` too.
+
 ## Call sites of rusqlite
 
 Counted with `grep -r rusqlite` over each crate on the commit that added the store. A line counts once, however many times the word appears on it.
