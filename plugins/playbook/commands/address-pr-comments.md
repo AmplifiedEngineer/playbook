@@ -124,6 +124,10 @@ PR-level:
 
 If `DRY_RUN=true`, stop here. Print "dry-run: no edits applied, no replies posted."
 
+## Step 3b: Pick what to work on
+
+With one item or none, skip this step. Otherwise ask **Which comments to work on?** Read `skills/grounding-review/references/pick-list.md` in this plugin and follow it, using the indexes from Step 3 and every item marked `[x]` by default. A reply such as `1,3,5-7` or `all except 4` picks the items. An item left out is treated as **Skip**: Step 4 does not visit it and the final summary lists it, so nothing slips through silently. `--dry-run` never reaches this step.
+
 ## Reading and writing Conventional Comments
 
 Read `playbook:grounding-review` `references/conventional-comments.md` once before Step 4. Reviewers may write comments as `<label> [decorations]: <subject>`. Read them like this:
@@ -138,7 +142,7 @@ When a reply is a review comment, write it in the same format, for example `ques
 
 ## Step 4: Iterate one at a time
 
-For each indexed item, do this loop:
+For each item picked in Step 3b (every item when that step was skipped), do this loop:
 
 1. **Show context.** Print the file path, the comment author, the full body, and the URL. Then `Read` the file around the line (10 lines either side).
 2. **Verify the claim.** Does the code actually do what the reviewer says? Read enough to be sure. If not, you're going to draft a reply rather than a fix.
