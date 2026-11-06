@@ -17,7 +17,7 @@ Plugin files name only the alias, and `playbook cc` passes the fallback chain. R
 
 ## Approval prompts
 
-`playbook route` returns `action: ask` for three cases: the top model (Opus), the high `implement` tier, and a task that has failed twice. The design and review kinds both run on Opus. The `plan`, `adr` and `implement` commands then stop and ask you before they dispatch.
+With `routing.escalate` set to `ask`, `playbook route` returns `action: ask` for three cases: the top model (Opus), the high `implement` tier, and a task that has failed twice. The design and review kinds both run on Opus. The `plan`, `adr` and `implement` commands then stop and ask you before they dispatch.
 
 - `/playbook:plan` and `/playbook:adr` ask before the `fact-checker`, `critic` and `test-reviewer` run, because they route the `design` kind.
 - `/playbook:implement` routes the `implement` kind. It asks only for the `high` tier or after two failures.
@@ -26,15 +26,15 @@ The `routing.escalate` key decides what happens:
 
 | Value | What happens |
 |---|---|
-| `ask` (default) | The command stops and asks you first. |
-| `auto` | The command proceeds on the top model and logs the assumption. `auto.budgetUsd` still caps the spend. |
+| `ask` | The command stops and asks you first. |
+| `auto` (default) | The command proceeds on the top model and logs the assumption. `auto.budgetUsd` still caps the spend. |
 | `deny` | The command never escalates. It uses the next cheaper route (Sonnet at high effort, or the medium implement tier). |
 
-To stop the prompts, run this in the repo, or add `--global` for every repo:
+To turn the prompts on, run this in the repo, or add `--global` for every repo. The default is `auto`.
 
 ```bash
-playbook config set routing.escalate auto
-playbook config set --global routing.escalate auto
+playbook config set routing.escalate ask
+playbook config set --global routing.escalate ask
 ```
 
 Your effort ceiling always wins over the route. Auto mode does not change this key.

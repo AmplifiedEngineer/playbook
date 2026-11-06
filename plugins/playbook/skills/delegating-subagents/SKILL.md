@@ -79,7 +79,7 @@ Route the task before picking an agent. Kinds: `mechanical`, `classify`, `check`
 - `action: ask`: stop and ask the user first. The task runs on the top model, uses the high tier, or has failed twice. Do not dispatch until the user says yes.
 - `action: downgraded`: the user set `routing.escalate` to `deny`. Dispatch the cheaper route given.
 
-The `routing.escalate` key is the gate: `ask` (default) asks before escalating, `auto` proceeds and logs the assumption in the run, `deny` never escalates. Say the tier and a one line reason in every dispatch report. A failure does not raise the tier by itself. The user's effort ceiling always wins (`cappedFrom` says when it applied).
+The `routing.escalate` key is the gate: `ask` asks before escalating, `auto` (default) proceeds and logs the assumption in the run, `deny` never escalates. Say the tier and a one line reason in every dispatch report. A failure does not raise the tier by itself. The user's effort ceiling always wins (`cappedFrom` says when it applied).
 
 Use `write` for text, see "Writing text" below. Without the tool, do this: pick the agent from the roster above, which pins its own model, and treat the gate as `ask`, the default. Before you send a task to the top model or to the high tier, or after it has failed twice, stop and ask the user first.
 
