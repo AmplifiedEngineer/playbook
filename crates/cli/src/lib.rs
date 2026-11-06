@@ -2528,6 +2528,7 @@ pub enum HookName {
     ContextHygiene,
     DocReadHint,
     UsageWarm,
+    HandoffOnClear,
     SessionActivity,
     /// Retired with the disk guard. A `settings.json` entry written by
     /// 0.38.0 still runs it until `playbook setup --hooks` removes the
@@ -2692,6 +2693,7 @@ mod tests {
             "context-hygiene",
             "doc-read-hint",
             "usage-warm",
+            "handoff-on-clear",
             "session-activity",
             "rm-workspace-guard",
             "bg-await-guard",

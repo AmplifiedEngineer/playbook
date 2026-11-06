@@ -19,6 +19,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `autoReview.fix` | `false` | `true`, `false` |
 | `autoMerge.enabled` | `false` | `true`, `false` |
 | `commit.signOff` | `true` | `true`, `false` |
+| `handoff.onClear` | `false` | `true`, `false` |
 | `pr.draft` | `true` | `true`, `false` |
 | `pr.rules.template` | `block` | `off`, `warn`, `block` |
 | `pr.rules.length` | `warn` | `off`, `warn`, `block` |

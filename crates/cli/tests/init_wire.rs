@@ -18,7 +18,7 @@
 //!   `running_wire_twice_writes_nothing_the_second_time`
 //! - Every written command for a ported hook resolves to a real `HookName`,
 //!   and is a bare name rather than a path (the "bare-name assumption"),
-//!   and all 24 ported hooks (the 19 functional hooks plus the 5 safety
+//!   and all 26 ported hooks (the 20 functional hooks plus the 5 safety
 //!   guards) are exactly the ones wired that way:
 //!   `every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves`
 //! - A pre-existing user hook entry survives wiring, unclobbered:
@@ -250,6 +250,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         "context-hygiene",
         "doc-read-hint",
         "usage-warm",
+        "handoff-on-clear",
         "session-activity",
         "worktree-create",
         "worktree-remove",
