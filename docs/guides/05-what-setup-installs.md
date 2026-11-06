@@ -85,7 +85,7 @@ Three steps run every time and have no flag: the memory migration, the trust ste
 
 ### Hooks
 
-Setup adds 32 hook entries to `~/.claude/settings.json`. They run 24 different `playbook hook <name>` commands. The [hook reference](../reference/hooks.md) lists each one with its event, matcher, what it reads and writes, whether it can block a tool call, and how to turn it off.
+Setup adds 33 hook entries to `~/.claude/settings.json`. They run 25 different `playbook hook <name>` commands. The [hook reference](../reference/hooks.md) lists each one with its event, matcher, what it reads and writes, whether it can block a tool call, and how to turn it off.
 
 The entries fall into six groups: safety guards, session lifecycle, usage tracking and auto mode, memory, hygiene, and worktree. Only a few hooks can stop a tool call: `rm-workspace-guard`, `policy-guard` (only once you turn it on), `preread-size-check`, and (in `auto` mode) `auto-guard` and `auto-cost`. `memory-capture` can pause a stop. `worktree-create` replaces Claude Code's own worktree creation. The rest add context or warn.
 

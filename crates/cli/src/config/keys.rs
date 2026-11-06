@@ -51,6 +51,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "autoReview.fix",
     "autoMerge.enabled",
     "commit.signOff",
+    "handoff.onClear",
     "pr.draft",
     "pr.rules.template",
     "pr.rules.length",
@@ -289,6 +290,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "autoReview.fix" => Some(Value::Bool(false)),
         "autoMerge.enabled" => Some(Value::Bool(false)),
         "commit.signOff" => Some(Value::Bool(true)),
+        "handoff.onClear" => Some(Value::Bool(false)),
         "pr.draft" => Some(Value::Bool(true)),
         "pr.rules.template" | "pr.rules.ticketLine" => Some(Value::String("block".to_string())),
         "pr.rules.length" | "pr.rules.issue" | "pr.rules.scope" => {

@@ -306,6 +306,33 @@ fn save_in(
     Ok(target)
 }
 
+/// Whether `session_id` has a handoff for `slug` in `dir` saved at or after
+/// `since` that no session start has loaded yet.
+pub fn saved_since(dir: &Path, slug: &str, session_id: &str, since: SystemTime) -> bool {
+    let wanted = session_tag(session_id);
+    !wanted.is_empty()
+        && unread(dir, slug).iter().any(|entry| {
+            entry.modified >= since && tag_of(&entry.path, slug).as_deref() == Some(wanted.as_str())
+        })
+}
+
+/// Saves `text` in `dir` as the handoff of `session_id`, tagged with it.
+pub fn save_for_session(
+    dir: &Path,
+    slug: &str,
+    text: &str,
+    session_id: &str,
+) -> Result<PathBuf, String> {
+    save_in(
+        dir,
+        slug,
+        text,
+        crate::common::time::now_epoch_secs(),
+        std::process::id(),
+        &session_tag(session_id),
+    )
+}
+
 pub struct Taken {
     pub contents: Vec<String>,
     pub total: usize,

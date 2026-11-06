@@ -143,6 +143,7 @@ const PORTED_HOOK_NAMES: &[&str] = &[
     "context-hygiene",
     "doc-read-hint",
     "usage-warm",
+    "handoff-on-clear",
     "session-activity",
     "auto-guard",
     "auto-cost",

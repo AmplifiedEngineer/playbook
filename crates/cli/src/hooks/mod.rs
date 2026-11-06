@@ -15,6 +15,7 @@ pub mod bg_await_guard;
 pub mod commit_message_sanitizer;
 pub mod context_hygiene;
 pub mod doc_read_hint;
+pub mod handoff_on_clear;
 pub mod memory_anchors;
 pub mod memory_capture;
 pub mod memory_signals;
@@ -96,6 +97,7 @@ pub fn dispatch(name: HookName, payload: &Payload) {
         HookName::ContextHygiene => context_hygiene::run(payload),
         HookName::DocReadHint => doc_read_hint::run(payload),
         HookName::UsageWarm => usage_warm::run(payload),
+        HookName::HandoffOnClear => handoff_on_clear::run(payload),
         // Retired. Old plugin caches and settings.json entries still call
         // these; succeed without output.
         HookName::MigrationCheck | HookName::DiskGuard => {}

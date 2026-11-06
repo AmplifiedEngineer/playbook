@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Wires the 25 hooks Claude Code can invoke into `settings.json` as a bare
+//! Wires the 26 hooks Claude Code can invoke into `settings.json` as a bare
 //! `playbook hook <name>` command: 18 functional hooks plus 7 guards.
 //!
 //! `GUARD_SPECS` stays a separate list from `PORTED_HOOK_SPECS` because the
@@ -103,7 +103,7 @@ pub fn wired_hooks() -> impl Iterator<Item = &'static HookSpec> {
 /// `hooks/hooks.json` (since removed), line for line (`session-clean-exit` fires on both
 /// `Stop` and `SessionEnd`), while `auto-guard` and `auto-cost` never had a
 /// `hooks/hooks.json` entry. Together with `GUARD_SPECS` below these are exactly
-/// the 25 settings-wired `HookName` variants.
+/// the 26 settings-wired `HookName` variants.
 ///
 /// Divergence from `hooks/hooks.json`'s literal shape: that file shipped
 /// `Stop`'s two hooks (`session-clean-exit`, `memory-capture`) as two
@@ -314,6 +314,16 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         purpose: "Starts the same background read when a session ends, so the finished session is already stored.",
         if_cond: None,
         timeout: Some(5),
+        also_replaces: None,
+    },
+    HookSpec {
+        event: "SessionEnd",
+        matcher: Some("clear"),
+        name: "handoff-on-clear",
+        group: Group::Session,
+        purpose: "When `handoff.onClear` is true, writes the session's handoff as `/clear` ends it, by resuming the session as a fork. Off by default.",
+        if_cond: None,
+        timeout: Some(60),
         also_replaces: None,
     },
     HookSpec {
