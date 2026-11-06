@@ -172,7 +172,10 @@ fn run_times(conn: &Connection, worktree: &str) -> (Option<i64>, Option<i64>) {
     .unwrap_or((None, None))
 }
 
-fn group_counts(conn: &Connection, column: &str) -> Result<BTreeMap<String, usize>, String> {
+pub(crate) fn group_counts(
+    conn: &Connection,
+    column: &str,
+) -> Result<BTreeMap<String, usize>, String> {
     let sql = format!("SELECT COALESCE({column}, 'unknown'), COUNT(*) FROM files GROUP BY 1");
     let mut stmt = conn
         .prepare(&sql)
@@ -186,6 +189,16 @@ fn group_counts(conn: &Connection, column: &str) -> Result<BTreeMap<String, usiz
         out.insert(key, usize::try_from(n).unwrap_or(0));
     }
     Ok(out)
+}
+
+/// The language counts the last index run stored for this worktree. A store
+/// that an older build wrote has no such key, so the live count stands in until
+/// the next index run stores one.
+fn stored_languages(conn: &Connection, worktree: &str) -> Result<BTreeMap<String, usize>, String> {
+    match db::meta_get(conn, &db::languages_key(worktree)) {
+        Some(text) => serde_json::from_str(&text).or_else(|_| group_counts(conn, "lang")),
+        None => group_counts(conn, "lang"),
+    }
 }
 
 /// The full status report: a hashing freshness check plus index facts.
@@ -207,7 +220,7 @@ pub fn status(
         drift,
         schema_version: db::SCHEMA_VERSION,
         by_status: group_counts(conn, "status")?,
-        by_lang: group_counts(conn, "lang")?,
+        by_lang: stored_languages(conn, worktree)?,
         db_bytes: std::fs::metadata(index_path).map_or(0, |m| m.len()),
         last_run_started: started,
         last_run_completed: completed,
