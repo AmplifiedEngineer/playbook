@@ -52,6 +52,12 @@ Segments are PR-sized increments with one concern each:
 
 A Segment aims for under 500 changed lines, needs a reason above 1000, and never exceeds 1500. The default order is a linear chain, which maps to stacked PRs.
 
+### Approval prompts before agents run
+
+`/playbook:plan` and `/playbook:adr` ask you for approval before they dispatch the `fact-checker`, the `critic` and the `test-reviewer`. They choose the model with `playbook route design`. That route is Opus at xhigh effort, and the top model needs your approval while `routing.escalate` is `ask`. `ask` is the default.
+
+To stop the prompts, run `playbook config set routing.escalate auto` in the repo, or add `--global` for every repo. With `auto`, the commands proceed and log the choice. See [Models and effort](14-models-and-effort.md#approval-prompts) for all three values.
+
 ### Auto
 
 `--auto` answers only the Work Unit and Segment questions. It stops at the design approval. Add `--auto-design` to approve the design as well. Every choice goes into an Assumptions list. A gate FAIL stops the run. Auto from `PLAYBOOK_MODE` or the repo config acts like plain `--auto`.
@@ -67,6 +73,8 @@ A Segment aims for under 500 changed lines, needs a reason above 1000, and never
 It accepts a plan, an ADR blueprint, an issue, a ticket or plain text. With no argument it lists saved plans. If the input is not a ready plan, it stops and points you to `/playbook:plan` or `/playbook:adr`.
 
 It runs on Sonnet and never edits files itself. It hands each Work Unit to a subagent.
+
+`/playbook:implement` asks for approval only when `playbook route implement` says so. That happens for the `high` implement tier, and for a task that has already failed twice. The `low` and `medium` tiers never ask. The prompt follows the same `routing.escalate` setting as in Plan. See [Models and effort](14-models-and-effort.md#approval-prompts).
 
 **Delivery strategy.** Up front it asks two things, unless you preset `--pr-strategy` and `--boundary`:
 
