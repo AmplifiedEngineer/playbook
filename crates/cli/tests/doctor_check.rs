@@ -1408,6 +1408,43 @@ fn another_program_on_the_collector_port_fails_with_the_move_command() {
 }
 
 #[test]
+fn a_token_in_settings_that_differs_from_the_collector_warns() {
+    let b = Box::new("tel-stale-token");
+    point_settings_at_collector(&b, free_port());
+    b.settings(
+        r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:1","OTEL_EXPORTER_OTLP_HEADERS":"Authorization=Bearer old"}}"#,
+    );
+
+    let rows = b.run_with_env(&[]);
+
+    let mine = telemetry_rows(&rows);
+    assert!(
+        text(&mine).contains("WARN the token in Claude Code settings is not the collector token"),
+        "{}",
+        text(&mine)
+    );
+    assert!(hints(&mine).contains("playbook setup --only telemetry"));
+}
+
+#[test]
+fn a_token_in_settings_that_matches_the_collector_does_not_warn() {
+    let b = Box::new("tel-token-ok");
+    point_settings_at_collector(&b, free_port());
+    b.settings(
+        r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:1","OTEL_EXPORTER_OTLP_HEADERS":"Authorization=Bearer t"}}"#,
+    );
+
+    let rows = b.run_with_env(&[]);
+
+    let mine = telemetry_rows(&rows);
+    assert!(
+        !text(&mine).contains("is not the collector token"),
+        "{}",
+        text(&mine)
+    );
+}
+
+#[test]
 fn a_port_in_settings_that_differs_from_the_collector_warns() {
     let b = Box::new("tel-stale-port");
     point_settings_at_collector(&b, free_port());

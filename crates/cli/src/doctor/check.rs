@@ -1195,6 +1195,9 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
     let Some(state) = state else {
         return rows;
     };
+    if let Some(row) = token_row(&env.home, &cwd, &state.token) {
+        rows.push(row);
+    }
     rows.push(daemon_row(&paths, state.port));
     let up = running(&state) && probe(state.port) == Reply::Collector;
     if up {
@@ -1254,6 +1257,29 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
             .hint("restart Claude Code so it reads the new settings, then start a session"),
     });
     rows
+}
+
+/// A warning when the bearer token Claude Code sends is not the collector's.
+/// The collector answers 401 to every export then, and Claude Code drops
+/// them without a message. `None` when the token matches or settings cannot
+/// be read.
+fn token_row(home: &Path, cwd: &Path, token: &str) -> Option<Row> {
+    let vars = crate::usage::telemetry_detect::merged_vars(home, cwd, false)?;
+    let sent = vars
+        .get("OTEL_EXPORTER_OTLP_HEADERS")
+        .and_then(|h| h.split_once("Bearer "))
+        .map(|(_, rest)| rest.split(',').next().unwrap_or("").trim().to_string());
+    if token.is_empty() || sent.as_deref() == Some(token) {
+        return None;
+    }
+    Some(
+        Row::new(
+            "-",
+            Level::Warn,
+            "the token in Claude Code settings is not the collector token, so the collector refuses every export",
+        )
+        .hint(TELEMETRY_SETUP_FIX),
+    )
 }
 
 /// Who holds the collector's lifetime lock, or why none does. Read only: it
