@@ -324,6 +324,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     if let Some(popup) = &app.budget_popup {
         super::budget_popup::render(frame, area, popup, &pal);
     }
+    if app.reset_popup {
+        super::reset_popup::render(frame, area, &pal);
+    }
     if let Some(editor) = &app.editor {
         super::editor_view::render(frame, area, editor, &pal, app.icon);
     }

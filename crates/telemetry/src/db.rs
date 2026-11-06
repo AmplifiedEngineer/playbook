@@ -309,6 +309,30 @@ pub fn clear_backfilled_files(conn: &Connection) -> Result<(), String> {
         .map_err(|e| format!("failed to clear the backfill progress: {e}"))
 }
 
+/// Empties the usage history in one transaction: the events, the tool
+/// events and the read progress, so the next ingest reads every transcript
+/// again like a first run. Settings, the budget, the limit readings, the
+/// account names and the telemetry rows stay. A reader sees the history
+/// before the call or none of it, never a part.
+pub fn reset_usage(conn: &Connection) -> Result<(), String> {
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| format!("failed to begin the usage reset: {e}"))?;
+    for table in RESET_TABLES {
+        tx.execute(&format!("DELETE FROM {table}"), [])
+            .map_err(|e| format!("failed to clear {table}: {e}"))?;
+    }
+    tx.commit()
+        .map_err(|e| format!("failed to commit the usage reset: {e}"))
+}
+
+/// The tables `reset_usage` empties: the history and where its reading got to.
+const RESET_TABLES: [&str; 4] = [
+    "usage_events",
+    "tool_invocation_events",
+    "usage_backfill_files",
+    "usage_watermarks",
+];
+
 /// The newest usage timestamp stored for an agent, or 0.
 pub fn newest_usage_of(conn: &Connection, agent: &str) -> Result<i64, String> {
     conn.query_row(
@@ -505,6 +529,38 @@ mod tests {
             "the WAL must be private too"
         );
         let _ = fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    #[test]
+    fn a_reset_empties_the_history_and_the_read_progress_but_keeps_the_rest() {
+        // Arrange
+        let dir = scratch_dir("usage-reset");
+        let conn = open_db(&dir.join("usage.db")).unwrap();
+        conn.execute_batch(
+            "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort, repo,
+                branch, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost_usd)
+             VALUES ('e', 1, 's', 'a', 'm', '', 'r', 'b', 1, 1, 0, 0, 1.0);
+             INSERT INTO tool_invocation_events VALUES ('t', 1, 's', 'a', 'skill', 'n');
+             INSERT INTO usage_backfill_files VALUES ('/f', 1);
+             INSERT INTO usage_watermarks VALUES ('claude-code', 5);
+             INSERT INTO account_names (key, name) VALUES ('k', 'Work');",
+        )
+        .unwrap();
+        let count = |t: &str| -> i64 {
+            conn.query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |r| r.get(0))
+                .unwrap()
+        };
+
+        // Act
+        reset_usage(&conn).unwrap();
+        reset_usage(&conn).unwrap();
+
+        // Assert
+        for table in RESET_TABLES {
+            assert_eq!(count(table), 0, "{table}");
+        }
+        assert_eq!(count("account_names"), 1);
+        let _ = fs::remove_dir_all(dir);
     }
 
     fn busy() -> rusqlite::Error {
