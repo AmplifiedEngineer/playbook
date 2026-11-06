@@ -1,0 +1,2 @@
+exit: 0
+src/counter.js:5-14  class Counter  export class Counter

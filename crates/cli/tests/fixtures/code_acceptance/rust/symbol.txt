@@ -1,0 +1,2 @@
+exit: 0
+src/lib.rs:18-22  function area  pub fn area(p: &Point) -> i32

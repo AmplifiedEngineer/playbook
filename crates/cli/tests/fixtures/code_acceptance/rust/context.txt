@@ -1,0 +1,19 @@
+exit: 0
+== src/lib.rs:18-22  symbol area; text
+pub fn area(p: &Point) -> i32 {
+    // area is computed from the point
+    let note = "area";
+    p.x * p.y * SCALE
+}
+== src/shape.rs:13-16  symbol double_area
+pub fn double_area() -> i32 {
+    // area doubled
+    area(&corner()) * 2
+}
+== src/shape.rs:1-6  text; import
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: Apache-2.0
+use crate::{area, Point};
+
+pub struct Square {
+    pub side: i32,

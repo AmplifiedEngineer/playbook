@@ -1,0 +1,6 @@
+exit: 0
+const:3-3  START  export const START = 0
+class:5-14  Counter  export class Counter
+  method:6-8  Counter.constructor  constructor()
+  method:10-13  Counter.increment  increment()
+function:16-18  reset  export function reset(counter)

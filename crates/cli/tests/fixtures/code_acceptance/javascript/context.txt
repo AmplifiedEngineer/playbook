@@ -1,0 +1,19 @@
+exit: 0
+== src/counter.js:5-14  symbol Counter; text
+export class Counter {
+  constructor() {
+    this.value = START;
+  }
+  // Counter increments the value
+  increment() {
+    this.value += 1;
+    return this.value;
+  }
+}
+== src/app.js:1-6  text; import
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: Apache-2.0
+import { Counter, reset } from "./counter.js";
+// Counter demo
+export function run() {
+  const note = "Counter";

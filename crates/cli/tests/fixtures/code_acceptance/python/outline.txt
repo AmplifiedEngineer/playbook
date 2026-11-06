@@ -1,0 +1,6 @@
+exit: 0
+variable:3-3  SCALE  SCALE = 2
+class:6-12  Square  class Square
+  method:7-8  Square.__init__  def __init__(self, side)
+  method:10-12  Square.area  def area(self)
+function:15-16  make_square  def make_square(side)

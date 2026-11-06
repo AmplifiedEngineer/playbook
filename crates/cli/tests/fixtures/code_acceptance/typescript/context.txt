@@ -1,0 +1,19 @@
+exit: 0
+== src/shapes.ts:15-22  symbol Square; text
+export class Square implements Shape {
+  name = "Square";
+  constructor(private side: number) {}
+  // Square area
+  area(): number {
+    return this.side * this.side * SCALE;
+  }
+}
+== src/main.ts:1-8  text; symbol makeSquare; import
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: Apache-2.0
+import { Square } from "./shapes";
+// Square factory
+export function makeSquare(side: number): Square {
+  const label = "Square";
+  return new Square(side);
+}
