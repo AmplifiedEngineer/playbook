@@ -13,8 +13,8 @@
 │ $0┤▁▆▁  ▃│PgUp       Move five rows up                        tables                  │ ██  █  █ │
 │    5 7  9│Home, g    First row, or first day of a chart       tables, charts          │ 29  1  3 │
 ╰──────────│End, G     Last row, or last day of a chart         tables, charts          │■■■ high├─╯
-╭─┤³Models├│Left       Move the chart cursor one bar back       charts                  │──────────╮
-│name      │Right      Move the chart cursor one bar forward    charts                  │▼ share   │
+╭─┤³Models├│Left, h    Move the chart cursor one bar back       charts                  │──────────╮
+│name      │Right, l   Move the chart cursor one bar forward    charts                  │▼ share   │
 │■opus-5   │                                                                            │5 ■■■■■···│
 │■sonnet-5 │Periods                                                                     │5 ■■■·····│
 │■haiku-5  │d          Show today                               all panels              │7 ········│
@@ -27,4 +27,4 @@
 │          │                                                                            │     $0.80│
 │          │Views                                                                       │     $0.95│
 ╰──────────╰┤ ↑/↓ scroll, any other key closes ├────────────────────────────────────────╯──────────╯
- d day w week m month ←/→ day r range v view / filter h help q quit  updated 01:46:40 UTC, every 5s
+ d day w week m month ←/→ day r range v view / filter ? help q quit  updated 01:46:40 UTC, every 5s

@@ -714,8 +714,8 @@ impl App {
         let at = self.help.unwrap_or(0);
         let page = self.help_page();
         let to = match code {
-            KeyCode::Down => Some(at + 1),
-            KeyCode::Up => Some(at.saturating_sub(1)),
+            KeyCode::Down | KeyCode::Char('j') => Some(at + 1),
+            KeyCode::Up | KeyCode::Char('k') => Some(at.saturating_sub(1)),
             KeyCode::PageDown => Some(at + page),
             KeyCode::PageUp => Some(at.saturating_sub(page)),
             KeyCode::Home => Some(0),
@@ -1404,6 +1404,18 @@ mod tests {
         assert_eq!(app.cursor, Some(today() - 29), "stops on the oldest day");
     }
 
+    #[test]
+    fn h_and_l_move_the_chart_cursor_like_left_and_right() {
+        let mut app = charted(Range::LastDays(30), 30);
+        app.key(press(KeyCode::Char('h')));
+        assert_eq!(app.cursor, Some(today() - 1));
+        app.key(press(KeyCode::Char('h')));
+        assert_eq!(app.cursor, Some(today() - 2));
+        app.key(press(KeyCode::Char('l')));
+        assert_eq!(app.cursor, Some(today() - 1));
+        assert!(app.help.is_none(), "h no longer opens the help");
+    }
+
     // NOW is Thursday 2026-09-03, so the Monday week has bars from today - 3
     // to today + 3 and the cursor starts on today, not on the last bar.
     #[test]
@@ -1564,18 +1576,16 @@ mod tests {
     }
 
     #[test]
-    fn h_and_question_mark_open_the_help_and_any_other_key_closes_it() {
-        for open in ['h', '?'] {
-            let mut app = loaded();
-            app.key(press(KeyCode::Char(open)));
-            assert_eq!(app.help, Some(0));
-            // A key that would change the range only closes the window.
-            assert_eq!(app.key(press(KeyCode::Char('a'))), Effect::None);
-            assert_eq!((app.help, app.range), (None, Range::All));
-        }
+    fn question_mark_opens_the_help_and_any_other_key_closes_it() {
+        let mut app = loaded();
+        app.key(press(KeyCode::Char('?')));
+        assert_eq!(app.help, Some(0));
+        // A key that would change the range only closes the window.
+        assert_eq!(app.key(press(KeyCode::Char('a'))), Effect::None);
+        assert_eq!((app.help, app.range), (None, Range::All));
         for close in [KeyCode::Esc, KeyCode::Char('h'), KeyCode::Char('x')] {
             let mut app = loaded();
-            app.key(press(KeyCode::Char('h')));
+            app.key(press(KeyCode::Char('?')));
             app.key(press(close));
             assert_eq!(app.help, None, "{close:?}");
             assert!(!app.quit, "{close:?}");
@@ -1586,7 +1596,7 @@ mod tests {
     fn the_help_scrolls_with_the_arrows_and_stops_at_its_ends() {
         let mut app = loaded();
         app.area = Rect::new(0, 0, 80, 24);
-        app.key(press(KeyCode::Char('h')));
+        app.key(press(KeyCode::Char('?')));
         app.key(press(KeyCode::Up));
         assert_eq!(app.help, Some(0));
         app.key(press(KeyCode::Down));
@@ -1601,11 +1611,22 @@ mod tests {
     }
 
     #[test]
+    fn the_help_scrolls_with_j_and_k() {
+        let mut app = loaded();
+        app.area = Rect::new(0, 0, 80, 24);
+        app.key(press(KeyCode::Char('?')));
+        app.key(press(KeyCode::Char('j')));
+        assert_eq!(app.help, Some(1));
+        app.key(press(KeyCode::Char('k')));
+        assert_eq!(app.help, Some(0));
+    }
+
+    #[test]
     fn a_refresh_while_the_help_is_open_keeps_it_and_the_selection() {
         let mut app = loaded();
         app.key(press(KeyCode::Char('3')));
         app.key(press(KeyCode::Down));
-        app.key(press(KeyCode::Char('h')));
+        app.key(press(KeyCode::Char('?')));
         app.key(press(KeyCode::Down));
         app.refresh(data_with([5.0, 1.0, 3.0]));
         assert_eq!(app.help, Some(1));
@@ -1616,7 +1637,7 @@ mod tests {
     #[test]
     fn ctrl_c_quits_while_the_help_is_open() {
         let mut app = loaded();
-        app.key(press(KeyCode::Char('h')));
+        app.key(press(KeyCode::Char('?')));
         app.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(app.quit);
     }

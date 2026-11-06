@@ -13,12 +13,12 @@
 ╰│PgUp       Move five rows up                        tables                  │╯
 ╭│Home, g    First row, or first day of a chart       tables, charts          │╮
 ││End, G     Last row, or last day of a chart         tables, charts          ││
-││Left       Move the chart cursor one bar back       charts                  ││
-╰│Right      Move the chart cursor one bar forward    charts                  │╯
+││Left, h    Move the chart cursor one bar back       charts                  ││
+╰│Right, l   Move the chart cursor one bar forward    charts                  │╯
 ╭│                                                                            │╮
 ││Periods                                                                     ││
 ││d          Show today                               all panels              ││
 ││w          Show this week                           all panels              ││
 ││W          Show last week                           all panels              ││
 ╰╰┤ ↑/↓ scroll, any other key closes ├────────────────────────────────────────╯╯
- w week m month r range v view / filter h help q quit      updated 01:46:40 UTC
+ w week m month r range v view / filter ? help q quit      updated 01:46:40 UTC
