@@ -167,7 +167,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.ref && '["macos-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
+        # Linux splits the tests over two runners, each compiling for itself.
+        # macOS runs them whole. Build-test below waits for every leg.
+        include: ${{ fromJSON(inputs.ref && '[{"os":"macos-latest","shard":""}]' || '[{"os":"ubuntu-latest","shard":"1/2"},{"os":"ubuntu-latest","shard":"2/2"},{"os":"macos-latest","shard":""}]') }}
     needs: changes
     # Run even if `changes` failed (fail open); never let a skipped needs
     # turn a required check into a skipped one.
@@ -189,7 +191,7 @@ jobs:
       # Whether this leg saves the cargo cache: Linux after a push to main,
       # macOS after a daily or manual run on main, the runs that build it
       # there. A release gate never saves, so it does not slow the release.
-      SAVE_CACHE: ${{ (github.event_name == 'push' && matrix.os == 'ubuntu-latest') || (matrix.os == 'macos-latest' && github.ref == 'refs/heads/main' && (inputs.ref || '') == '' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')) }}
+      SAVE_CACHE: ${{ (github.event_name == 'push' && matrix.os == 'ubuntu-latest' && matrix.shard == '1/2') || (matrix.os == 'macos-latest' && github.ref == 'refs/heads/main' && (inputs.ref || '') == '' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')) }}
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         # Linux-only action; it self-skips on macOS with a confusing warning
@@ -298,7 +300,17 @@ jobs:
         if: env.LANE == 'true'
         env:
           PKGS: ${{ needs.changes.outputs.pkgs || '--workspace' }}
-        run: cargo nextest run $PKGS --no-tests=pass --config-file .github/nextest.toml --profile ci
+          SHARD: ${{ matrix.shard }}
+        run: |
+          # A hash partition gives each test to exactly one shard. The
+          # collector daemon group stays one test at a time inside its shard,
+          # and the shards run on separate runners.
+          args=()
+          if [ -n "$SHARD" ]; then
+            args+=(--partition "hash:$SHARD")
+          fi
+          # shellcheck disable=SC2086
+          cargo nextest run $PKGS --no-tests=pass --config-file .github/nextest.toml --profile ci "${args[@]}"
 
       # The key changes only with Cargo.lock and the toolchain, and almost
       # every change rebuilds the workspace crates, so the cache keeps only
