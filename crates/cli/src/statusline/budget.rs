@@ -6,11 +6,17 @@
 //! by [`super::lines::line_4`]. The words and the leading `!` carry the
 //! meaning, so nothing relies on colour alone.
 
+use crate::usage::data::usage_db;
 use crate::usage::limits::{brief, fmt_span, LimitPeriod, State};
 use crate::usage::limits_source::{manual_budgets, Snapshot};
+use crate::usage::local_total::LocalTotal;
 use crate::usage::monthly_use::{detect, monthly_use, MonthlyUse, Source};
 use crate::usage::plan::{self, Account};
 use std::path::Path;
+
+/// The file under the statusline cache folder that holds the month's local
+/// total between renders.
+const LOCAL_TOTAL_FILE: &str = "monthly-local-total";
 
 /// Placed before the words of a segment that is an alarm.
 pub const ALARM_MARK: &str = "! ";
@@ -44,26 +50,46 @@ pub struct Segment {
 /// Code's config file, read only when stdin carries no monthly dollar figure,
 /// and `home` is where the manual budget is kept. Empty when nothing is worth
 /// saying, which is the usual case.
-pub fn build(input: &str, now: i64, claude_json: &Path, home: &Path) -> Vec<Segment> {
+pub fn build(
+    input: &str,
+    now: i64,
+    claude_json: &Path,
+    home: &Path,
+    cache_dir: &Path,
+) -> Vec<Segment> {
     let snapshot = Snapshot::from_statusline(input, now);
     let mut out = snapshot.as_ref().map_or_else(Vec::new, |s| windows(s, now));
-    out.extend(monthly(snapshot.as_ref(), now, claude_json, home));
+    out.extend(monthly(
+        snapshot.as_ref(),
+        now,
+        claude_json,
+        home,
+        cache_dir,
+    ));
     out
 }
 
 /// The monthly dollar segment: the amount Claude reports (stdin, else the
-/// config file cache) against the lower of its limit and the manual budget.
+/// config file cache) against the lower of its limit and the manual budget,
+/// or with only a manual budget, this machine's cost for the month.
 fn monthly(
     snapshot: Option<&Snapshot>,
     now: i64,
     claude_json: &Path,
     home: &Path,
+    cache_dir: &Path,
 ) -> Option<Segment> {
     let mut account = Account::default();
     if detect(snapshot, &account, now).is_none() {
-        account = plan::read_limited(claude_json, MAX_CONFIG_BYTES)?;
+        account = plan::read_limited(claude_json, MAX_CONFIG_BYTES).unwrap_or_default();
     }
-    let figure = monthly_use(snapshot, &account, &manual_budgets(home), now)?;
+    let local = LocalTotal {
+        db: usage_db(home),
+        cache: Some(cache_dir.join(LOCAL_TOTAL_FILE)),
+    };
+    let figure = monthly_use(snapshot, &account, &manual_budgets(home), now, || {
+        local.month_used(now)
+    })?;
     monthly_segment(&figure, now)
 }
 
@@ -74,10 +100,14 @@ fn monthly_segment(m: &MonthlyUse, now: i64) -> Option<Segment> {
     // there: hours since the fetch must not dilute it.
     let seen = match m.source {
         Source::Cache { age, .. } => now - age,
-        Source::Statusline => now,
+        Source::Statusline | Source::Local => now,
     };
     let headroom = m.limit.headroom(seen)?;
-    let label = if m.own_budget { "mo budget" } else { "mo" };
+    let label = match (m.source, m.own_budget) {
+        (Source::Local, _) => "mo budget (local)",
+        (_, true) => "mo budget",
+        (_, false) => "mo",
+    };
     let figure = format!("${:.0}/${:.0} {label}", m.limit.used, m.limit.limit);
     let exceeded = headroom.state == State::Exceeded;
     let (words, alarm, short_ok) = match (m.source, headroom.state) {
