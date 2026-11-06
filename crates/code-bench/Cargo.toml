@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "code-bench"
+version.workspace = true
+edition.workspace = true
+description = "Dev-only benchmark for the code index: corpus, metrics and gate"
+license.workspace = true
+publish = false
+
+[lib]
+name = "code_bench"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
