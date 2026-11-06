@@ -2,18 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The `handoff/used/` folder is gone: loaded handoffs are gc tombstones. Only
-//! the migration, its tests and the changelog and gc docs may still name it.
+//! the migration, its tests and the changelog and the gc, worktree and migrations docs may still name it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const ALLOWED: [&str; 6] = [
+const ALLOWED: [&str; 7] = [
     "crates/cli/src/init/migrate.rs",
     "crates/cli/src/init/handoff_used.rs",
     "crates/cli/tests/handoff_used_migration.rs",
     "CHANGELOG.md",
     "docs/internals/17-gc-and-tombstones.md",
     "docs/internals/03-worktree.md",
+    "docs/internals/07-migrations.md",
 ];
 const SCANNED_DIRS: [&str; 5] = ["crates", "docs", "plugins", "seed", "scripts"];
 const EXTENSIONS: [&str; 6] = ["rs", "md", "json", "toml", "sh", "yml"];
