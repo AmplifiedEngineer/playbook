@@ -17,7 +17,6 @@
 use super::component::{components, resolve, Kind, Resolution};
 use super::floor::{floor_of, Floor};
 use super::rank;
-use crate::agents::variants::TIERS;
 use crate::usage::aggregate::SECONDS_PER_DAY;
 use crate::usage::query::{self, Range};
 use crate::usage::{db, ToolInvocationEvent, ToolKind, UsageEvent};
@@ -110,6 +109,11 @@ pub struct Report {
     pub other_dispatches: usize,
     pub agents: Vec<AgentReport>,
 }
+
+/// The effort tiers an older release could name in a variant agent
+/// (`reviewer-low`). New dispatches name the base agent, so these only matter
+/// for dispatches already in the usage history.
+const TIERS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
 /// The agent a dispatch name refers to and the effort tier it names, if any.
 /// `playbook:reviewer` and `reviewer` are the base, `reviewer-low` and

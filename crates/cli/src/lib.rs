@@ -630,11 +630,12 @@ pub enum Command {
     /// started with `playbook cc` or `playbook ccd` get the ceiling. With no level, shows both
     /// values and the one that wins.
     ///
-    /// The ceiling caps the agent variants the launcher renders, the default
-    /// effort it adds and what the binary reports. It does not cap a command,
-    /// skill or base agent that ships its own effort, or a level you state for
-    /// the session, because only Claude Code's `maxEffortLevel` setting can,
-    /// and playbook never writes it.
+    /// The ceiling lowers the `effort` an orchestrator passes when it spawns an
+    /// agent, the default effort the launcher adds and what the binary reports.
+    /// It does not cap a command or skill that ships its own effort, a level you
+    /// state for the session, or a spawn that skips the resolve step, because
+    /// only Claude Code's `maxEffortLevel` setting can, and playbook never
+    /// writes it.
     ///
     /// Example: `playbook effort xhigh`
     #[command(args_conflicts_with_subcommands = true)]
@@ -835,7 +836,7 @@ pub enum Command {
         #[command(subcommand)]
         sub: ManifestCommand,
     },
-    /// Check agent definition files and show their effort variants
+    /// Check that agent definition files follow the playbook rules
     Agents {
         #[command(subcommand)]
         sub: AgentsCommand,
@@ -1397,27 +1398,6 @@ pub enum AgentsCommand {
     Check {
         /// Directory of agent definitions. Defaults to `plugins/playbook/agents` in the repo, else `agents` at the repo root
         agents_dir: Option<PathBuf>,
-    },
-    /// Show the effort-tier variants a session would get
-    ///
-    /// Variants such as `reviewer-low` are not files. `playbook cc` and `playbook ccd` render
-    /// them from the base agents and pass them to Claude Code with `--agents`.
-    /// This prints the same set, so you can see what a session would hold and
-    /// its size. Use `--json` for the full definitions.
-    ///
-    /// Example: `playbook agents variants --ceiling medium`
-    Variants {
-        /// Directory of agent definitions. Defaults to `plugins/playbook/agents` in the repo, else `agents` at the repo root
-        agents_dir: Option<PathBuf>,
-        /// Lowest effort ceiling to apply to every agent (default: none)
-        #[arg(long)]
-        ceiling: Option<String>,
-        /// One of auto, all or off
-        #[arg(long, default_value = "auto")]
-        mode: String,
-        /// Print the `--agents` JSON
-        #[arg(long)]
-        json: bool,
     },
 }
 

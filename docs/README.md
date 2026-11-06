@@ -22,7 +22,7 @@ Task-oriented workflows.
 - [pbtop](guides/11-pbtop.md): the Agent Budget Dashboard on its own, and the retired `playbook-telemetry`.
 - [Settings](guides/12-settings.md): `playbook config`, tiers and examples.
 - [Security defaults](guides/13-security-defaults.md): the opt-in `permissions` block and its limits.
-- [Models and effort](guides/14-models-and-effort.md): the model tiers, fallbacks, effort ceiling, variants and routing.
+- [Models and effort](guides/14-models-and-effort.md): the model tiers, fallbacks, effort ceiling and routing.
 - [Memory](guides/15-memory.md): the local memory store and `memory.source`.
 - [Watch acceptance run](guides/16-watch-acceptance-run.md): the day-long run that proves watch mode on a real repository, step by step.
 

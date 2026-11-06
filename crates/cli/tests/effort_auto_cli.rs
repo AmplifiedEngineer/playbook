@@ -36,11 +36,6 @@ impl Home {
                 "CLAUDE_PLUGIN_ROOT",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/plugin"),
             )
-            .env(
-                "PLAYBOOK_AGENT_VARIANTS",
-                "reviewer-low,reviewer-high,reviewer-xhigh",
-            )
-            .env_remove("PLAYBOOK_AGENT_VARIANTS_PLUGIN")
             .env_remove("CLAUDE_CONFIG_DIR")
             .output()
             .expect("playbook should spawn")

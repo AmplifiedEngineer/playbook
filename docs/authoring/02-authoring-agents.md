@@ -87,18 +87,15 @@ ADR 0003 works the same rule through a second example. A `critic` takes a focus 
 
 The trade-off in one line each: parametrizing keeps behaviour consistent and the file count low. Splitting keeps each checklist honest, at the cost of another file to maintain.
 
-## Effort tiers and per-session variants
+## Effort per spawn
 
-Effort is fixed per agent file because the `Agent` tool takes no per-call effort. When an orchestrator spawns one role at different difficulty (a one-line docs diff and a 200 KB security diff), keep one base agent and let the launcher render variants named `<base>-<tier>`, such as `reviewer-low` and `reviewer-xhigh`, for one session.
+An agent file sets the effort the agent runs at by default. When an orchestrator spawns one role at different difficulty (a one-line docs diff and a 200 KB security diff), it keeps the one base agent and passes a different `effort` on the `Agent` call. The `delegating-subagents` skill tells it to, because the tool only takes the parameter when a skill asks.
 
-- Only the base files are committed. A variant keeps the base's `tools`, `model` and body, and differs in `name`, a one-line `description` and `effort`. `playbook cc` and `playbook ccd` write the set into a throwaway plugin directory in the temp dir for the session and remove it afterwards, so no plugin file or Claude Code config changes.
-- Every base agent lists every tier (`low`, `medium`, `high`, `xhigh`, `max`) in the `VARIANTS` table in `crates/cli/src/agents/variants.rs`. A tier equal to the agent's own effort renders nothing, so there is no `-medium` variant for the reviewer, which ships at `medium`.
-- A session gets only the useful variants (`agents.variants`, default `auto`): the cheaper tiers for every agent, plus `xhigh` for `critic`, `implementer` and `reviewer` (the Haiku agents stop at `medium` under the model cap, so they get no `xhigh`), and never a tier above the user's effort ceilings. `all` adds the rest including `max`, and `off` passes none. Committing every variant as a file would add about 27 KB to every session, which is why they are rendered instead.
-- Sessions started without the launcher have the base agents only. `playbook agents variants plugins/playbook/agents` lists what a session gets, `playbook effort resolve agents <name> --json` reports the file to dispatch, and the `delegating-subagents` skill falls back to the base agent when a variant is not there.
-- Spawn a variant by its plain name, for example `reviewer-xhigh`, with no `playbook:` prefix. The base agents keep it (`playbook:reviewer`).
-- `playbook agents check`, fails when an agent has no `VARIANTS` entry, a tier cannot render, or a generated variant file is left in `agents/`. Variants are built from the base, so they follow every normal check, including the read-only tool rules.
-
-The policy for base efforts is in [Model routing and memory](../internals/02-model-routing-and-memory.md#effort-policy), and the design is in [ADR-0017](../adr/0017-per-component-effort-ceilings.md).
+- There are no variant agents and nothing to register. A new agent file needs no table entry.
+- `playbook effort resolve agents <name> --json` reports `effort`, the shipped effort lowered by every ceiling, and `ceiling`. The orchestrator never passes a level above `ceiling`.
+- Claude Code 2.1.296 or later applies the parameter to plugin agents. An older version ignores it and the agent runs at its file's effort.
+- Spawn the base agent with its prefix, for example `playbook:reviewer`.
+- Older releases rendered `<base>-<tier>` variants such as `reviewer-low`. The launcher now removes any leftover `playbook-variants-<pid>` folder from the temp dir, and the `agents.variants` setting is accepted and ignored.
 
 ## The check
 
@@ -121,7 +118,7 @@ Run it before committing a new or edited agent:
 playbook agents check plugins/playbook/agents
 ```
 
-It also checks the variants: every agent has a `VARIANTS` entry, every tier renders from its base, and no generated variant file is left in `agents/`. It reports every offending file at once rather than stopping at the first one.
+It reports every offending file at once rather than stopping at the first one.
 
 ## See also
 

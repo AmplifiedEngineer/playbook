@@ -51,7 +51,7 @@ For narrow prompts (a quick choice between two named options) staying inline on 
 
 Reasoning: [Why the pieces are shaped this way](../internals/14-why-the-pieces-are-shaped-this-way.md).
 
-Effort is a second dial next to the model tier. Agents, commands and skills accept an `effort` key (`low`, `medium`, `high`, `xhigh`, `max`). The `Agent` tool has no per-call effort, only `model`, so an agent's effort is fixed by its file. Where one role needs two efforts, the launcher renders tier variants for the session (see [Authoring agents](../authoring/02-authoring-agents.md)) and the orchestrator picks by name. To compare settings on real inputs, run `playbook eval bench`.
+Effort is a second dial next to the model tier. Agents, commands and skills accept an `effort` key (`low`, `medium`, `high`, `xhigh`, `max`). The `Agent` tool takes an `effort` parameter per call when a skill asks for it, and the `delegating-subagents` skill asks for it on every spawn. The agent file sets the default, and the orchestrator passes a lower or higher level for one spawn (see [Authoring agents](../authoring/02-authoring-agents.md)). To compare settings on real inputs, run `playbook eval bench`.
 
 **Main session default.** The `playbook cc` and `playbook ccd` launchers add `--effort medium` to the `claude` command line when the session states no effort. Stating one turns it off: pass `--effort high` (or any level), set `effortLevel` in `~/.claude/settings.json`, or export `CLAUDE_CODE_EFFORT_LEVEL`. An effort ceiling still lowers the default. Playbook only shapes its own launcher command line and never writes Claude Code's settings or memory, so a session started without the launcher keeps the model default. See [ADR-0023](../adr/0023-commands-at-medium.md).
 
@@ -75,7 +75,7 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 | `commands/deep-review`, `implement`, `plan`, `adr`, `learn-project`, `fix`, `address-pr-comments` | opus, except implement and fix (sonnet) | `medium` (was high) | Lowered by the maintainer on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). No bench exists for the design commands. The evidence is the reviewer, implementer and critic results. Watch rework and missed findings. |
 | `commands/commit-and-push`, `create-pull-request`, `repo-audit` | fork into git (haiku) and auditor (opus) | none | They fork into `playbook:git` (`xhigh`) and `playbook:auditor` (`high`), which set the effort. |
 | `commands/doctor`, `session-start`, `setup` | haiku (was sonnet) | `low` (kept) | Run compiled helpers and print the result, or load a saved handoff. Mechanical, so the cheapest tier fits (about 95% less per call, 20x cheaper per token). Checked live (see PR). |
-| per-session variants such as `reviewer-low` | same as base | any tier | Not files. `playbook cc` and `playbook ccd` render them from the base agent into a throwaway session plugin (`--plugin-dir`), spawned as `playbook-variants:<name>`. The orchestrator picks by ceiling, then diff size and risk; see `playbook:delegating-subagents`. |
+| the `effort` parameter of the `Agent` call | the agent file's own effort | any level up to every ceiling | Passed by the orchestrator, from `playbook effort resolve` or `playbook effort choose`. The orchestrator picks by ceiling, then diff size and risk; see `playbook:delegating-subagents`. |
 | `skills/*` | none | none | A skill is knowledge loaded into whoever uses it. An `effort` key would override the caller's choice, so none sets one. |
 
 Evidence for the rows marked "See below":
@@ -125,13 +125,13 @@ Every agent, command and skill with its model, effort and reason is in [`docs/re
 
 The Haiku 5.5 evaluation (#576) found `xhigh` costs 2x `medium` for the same pass rate. `max` costs 13x (about 7,100 thinking tokens and 32 s per call) and scores worst (91% against 97% at `medium`). `crates/cli/src/effort/model_cap.rs` therefore caps every component whose frontmatter model is Haiku:
 
-- `max` is never used on Haiku, whatever a role or a variant asks for.
+- `max` is never used on Haiku, whatever a role or a spawn asks for.
 - Haiku roles stop at `medium` by default.
 - A role may go up to `xhigh` only when it has an entry in `OPT_INS` with a recorded reason. Today that is the `git` agent (evidence above), so the `git` agent itself ships at `xhigh`. Because the fork skills `commit-and-push` and `create-pull-request` name `agent: playbook:git` (the prefix is required, a bare `git` forks a general purpose agent on the session model), the base file is the simple place for it. A cheaper `git-low` variant stays available for a session that wants it.
 
 The cap is a ceiling like the others. The lowest ceiling wins, your `maxEffortLevel` still beats it when lower, and it never raises anything. It applies in `playbook effort resolve`, in the variants `playbook cc` and `playbook ccd` render, and it shows in `playbook effort list` and `playbook doctor models`.
 
-Effort is fixed per agent definition: base agents run at their own effort, and an orchestrator picks a variant by ceiling, diff size and risk. Do not request xhigh or max on your own for anything else. If a deployment rejects it, use the base agent.
+An agent runs at its own effort unless the orchestrator passes another `effort` on the `Agent` call, chosen by ceiling, diff size and risk. Do not request xhigh or max on your own for anything else. If a deployment rejects it, omit the parameter.
 
 ### Per-component ceilings
 

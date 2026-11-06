@@ -273,33 +273,10 @@ fn nonexistent_agents_dir_argument_errors() {
     assert!(err.contains(&missing.display().to_string()));
 }
 
-// --- Effort-tier variants: rendered per session, never committed ---
-
-fn run_sub(sub: &str, agents_dir: &Path) -> Output {
-    isolated::playbook()
-        .args(["agents", sub])
-        .arg(agents_dir)
-        .output()
-        .expect("playbook binary should spawn")
-}
-
-/// A scratch dir holding just a valid `reviewer.md`.
-fn reviewer_fixture(tag: &str) -> PathBuf {
-    let dir = scratch(tag);
-    let content = agent(
-        "reviewer",
-        STRICT_DESC,
-        "Read, Grep, Glob",
-        "sonnet",
-        "high",
-        GUARDRAILS_FULL,
-    );
-    fs::write(dir.join("reviewer.md"), content).expect("fixture");
-    dir
-}
+// --- Effort-tier variants are gone: any agent file is valid without a table entry ---
 
 #[test]
-fn an_agent_with_no_variants_entry_fails_naming_the_file() {
+fn an_agent_needs_no_entry_in_any_variants_table() {
     let dir = scratch("variant-no-entry");
     let content = agent(
         "newcomer",
@@ -311,78 +288,11 @@ fn an_agent_with_no_variants_entry_fails_naming_the_file() {
     );
     fs::write(dir.join("newcomer.md"), content).expect("fixture");
 
-    let out = run_sub("check", &dir);
-
-    assert_eq!(out.status.code(), Some(1));
-    assert!(stderr_of(&out).contains("newcomer.md: no entry in VARIANTS"));
-}
-
-#[test]
-fn a_committed_generated_variant_file_fails() {
-    let dir = reviewer_fixture("variant-committed");
-    let body = format!(
-        "---\nname: reviewer-low\n---\n{}\n",
-        playbook::agents::variants::MARKER
-    );
-    fs::write(dir.join("reviewer-low.md"), body).expect("stale variant");
-
-    let out = run_sub("check", &dir);
-
-    assert_eq!(out.status.code(), Some(1));
-    assert!(stderr_of(&out).contains("reviewer-low.md: a generated variant file, delete it"));
-}
-
-#[test]
-fn a_base_that_cannot_render_a_tier_fails() {
-    let dir = reviewer_fixture("variant-unrenderable");
-    let base = dir.join("reviewer.md");
-    let body = fs::read_to_string(&base).expect("base");
-    fs::write(&base, body.replace("effort: high\n", "")).expect("edit");
-
-    let out = run_sub("check", &dir);
-
-    assert_eq!(out.status.code(), Some(1));
-    let err = stderr_of(&out);
-    assert!(
-        err.contains("reviewer.md: cannot render the 'low' variant"),
-        "{err}"
-    );
-}
-
-#[test]
-fn the_variants_command_shows_what_a_session_would_hold() {
-    let dir = reviewer_fixture("variant-show");
     let out = isolated::playbook()
-        .args(["agents", "variants", "--json"])
+        .args(["agents", "check"])
         .arg(&dir)
         .output()
-        .expect("spawn");
-    assert!(out.status.success(), "{}", stderr_of(&out));
-    let map: serde_json::Value = serde_json::from_str(&stdout_of(&out)).expect("json");
-    for name in ["reviewer-low", "reviewer-medium", "reviewer-xhigh"] {
-        assert_eq!(
-            map[name]["tools"],
-            serde_json::json!(["Read", "Grep", "Glob"]),
-            "{name}"
-        );
-        assert_eq!(map[name]["model"], "sonnet");
-    }
-    assert_eq!(map["reviewer-low"]["effort"], "low");
-    assert!(map.get("reviewer-max").is_none(), "max needs mode all");
+        .expect("playbook binary should spawn");
 
-    let capped = isolated::playbook()
-        .args(["agents", "variants", "--ceiling", "medium", "--json"])
-        .arg(&dir)
-        .output()
-        .expect("spawn");
-    let map: serde_json::Value = serde_json::from_str(&stdout_of(&capped)).expect("json");
-    assert!(map.get("reviewer-xhigh").is_none());
-    assert!(map.get("reviewer-medium").is_some());
-
-    let off = isolated::playbook()
-        .args(["agents", "variants", "--mode", "off"])
-        .arg(&dir)
-        .output()
-        .expect("spawn");
-    assert!(stdout_of(&off).contains("no variants"));
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
 }

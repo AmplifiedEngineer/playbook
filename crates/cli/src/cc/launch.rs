@@ -245,30 +245,7 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
     if let Some(flags) = crate::models::launcher_flags(args, &user_settings, effort.as_deref()) {
         all.extend(flags);
     }
-    let mut variants_dir = None;
-    // A session started from inside another one inherits its variants. Clear
-    // them, so only the variants this launch builds reach the new session.
-    std::env::remove_var(crate::effort::component::VARIANTS_ENV);
-    std::env::remove_var(crate::effort::component::VARIANTS_PLUGIN_ENV);
-    if let Some(session) = super::agent_variants::session(
-        args,
-        &home,
-        &home.join(".claude"),
-        &cwd_now,
-        crate::plugin_root::find_here().as_deref(),
-        &std::env::temp_dir(),
-    ) {
-        all.extend(session.args);
-        // The orchestrator reads these through `playbook effort resolve`.
-        std::env::set_var(crate::effort::component::VARIANTS_ENV, session.names);
-        if session.plugin_dir.is_some() {
-            std::env::set_var(
-                crate::effort::component::VARIANTS_PLUGIN_ENV,
-                super::agent_variants::PLUGIN_NAME,
-            );
-        }
-        variants_dir = session.plugin_dir;
-    }
+    super::stale_variants::remove_leftovers(&std::env::temp_dir());
     for (var, id) in crate::models::env_overrides(&home) {
         std::env::set_var(var, id);
     }
@@ -287,9 +264,6 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
 
     let mut cwd = cwd_now;
     let rc = dispatch(&mut cwd, &all);
-    if let Some(dir) = variants_dir {
-        let _ = std::fs::remove_dir_all(dir);
-    }
     retention::prune(&cwd.to_string_lossy(), crate::common::time::now_secs());
     rc
 }

@@ -5,4 +5,3 @@
 //! the retired shell original.
 
 pub mod check;
-pub mod variants;

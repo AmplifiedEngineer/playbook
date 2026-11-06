@@ -638,11 +638,7 @@ mod tests {
             claude: None,
             ceiling: ceiling.map(str::to_string),
             effective,
-            file: Some(name.to_string()),
             subagent_type: Some(format!("playbook:{name}")),
-            allowed: vec![name.to_string()],
-            satisfied: true,
-            variants_plugin: None,
         }
     }
 

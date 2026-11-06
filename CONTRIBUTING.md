@@ -122,7 +122,7 @@ The skills, commands, agents and output style live in `plugins/playbook` and shi
 
 ### Editing agents
 
-The agent files live in `plugins/playbook/agents`. The binary renders effort variants such as `reviewer-low` from the base files for one session. Every base agent needs an entry in the `VARIANTS` table in `crates/cli/src/agents/variants.rs`, with every tier. Run `playbook agents check plugins/playbook/agents` to check the files and `playbook agents variants plugins/playbook/agents` to see what a session would get.
+The agent files live in `plugins/playbook/agents`. Run `playbook agents check plugins/playbook/agents` to check the files. An orchestrator sets an agent's effort per spawn with the `effort` parameter, so a new agent needs no table entry.
 
 ## Project-Specific Code Style
 

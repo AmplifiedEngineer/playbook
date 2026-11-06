@@ -17,7 +17,6 @@
 //! `frontmatter_value` does with `grep`/`sed`. Bending that heavier parser's
 //! semantics to fit a script this narrow would cost more than it saves.
 
-use super::variants;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -378,8 +377,6 @@ pub fn check(agents_dir: &Path) -> Result<String, String> {
         violations.extend(check_agent(&label, name, &content));
     }
 
-    violations.extend(check_variants(agents_dir, &entries_names(agents_dir)));
-
     if !violations.is_empty() {
         let mut message = format!(
             "{} violation(s) across agent definitions:",
@@ -394,55 +391,6 @@ pub fn check(agents_dir: &Path) -> Result<String, String> {
     Ok(format!(
         "check-agents: OK ({count} agent definitions, all valid)"
     ))
-}
-
-/// Every `*.md` file name in `dir`, sorted.
-fn entries_names(dir: &Path) -> Vec<String> {
-    let mut names: Vec<String> = fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|n| n.ends_with(".md"))
-        .collect();
-    names.sort();
-    names
-}
-
-/// Variants are rendered per session, so none may be committed, every agent
-/// file needs a `VARIANTS` entry, and every tier must render from its base. A
-/// missing entry or a tier that cannot render fails, naming the file.
-fn check_variants(dir: &Path, files: &[String]) -> Vec<String> {
-    let mut violations = Vec::new();
-    for file in files {
-        if file == TEMPLATE_NAME {
-            continue;
-        }
-        let stem = file.strip_suffix(".md").unwrap_or(file);
-        let text = fs::read_to_string(dir.join(file)).unwrap_or_default();
-        if text.lines().any(|l| l.starts_with(variants::MARKER)) {
-            violations.push(format!(
-                "{file}: a generated variant file, delete it: variants are now rendered for each session"
-            ));
-            continue;
-        }
-        let Some((base, tiers)) = variants::VARIANTS.iter().find(|(b, _)| *b == stem) else {
-            violations.push(format!(
-                "{file}: no entry in VARIANTS (crates/cli/src/agents/variants.rs), every agent needs every tier"
-            ));
-            continue;
-        };
-        for tier in variants::TIERS {
-            if !tiers.contains(&tier) {
-                violations.push(format!(
-                    "{file}: VARIANTS lacks the '{tier}' tier for {base}"
-                ));
-            } else if let Err(err) = variants::render_definition(base, &text, tier) {
-                violations.push(format!("{file}: cannot render the '{tier}' variant: {err}"));
-            }
-        }
-    }
-    violations
 }
 
 #[cfg(test)]
