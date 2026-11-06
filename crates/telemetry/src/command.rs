@@ -200,7 +200,7 @@ pub enum AccountCommand {
         /// End with this session included
         #[arg(long, value_name = "SESSION")]
         through_session: Option<String>,
-        /// The account key or name that receives the events
+        /// Account key or name that receives the events
         #[arg(long = "as", value_name = "KEY_OR_NAME")]
         target: String,
         /// Move only events now labeled with this account key or name
@@ -212,7 +212,7 @@ pub enum AccountCommand {
     },
     /// Reverse the newest applied move, or the one with this number
     Undo {
-        /// The move number printed by `account assign`
+        /// Move number printed by `account assign`
         id: Option<i64>,
     },
 }

@@ -1623,16 +1623,32 @@ Subcommands: `account`, `collect`, `doctor`, `prune`, `status`, `stop`
 
 ### `playbook usage account`
 
-List the accounts in the usage store and name them
+List the accounts in the usage store, name them and move events
 
-Every usage event carries an account key, the email Claude Code was signed in to. These commands show the keys and give each one a display name.
+Every usage event carries an account key, the email Claude Code was signed in to. These commands show the keys, give each one a display name and relabel events recorded under the wrong account.
 
 Example: `playbook usage account list`
 
 - `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 - `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
-Subcommands: `list`, `name`
+Subcommands: `assign`, `list`, `name`, `undo`
+
+### `playbook usage account assign`
+
+Move the events of a time range to another account
+
+Prints how many events and how much cost would move and changes nothing until you add `--confirm`. Times are read on your local clock; add `--utc` for UTC. The end is exclusive. An applied move is numbered and `account undo` reverses it. Running the same move again moves nothing.
+
+Example: `playbook usage account assign --from 2026-11-01T00:00 --to 2026-11-02T12:00 --as personal`
+
+- `--from <FROM>`: First instant to move, like 2026-11-01T00:00 (a bare date means midnight)
+- `--to <TO>`: First instant not to move, like 2026-11-02T12:00
+- `--as <KEY_OR_NAME>`: Account key or name that receives the events
+- `--was <KEY_OR_NAME>`: Move only events now labeled with this account key or name
+- `--confirm`: Apply the move; without it nothing changes
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
 ### `playbook usage account list`
 
@@ -1649,6 +1665,14 @@ Example: `playbook usage account name igor@getdigital.com.br Company`
 
 - `<KEY>`: Account key shown by `account list`
 - `<NAME>`: Display name to show; empty clears it
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+
+### `playbook usage account undo`
+
+Reverse the newest applied move, or the one with this number
+
+- `<ID>`: Move number printed by `account assign`
 - `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 - `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
