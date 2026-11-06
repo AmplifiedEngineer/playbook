@@ -37,6 +37,29 @@ pub fn run(paths: &Paths, command: &AccountCommand) -> Result<String, String> {
             let to = to.as_deref().map_or(Ok(now + 1), time)?;
             Ok(sess::list_text(&sess::sessions(&conn, from, to)?))
         }
+        AccountCommand::Reconcile {
+            from,
+            to,
+            dashboard,
+            top,
+        } => {
+            let days = dashboard
+                .iter()
+                .map(|d| sess::parse_dashboard(d))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut seen = std::collections::BTreeSet::new();
+            if let Some((day, _)) = days.iter().find(|(day, _)| !seen.insert(*day)) {
+                return Err(format!(
+                    "{} is listed twice in --dashboard",
+                    crate::aggregate::date_key(*day)
+                ));
+            }
+            let (from, to) = (time(from)?, time(to)?);
+            if from >= to {
+                return Err("--from must be earlier than --to".to_string());
+            }
+            sess::reconcile(&conn, from, to, &days, *top)
+        }
         AccountCommand::Assign {
             from,
             to,

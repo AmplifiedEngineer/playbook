@@ -246,7 +246,7 @@ command playbook usage doctor subcommands=- aliases=- groups=Doctor[raw]
 arg playbook usage doctor id=raw long=raw short=- value_names=RAW possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
 command playbook usage prune subcommands=- aliases=- groups=Prune[dry_run]
 arg playbook usage prune id=dry_run long=dry-run short=- value_names=DRY_RUN possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
-command playbook usage account subcommands=list,name,sessions,assign,undo aliases=- groups=Account[-]
+command playbook usage account subcommands=list,name,sessions,reconcile,assign,undo aliases=- groups=Account[-]
 command playbook usage account list subcommands=- aliases=- groups=-
 command playbook usage account name subcommands=- aliases=- groups=Name[key,name]
 arg playbook usage account name id=key long=- short=- value_names=KEY possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
@@ -254,6 +254,11 @@ arg playbook usage account name id=name long=- short=- value_names=NAME possible
 command playbook usage account sessions subcommands=- aliases=- groups=Sessions[from,to]
 arg playbook usage account sessions id=from long=from short=- value_names=FROM possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 arg playbook usage account sessions id=to long=to short=- value_names=TO possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
+command playbook usage account reconcile subcommands=- aliases=- groups=Reconcile[from,to,dashboard,top]
+arg playbook usage account reconcile id=from long=from short=- value_names=FROM possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
+arg playbook usage account reconcile id=to long=to short=- value_names=TO possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
+arg playbook usage account reconcile id=dashboard long=dashboard short=- value_names=DAY=AMOUNT possible=- defaults=- aliases=- required=true hidden=false global=false action=Append num_args=- parser=alloc::string::String conflicts=-
+arg playbook usage account reconcile id=top long=top short=- value_names=TOP possible=- defaults=5 aliases=- required=false hidden=false global=false action=Set num_args=- parser=usize conflicts=-
 command playbook usage account assign subcommands=- aliases=- groups=Assign[from,to,from_session,before_session,through_session,target,was,confirm]
 arg playbook usage account assign id=from long=from short=- value_names=FROM possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 arg playbook usage account assign id=to long=to short=- value_names=TO possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=before_session,through_session
