@@ -1,25 +1,39 @@
 # SPDX-License-Identifier: Apache-2.0
+#
+# Keeps armed PRs (auto-merge enabled) up to date with main one at a time.
+# The ruleset on main has strict status checks, so every merge makes every
+# other open PR stale. Updating all of them at once would start CI on all of
+# them at once and most of those runs would be thrown away by the next merge.
+# Instead each run updates at most one PR, and none while an up to date armed
+# PR is still waiting on its checks. scripts/pick-pr-to-update.js holds the
+# decision.
+#
+# No pull_request trigger: jobs on refs/pull/N/merge cannot use the `cicd`
+# environment, which allows only main and v* tags.
 name: Auto-Update PRs
 
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
 
 permissions: {}
 
+# One update pass at a time. A pass that overlaps another waits and is never
+# cancelled, so a branch update that is running always finishes.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: auto-update-pr
+  cancel-in-progress: false
 
 jobs:
   update:
     name: update
-    # Holds the GitHub App credentials. Protection rules for them live on this environment.
-    environment: bot-app
     runs-on: ubuntu-latest
+    environment: cicd
     # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
     timeout-minutes: 5
-    # The App token minted below makes the API calls; the job token is not used.
     permissions: {}
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
@@ -54,32 +68,68 @@ jobs:
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
-      - name: Update open PRs with latest main
+          permission-checks: read
+      # Only the decision script is read from the checkout, which is main.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.bot.outputs.configured == 'true'
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/pick-pr-to-update.js
+          token: ${{ steps.app-token.outputs.token }}
+      - name: Update the next armed PR
         if: steps.bot.outputs.configured == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
-            const pulls = await github.rest.pulls.list({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              base: 'main',
-            });
+            const { pickPrToUpdate } = require(process.env.GITHUB_WORKSPACE + '/scripts/pick-pr-to-update.js');
+            const { owner, repo } = context.repo;
 
-            for (const pr of pulls.data) {
-              try {
-                await github.rest.pulls.updateBranch({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: pr.number,
+            // Armed = open, base main, not draft, auto-merge enabled. Oldest first.
+            const open = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', base: 'main', per_page: 100,
+            });
+            const armed = open
+              .filter((pr) => !pr.draft && pr.auto_merge)
+              .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+            const candidates = [];
+            for (const pr of armed) {
+              if (!pr.head.repo || pr.head.repo.full_name !== `${owner}/${repo}`) {
+                core.info(`PR #${pr.number}: from a fork, cannot update; skipped.`);
+                continue;
+              }
+              const cmp = await github.rest.repos.compareCommitsWithBasehead({
+                owner, repo, basehead: `main...${pr.head.label}`,
+              });
+              const behind_by = cmp.data.behind_by;
+              let checks_pending = false;
+              if (behind_by === 0) {
+                // Pending = any check run on the head that has not completed.
+                // A head with no runs yet counts as pending: CI is starting.
+                const runs = await github.paginate(github.rest.checks.listForRef, {
+                  owner, repo, ref: pr.head.sha, per_page: 100,
                 });
-                core.info('Updated PR #' + pr.number + ': ' + pr.title);
-              } catch (err) {
-                if (err.status === 422) {
-                  core.info('PR #' + pr.number + ' already up-to-date');
-                } else {
-                  core.warning('Failed to update PR #' + pr.number + ': ' + err.message);
-                }
+                checks_pending = runs.length === 0 || runs.some((r) => r.status !== 'completed');
+              }
+              candidates.push({ number: pr.number, behind_by, checks_pending });
+            }
+
+            const inFlight = candidates.find((c) => c.behind_by === 0 && c.checks_pending);
+            const target = pickPrToUpdate(candidates);
+            if (target === null) {
+              core.info(inFlight
+                ? `Summary: PR #${inFlight.number} is up to date and waiting on checks; ${candidates.length - 1} other armed PR(s) wait.`
+                : `Summary: nothing to update (${candidates.length} armed PR(s), none behind main).`);
+              return;
+            }
+            try {
+              await github.rest.pulls.updateBranch({ owner, repo, pull_number: target });
+              core.info(`Summary: updated PR #${target} with main.`);
+            } catch (err) {
+              if (err.status === 422) {
+                core.info(`Summary: PR #${target} is already up to date (422).`);
+              } else {
+                core.warning(`Summary: failed to update PR #${target}: ${err.message}`);
               }
             }

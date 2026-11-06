@@ -38,7 +38,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `models.haiku` | empty | empty, or `claude-<tier>-<major>[-<minor>]` for that tier |
 | `models.sonnet` | empty | empty, or `claude-<tier>-<major>[-<minor>]` for that tier |
 | `models.opus` | empty | empty, or `claude-<tier>-<major>[-<minor>]` for that tier |
-| `routing.escalate` | `ask` | `ask`, `auto`, `deny` |
+| `routing.escalate` | `auto` | `ask`, `auto`, `deny` |
 | `auto.budgetUsd` | `200` | a number, see the config keys page for the range |
 | `auto.agentBudgetUsd` | `50` | a number, see the config keys page for the range |
 | `auto.sessionCeilingUsd` | `0` | a number, see the config keys page for the range |
@@ -1317,7 +1317,7 @@ Example: `playbook review triage-merge --lenses security,logic --tiers triage.js
 
 Say which model, effort and agent a kind of task goes to
 
-One routing table for every command that dispatches agents. Kinds: mechanical, classify, check, review, write, implement, design. Only `implement` reads `--tier` (low, medium or high). The answer includes whether the user must approve first (the top model, the high tier, or a task that failed twice). `routing.escalate` decides what happens then: `ask` (default) tells you to ask the user, `auto` proceeds (auto mode and `auto.budgetUsd` still cap the spend), `deny` returns the cheaper route. Your effort ceiling always wins.
+One routing table for every command that dispatches agents. Kinds: mechanical, classify, check, review, write, implement, design. Only `implement` reads `--tier` (low, medium or high). The answer includes whether the user must approve first (the top model, the high tier, or a task that failed twice). `routing.escalate` decides what happens then: `ask` tells you to ask the user, `auto` (default) proceeds (auto mode and `auto.budgetUsd` still cap the spend), `deny` returns the cheaper route. Your effort ceiling always wins.
 
 Example: `playbook route implement --tier medium --json`
 
@@ -1619,7 +1619,78 @@ Example: `playbook usage --range today`
 - `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 - `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
-Subcommands: `collect`, `doctor`, `prune`, `status`, `stop`
+Subcommands: `account`, `collect`, `doctor`, `prune`, `status`, `stop`
+
+### `playbook usage account`
+
+List the accounts in the usage store, name them and move events
+
+Every usage event carries an account key: the email Claude Code was signed in to, or a `token:` fingerprint. These commands show the keys, give each one a display name and relabel events recorded under the wrong account.
+
+Example: `playbook usage account list`
+
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+
+Subcommands: `assign`, `list`, `name`, `sessions`, `undo`
+
+### `playbook usage account assign`
+
+Move events to another account, by time range or by session
+
+Prints how many events and how much cost would move and changes no events until you add `--confirm`. Times are read on your local clock; add `--utc` for UTC. By time, give `--from` and `--to` (the end is not included) and each event moves by its own time. By session, give `--before-session` or `--through-session` with `--from` or `--from-session` as the start, and every event of each session that starts in that span moves. An applied move is numbered and `account undo` reverses it. Running the same move again moves nothing.
+
+Example: `playbook usage account assign --from 2026-11-01T00:00 --to 2026-11-02T12:00 --as personal`
+
+- `--from <FROM>`: First instant to move, like 2026-11-01T00:00 (a bare date means midnight)
+- `--to <TO>`: First instant not to move, like 2026-11-02T12:00
+- `--from-session <SESSION>`: Start with the sessions from this one on (its id from `account sessions`)
+- `--before-session <SESSION>`: End before this session starts
+- `--through-session <SESSION>`: End with this session included
+- `--as <KEY_OR_NAME>`: Account key or name that receives the events
+- `--was <KEY_OR_NAME>`: Move only events now labeled with this account key or name
+- `--confirm`: Apply the move; without it nothing changes
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+
+### `playbook usage account list`
+
+List the accounts with their events, cost and time span
+
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+
+### `playbook usage account name`
+
+Give an account key a display name, or clear it with an empty name
+
+Example: `playbook usage account name you@example.com Company`
+
+- `<KEY>`: Account key shown by `account list`
+- `<NAME>`: Display name to show; empty clears it
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+
+### `playbook usage account sessions`
+
+List the sessions that start in a window
+
+Shows each session id with its first and last event time, repo, event count, cost and account label, oldest first. Use an id as the boundary of `account assign`. Times are on your local clock; add `--utc` for UTC. The window is the last 7 days unless `--from` and `--to` say otherwise.
+
+Example: `playbook usage account sessions --from 2026-10-30 --to 2026-11-04`
+
+- `--from <FROM>`: Start of the window, like 2026-10-30 or 2026-10-30T08:00
+- `--to <TO>`: End of the window (not included)
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+
+### `playbook usage account undo`
+
+Reverse the newest applied move, or the one with this number
+
+- `<ID>`: Move number printed by `account assign`
+- `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
+- `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 
 ### `playbook usage collect`
 

@@ -165,7 +165,7 @@ jobs:
   prepare:
     name: prepare
     # Holds the GitHub App credentials. Protection rules for them live on this environment.
-    environment: bot-app
+    environment: cicd
     needs: plan
     if: needs.plan.outputs.state == 'prepare'
     runs-on: ubuntu-latest
@@ -273,7 +273,7 @@ jobs:
   tag:
     name: tag
     # Holds the GitHub App credentials. Protection rules for them live on this environment.
-    environment: bot-app
+    environment: cicd
     needs: [plan, prepare, macos]
     if: ${{ !cancelled() && !failure() && (needs.plan.outputs.state == 'prepare' || needs.plan.outputs.state == 'tag') }}
     runs-on: ubuntu-latest
@@ -1475,7 +1475,7 @@ jobs:
   downstream:
     name: downstream
     # Holds the GitHub App credentials. Protection rules for them live on this environment.
-    environment: bot-app
+    environment: cicd
     needs: [plan, formulas]
     if: >-
       ${{ !cancelled()
@@ -1822,7 +1822,7 @@ jobs:
   nix:
     name: nix
     # Holds the GitHub App credentials. Protection rules for them live on this environment.
-    environment: bot-app
+    environment: cicd
     needs: [plan, verify]
     if: >-
       ${{ !cancelled()
@@ -2095,7 +2095,7 @@ jobs:
   scoop:
     name: scoop
     # Holds the GitHub App credentials. Protection rules for them live on this environment.
-    environment: bot-app
+    environment: cicd
     needs: [plan, verify]
     if: >-
       ${{ !cancelled()

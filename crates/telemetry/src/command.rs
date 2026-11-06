@@ -6,7 +6,7 @@
 use clap::Subcommand;
 
 /// `playbook usage` subcommands.
-#[derive(Subcommand, Debug, Clone, Copy)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum UsageCommand {
     /// Warm the usage store in the background (run by the `usage-warm` hook)
     #[command(hide = true)]
@@ -103,5 +103,92 @@ pub enum UsageCommand {
         /// Say what would be removed without deleting anything
         #[arg(long)]
         dry_run: bool,
+    },
+    /// List the accounts in the usage store, name them and move events
+    ///
+    /// Every usage event carries an account key: the email Claude Code was
+    /// signed in to, or a `token:` fingerprint. These commands show the keys,
+    /// give each one a display name and relabel events recorded under the wrong account.
+    ///
+    /// Example: `playbook usage account list`
+    Account {
+        #[command(subcommand)]
+        command: AccountCommand,
+    },
+}
+
+/// `playbook usage account` subcommands.
+#[derive(Subcommand, Debug, Clone)]
+pub enum AccountCommand {
+    /// List the accounts with their events, cost and time span
+    List,
+    /// Give an account key a display name, or clear it with an empty name
+    ///
+    /// Example: `playbook usage account name you@example.com Company`
+    Name {
+        /// Account key shown by `account list`
+        key: String,
+        /// Display name to show; empty clears it
+        name: String,
+    },
+    /// List the sessions that start in a window
+    ///
+    /// Shows each session id with its first and last event time, repo, event
+    /// count, cost and account label, oldest first. Use an id as the boundary
+    /// of `account assign`. Times are on your local clock; add `--utc` for
+    /// UTC. The window is the last 7 days unless `--from` and `--to` say
+    /// otherwise.
+    ///
+    /// Example: `playbook usage account sessions --from 2026-10-30 --to 2026-11-04`
+    Sessions {
+        /// Start of the window, like 2026-10-30 or 2026-10-30T08:00
+        #[arg(long)]
+        from: Option<String>,
+        /// End of the window (not included)
+        #[arg(long)]
+        to: Option<String>,
+    },
+    /// Move events to another account, by time range or by session
+    ///
+    /// Prints how many events and how much cost would move and changes
+    /// no events until you add `--confirm`. Times are read on your local clock;
+    /// add `--utc` for UTC. By time, give `--from` and `--to` (the end is not
+    /// included) and each event moves by its own time. By session, give
+    /// `--before-session` or `--through-session` with `--from` or
+    /// `--from-session` as the start, and every event of each session that
+    /// starts in that span moves. An applied move is numbered and `account
+    /// undo` reverses it. Running the same move again moves nothing.
+    ///
+    /// Example: `playbook usage account assign --from 2026-11-01T00:00 --to 2026-11-02T12:00 --as personal`
+    Assign {
+        /// First instant to move, like 2026-11-01T00:00 (a bare date means midnight)
+        #[arg(long)]
+        from: Option<String>,
+        /// First instant not to move, like 2026-11-02T12:00
+        #[arg(long, conflicts_with_all = ["before_session", "through_session"])]
+        to: Option<String>,
+        /// Start with the sessions from this one on (its id from `account sessions`)
+        #[arg(long, value_name = "SESSION", conflicts_with = "from")]
+        from_session: Option<String>,
+        /// End before this session starts
+        #[arg(long, value_name = "SESSION", conflicts_with = "through_session")]
+        before_session: Option<String>,
+        /// End with this session included
+        #[arg(long, value_name = "SESSION")]
+        through_session: Option<String>,
+        /// Account key or name that receives the events
+        #[arg(long = "as", value_name = "KEY_OR_NAME")]
+        target: String,
+        /// Move only events now labeled with this account key or name
+        #[arg(long, value_name = "KEY_OR_NAME")]
+        was: Option<String>,
+        /// Apply the move; without it nothing changes
+        #[arg(long)]
+        confirm: bool,
+    },
+    /// Reverse the newest applied move, or the one with this number
+    Undo {
+        /// Move number printed by `account assign`
+        id: Option<i64>,
     },
 }

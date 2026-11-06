@@ -576,6 +576,11 @@ fn table() -> Vec<Case> {
         case("usage prune", &["usage", "prune"]).out("removed 0").writes(),
         case("usage doctor", &["usage", "doctor"]).out("Where pbtop can read limits"),
         case("usage stop", &["usage", "stop"]).out("not running"),
+        case("usage account assign", &["usage", "account", "assign", "--from", "2026-01-01", "--to", "2026-01-02", "--as", "x"]).out("dry run: 0 events").writes(),
+        case("usage account sessions", &["usage", "account", "sessions"]).out("No sessions start").writes(),
+        case("usage account undo",&["usage", "account", "undo"]).out("no applied move").writes(),
+        case("usage account list",&["usage", "account", "list"]).out("No usage recorded yet").writes(),
+        case("usage account name", &["usage", "account", "name", "k", "Home"]).out("k is shown as Home").writes(),
         case("sessions", &["sessions"]).writes().out("No recent sessions"),
         case("sessions list", &["sessions", "list"]).out("No recent sessions").writes(),
         // watch mode: nothing is enabled and no token is set on a fresh home

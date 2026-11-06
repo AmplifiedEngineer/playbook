@@ -110,6 +110,7 @@ pub fn run(
             let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             super::collector::run_collect(paths, port, idle_seconds, &stop)
         }
+        Some(UsageCommand::Account { command }) => super::account_cmd::run(paths, &command),
         Some(UsageCommand::Prune { dry_run }) => super::collector::run_prune(paths, dry_run),
         Some(UsageCommand::Status { json }) => {
             let status = super::collector::status(paths, super::collector::configured_retention())?;
@@ -186,6 +187,7 @@ pub fn parse_range(value: &str) -> Result<Range, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::AccountCommand;
 
     fn paths(name: &str) -> Paths {
         let dir = crate::util::scratch_dir(name);
@@ -237,6 +239,77 @@ mod tests {
             stop_text(Stopped::Killed, Path::new("/x")),
             Ok("stopped".into())
         );
+    }
+
+    fn account(p: &Paths, args: AccountCommand) -> Result<String, String> {
+        run(
+            Some(UsageCommand::Account { command: args }),
+            &no_opts(),
+            p,
+            false,
+        )
+    }
+
+    #[test]
+    fn the_account_commands_name_a_key_and_list_it_through_the_entry_point() {
+        let p = paths("entry-account");
+        let conn = crate::db::open_db(&p.db).unwrap();
+        conn.execute(
+            "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
+                repo, branch, input_tokens, output_tokens, cache_creation_tokens,
+                cache_read_tokens, cost_usd) VALUES ('e', 86400, 's', 'a@b.c', 'm', '', 'r', 'b', 1, 1, 0, 0, 2.5)",
+            [],
+        )
+        .unwrap();
+        let name = |name: &str| AccountCommand::Name {
+            key: "a@b.c".into(),
+            name: name.into(),
+        };
+
+        assert!(account(&p, AccountCommand::List)
+            .unwrap()
+            .starts_with("a@b.c\n  1 events, $2.50"));
+        assert_eq!(account(&p, name("Home")).unwrap(), "a@b.c is shown as Home");
+        assert!(account(&p, AccountCommand::List)
+            .unwrap()
+            .starts_with("Home (a@b.c)"));
+        assert_eq!(account(&p, name("")).unwrap(), "cleared the name of a@b.c");
+    }
+
+    #[test]
+    fn assign_dry_runs_then_applies_and_undoes_through_the_entry_point() {
+        crate::tz::set(crate::tz::Zone::Utc);
+        let p = paths("entry-assign");
+        let conn = crate::db::open_db(&p.db).unwrap();
+        conn.execute(
+            "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
+                repo, branch, input_tokens, output_tokens, cache_creation_tokens,
+                cache_read_tokens, cost_usd) VALUES ('e', 86400, 's', 'a@b.c', 'm', '', 'r', 'b', 1, 1, 0, 0, 2.5)",
+            [],
+        )
+        .unwrap();
+        let assign = |confirm| AccountCommand::Assign {
+            from: Some("1970-01-02".into()),
+            from_session: None,
+            before_session: None,
+            through_session: None,
+            to: Some("1970-01-03".into()),
+            target: "personal".into(),
+            was: None,
+            confirm,
+        };
+
+        let dry = account(&p, assign(false)).unwrap();
+        assert!(
+            dry.contains("1 events ($2.50)") && dry.contains("--confirm"),
+            "{dry}"
+        );
+        assert!(account(&p, assign(true)).unwrap().contains("move 1:"));
+        assert!(account(&p, assign(true))
+            .unwrap()
+            .starts_with("nothing to move"));
+        let undone = account(&p, AccountCommand::Undo { id: None }).unwrap();
+        assert!(undone.contains("restored 1"), "{undone}");
     }
 
     #[test]

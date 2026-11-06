@@ -30,7 +30,7 @@ It runs on Opus at medium effort and reads the codebase and memory first, so it 
 
 1. **Divergent.** It challenges the premise, weighs 2 or 3 approaches, and asks you to approve a design. It can route to `/playbook:adr` when the decision is hard to reverse.
 2. **Convergent.** In the same session, it interviews you for Work Units and Segments, one question at a time, each with a recommended answer.
-3. **Quality gate.** A `fact-checker` verifies paths, signatures and the dependency graph. A `critic` challenges the design. A `test-reviewer` checks the test plan. Each phase retries up to three times on FAIL. WARNs show but do not block.
+3. **Quality gate.** A `fact-checker` verifies paths, signatures and the dependency graph. A `critic` challenges the design. A `test-reviewer` checks the test plan. Each phase runs up to `gate.maxRounds` rounds (5 by default) and stops earlier on PASS or WARN. It stops as STUCK after two rounds without progress. WARNs show but do not block.
 
 It checkpoints after every decision, so rerunning with the same topic offers to resume. The plan is saved to `playbook path plans` as `<slug>.md`, with a `<slug>-quality.md` report, and key decisions are stored as memory facts.
 
@@ -52,6 +52,12 @@ Segments are PR-sized increments with one concern each:
 
 A Segment aims for under 500 changed lines, needs a reason above 1000, and never exceeds 1500. The default order is a linear chain, which maps to stacked PRs.
 
+### Approval prompts before agents run
+
+`/playbook:plan` and `/playbook:adr` ask you for approval before they dispatch the `fact-checker`, the `critic` and the `test-reviewer`. They choose the model with `playbook route design`. That route is Opus at xhigh effort, and the top model needs your approval while `routing.escalate` is `ask`. The default is `auto`, so the prompts only appear if you set `ask`.
+
+To turn the prompts on, run `playbook config set routing.escalate ask` in the repo, or add `--global` for every repo. With `auto`, the commands proceed and log the choice. See [Models and effort](14-models-and-effort.md#approval-prompts) for all three values.
+
 ### Auto
 
 `--auto` answers only the Work Unit and Segment questions. It stops at the design approval. Add `--auto-design` to approve the design as well. Every choice goes into an Assumptions list. A gate FAIL stops the run. Auto from `PLAYBOOK_MODE` or the repo config acts like plain `--auto`.
@@ -67,6 +73,8 @@ A Segment aims for under 500 changed lines, needs a reason above 1000, and never
 It accepts a plan, an ADR blueprint, an issue, a ticket or plain text. With no argument it lists saved plans. If the input is not a ready plan, it stops and points you to `/playbook:plan` or `/playbook:adr`.
 
 It runs on Sonnet and never edits files itself. It hands each Work Unit to a subagent.
+
+`/playbook:implement` asks for approval only when `playbook route implement` says so. That happens for the `high` implement tier, and for a task that has already failed twice. The `low` and `medium` tiers never ask. The prompt follows the same `routing.escalate` setting as in Plan. See [Models and effort](14-models-and-effort.md#approval-prompts).
 
 **Delivery strategy.** Up front it asks two things, unless you preset `--pr-strategy` and `--boundary`:
 
