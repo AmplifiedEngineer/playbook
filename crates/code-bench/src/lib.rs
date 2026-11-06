@@ -7,6 +7,7 @@
 pub mod corpus;
 pub mod ctags;
 pub mod gate;
+pub mod merge_base;
 pub mod metrics;
 pub mod oracle;
 pub mod process;

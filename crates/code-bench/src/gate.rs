@@ -453,6 +453,26 @@ mod tests {
         )
     }
 
+    fn waiver(name: &str, kind: Option<QueryKind>) -> Waiver {
+        Waiver {
+            repo: name.into(),
+            kind,
+            reason: "not yet in the corpus".into(),
+        }
+    }
+
+    fn entry(id: &str, expires: &str, dp: u32, dr: u32) -> Override {
+        Override {
+            id: id.into(),
+            reason: "the fix removes spelling-only matches".into(),
+            expires: expires.into(),
+            repo: Some("r".into()),
+            kind: Some(KIND),
+            precision_drop_bps: dp,
+            recall_drop_bps: dr,
+        }
+    }
+
     #[test]
     fn drops_fail_from_one_basis_point() {
         for (p, r, fails) in [(8000, 6000, false), (7999, 6000, true), (8000, 5999, true)] {
@@ -484,5 +504,148 @@ mod tests {
                 "{p} {r} {bytes}"
             );
         }
+    }
+
+    #[test]
+    fn one_repo_dropping_fails_while_the_average_rises() {
+        let base = baseline(
+            vec![
+                repo("a", vec![cell(KIND, 10, 8000, 6000, 10_000)]),
+                repo("b", vec![cell(KIND, 10, 8000, 6000, 10_000)]),
+            ],
+            vec![],
+        );
+        let now = vec![
+            repo("a", vec![cell(KIND, 10, 9500, 6000, 10_000)]),
+            repo("b", vec![cell(KIND, 10, 7900, 6000, 10_000)]),
+        ];
+        let found = run(&base, &no_floor(), vec![], now);
+        assert!(matches!(&found[..], [Failure::Regression { repo, .. }] if repo == "b"));
+    }
+
+    #[test]
+    fn an_override_must_cover_the_exact_drop_and_be_unexpired() {
+        let table = [
+            ("2026-11-07", 100, true),
+            ("2026-11-07", 99, false),
+            ("2026-11-06", 100, false),
+            ("2027-01-01", 100, true),
+        ];
+        for (expires, delta, passes) in table {
+            let found = change(7900, 6000, 10_000, vec![entry("o", expires, delta, 0)]);
+            assert_eq!(found.is_empty(), passes, "{expires} {delta}");
+        }
+    }
+
+    #[test]
+    fn cells_of_nine_ten_and_eleven_tasks() {
+        for (tasks, measured) in [(9, false), (10, true), (11, true)] {
+            let found = run(
+                &baseline(vec![], vec![]),
+                &no_floor(),
+                vec![],
+                vec![repo("r", vec![cell(KIND, tasks, 1, 1, 1)])],
+            );
+            assert_eq!(found.is_empty(), measured, "{tasks}");
+        }
+    }
+
+    #[test]
+    fn listed_waivers_let_skips_and_unmeasured_cells_pass() {
+        let mut failed = repo("r", vec![]);
+        failed.status = RepoStatus::Failed {
+            reason: "clone".into(),
+        };
+        let base = baseline(vec![], vec![]);
+        assert!(!run(&base, &no_floor(), vec![], vec![failed.clone()]).is_empty());
+        let listed = baseline(vec![], vec![waiver("r", None)]);
+        assert!(run(&listed, &no_floor(), vec![], vec![failed]).is_empty());
+        let few = vec![repo("r", vec![cell(KIND, 2, 1, 1, 1)])];
+        let listed = baseline(vec![], vec![waiver("r", Some(KIND))]);
+        assert!(run(&listed, &no_floor(), vec![], few).is_empty());
+    }
+
+    #[test]
+    fn a_baseline_repo_missing_from_the_report_fails_unless_waived() {
+        let base = baseline(vec![repo("r", vec![cell(KIND, 10, 1, 1, 1)])], vec![]);
+        assert_eq!(
+            run(&base, &no_floor(), vec![], vec![]),
+            vec![Failure::RepoMissing { repo: "r".into() }]
+        );
+    }
+
+    #[test]
+    fn cumulative_drift_below_the_floor_fails_net_of_overrides() {
+        let floor = Floor {
+            cells: vec![FloorCell {
+                repo: "r".into(),
+                kind: KIND,
+                precision_bps: 7900,
+                recall_bps: 6000,
+            }],
+        };
+        let base = baseline(
+            vec![repo("r", vec![cell(KIND, 10, 7900, 6000, 10_000)])],
+            vec![],
+        );
+        let now = |p| vec![repo("r", vec![cell(KIND, 10, p, 6000, 10_000)])];
+        assert!(run(&base, &floor, vec![], now(7900)).is_empty());
+        assert!(!run(&base, &floor, vec![], now(7899)).is_empty());
+        let covered = vec![entry("o", RUN_DATE, 1, 0)];
+        assert!(run(&base, &floor, covered.clone(), now(7899)).is_empty());
+        assert!(!run(&base, &floor, covered, now(7898)).is_empty());
+    }
+
+    #[test]
+    fn a_dropped_task_id_fails_without_an_override() {
+        let base = baseline(vec![], vec![]);
+        let report = Report {
+            tasks_version: 1,
+            repos: vec![],
+        };
+        let prior: BTreeSet<String> = ["a".to_string(), "b".to_string()].into();
+        let now: BTreeSet<String> = ["a".to_string()].into();
+        let go = |entries| {
+            let overrides = Overrides { entries };
+            let inputs = Inputs {
+                baseline: &base,
+                floor: &no_floor(),
+                overrides: &overrides,
+                report: &report,
+                run_date: RUN_DATE,
+                prior_task_ids: &prior,
+                task_ids: &now,
+            };
+            evaluate(&inputs)
+        };
+        assert_eq!(go(vec![]), vec![Failure::TaskRemoved("b".into())]);
+        assert!(go(vec![entry("task-removed:b", RUN_DATE, 0, 0)]).is_empty());
+    }
+
+    #[test]
+    fn a_report_of_another_task_version_fails() {
+        let mut base = baseline(vec![], vec![]);
+        base.tasks_version = 2;
+        assert!(matches!(
+            &run(&base, &no_floor(), vec![], vec![])[..],
+            [Failure::VersionMismatch { .. }]
+        ));
+    }
+
+    #[test]
+    fn missing_or_malformed_data_files_fail() {
+        assert!(Baseline::parse("").is_err());
+        assert!(Baseline::parse(
+            r#"{"tasks_version":1,"waivers":[{"repo":"r","kind":null,"reason":" "}],"repos":[]}"#
+        )
+        .is_err());
+        assert!(Floor::parse("[]").is_err());
+        assert!(
+            Overrides::parse(r#"{"entries":[{"id":"o","reason":"x","expires":"soon"}]}"#).is_err()
+        );
+        assert!(Overrides::parse(
+            r#"{"entries":[{"id":"o","reason":"x","expires":"2026-11-07"}]}"#
+        )
+        .is_ok());
     }
 }

@@ -35,7 +35,7 @@ pub enum QueryKind {
 impl QueryKind {
     pub const ALL: [QueryKind; 2] = [QueryKind::Symbol, QueryKind::Refs];
 
-    fn subcommand(self) -> &'static str {
+    pub(crate) fn subcommand(self) -> &'static str {
         match self {
             QueryKind::Symbol => "symbol",
             QueryKind::Refs => "refs",
