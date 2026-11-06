@@ -1,0 +1,2 @@
+exit: 0
+src/shapes.ts:15-22  class Square  export class Square implements Shape

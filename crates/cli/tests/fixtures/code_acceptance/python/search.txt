@@ -1,0 +1,8 @@
+exit: 0
+pkg/shapes.py:6-12  class Square  class Square
+pkg/main.py:3-3  pkg.shapes: Square, make_square
+pkg/main.py:4-4  # Square helpers
+pkg/main.py:7-7  label = "Square"
+pkg/main.py:12-12  return total([make_square(2), Square(3)])
+pkg/shapes.py:11-11  # Square area
+pkg/shapes.py:16-16  return Square(side)

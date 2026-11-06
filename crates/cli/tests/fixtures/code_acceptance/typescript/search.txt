@@ -1,0 +1,10 @@
+exit: 0
+src/shapes.ts:15-22  class Square  export class Square implements Shape
+src/main.ts:3-3  ./shapes: Square
+src/main.ts:4-4  // Square factory
+src/main.ts:5-5  export function makeSquare(side: number): Square {
+src/main.ts:6-6  const label = "Square";
+src/main.ts:7-7  return new Square(side);
+src/main.ts:10-10  export function total(items: Square[]): number {
+src/shapes.ts:16-16  name = "Square";
+src/shapes.ts:18-18  // Square area

@@ -1,0 +1,11 @@
+---
+source: crates/code/tests/snapshots.rs
+expression: "render(LANGS[2])"
+---
+src/app.js function run 5-11 exported
+src/app.js function twice 13-13 exported
+src/counter.js const START 3-3 exported
+src/counter.js class Counter 5-14 exported
+src/counter.js method Counter.constructor 6-8 exported
+src/counter.js method Counter.increment 10-13 exported
+src/counter.js function reset 16-18 exported

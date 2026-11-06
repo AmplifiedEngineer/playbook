@@ -1,0 +1,7 @@
+exit: 0
+const:5-5  Scale  const Scale = 2
+interface:7-9  Shape  type Shape interface
+  method:8-8  Shape.Area  Area() int
+struct:11-13  Square  type Square struct
+  method:16-18  Square.Area  func (s Square) Area() int
+function:20-22  NewSquare  func NewSquare(side int) Square

@@ -1,0 +1,7 @@
+exit: 0
+shape.go:11-13  struct Square  type Square struct
+main.go:1-16  // Square totals.
+shape.go:15-15  // Area returns the Square area.
+shape.go:16-16  func (s Square) Area() int {
+shape.go:20-20  func NewSquare(side int) Square {
+shape.go:21-21  return Square{Side: side}

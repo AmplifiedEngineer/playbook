@@ -1,0 +1,2 @@
+exit: 0
+pkg/shapes.py:6-12  class Square  class Square
