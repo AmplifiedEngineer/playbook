@@ -2128,3 +2128,58 @@ mod completion_row {
         assert_eq!(layer(&rows, "3")[0]["level"], "PASS");
     }
 }
+
+/// A fake `pbtop` in `<root>/<dir>` that prints `pbtop <version>`.
+fn pbtop_stub(b: &Box, dir: &str, version: &str) -> PathBuf {
+    let d = b.root.join(dir);
+    fs::create_dir_all(&d).unwrap();
+    let f = d.join("pbtop");
+    fs::write(&f, format!("#!/bin/sh\necho 'pbtop {version}'\n")).unwrap();
+    fs::set_permissions(&f, fs::Permissions::from_mode(0o755)).unwrap();
+    d
+}
+
+fn pbtop_rows(rows: &[Value]) -> Vec<&Value> {
+    rows.iter()
+        .filter(|r| {
+            r["message"]
+                .as_str()
+                .is_some_and(|m| m.starts_with("pbtop "))
+        })
+        .collect()
+}
+
+#[test]
+fn an_older_pbtop_on_path_warns_with_the_fix() {
+    let b = Box::new("pbtop-old");
+    let dir = pbtop_stub(&b, "old", "0.0.1");
+
+    let rows = b.run(&[&dir], "/bin/zsh", None);
+
+    let found = pbtop_rows(&rows);
+    assert_eq!(found.len(), 1, "{rows:?}");
+    assert_eq!(found[0]["level"], "WARN");
+    assert!(
+        found[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("pbtop 0.0.1"),
+        "{found:?}"
+    );
+    assert!(
+        found[0]["hint"].as_str().unwrap().starts_with("run: "),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn a_pbtop_at_the_running_version_or_none_adds_no_row() {
+    let b = Box::new("pbtop-same");
+    let dir = pbtop_stub(&b, "same", env!("CARGO_PKG_VERSION"));
+
+    let same = b.run(&[&dir], "/bin/zsh", None);
+    let none = b.run(&[], "/bin/zsh", None);
+
+    assert!(pbtop_rows(&same).is_empty(), "{same:?}");
+    assert!(pbtop_rows(&none).is_empty(), "{none:?}");
+}

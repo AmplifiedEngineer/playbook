@@ -31,15 +31,20 @@ const OLD_PLUGIN_KEY: &str = "notices/plugin";
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Notices {
     pub line: Option<String>,
+    /// A second line for the same step, set by the caller after `commit`
+    /// when a separate `pbtop` is older than this binary. It shows only with
+    /// `line`, so it is shown once.
+    pub pbtop: Option<String>,
 }
 
 impl Notices {
-    /// The line with its newline, or an empty string.
+    /// The lines with their newlines, or an empty string.
     pub fn render(&self) -> String {
         self.line
-            .as_deref()
+            .iter()
+            .chain(self.pbtop.iter().filter(|_| self.line.is_some()))
             .map(|l| format!("{l}\n"))
-            .unwrap_or_default()
+            .collect()
     }
 }
 
@@ -148,6 +153,7 @@ impl Pending {
         .unwrap_or(false);
         Notices {
             line: self.line.filter(|_| moved),
+            pbtop: None,
         }
     }
 }
@@ -161,6 +167,24 @@ mod tests {
 
     fn line(root: &Path, recorded: Option<&str>, older: bool) -> Option<String> {
         prepare(root, recorded, older).commit(root).line
+    }
+
+    #[test]
+    fn the_pbtop_line_follows_the_release_line_and_never_shows_alone() {
+        let both = Notices {
+            line: Some("playbook updated from 0.1.0 to 0.2.0".into()),
+            pbtop: Some("pbtop 0.1.0 is older".into()),
+        };
+        let alone = Notices {
+            line: None,
+            pbtop: Some("pbtop 0.1.0 is older".into()),
+        };
+
+        assert_eq!(
+            both.render(),
+            "playbook updated from 0.1.0 to 0.2.0\npbtop 0.1.0 is older\n"
+        );
+        assert_eq!(alone.render(), "");
     }
 
     #[test]

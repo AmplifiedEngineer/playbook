@@ -78,8 +78,10 @@ grep -qF 'releases/download/v${pkgver}/playbook-${pkgver}-aarch64-unknown-linux-
 grep -qF -- '-Dm755' "$CASE/PKGBUILD" || fail "binary is not installed with mode 755"
 grep -qF '/usr/bin/playbook' "$CASE/PKGBUILD" || fail "binary is not installed to /usr/bin/playbook"
 ok
-# Only the playbook binary: no pb link, no pbtop, no install hook, no pbtop sums.
-! grep -v '^ *#' "$CASE/PKGBUILD" | grep -qE 'pbtop|pbdoc|\binstall=|/usr/bin/pb\b' || fail "the package ships more than playbook"
+# The playbook binary and a pbtop link to it: no pb link, no pbtop archive, no install hook.
+# shellcheck disable=SC2016
+grep -qF 'ln -s playbook "${pkgdir}/usr/bin/pbtop"' "$CASE/PKGBUILD" || fail "pbtop is not linked to playbook"
+! grep -v '^ *#' "$CASE/PKGBUILD" | grep -qE 'pbtop-|pbdoc|\binstall=|/usr/bin/pb\b' || fail "the package ships more than playbook and its pbtop link"
 ! grep -q '@[A-Z_0-9]*@' "$CASE/PKGBUILD" || fail "a placeholder is left"
 ok
 bash -n "$CASE/PKGBUILD" || fail "the rendered PKGBUILD is not valid bash"

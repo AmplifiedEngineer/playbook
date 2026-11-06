@@ -298,6 +298,20 @@ pub fn needs_you(message: &str, command: Option<&str>) -> String {
 
 /// Runs the heal for `trigger` at `now` (epoch seconds).
 pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
+    run_with(ctx, trigger, now, &|| {
+        crate::doctor::pbtop::note(&std::env::var_os("PATH").unwrap_or_default())
+    })
+}
+
+/// `run`, with `pbtop_note` as the check for an older separate `pbtop`. It
+/// runs only for a step that shows the release line, and never for the hook,
+/// which must not start a child process.
+fn run_with(
+    ctx: &Ctx,
+    trigger: Trigger,
+    now: u64,
+    pbtop_note: &dyn Fn() -> Option<String>,
+) -> Outcome {
     if crate::common::real_home::refused(&ctx.home) {
         return Outcome::skipped(Skip::RealHomeUnderTest);
     }
@@ -315,10 +329,11 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
     // heal returns, whether it succeeded or not.
     let pending = crate::notices::prepare(&root, record.binary.as_deref(), older);
     let out = heal_for(ctx, trigger, now, &root, &record, order);
-    Outcome {
-        notices: pending.commit(&root),
-        ..out
+    let mut notices = pending.commit(&root);
+    if notices.line.is_some() && !matches!(trigger, Trigger::Hook) {
+        notices.pbtop = pbtop_note();
     }
+    Outcome { notices, ..out }
 }
 
 fn heal_for(
@@ -731,6 +746,60 @@ mod tests {
             ))
         );
         assert_eq!(second.notices.line, None);
+    }
+
+    const OLD_PBTOP_NOTE: &str = "pbtop 0.1.0 is older than playbook";
+
+    #[test]
+    fn an_upgrade_step_adds_the_older_pbtop_note_to_the_release_line_once() {
+        // Arrange
+        let home = scratch_dir("heal-pbtop-note");
+        seed(&home, "0.25.0", 1, None);
+        let probe = || Some(OLD_PBTOP_NOTE.to_string());
+
+        // Act
+        let first = run_with(&ctx(&home), Trigger::Fix, 1000, &probe);
+        let second = run_with(&ctx(&home), Trigger::Fix, 2000, &probe);
+
+        // Assert
+        assert!(first.notices.line.is_some());
+        assert_eq!(first.notices.pbtop.as_deref(), Some(OLD_PBTOP_NOTE));
+        assert!(first
+            .notices
+            .render()
+            .ends_with(&format!("{OLD_PBTOP_NOTE}\n")));
+        assert_eq!(second.notices.pbtop, None);
+        assert_eq!(second.notices.render(), "");
+    }
+
+    #[test]
+    fn the_session_hook_never_looks_for_an_older_pbtop() {
+        // Arrange
+        let home = scratch_dir("heal-pbtop-hook");
+        seed(&home, "0.25.0", 1, None);
+        let probe = || -> Option<String> { panic!("the hook must not run pbtop --version") };
+
+        // Act
+        let out = run_with(&ctx(&home), Trigger::Hook, 1000, &probe);
+
+        // Assert
+        assert!(out.notices.line.is_some());
+        assert_eq!(out.notices.pbtop, None);
+    }
+
+    #[test]
+    fn a_step_with_no_release_line_does_not_look_for_an_older_pbtop() {
+        // Arrange
+        let home = scratch_dir("heal-pbtop-quiet");
+        run(&ctx(&home), Trigger::Hook, 1000);
+        let probe = || -> Option<String> { panic!("no release line, so no probe") };
+
+        // Act
+        let out = run_with(&ctx(&home), Trigger::Fix, 2000, &probe);
+
+        // Assert
+        assert_eq!(out.notices.line, None);
+        assert_eq!(out.notices.pbtop, None);
     }
 
     #[test]
