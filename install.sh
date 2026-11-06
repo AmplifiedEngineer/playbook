@@ -577,7 +577,7 @@ warn_if_shadowed() {
     if [ "$name" = playbook ]; then
         warn "$first runs before the new $PLAYBOOK_BIN_DIR/playbook on PATH, so hooks keep using the old binary; remove it (Homebrew: brew uninstall playbook) or put $PLAYBOOK_BIN_DIR first on PATH"
     else
-        warn "$first runs before the new $PLAYBOOK_BIN_DIR/$name on PATH; remove it (Homebrew: brew uninstall pbtop, or playbook-telemetry) or put $PLAYBOOK_BIN_DIR first on PATH"
+        warn "$first runs before the new $PLAYBOOK_BIN_DIR/$name on PATH; remove it (Homebrew: brew uninstall pbtop) or put $PLAYBOOK_BIN_DIR first on PATH"
     fi
 }
 

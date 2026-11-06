@@ -50,35 +50,47 @@ pub struct Slots {
     slots: BTreeMap<String, usize>,
 }
 
-impl Slots {
-    /// Gives every model a slot from a hash of its name, moving on to the next
-    /// free one when taken, in name order. The same model keeps its color when
-    /// the range changes, unless another model wants the same one. With more
-    /// models than slots the extra ones share. `earlier` holds the models of
-    /// the previous period: they get a color for the table but are not part of
-    /// the stacking order.
-    pub fn of(models: &[Group], earlier: &[Group]) -> Slots {
-        let mut names: Vec<&str> = models
-            .iter()
-            .chain(earlier)
-            .map(|g| g.key.as_str())
-            .collect();
-        names.sort_unstable();
-        names.dedup();
-        let mut taken = [false; SERIES];
-        let mut slots = BTreeMap::new();
-        for name in names {
+/// Slots reserved for each model family, two apiece: a family keeps its hue
+/// and its versions tell apart by the second slot.
+const FAMILY_SLOTS: [(&str, usize); 3] = [("opus", 0), ("sonnet", 2), ("haiku", 4)];
+/// First slot for a model of no known family, and how many slots that pool has.
+const OTHER_BASE: usize = 6;
+const OTHER_POOL: usize = SERIES - OTHER_BASE;
+const FAMILY_WIDTH: usize = 2;
+
+/// The slot of a model, from its name alone. It never depends on the other
+/// models in view, so a model keeps its color across ranges and panels.
+fn slot_for(name: &str) -> usize {
+    let digits: usize = name
+        .bytes()
+        .filter(u8::is_ascii_digit)
+        .map(|b| usize::from(b - b'0'))
+        .sum();
+    match FAMILY_SLOTS
+        .iter()
+        .find(|(family, _)| name.contains(family))
+    {
+        Some((_, base)) => base + digits % FAMILY_WIDTH,
+        None => {
             let hash = name.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
                 (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
             });
-            let start = (hash % SERIES as u64) as usize;
-            let slot = (0..SERIES)
-                .map(|i| (start + i) % SERIES)
-                .find(|s| !taken[*s])
-                .unwrap_or(start);
-            taken[slot] = true;
-            slots.insert(name.to_string(), slot);
+            OTHER_BASE + (hash % OTHER_POOL as u64) as usize
         }
+    }
+}
+
+impl Slots {
+    /// Gives every model the slot `slot_for` picks from its name. Two models
+    /// can share a slot when their names land on the same one. `earlier` holds
+    /// the models of the previous period: they get a color for the table but
+    /// are not part of the stacking order.
+    pub fn of(models: &[Group], earlier: &[Group]) -> Slots {
+        let slots = models
+            .iter()
+            .chain(earlier)
+            .map(|g| (g.key.clone(), slot_for(&g.key)))
+            .collect();
         let mut order: Vec<&Group> = models.iter().collect();
         order.sort_by(|a, b| {
             b.cost_usd
@@ -757,7 +769,7 @@ mod tests {
     }
 
     #[test]
-    fn slots_are_stable_collision_free_and_ordered_by_cost() {
+    fn a_model_keeps_its_color_whatever_else_is_in_view() {
         let models = [
             group("claude-sonnet-5", 5.0),
             group("claude-opus-5", 9.0),
@@ -771,40 +783,33 @@ mod tests {
         let mut seen: Vec<usize> = models.iter().map(|g| slots.slot(&g.key)).collect();
         seen.sort_unstable();
         seen.dedup();
-        assert_eq!(seen.len(), 3, "three models, three colors");
-        // The order the models arrive in does not change a color.
+        assert_eq!(seen.len(), 3, "three families, three colors");
+        // Neither the arrival order nor the other models change a color.
         let mut reversed = models.to_vec();
         reversed.reverse();
         let again = Slots::of(&reversed, &[]);
+        let extra = [group("claude-opus-4-6", 2.0), group("gpt-5-codex", 1.0)];
+        let crowded = Slots::of(&extra, &models);
         for g in &models {
             assert_eq!(slots.slot(&g.key), again.slot(&g.key));
+            assert_eq!(slots.slot(&g.key), crowded.slot(&g.key));
+            assert_eq!(
+                slots.slot(&g.key),
+                Slots::of(std::slice::from_ref(g), &[]).slot(&g.key)
+            );
         }
-        // The first model by name always keeps its hashed slot, so a model
-        // alone (a filtered view) keeps its color, and one that collides with
-        // an earlier model moves to the next free slot.
-        let alone = Slots::of(&[group("claude-haiku-4-5", 1.0)], &[]);
-        assert_eq!(
-            alone.slot("claude-haiku-4-5"),
-            slots.slot("claude-haiku-4-5")
-        );
     }
 
     #[test]
-    fn more_models_than_colors_share_them_and_an_unknown_model_gets_slot_zero() {
-        let many: Vec<Group> = (0..12)
-            .map(|i| group(&format!("model-{i}"), f64::from(i)))
-            .collect();
-        let slots = Slots::of(&many, &[]);
-        assert_eq!(slots.order.len(), 12);
-        assert!(many.iter().all(|g| slots.slot(&g.key) < SERIES));
-        let distinct: std::collections::BTreeSet<usize> =
-            many.iter().map(|g| slots.slot(&g.key)).collect();
-        assert_eq!(
-            distinct.len(),
-            SERIES,
-            "every color is used before any is shared"
-        );
-        assert_eq!(slots.slot("not-in-the-range"), 0);
+    fn versions_of_a_family_stay_in_its_slots_and_other_models_use_the_rest() {
+        let opus_5 = slot_for("claude-opus-5");
+        let opus_46 = slot_for("claude-opus-4-6");
+        assert!(opus_5 < 2 && opus_46 < 2, "opus keeps slots 0 and 1");
+        assert_ne!(opus_5, opus_46, "adjacent versions tell apart");
+        assert!((2..4).contains(&slot_for("claude-sonnet-5")));
+        assert!((4..6).contains(&slot_for("claude-haiku-4-5")));
+        assert!((OTHER_BASE..SERIES).contains(&slot_for("gpt-5-codex")));
+        assert_eq!(Slots::default().slot("not-in-the-range"), 0);
         assert!(Slots::of(&[], &[]).order.is_empty());
     }
 

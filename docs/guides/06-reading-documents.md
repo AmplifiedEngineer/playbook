@@ -25,6 +25,10 @@ A section number that does not exist exits with code 2 and says which numbers ar
 
 pdf, docx, doc, odt, rtf, epub, pptx, ppt, odp, xlsx, ods and csv. Images are not converted, use Read for those.
 
+## Exit codes
+
+`playbook doc read` exits 0 on success, 1 for a failure, 2 for a section that does not exist, 3 for a document that needs OCR and 128 plus the signal number when interrupted. The helper and its limits are described in [The pbdoc helper](../internals/19-pbdoc-helper.md).
+
 ## Safeguards
 
 - **Local only.** The OCR option and the hosted mode of the upstream `anydoc` tool send the document to a remote server. Playbook never passes them. A scanned PDF with no text layer answers "needs OCR, not supported locally" and nothing is retried elsewhere.
