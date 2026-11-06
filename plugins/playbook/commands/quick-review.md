@@ -70,7 +70,7 @@ When in worktree mode, read and grep all files under `$WT` instead of the local 
 Findings are plain: a label, `file:line`, the exact evidence, a short failure scenario, and one fix in plain words. They are not comment bodies yet. Step 4 drafts the comment for each finding after the sweep, and only when something will be posted. The non-negotiable points for every finding:
 
 - **Conventional Comments on every finding, PLAIN TEXT (no bold).** Read `playbook:grounding-review` reference `references/conventional-comments.md` now and follow it: `<label> [decorations]: <subject>`, for example `issue (blocking): ...` or `nitpick: ...`. NEVER wrap the label in `**...**`. Never write a bare `blocking:`. The label and decorations order the findings and are what posts.
-- **One sentence by default, two at most: the problem, then what breaks.** State the defect and its failure, then stop. A second sentence only when the mechanism is genuinely non-obvious. A finding that argues a real decision can run a little longer. Avoid jargon; plainest words available. Don't teach the author what they already know or recap the diff.
+- **One sentence by default, two at most: the problem, then what breaks.** State the defect and its failure, then stop. A second sentence only when the mechanism is genuinely non-obvious. Avoid jargon; plainest words available. Don't teach the author what they already know or recap the diff.
 - **Pick one pragmatic fix.** No "X, or Y" options. If both work, prefer the smallest diff and recommend that one.
 - **Paraphrase, don't quote, in the sentence itself.** The exact code belongs in the evidence line. Block-quoting the README or source code is almost always longer than restating it in your own words.
 - **Don't restate the diff or the anchor.** The author wrote the code; the comment is already on the line. Skip "this function adds X" and skip "at file:line" when the comment IS at that line.
@@ -251,7 +251,7 @@ If you catch yourself doing any of these while drafting findings, stop and rewri
 1. **Diff restatement.** "This change moves X into Y so that...". Delete the entire setup sentence and lead with the finding.
 2. **Hedging stack.** "may actually be" + "I'd lean toward" + "that said" in a single comment is a tell.
 3. **Meta-justification.** "since a non-timestamp string in a timestamp column is its own foot-gun". The recommendation is enough; trust the reader.
-4. **Bullet-list explanation inside an inline comment.** Use short prose paragraphs (up to three), not bullets, inside an inline comment. If bullets feel necessary, the finding is too big: split or simplify.
+4. **Bullet-list explanation inside an inline comment.** A comment is the label plus 1 to 2 sentences (`LEN-REVIEW`), with no bullets. If bullets feel necessary, the finding is too big: split or simplify.
 5. **Posting findings in the review body** instead of inline.
 6. **Auto-submitting** without the two-question orchestration.
 

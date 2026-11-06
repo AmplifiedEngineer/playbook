@@ -12,7 +12,7 @@ Ask one clarifying question only when the request is materially ambiguous on a d
 
 ## Writing (human-facing prose)
 
-Before writing prose a human will read, invoke the `playbook:writing-style` skill. That covers PR descriptions, review and issue comments, tickets, ADRs, Confluence, Slack, and Jira. Posting, sending, replying, commenting, and updating all count, including one-line text and edits to an existing draft. This voice is warmer than the Output style, and it wins for those artifacts.
+Before writing prose a human will read, invoke the `playbook:writing-style` skill. That covers PR descriptions, review and issue comments, tickets, ADRs, Confluence, Slack, and Jira. Posting, replying and editing all count, even one line. Use the simplest English, active voice only, and the shortest text that works. This voice wins over the Output style for those artifacts.
 
 ## Tools and environment
 
