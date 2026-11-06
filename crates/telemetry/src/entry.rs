@@ -86,6 +86,55 @@ fn account_run(paths: &Paths, command: &AccountCommand) -> Result<String, String
                 format!("{key} is shown as {}{note}", name.trim())
             })
         }
+        AccountCommand::Assign {
+            from,
+            to,
+            target,
+            was,
+            confirm,
+        } => {
+            use super::account_move as mv;
+            let zone = super::tz::current();
+            let (from, to) = (mv::parse_time(from, zone)?, mv::parse_time(to, zone)?);
+            if from >= to {
+                return Err("--from must be earlier than --to".to_string());
+            }
+            let target = store::resolve(&conn, target)?;
+            let was = was
+                .as_deref()
+                .map(|w| store::resolve(&conn, w))
+                .transpose()?;
+            let span = format!("{} to {}", super::tz::iso(from), super::tz::iso(to));
+            if !confirm {
+                let m = mv::plan(&conn, from, to, &target, was.as_deref())?;
+                return Ok(format!(
+                    "dry run: {} events (${:.2}) and {} skill and agent records from {span} would move to {target}.\nAdd --confirm to apply.",
+                    m.events, m.cost_usd, m.tool_events
+                ));
+            }
+            let now = crate::util::time::now_secs();
+            Ok(
+                match mv::assign(&conn, from, to, &target, was.as_deref(), now)? {
+                    Some((id, m)) => format!(
+                        "move {id}: {} events (${:.2}) and {} skill and agent records from {span} now belong to {target}.\nUndo with: playbook usage account undo {id}",
+                        m.events, m.cost_usd, m.tool_events
+                    ),
+                    None => format!(
+                        "nothing to move from {span}: those events already belong to {target}."
+                    ),
+                },
+            )
+        }
+        AccountCommand::Undo { id } => Ok(match super::account_move::undo(&conn, *id)? {
+            Some((id, n, 0)) => format!("undid move {id}: restored {n} records."),
+            Some((id, n, skipped)) => format!(
+                "undid move {id}: restored {n} records and left {skipped} that were relabeled since."
+            ),
+            None => match id {
+                Some(id) => format!("move {id} does not exist or is already undone."),
+                None => "no applied move to undo.".to_string(),
+            },
+        }),
     }
 }
 
@@ -295,6 +344,39 @@ mod tests {
             .unwrap()
             .starts_with("Home (a@b.c)"));
         assert_eq!(account(&p, name("")).unwrap(), "cleared the name of a@b.c");
+    }
+
+    #[test]
+    fn assign_dry_runs_then_applies_and_undoes_through_the_entry_point() {
+        crate::tz::set(crate::tz::Zone::Utc);
+        let p = paths("entry-assign");
+        let conn = crate::db::open_db(&p.db).unwrap();
+        conn.execute(
+            "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
+                repo, branch, input_tokens, output_tokens, cache_creation_tokens,
+                cache_read_tokens, cost_usd) VALUES ('e', 86400, 's', 'a@b.c', 'm', '', 'r', 'b', 1, 1, 0, 0, 2.5)",
+            [],
+        )
+        .unwrap();
+        let assign = |confirm| AccountCommand::Assign {
+            from: "1970-01-02".into(),
+            to: "1970-01-03".into(),
+            target: "personal".into(),
+            was: None,
+            confirm,
+        };
+
+        let dry = account(&p, assign(false)).unwrap();
+        assert!(
+            dry.contains("1 events ($2.50)") && dry.contains("--confirm"),
+            "{dry}"
+        );
+        assert!(account(&p, assign(true)).unwrap().contains("move 1:"));
+        assert!(account(&p, assign(true))
+            .unwrap()
+            .starts_with("nothing to move"));
+        let undone = account(&p, AccountCommand::Undo { id: None }).unwrap();
+        assert!(undone.contains("restored 1"), "{undone}");
     }
 
     #[test]
