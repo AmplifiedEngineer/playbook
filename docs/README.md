@@ -68,6 +68,7 @@ How the machine works, and why it is shaped this way.
 - [CLA and DCO checks](internals/18-cla-and-dco-checks.md): how a contributor signs by commit, what the two checks verify and how the rollout keeps open PRs unblocked.
 - [The SQLite store crate](internals/19-sqlite-store.md): the shim every crate will use to reach SQLite, its busy-retry helpers, the call-site counts and the libsql item map.
 - [Cleanup, tombstones and gc](internals/17-gc-and-tombstones.md): what `playbook gc` removes, how a tombstone is kept and restored, the stores and the build output table.
+- [The pbdoc helper](internals/19-pbdoc-helper.md): the bundled document converter, its command line, exit codes and safety limits.
 - [PR-Agent and the review pipeline](internals/16-pr-agent-and-the-review-pipeline.md): the decision to try PR-Agent's ideas in the playbook review pipeline first, and which ones.
 
 ## Decisions
