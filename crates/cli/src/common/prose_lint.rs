@@ -327,7 +327,9 @@ fn passive_findings(masked: &str, newlines: &[usize]) -> Vec<Finding> {
         if present && STATUS_WORDS.contains(&word.as_str()) {
             continue;
         }
-        let whole = caps.get(0).expect("group 0 always exists");
+        let Some(whole) = caps.get(0) else {
+            continue;
+        };
         let line = newlines.partition_point(|&n| n < whole.start()) + 1;
         found.push(Finding {
             line,
