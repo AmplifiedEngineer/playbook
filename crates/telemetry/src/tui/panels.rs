@@ -882,9 +882,14 @@ pub const HEALTH_ROWS: usize = 9;
 /// The title note of a telemetry view: its source and, for a period, the
 /// span it is compared with.
 fn telemetry_note(pal: &Palette, data: &Data) -> Line<'static> {
+    let source = if data.health.tools.iter().any(|t| t.transcript_calls > 0) {
+        "source telemetry + transcripts"
+    } else {
+        "source telemetry"
+    };
     let text = match &data.comparison {
-        Some(c) => format!("source telemetry  vs {}", c.period.previous_label()),
-        None => "source telemetry".to_string(),
+        Some(c) => format!("{source}  vs {}", c.period.previous_label()),
+        None => source.to_string(),
     };
     note_line(pal, &text, pal.box_mem).right_aligned()
 }
@@ -901,10 +906,12 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, s
         "Tools",
         pal.box_mem,
     );
-    if !data.telemetry_rows {
-        return empty(frame, area, pal, block, &telemetry_off(app));
-    }
+    // Transcript counts fill days the collector missed, so tool rows show
+    // even when the range has no live telemetry.
     if data.health.tools.is_empty() {
+        if !data.telemetry_rows {
+            return empty(frame, area, pal, block, &telemetry_off(app));
+        }
         return empty(
             frame,
             area,
@@ -952,14 +959,26 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, s
                     } else {
                         Style::default()
                     };
+                    // `~` marks a count that includes transcript calls, which
+                    // carry no outcome and no time. Those figures show `-`.
+                    let calls = if t.transcript_calls > 0 {
+                        format!("{}~", t.calls)
+                    } else {
+                        t.calls.to_string()
+                    };
+                    let or_dash = |known: bool, text: String| if known { text } else { "-".into() };
                     let mut cells = vec![
                         Cell::from(fit(&t.name, w[0])),
-                        num(t.calls.to_string()),
-                        num(percent(t.error_rate())).style(rate_style),
-                        num(duration_ms(t.avg_ms())),
-                        num(duration_ms(t.max_ms as f64)),
+                        num(calls),
+                        num(or_dash(t.has_outcome(), percent(t.error_rate()))).style(rate_style),
+                        num(or_dash(t.has_duration(), duration_ms(t.avg_ms()))),
+                        num(or_dash(t.has_duration(), duration_ms(t.max_ms as f64))),
                     ];
                     match before.get(t.name.as_str()) {
+                        Some(p) if !(t.has_duration() && p.has_duration()) => {
+                            cells.push(num("-").style(Style::default()));
+                            cells.push(change_cell(pal, "-".to_string(), 0.0));
+                        }
                         Some(p) => {
                             let delta = t.avg_ms() - p.avg_ms();
                             let pct = Change::of(t.avg_ms(), p.avg_ms()).percent;

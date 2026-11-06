@@ -326,44 +326,85 @@ pub fn rate_limited_at(conn: &Connection, since: i64, until: i64) -> Result<Vec<
         .map_err(|e| format!("failed to read rate limit errors: {e}"))
 }
 
-/// Tool calls of one tool in a window.
+/// Tool calls of one tool in a window. `calls` counts every call, live or
+/// from a transcript. A transcript call has no outcome and no duration, so
+/// `failures` and `total_ms` cover only calls that have one (`outcomes` and
+/// `timed` count them) and nothing is guessed for the rest.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ToolStat {
     pub name: String,
     pub calls: u64,
+    /// Calls known only from a transcript: counted, but no outcome or time.
+    pub transcript_calls: u64,
     pub failures: u64,
+    /// Calls with a known outcome.
+    pub outcomes: u64,
+    /// Calls with a known duration.
+    pub timed: u64,
     pub total_ms: u64,
     pub max_ms: u64,
 }
 
 impl ToolStat {
-    /// Failures over calls, 0 to 1.
+    /// Failures over calls with a known outcome, 0 to 1.
     pub fn error_rate(&self) -> f64 {
-        if self.calls == 0 {
+        ratio(self.failures, self.outcomes)
+    }
+
+    /// Average over calls with a known duration, 0 when there is none.
+    pub fn avg_ms(&self) -> f64 {
+        if self.timed == 0 {
             0.0
         } else {
-            self.failures as f64 / self.calls as f64
+            self.total_ms as f64 / self.timed as f64
         }
     }
 
-    pub fn avg_ms(&self) -> f64 {
-        if self.calls == 0 {
-            0.0
-        } else {
-            self.total_ms as f64 / self.calls as f64
-        }
+    pub fn has_outcome(&self) -> bool {
+        self.outcomes > 0
+    }
+
+    pub fn has_duration(&self) -> bool {
+        self.timed > 0
     }
 }
 
-/// The tools used in `[since, until)`, busiest first, then by name.
+/// The tools used in `[since, until)`, busiest first, then by name, from one
+/// merged set of calls. Per tool use id the live row wins. A transcript call
+/// (`tool_invocation_events`, shown as the `Agent` or `Skill` tool) counts only
+/// when the call has no live row at all, so each call counts once whatever
+/// the agent name says. The same rule written as a view:
+/// `live UNION ALL (transcript events NOT IN live)`.
 pub fn tool_stats(conn: &Connection, since: i64, until: i64) -> Result<Vec<ToolStat>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT CASE WHEN tool_name = '' THEN 'unknown' ELSE tool_name END AS n,
-                    COUNT(*), SUM(1 - success), SUM(duration_ms), MAX(duration_ms)
-             FROM telemetry_tools WHERE timestamp >= ?1 AND timestamp < ?2
-             GROUP BY n ORDER BY COUNT(*) DESC, n",
+    let transcript = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'tool_invocation_events')",
+            [],
+            |r| r.get::<_, bool>(0),
         )
+        .map_err(|e| format!("failed to read telemetry tools: {e}"))?;
+    let from_transcripts = if transcript {
+        "UNION ALL
+         SELECT CASE e.kind WHEN 'agent' THEN 'Agent' ELSE 'Skill' END, NULL, NULL, 1
+         FROM tool_invocation_events e
+         WHERE e.timestamp >= ?1 AND e.timestamp < ?2
+           AND NOT EXISTS (SELECT 1 FROM telemetry_tools t
+                           WHERE t.session_id = e.session_id AND t.tool_use_id = e.event_id)"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "WITH calls(n, ok, ms, tr) AS (
+            SELECT tool_name, success, duration_ms, 0 FROM telemetry_tools
+            WHERE timestamp >= ?1 AND timestamp < ?2
+            {from_transcripts})
+         SELECT CASE WHEN n = '' THEN 'unknown' ELSE n END AS name,
+                COUNT(*), SUM(tr), COALESCE(SUM(1 - ok), 0), COUNT(ok), COUNT(ms),
+                COALESCE(SUM(ms), 0), COALESCE(MAX(ms), 0)
+         FROM calls GROUP BY name ORDER BY COUNT(*) DESC, name"
+    );
+    let mut stmt = conn
+        .prepare(&sql)
         .map_err(|e| format!("failed to read telemetry tools: {e}"))?;
     let rows = stmt
         .query_map(params![since, until], |r| {
@@ -373,9 +414,12 @@ pub fn tool_stats(conn: &Connection, since: i64, until: i64) -> Result<Vec<ToolS
             Ok(ToolStat {
                 name: r.get(0)?,
                 calls: n(1)?,
-                failures: n(2)?,
-                total_ms: n(3)?,
-                max_ms: n(4)?,
+                transcript_calls: n(2)?,
+                failures: n(3)?,
+                outcomes: n(4)?,
+                timed: n(5)?,
+                total_ms: n(6)?,
+                max_ms: n(7)?,
             })
         })
         .map_err(|e| format!("failed to read telemetry tools: {e}"))?;
@@ -1223,5 +1267,107 @@ mod tests {
             .collect();
         assert_eq!(got, [("Explore", 2), ("reviewer", 1)]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn with_events(events: &[(&str, &str, i64, &str)]) -> Connection {
+        let conn = mem();
+        conn.execute_batch(
+            "CREATE TABLE tool_invocation_events (event_id TEXT PRIMARY KEY,
+                timestamp INTEGER NOT NULL, session_id TEXT NOT NULL, account TEXT NOT NULL,
+                kind TEXT NOT NULL, name TEXT NOT NULL);",
+        )
+        .unwrap();
+        for (id, session, ts, kind) in events {
+            let name = if *kind == "agent" {
+                "playbook:reviewer"
+            } else {
+                "playbook:plan"
+            };
+            conn.execute(
+                "INSERT INTO tool_invocation_events VALUES (?1, ?2, ?3, 'a', ?4, ?5)",
+                params![id, ts, session, kind, name],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    fn stat<'a>(stats: &'a [ToolStat], name: &str) -> &'a ToolStat {
+        stats.iter().find(|s| s.name == name).unwrap()
+    }
+
+    #[test]
+    fn transcript_counts_match_a_hand_counted_fixture_with_no_invented_numbers() {
+        let conn = with_events(&[
+            ("a1", "s1", 10, "agent"),
+            ("a2", "s1", 20, "agent"),
+            ("a3", "s1", 30, "agent"),
+            ("k1", "s1", 40, "skill"),
+            ("k2", "s1", 50, "skill"),
+        ]);
+        let stats = tool_stats(&conn, 0, 100).unwrap();
+        let agent = stat(&stats, "Agent");
+        assert_eq!((agent.calls, agent.transcript_calls), (3, 3));
+        assert_eq!((agent.outcomes, agent.timed, agent.failures), (0, 0, 0));
+        assert!(!agent.has_outcome() && !agent.has_duration());
+        assert_eq!(stat(&stats, "Skill").calls, 2);
+        assert!(tool_stats(&conn, 100, 200).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_live_row_wins_per_tool_use_id_and_the_agent_name_does_not_matter() {
+        // The live data may call the agent `custom`; the transcript says
+        // `playbook:reviewer`. One tool use id is one call.
+        let conn = with_events(&[("tu1", "s1", 10, "agent"), ("tu2", "s1", 20, "agent")]);
+        insert_tool(&conn, &tool("tu1", "Agent", false, 300, 11)).unwrap();
+        let stats = tool_stats(&conn, 0, 100).unwrap();
+        let agent = stat(&stats, "Agent");
+        assert_eq!((agent.calls, agent.transcript_calls), (2, 1));
+        assert_eq!((agent.failures, agent.outcomes, agent.timed), (1, 1, 1));
+        assert_eq!((agent.total_ms, agent.max_ms), (300, 300));
+    }
+
+    #[test]
+    fn a_live_row_outside_the_window_still_hides_its_transcript_twin() {
+        let conn = with_events(&[("tu1", "s1", 10, "agent")]);
+        insert_tool(&conn, &tool("tu1", "Agent", true, 5, 500)).unwrap();
+        assert!(tool_stats(&conn, 0, 100).unwrap().is_empty());
+    }
+
+    #[test]
+    fn duration_and_error_figures_use_only_calls_that_have_them() {
+        let conn = with_events(&[("a1", "s1", 10, "agent"), ("a2", "s1", 11, "agent")]);
+        insert_tool(&conn, &tool("live1", "Agent", true, 100, 12)).unwrap();
+        insert_tool(&conn, &tool("live2", "Agent", false, 300, 13)).unwrap();
+        let stats = tool_stats(&conn, 0, 100).unwrap();
+        let agent = stat(&stats, "Agent");
+        assert_eq!(agent.calls, 4);
+        assert_eq!(
+            agent.avg_ms(),
+            200.0,
+            "the two unknown durations are left out"
+        );
+        assert_eq!(
+            agent.error_rate(),
+            0.5,
+            "the two unknown outcomes are left out"
+        );
+    }
+
+    #[test]
+    fn transcript_only_and_live_only_days_each_report_their_own_rows() {
+        let day = 86_400;
+        let conn = with_events(&[("old", "s1", 2 * day + 5, "skill")]);
+        insert_tool(&conn, &tool("live", "Bash", true, 3, 5 * day + 5)).unwrap();
+        let transcript_day = tool_stats(&conn, 2 * day, 3 * day).unwrap();
+        assert_eq!(transcript_day.len(), 1);
+        assert_eq!(transcript_day[0].transcript_calls, 1);
+        let live_day = tool_stats(&conn, 5 * day, 6 * day).unwrap();
+        assert_eq!(
+            (live_day[0].name.as_str(), live_day[0].transcript_calls),
+            ("Bash", 0)
+        );
+        let health = health(&conn, 2 * day, 3 * day).unwrap();
+        assert!(health.is_empty(), "health stays live only");
     }
 }

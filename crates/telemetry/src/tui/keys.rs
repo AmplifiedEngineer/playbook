@@ -515,6 +515,13 @@ pub fn help_lines() -> Vec<HelpLine> {
             });
         }
     }
+    out.push(HelpLine::Blank);
+    out.push(HelpLine::Heading("Marks"));
+    out.push(HelpLine::Key {
+        shown: "~",
+        text: "Tools: count only, from transcripts",
+        panels: "",
+    });
     out
 }
 
