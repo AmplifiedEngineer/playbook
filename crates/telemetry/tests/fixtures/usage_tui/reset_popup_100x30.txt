@@ -1,0 +1,30 @@
+╭─┤Agent Budget Dashboard├──┤UTC├──────────────────────────────────────────────────────────────────╮
+│last 30 days Aug 5 to Sep 3, 2026  (no previous period to compare)                                │
+│cost          $20.27                                                                              │
+│tokens        618.8K                                                                              │
+│messages          26                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─┤¹Spend per day, USD├─┤v view: total├──────────╮╭─┤²Tokens per day├──────────────────────────────╮
+│total $20.27  peak $6.01 on 08-25  avg $0.68/day││total 618.8K  peak 47.6K on 08-14  avg 20.6K/day│
+│Thu 2026-09-03 today  $1.25  2 msgs  47.6K tok  ││Thu 2026-09-03 today  47.6K tok  $1.25  2 msgs  │
+│ $8┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄││ 50K┤┄┄┄┄┄┄┄┄┄┄┄┄▆┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▆┄┄┄┄┄┄┄┄┄▆┄┄▆┄│
+│   │                             █              ││    │            █               █         █  █ │
+│ $4┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╭┤ Reset usage ├───────────────────────────────────────────╮▇┄┄┄█┄▇▇┄┄▇▇┄┄█┄┄█┄│
+│ $0┤▁▆▁  ▃ ▁▂ ▂  ▁█│Delete the stored usage history and read it again from the│█   █ ██  ██  █  █ │
+│    5 7  9  11 13 1│session transcripts, as on a first run?                   │ 23   26  29  1  3 │
+╰───────────────────│The budget, the limit readings, the account names and the │───────────────────╯
+╭─┤³Models├─────────│layout stay.                                              │s├─────────────────╮
+│name             ms│                                                          │     cost▼ share   │
+│▟opus-5            │                                                          │    $11.85 ■■■■■···│
+│█sonnet-5          ╰┤ y deletes, any other key cancels ├──────────────────────╯     $8.25 ■■■·····│
+│▒haiku-5            7  166.6K     $0.17 ········││gamma               7  166.6K     $0.17 ········│
+╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
+╭─┤⁵Live sessions├─────┤hour $1.25  today $1.25├─╮╭─┤⁶Sessions per day├──────────────────────┤UTC├─╮
+│state project     model       msgs     cost ago▲││day   session  project      model          cost▼│
+│live  alpha       opus-5         2    $1.25  20s││09-03 s-live   alpha        opus-5         $1.25│
+│                                                ││09-01 s-old    beta         sonnet-5       $1.25│
+│                                                ││      s-1      beta         sonnet-5       $0.55│
+│                                                ││08-30 s-3      alpha        opus-5         $0.80│
+│                                                ││08-29 s-4      beta         sonnet-5       $0.95│
+╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
+ d day w week m month ←/→ day r range v view / filter ? help q quit  updated 01:46:40 UTC, every 5s

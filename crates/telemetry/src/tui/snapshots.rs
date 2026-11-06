@@ -1154,6 +1154,14 @@ fn the_sessions_tab_stacks_live_and_sessions_at_80x24() {
 }
 
 #[test]
+fn the_reset_window_at_100x30() {
+    let mut a = app(Theme::Mono);
+    a.reset_popup = true;
+
+    check("reset_popup_100x30", &draw(&a, 100, 30));
+}
+
+#[test]
 fn the_layout_editor_window_at_100x30() {
     let mut a = tabbed(0);
     a.editor = Some(crate::tui::editor::Editor::new(&a.layout, 0));
