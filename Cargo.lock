@@ -1228,7 +1228,7 @@ dependencies = [
 
 [[package]]
 name = "pbdoc"
-version = "0.40.0"
+version = "0.40.1"
 dependencies = [
  "anydoc",
  "rayon",
@@ -1275,7 +1275,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "playbook"
-version = "0.40.0"
+version = "0.40.1"
 dependencies = [
  "chrono",
  "clap",
@@ -1296,7 +1296,7 @@ dependencies = [
 
 [[package]]
 name = "playbook-code"
-version = "0.40.0"
+version = "0.40.1"
 dependencies = [
  "clap",
  "playbook-common",
@@ -1339,7 +1339,7 @@ dependencies = [
 
 [[package]]
 name = "playbook-telemetry"
-version = "0.40.0"
+version = "0.40.1"
 dependencies = [
  "chrono",
  "clap",

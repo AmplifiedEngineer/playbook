@@ -21,4 +21,4 @@
 │Sun 08-30 s-3      alpha              opus-5                1   23.8K    $0.80│
 │Sat 08-29 s-4      beta               sonnet-5              1   23.8K    $0.95│
 ╰──────────────────────────────────────────────────────────────────────────────╯
- Tab tab w week m month v view / filter h help q quit      updated 01:46:40 UTC
+ Tab tab w week m month v view / filter ? help q quit      updated 01:46:40 UTC
