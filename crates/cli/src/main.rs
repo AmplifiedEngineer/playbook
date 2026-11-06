@@ -1545,7 +1545,12 @@ fn real_main() {
                     match config::write::set(tier, &key, &value_json, &home, repo_slug) {
                         Ok(()) => {
                             println!("config set: {key} updated to {shown}");
-                            if key == "usage.telemetry" {
+                            if key == "usage.telemetry" && tier != config::write::Tier::Global {
+                                println!(
+                                    "telemetry: Claude Code settings follow the global value, so they were not changed; to change them, run: playbook config set --global usage.telemetry {}",
+                                    value.trim()
+                                );
+                            } else if key == "usage.telemetry" {
                                 let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
                                 let epoch = common::time::now_epoch_secs();
                                 match init::telemetry::sync_setting(

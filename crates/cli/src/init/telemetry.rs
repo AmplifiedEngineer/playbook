@@ -544,9 +544,7 @@ fn owned_env(env: &Map<String, Value>) -> Vec<(String, String)> {
 }
 
 fn env_block(settings_path: &Path) -> Result<Map<String, Value>, String> {
-    let root = load(settings_path).map_err(|e| {
-        format!("{e}; nothing was changed. Fix the file, then run: playbook setup --only telemetry")
-    })?;
+    let root = load(settings_path)?;
     Ok(root
         .get("env")
         .and_then(Value::as_object)
@@ -592,13 +590,22 @@ fn sync_with(
     process_configured: bool,
 ) -> Result<Vec<String>, String> {
     let path = claude_home.join("settings.json");
-    let before = owned_env(&env_block(&path)?);
+    let unreadable = |e: String| {
+        format!(
+            "{e}; the Claude Code settings were not changed. Fix the file, then run: playbook config set usage.telemetry {}",
+            if on { "auto" } else { "off" }
+        )
+    };
+    let before = owned_env(&env_block(&path).map_err(unreadable)?);
     if on {
         let step = apply(home, claude_home, cwd, epoch, process_configured, true);
         match step.status {
             crate::init::run::StepStatus::Failed => return Err(step.detail),
             crate::init::run::StepStatus::Skipped => {
-                return Ok(vec![format!("telemetry: not written: {}", step.detail)]);
+                return Ok(vec![
+                    format!("telemetry: not written: {}", step.detail),
+                    "telemetry: if a Claude Code session started this shell with the keys playbook wrote earlier, run the command again from a new terminal".to_string(),
+                ]);
             }
             _ => {}
         }
@@ -627,6 +634,7 @@ fn sync_with(
         }
     }
     let mut lines = Vec::new();
+    let left: Vec<&str> = after.iter().map(|(k, _)| k.as_str()).collect();
     let backup = path.with_file_name(format!("settings.json.bak.{epoch}"));
     if diff.is_empty() {
         lines.push(format!(
@@ -634,8 +642,10 @@ fn sync_with(
             path.display(),
             if on {
                 "holds every key playbook owns"
-            } else {
+            } else if left.is_empty() {
                 "has none of the keys playbook owns"
+            } else {
+                "was not changed"
             }
         ));
     } else {
@@ -651,6 +661,12 @@ fn sync_with(
         if !on {
             lines.push("  every other key was kept".to_string());
         }
+    }
+    if !on && !left.is_empty() {
+        lines.push(format!(
+            "telemetry: left in place because playbook did not write them or you changed them: {}",
+            left.join(", ")
+        ));
     }
     if on {
         lines.push(format!("telemetry: {TOOL_DETAILS_LINE}"));
@@ -1209,12 +1225,55 @@ mod tests {
 
         for on in [true, false] {
             let err = sync_with(&home, &claude, &cwd, 100, on, false).unwrap_err();
-            assert!(err.contains("nothing was changed"), "{err}");
+            assert!(err.contains("were not changed"), "{err}");
+            assert!(err.contains("playbook config set usage.telemetry"), "{err}");
             assert!(err.contains("settings.json"), "{err}");
         }
         assert_eq!(
             fs::read_to_string(claude.join("settings.json")).unwrap(),
             "{ not json"
         );
+    }
+
+    #[test]
+    fn turning_it_off_names_keys_it_did_not_write() {
+        let (home, claude, cwd) = setup(
+            "init-tel-sync-handmade",
+            r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1"}}"#,
+        );
+
+        let out = text(&sync_with(&home, &claude, &cwd, 100, false, false).unwrap());
+
+        assert!(!out.contains("has none of the keys"), "{out}");
+        assert!(out.contains("left in place"), "{out}");
+        assert!(out.contains("CLAUDE_CODE_ENABLE_TELEMETRY"), "{out}");
+        assert_eq!(env_of(&claude)["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
+    }
+
+    #[test]
+    fn turning_it_on_where_telemetry_is_set_elsewhere_says_not_written() {
+        let (home, claude, cwd) = setup("init-tel-sync-elsewhere", r#"{"env":{"FOO":"1"}}"#);
+
+        let out = text(&sync_with(&home, &claude, &cwd, 100, true, true).unwrap());
+
+        assert!(out.contains("not written"), "{out}");
+        assert!(!env_of(&claude).contains_key("OTEL_LOGS_EXPORTER"));
+    }
+
+    #[test]
+    fn a_replaced_value_comes_back_on_off_and_shows_as_a_change() {
+        let (home, claude, cwd) = setup(
+            "init-tel-sync-restore",
+            r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}"#,
+        );
+        sync_with(&home, &claude, &cwd, 100, true, false).unwrap();
+
+        let out = text(&sync_with(&home, &claude, &cwd, 101, false, false).unwrap());
+
+        assert!(
+            out.contains("~ CLAUDE_CODE_ENABLE_TELEMETRY: 1 -> 0"),
+            "{out}"
+        );
+        assert_eq!(env_of(&claude)["CLAUDE_CODE_ENABLE_TELEMETRY"], "0");
     }
 }
