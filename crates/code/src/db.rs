@@ -117,6 +117,36 @@ impl std::fmt::Display for DbError {
 
 impl std::error::Error for DbError {}
 
+/// The `meta` key that holds a worktree's stored language list.
+pub fn languages_key(worktree: &str) -> String {
+    format!("languages:{worktree}")
+}
+
+/// One `meta` value, or `None` when the key is absent, as in a store that an
+/// older build wrote.
+pub fn meta_get(conn: &Connection, key: &str) -> Option<String> {
+    conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0))
+        .ok()
+}
+
+/// Writes a `meta` value only when it differs from the stored one. Returns
+/// whether a row was written, so an unchanged value takes no write lock.
+pub fn meta_set_if_changed(conn: &mut Connection, key: &str, value: &str) -> Result<bool, String> {
+    if meta_get(conn, key).as_deref() == Some(value) {
+        return Ok(false);
+    }
+    let hooks = TxHooks::default();
+    let tx = write_tx(conn, &hooks).map_err(|e| map_sql_error("failed to write the index", &e))?;
+    tx.execute(
+        "INSERT INTO meta(key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [key, value],
+    )
+    .map_err(|e| map_sql_error("failed to write the index", &e))?;
+    commit_tx(tx, &hooks).map_err(|e| map_sql_error("failed to write the index", &e))?;
+    Ok(true)
+}
+
 const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,

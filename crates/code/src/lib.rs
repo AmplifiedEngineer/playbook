@@ -15,6 +15,8 @@ pub mod db;
 pub mod host;
 pub mod index;
 pub mod lang;
+#[cfg(test)]
+mod language_list_tests;
 pub mod location;
 pub mod output;
 #[cfg(test)]

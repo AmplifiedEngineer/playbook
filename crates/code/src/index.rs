@@ -204,6 +204,8 @@ pub struct Report {
     pub failed: usize,
     /// Files that took stored content with the same key and were not parsed.
     pub reused: usize,
+    /// Whether the run wrote the stored language list.
+    pub languages_written: bool,
     /// Whether the cleanup at the end of the run finished.
     pub cleanup: Cleanup,
 }
@@ -1242,6 +1244,12 @@ pub fn run(
         )
         .map_err(|e| db::map_sql_error("failed to read the index", &e))
         .map(|n| usize::try_from(n).unwrap_or(0))?;
+    let languages = super::status::group_counts(&conn, "lang")?;
+    report.languages_written = db::meta_set_if_changed(
+        &mut conn,
+        &db::languages_key(worktree),
+        &serde_json::to_string(&languages).map_err(|e| e.to_string())?,
+    )?;
     let completed = opts.now().max(started);
     conn.execute(
         "UPDATE worktrees SET last_run_completed = ?2 WHERE id = ?1",
