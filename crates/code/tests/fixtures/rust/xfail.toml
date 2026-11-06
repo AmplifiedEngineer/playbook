@@ -1,0 +1,8 @@
+["src/lib.rs"]
+x = "struct fields are not extracted yet"
+y = "struct fields are not extracted yet"
+Horizontal = "enum variants are not extracted yet"
+Vertical = "enum variants are not extracted yet"
+
+["src/shape.rs"]
+side = "struct fields are not extracted yet"

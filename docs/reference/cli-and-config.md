@@ -326,7 +326,7 @@ Example: `playbook code search retry --lang python`
 - `<QUERY>`: Words to look for
 - `--text`: Search indexed text only
 - `--path <PATH>`: Only files under this path prefix, for example `lib/payment/`
-- `--lang <LANG>`: Only files of this language: rust, typescript, javascript or python (one of `rust`, `typescript`, `javascript`, `python`)
+- `--lang <LANG>`: Only files of this language: rust, typescript, javascript, python or go (one of `rust`, `typescript`, `javascript`, `python`, `go`)
 - `--limit <LIMIT>`: Most results to show, from 1 to 200
 - `--json`: Print one JSON document
 
@@ -350,7 +350,7 @@ Example: `playbook code symbol PaymentService --kind class`
 
 - `<NAME>`: Name to look up
 - `--kind <KIND>`: Only this kind, for example `function`, `class` or `method`
-- `--lang <LANG>`: Only files of this language: rust, typescript, javascript or python (one of `rust`, `typescript`, `javascript`, `python`)
+- `--lang <LANG>`: Only files of this language: rust, typescript, javascript, python or go (one of `rust`, `typescript`, `javascript`, `python`, `go`)
 - `--path <PATH>`: Only files under this path prefix, for example `lib/payment/`
 - `--limit <LIMIT>`: Most results to show, from 1 to 200
 - `--json`: Print one JSON document
