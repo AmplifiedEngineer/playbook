@@ -103,8 +103,8 @@ pub fn forget_worktree(data: &Path, slug: &str, worktree: &str) -> Result<(), St
     Ok(())
 }
 
-fn is_busy(err: &rusqlite::Error) -> bool {
-    err.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy)
+fn is_busy(err: &playbook_store::Error) -> bool {
+    err.sqlite_error_code() == Some(playbook_store::ErrorCode::DatabaseBusy)
 }
 
 /// The full freshness report for the repository containing `cwd`.
@@ -139,7 +139,7 @@ fn lookup(
     cwd: &Path,
     opts: &search::SearchOptions,
     run: fn(
-        &rusqlite::Connection,
+        &playbook_store::Connection,
         &Path,
         &search::SearchOptions,
     ) -> Result<search::SearchResult, String>,
@@ -222,7 +222,7 @@ mod tests {
     use super::*;
     use crate::index::{self, Options};
     use crate::testkit::{fx, pinned};
-    use rusqlite::Connection;
+    use playbook_store::Connection;
 
     fn store_in(data: &Path) -> PathBuf {
         data.join("code/o/r")

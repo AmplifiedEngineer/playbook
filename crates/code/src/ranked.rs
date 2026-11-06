@@ -8,11 +8,11 @@
 use super::search::{
     filters, fts_hits, literal_scan, load, Hit, SearchOptions, SearchResult, SymbolInfo,
 };
-use rusqlite::{params_from_iter, Connection};
+use playbook_store::{params_from_iter, Connection};
 use std::collections::HashMap;
 use std::path::Path;
 
-fn sql_err(e: rusqlite::Error) -> String {
+fn sql_err(e: playbook_store::Error) -> String {
     super::db::map_sql_error("search failed", &e)
 }
 
