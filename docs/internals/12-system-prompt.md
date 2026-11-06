@@ -36,6 +36,9 @@ The prompt locks in once, at the start of a fresh session. Resumed sessions keep
 **Code rules.**
 
 - Design work uses this repo's own `/playbook:plan` and `/playbook:adr` commands, not the built-in plan mode. Plan runs without asking. ADR and implement are offered and wait for a yes, and implement only runs when an approved plan or blueprint exists. The `auto-model-detect` hook nudges on common phrasing in interactive runs.
+- When a test, build or command fails, find the root cause and fix it in the same turn. Ask only for decisions on design, data loss risk or spend.
+- Code questions go through `playbook code`: run `playbook code status` first, then `playbook code index` when it says stale or missing. Use Grep and Glob only when the binary or the index is unavailable.
+- Before saying "I do not know" or "no work exists", search memory and the repo and name the sources checked.
 - Models and effort are not in the prompt. Each agent's frontmatter sets them, and `playbook route <kind>` prints the table.
 - Fan out independent subtasks via parallel `Agent` calls. Close agents the moment their work is done.
 - Comments stay rare and short, wrapped, and never name a plan or ticket. The `playbook:engineering-standards` skill carries the rest of the code rules, including no magic values and testing.

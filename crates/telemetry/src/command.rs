@@ -104,11 +104,11 @@ pub enum UsageCommand {
         #[arg(long)]
         dry_run: bool,
     },
-    /// List the accounts in the usage store and name them
+    /// List the accounts in the usage store, name them and move events
     ///
-    /// Every usage event carries an account key, the email Claude Code was
-    /// signed in to. These commands show the keys and give each one a display
-    /// name.
+    /// Every usage event carries an account key: the email Claude Code was
+    /// signed in to, or a `token:` fingerprint. These commands show the keys,
+    /// give each one a display name and relabel events recorded under the wrong account.
     ///
     /// Example: `playbook usage account list`
     Account {
@@ -133,11 +133,42 @@ pub enum AccountCommand {
     Fingerprint,
     /// Give an account key a display name, or clear it with an empty name
     ///
-    /// Example: `playbook usage account name igor@getdigital.com.br Company`
+    /// Example: `playbook usage account name you@example.com Company`
     Name {
         /// Account key shown by `account list`
         key: String,
         /// Display name to show; empty clears it
         name: String,
+    },
+    /// Move the events of a time range to another account
+    ///
+    /// Prints how many events and how much cost would move and changes
+    /// no events until you add `--confirm`. Times are read on your local clock;
+    /// add `--utc` for UTC. The end is exclusive. An applied move is
+    /// numbered and `account undo` reverses it. Running the same move again
+    /// moves nothing.
+    ///
+    /// Example: `playbook usage account assign --from 2026-11-01T00:00 --to 2026-11-02T12:00 --as personal`
+    Assign {
+        /// First instant to move, like 2026-11-01T00:00 (a bare date means midnight)
+        #[arg(long)]
+        from: String,
+        /// First instant not to move, like 2026-11-02T12:00
+        #[arg(long)]
+        to: String,
+        /// Account key or name that receives the events
+        #[arg(long = "as", value_name = "KEY_OR_NAME")]
+        target: String,
+        /// Move only events now labeled with this account key or name
+        #[arg(long, value_name = "KEY_OR_NAME")]
+        was: Option<String>,
+        /// Apply the move; without it nothing changes
+        #[arg(long)]
+        confirm: bool,
+    },
+    /// Reverse the newest applied move, or the one with this number
+    Undo {
+        /// Move number printed by `account assign`
+        id: Option<i64>,
     },
 }

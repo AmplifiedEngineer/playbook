@@ -48,6 +48,11 @@ impl Host for Playbook {
             .map(|(value, _, _)| value)
     }
 
+    fn set_config_value(&self, key: &str, value: &Value, home: &Path) -> Result<(), String> {
+        crate::config::write::set(crate::config::write::Tier::Global, key, value, home, None)
+            .map_err(|e| e.to_string())
+    }
+
     fn state_dir_from(&self, home: &Path) -> PathBuf {
         crate::usage::data::data_dir(home)
     }
@@ -69,4 +74,24 @@ pub fn playbook() -> Box<dyn Host> {
 /// Makes playbook the host of `usage`. Call before any usage code runs.
 pub fn install() {
     host::install(playbook());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_budget_written_through_the_host_is_read_back_through_the_host() {
+        let home = std::env::temp_dir().join(format!(
+            "playbook-usage-host-{}-budget",
+            crate::testing::run_id()
+        ));
+        std::fs::create_dir_all(&home).unwrap();
+
+        let wrote = Playbook.set_config_value("usage.budget.monthlyUsd", &Value::from(500), &home);
+        let read = Playbook.config_value("usage.budget.monthlyUsd", &home);
+
+        assert_eq!(wrote, Ok(()));
+        assert_eq!(read, Some(Value::from(500)));
+    }
 }

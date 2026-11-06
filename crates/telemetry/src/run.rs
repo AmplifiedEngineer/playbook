@@ -100,6 +100,7 @@ pub fn ingest_into(
         stats.duplicates_skipped += more.duplicates_skipped;
     }
     // Telemetry never changes the totals; a failure here leaves transcripts as the source.
+    let _ = super::agent_names::resolve_custom(conn, &paths.claude_projects);
     let _ = super::reconcile::reconcile(conn, crate::util::time::now_secs());
     Ok(stats)
 }

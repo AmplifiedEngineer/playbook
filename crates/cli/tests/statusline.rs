@@ -1268,3 +1268,106 @@ fn a_cache_is_paced_from_its_fetch_time_not_from_now() {
         "{lines:?}"
     );
 }
+
+// ---- line 4: a manual budget against this machine's own spend --------------
+
+/// The file the local month total is kept in, under the statusline cache.
+const LOCAL_TOTAL_FILE: &str = "monthly-local-total";
+use playbook::usage::local_total::LOCAL_TOTAL_CACHE_SECONDS as LOCAL_TOTAL_TTL;
+
+/// A home with `usage.budget.monthlyUsd` 1000 and one usage event 1 hour before
+/// `FETCHED + HOUR_SECS`, in the current month at that time.
+fn local_home(db: bool) -> (Scratch, f64) {
+    let s = Scratch::new();
+    let dir = s.0.join(".config/playbook");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("config.json"),
+        r#"{"usage":{"budget":{"monthlyUsd":1000}}}"#,
+    )
+    .unwrap();
+    let mut event = playbook::usage::UsageEvent {
+        event_id: "e1".to_string(),
+        timestamp: FETCHED,
+        account: "a".to_string(),
+        agent: "claude-code".to_string(),
+        model: "claude-opus-4-1".to_string(),
+        input_tokens: 1_000_000,
+        ..playbook::usage::UsageEvent::default()
+    };
+    event.apply_pricing();
+    if db {
+        let path = playbook::usage::data::usage_db(&s.0);
+        let conn = playbook::usage::db::open_db(&path).unwrap();
+        playbook::usage::db::upsert_usage_event(&conn, &event).unwrap();
+    }
+    (s, event.cost_usd)
+}
+
+fn lines_of(s: &Scratch, now: i64) -> Vec<String> {
+    let body = payload(&s.0, "");
+    strip_ansi(&text(&render(&body, &env_for(&s.0), now)))
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn a_manual_budget_alone_shows_this_machines_spend_marked_local() {
+    let (s, cost) = local_home(true);
+    let lines = lines_of(&s, FETCHED + HOUR_SECS);
+    let want = format!("${cost:.0}/$1000 mo budget (local)");
+    assert!(lines.last().unwrap().starts_with(&want), "{lines:?}");
+}
+
+#[test]
+fn without_a_usage_database_a_manual_budget_still_shows_nothing() {
+    let (s, _) = local_home(false);
+    let lines = lines_of(&s, FETCHED + HOUR_SECS);
+    assert!(!lines.join("\n").contains("mo budget"), "{lines:?}");
+    assert!(!s.0.join(".config/playbook/data/usage.db").exists());
+}
+
+#[test]
+fn the_claude_cache_keeps_priority_over_local_spend() {
+    let (s, _) = local_home(true);
+    std::fs::write(s.0.join(".claude.json"), ENTERPRISE_CACHE).unwrap();
+    let lines = lines_of(&s, FETCHED + HOUR_SECS);
+    assert_eq!(
+        lines.last().unwrap(),
+        "! $986/$1000 mo budget, cap in <1m",
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn the_gateway_reading_keeps_priority_over_local_spend() {
+    let (s, _) = local_home(true);
+    let now = FETCHED + HOUR_SECS;
+    let members = format!(
+        r#""rate_limits":{{"spend_limit":{{"used_percentage":82,"resets_at":{},"used_usd":410,"limit_usd":500,"period":"monthly"}}}}"#,
+        now + 10 * DAY_SECS
+    );
+    let body = payload(&s.0, &members);
+    let out = strip_ansi(&text(&render(&body, &env_for(&s.0), now)));
+    assert!(out.contains("$410/$500 mo"), "{out}");
+    assert!(!out.contains("(local)"), "{out}");
+}
+
+#[test]
+fn the_local_total_is_reused_within_its_ttl_without_reading_the_database() {
+    let (s, cost) = local_home(true);
+    let now = FETCHED + HOUR_SECS;
+    let want = format!("${cost:.0}/$1000 mo budget (local)");
+    assert!(lines_of(&s, now).last().unwrap().starts_with(&want));
+    assert!(s
+        .0
+        .join(".cache/statusline")
+        .join(LOCAL_TOTAL_FILE)
+        .is_file());
+    std::fs::remove_file(playbook::usage::data::usage_db(&s.0)).unwrap();
+    let hit = lines_of(&s, now + LOCAL_TOTAL_TTL - 1);
+    assert!(hit.last().unwrap().starts_with(&want), "{hit:?}");
+    let miss = lines_of(&s, now + LOCAL_TOTAL_TTL);
+    assert!(!miss.join("\n").contains("mo budget"), "{miss:?}");
+}

@@ -123,6 +123,11 @@ pub fn open_db(path: &Path) -> Result<Connection, String> {
         BUSY_TIMEOUT,
     )
     .map_err(|e| format!("failed to create the session accounts table: {e}"))?;
+    retry_busy(
+        || conn.execute_batch(super::account_move::SCHEMA_SQL),
+        BUSY_TIMEOUT,
+    )
+    .map_err(|e| format!("failed to create account move tables: {e}"))?;
     Ok(conn)
 }
 
@@ -558,6 +563,8 @@ mod tests {
         assert_eq!(
             tables,
             vec![
+                "account_assignment_rows",
+                "account_assignments",
                 "account_names",
                 "session_accounts",
                 "session_reconcile",
