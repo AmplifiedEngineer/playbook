@@ -120,6 +120,14 @@ pub fn run(payload: &Payload) {
         }
         system_message.push_str(&line);
     }
+    if !headless {
+        if let Some(line) = missing_keys_line(&home) {
+            if !system_message.is_empty() {
+                system_message.push('\n');
+            }
+            system_message.push_str(line);
+        }
+    }
     append_auto_mode_note(&mut extra_context);
     // Always on, headless included: skills ask for a task by name, and this map
     // is how the session learns which tasks this binary can do mechanically.
@@ -200,6 +208,14 @@ fn plugin_update_lines(home: &str) -> Vec<String> {
         lines
     })
     .unwrap_or_default()
+}
+
+/// The warning for a session that started without the OpenTelemetry keys, or
+/// nothing. A panic is dropped so the hook cannot fail.
+fn missing_keys_line(home: &str) -> Option<&'static str> {
+    std::panic::catch_unwind(|| crate::cc::telemetry::missing_keys_line(Path::new(home)))
+        .ok()
+        .flatten()
 }
 
 /// Starts the telemetry collector when Claude Code's settings point at it and
