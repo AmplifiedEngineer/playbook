@@ -176,7 +176,7 @@ Each stage ships on its own and is judged on its own record. Stage 0 is the smal
 - **Manual sweeps every quarter.** What we ran this month. They found class C items that no rule would, and they cost a coordinator and bench quota each time (the campaign alone was about $16.5 of bench spend plus the work to write the reports). Kept as the way to handle judgment items. The loop is meant to catch class A and B between sweeps, so the sweep can concentrate on class C.
 - **A learned model that tunes routing, memory ranking and text.** Rejected for now, for the reasons in ADR-0022: there are no labelled outcomes, a model is hard to explain and test, and its failures are silent. Reopen with a new ADR when the loop has at least a quarter of merged PR outcomes to hold out against.
 - **Autonomous edits to prompts, skills and hooks.** Rejected. The change is hard to evaluate (commands and the auditor have no bench) and a prompt regression is silent. Allowed only as a draft pull request.
-- **Remote or shared learning across users.** Rejected. It conflicts with local only data, and one user's habits are not another's.
+- **Remote or shared learning across users.** Rejected. It conflicts with local only data, and one user's habits are not another's. Syncing one user's own usage between that user's computers, only on opt-in, is a separate question recorded in [ADR 0061](0061-opt-in-usage-sync.md).
 - **A separate autonomy key per learner with no shared ceiling.** Rejected. A single ceiling gives the user one switch to turn everything off.
 
 ## Consequences
