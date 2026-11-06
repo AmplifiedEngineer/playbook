@@ -558,6 +558,9 @@ mod tests {
         assert_eq!(
             tables,
             vec![
+                "account_assignment_rows",
+                "account_assignments",
+                "account_names",
                 "session_reconcile",
                 "session_sources",
                 "telemetry_errors",

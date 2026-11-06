@@ -15,7 +15,7 @@ use rusqlite::{named_params, Connection, OptionalExtension, Transaction, Transac
 
 pub const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS account_assignments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER PRIMARY KEY,
     created_at INTEGER NOT NULL,
     from_ts INTEGER NOT NULL,
     to_ts INTEGER NOT NULL,
