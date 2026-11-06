@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Schema and connection layer for the gate-check database at the repo and worktree-scoped path under `$HOME/.config/playbook`, backed by `rusqlite` (the `bundled` feature compiles SQLite from source, so no system SQLite install is required).
+//! Schema and connection layer for the gate-check database at the repo and worktree-scoped path under `$HOME/.config/playbook`, backed by `playbook_store` (the `bundled` feature compiles SQLite from source, so no system SQLite install is required).
 //!
 //! An earlier version used `libsql` (tokio-based, async). `gate check`
 //! reliably segfaulted inside `sqlite3Close` on real musl release builds
@@ -10,13 +10,13 @@
 //! use, and drop were kept inside one tokio runtime, and every `Rows`
 //! cursor was drained to completion. Neither resolved it, and the crash
 //! matched an open, maintainer-filed bug in `libsql`'s own connection
-//! lifecycle code. `rusqlite` needs none of that: it is fully synchronous,
+//! lifecycle code. `playbook_store` needs none of that: it is fully synchronous,
 //! is the de facto standard Rust SQLite binding, and this binary has no
 //! other reason to be async.
 
 use crate::common::atomic::{with_dir_lock_aged, LONG_LOCK_STALE_AGE};
 use crate::common::sqlite::{retry_busy, OPEN_BUDGET};
-use rusqlite::OptionalExtension;
+use playbook_store::OptionalExtension;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -56,7 +56,7 @@ pub struct GatePhaseRow {
 
 /// Adds `gate_phases.source_hash` to a database created before this column
 /// existed, so an old database file keeps opening instead of erroring.
-fn ensure_source_hash_column(conn: &rusqlite::Connection) -> Result<(), String> {
+fn ensure_source_hash_column(conn: &playbook_store::Connection) -> Result<(), String> {
     let has_column: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_table_info('gate_phases') WHERE name = 'source_hash')",
@@ -79,8 +79,8 @@ fn ensure_source_hash_column(conn: &rusqlite::Connection) -> Result<(), String> 
 /// Rebuilds a `gate_phases` table created before STUCK existed, whose CHECK
 /// constraint rejects it. SQLite cannot alter a CHECK in place, so the rows are
 /// copied into a fresh table. A table with no verdict CHECK needs nothing.
-fn ensure_stuck_verdict(conn: &rusqlite::Connection) -> Result<(), String> {
-    let needs_rebuild = |conn: &rusqlite::Connection| -> Result<bool, String> {
+fn ensure_stuck_verdict(conn: &playbook_store::Connection) -> Result<(), String> {
+    let needs_rebuild = |conn: &playbook_store::Connection| -> Result<bool, String> {
         let sql: String = conn
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'gate_phases'",
@@ -170,13 +170,13 @@ pub fn resolve_db_path(repo_root: &Path, dest_base: &Path) -> Result<PathBuf, St
 
 /// Open (creating if missing) the SQLite database at `path`, ensuring the
 /// `gate_phases` schema and pragmas are in place.
-pub fn open_db(path: &Path) -> Result<rusqlite::Connection, String> {
+pub fn open_db(path: &Path) -> Result<playbook_store::Connection, String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("failed to create directory {}: {e}", parent.display()))?;
     }
 
-    let conn = rusqlite::Connection::open(path)
+    let conn = playbook_store::Connection::open(path)
         .map_err(|e| format!("failed to open database at {}: {e}", path.display()))?;
 
     // busy_timeout must be set BEFORE any statement that can contend for
@@ -208,7 +208,7 @@ pub fn open_db(path: &Path) -> Result<rusqlite::Connection, String> {
 /// Insert or replace the `(plan_slug, phase)` row with the given values.
 #[allow(clippy::too_many_arguments)]
 pub fn upsert_phase(
-    conn: &rusqlite::Connection,
+    conn: &playbook_store::Connection,
     plan_slug: &str,
     phase: &str,
     verdict: &str,
@@ -221,7 +221,7 @@ pub fn upsert_phase(
         "INSERT OR REPLACE INTO gate_phases \
          (plan_slug, phase, verdict, evidence, command, recorded_at, source_hash) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        rusqlite::params![
+        playbook_store::params![
             plan_slug,
             phase,
             verdict,
@@ -240,19 +240,19 @@ pub fn upsert_phase(
 /// revise and re-run); after PASS, WARN or STUCK the next record starts a new
 /// series at 1 and clears the old rounds.
 pub fn record_round(
-    conn: &rusqlite::Connection,
+    conn: &playbook_store::Connection,
     plan_slug: &str,
     phase: &str,
     verdict: &str,
     recorded_at: &str,
 ) -> Result<i64, String> {
-    let ctx = |e: rusqlite::Error| format!("failed to record round {plan_slug}/{phase}: {e}");
+    let ctx = |e: playbook_store::Error| format!("failed to record round {plan_slug}/{phase}: {e}");
     let tx = conn.unchecked_transaction().map_err(ctx)?;
     let last: Option<(i64, String)> = tx
         .query_row(
             "SELECT iteration, verdict FROM gate_rounds WHERE plan_slug = ?1 AND phase = ?2 \
              ORDER BY iteration DESC LIMIT 1",
-            rusqlite::params![plan_slug, phase],
+            playbook_store::params![plan_slug, phase],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
@@ -262,7 +262,7 @@ pub fn record_round(
         Some(_) => {
             tx.execute(
                 "DELETE FROM gate_rounds WHERE plan_slug = ?1 AND phase = ?2",
-                rusqlite::params![plan_slug, phase],
+                playbook_store::params![plan_slug, phase],
             )
             .map_err(ctx)?;
             1
@@ -272,7 +272,7 @@ pub fn record_round(
     tx.execute(
         "INSERT INTO gate_rounds (plan_slug, phase, iteration, verdict, recorded_at) \
          VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![plan_slug, phase, iteration, verdict, recorded_at],
+        playbook_store::params![plan_slug, phase, iteration, verdict, recorded_at],
     )
     .map_err(ctx)?;
     tx.commit().map_err(ctx)?;
@@ -282,14 +282,14 @@ pub fn record_round(
 /// Look up the row for `(plan_slug, phase)`, or `None` if it has never been
 /// recorded.
 pub fn query_phase(
-    conn: &rusqlite::Connection,
+    conn: &playbook_store::Connection,
     plan_slug: &str,
     phase: &str,
 ) -> Result<Option<GatePhaseRow>, String> {
     conn.query_row(
         "SELECT verdict, evidence, command, recorded_at, source_hash FROM gate_phases \
          WHERE plan_slug = ?1 AND phase = ?2",
-        rusqlite::params![plan_slug, phase],
+        playbook_store::params![plan_slug, phase],
         |row| {
             Ok(GatePhaseRow {
                 verdict: row.get(0)?,
@@ -478,7 +478,7 @@ mod tests {
         let conn = open_db(path).expect("open_db for count_rows");
         conn.query_row(
             "SELECT COUNT(*) FROM gate_phases WHERE plan_slug = ?1 AND phase = ?2",
-            rusqlite::params![plan_slug, phase],
+            playbook_store::params![plan_slug, phase],
             |row| row.get(0),
         )
         .expect("count query")
@@ -711,7 +711,7 @@ mod tests {
             "INSERT INTO gate_phases \
              (plan_slug, phase, verdict, evidence, command, recorded_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![
+            playbook_store::params![
                 "plan-a",
                 "spec",
                 "PASS",
@@ -742,7 +742,7 @@ mod tests {
         let dir = scratch_dir("source-hash-alter-race");
         fs::create_dir_all(&dir).expect("create scratch dir");
         let path = dir.join("state.db");
-        let conn_a = rusqlite::Connection::open(&path).expect("open conn_a");
+        let conn_a = playbook_store::Connection::open(&path).expect("open conn_a");
         conn_a
             .execute_batch(
                 "CREATE TABLE gate_phases (
@@ -760,7 +760,7 @@ mod tests {
             .execute_batch("BEGIN IMMEDIATE")
             .expect("begin immediate on conn_a");
 
-        let conn_b = rusqlite::Connection::open(&path).expect("open conn_b");
+        let conn_b = playbook_store::Connection::open(&path).expect("open conn_b");
         conn_b
             .busy_timeout(Duration::from_millis(2000))
             .expect("busy_timeout on conn_b");

@@ -12,7 +12,7 @@
 
 use super::write::Tier;
 use super::{keys, ConfigError};
-use rusqlite::{params, Connection, OptionalExtension};
+use playbook_store::{params, Connection, OptionalExtension};
 use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -85,7 +85,7 @@ fn tier_str(tier: Tier) -> &'static str {
 /// A database error is reported as the database path, the same shape a
 /// malformed JSON file had, so callers keep one error case for "config store
 /// unreadable".
-fn broken(root: &Path) -> impl Fn(rusqlite::Error) -> ConfigError + '_ {
+fn broken(root: &Path) -> impl Fn(playbook_store::Error) -> ConfigError + '_ {
     move |_| ConfigError::Malformed(db_path(root))
 }
 
@@ -100,7 +100,9 @@ pub fn open(root: &Path) -> Result<Connection, ConfigError> {
     let conn = init_connection(root).map_err(|e| match e {
         // Securing or opening the file failed (permissions, read-only
         // volume): say so, rather than calling the store malformed.
-        rusqlite::Error::SqliteFailure(f, _) if f.code == rusqlite::ErrorCode::CannotOpen => {
+        playbook_store::Error::SqliteFailure(f, _)
+            if f.code == playbook_store::ErrorCode::CannotOpen =>
+        {
             ConfigError::DirectoryUnwritable(data.clone())
         }
         other => broken(root)(other),
@@ -112,8 +114,8 @@ pub fn open(root: &Path) -> Result<Connection, ConfigError> {
 /// Open the file and apply pragmas and schema. Switching a fresh file to WAL
 /// and creating tables from several processes at once can report "busy"
 /// without waiting, so that one error is retried for a short while.
-fn init_connection(root: &Path) -> rusqlite::Result<Connection> {
-    let attempt = || -> rusqlite::Result<Connection> {
+fn init_connection(root: &Path) -> playbook_store::Result<Connection> {
+    let attempt = || -> playbook_store::Result<Connection> {
         // While the move is deferred (a lock is held, a writer is busy) the
         // old file is used as it is, instead of starting an empty new one.
         let path = if !db_path(root).exists() && legacy_db_path(root).is_file() {
@@ -124,8 +126,8 @@ fn init_connection(root: &Path) -> rusqlite::Result<Connection> {
         // Owner-only before SQLite can create it with the default umask; the
         // WAL and shm files copy this mode.
         crate::common::atomic::make_db_file_private(&path).map_err(|msg| {
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+            playbook_store::Error::SqliteFailure(
+                playbook_store::ffi::Error::new(playbook_store::ffi::SQLITE_CANTOPEN),
                 Some(msg),
             )
         })?;
@@ -143,11 +145,12 @@ fn init_connection(root: &Path) -> rusqlite::Result<Connection> {
     let mut tries = 0;
     loop {
         match attempt() {
-            Err(rusqlite::Error::SqliteFailure(err, _))
+            Err(playbook_store::Error::SqliteFailure(err, _))
                 if tries < 200
                     && matches!(
                         err.code,
-                        rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                        playbook_store::ErrorCode::DatabaseBusy
+                            | playbook_store::ErrorCode::DatabaseLocked
                     ) =>
             {
                 tries += 1;
@@ -331,7 +334,7 @@ fn upsert(
     scope: &str,
     key: &str,
     value: &Value,
-) -> rusqlite::Result<()> {
+) -> playbook_store::Result<()> {
     upsert_at(
         conn,
         tier,
@@ -352,7 +355,7 @@ fn upsert_at(
     key: &str,
     value: &Value,
     updated_at: i64,
-) -> rusqlite::Result<()> {
+) -> playbook_store::Result<()> {
     conn.execute(
         "INSERT INTO config (tier, scope, key, value_json, updated_at) VALUES (?1, ?2, ?3, ?4, ?5) \
          ON CONFLICT (tier, scope, key) DO UPDATE SET \
@@ -450,7 +453,7 @@ pub fn import(root: &Path, doc: &Value) -> Result<usize, ConfigError> {
     }
     let mut conn = open(root)?;
     let tx = conn
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .transaction_with_behavior(playbook_store::TransactionBehavior::Immediate)
         .map_err(broken(root))?;
     for (tier, scope, key, value) in &rows {
         upsert(&tx, tier, scope, key, value).map_err(broken(root))?;
@@ -576,7 +579,7 @@ fn replace_matching(
     // Immediate, so a write by another process between the read and the
     // first update waits on the busy timeout instead of failing the upgrade.
     let tx = conn
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .transaction_with_behavior(playbook_store::TransactionBehavior::Immediate)
         .map_err(broken(root))?;
     let rows = {
         let mut stmt = tx

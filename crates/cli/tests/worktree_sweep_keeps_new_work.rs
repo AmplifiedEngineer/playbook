@@ -387,7 +387,7 @@ fn store_rows(f: &Fixture) -> Vec<String> {
     let store = f
         .home
         .join(".config/playbook/data/code/acme/widgets/store-v4.sqlite3");
-    let conn = rusqlite::Connection::open(store).expect("store");
+    let conn = playbook_store::Connection::open(store).expect("store");
     let mut stmt = conn
         .prepare("SELECT key FROM worktrees ORDER BY key")
         .expect("prepare");

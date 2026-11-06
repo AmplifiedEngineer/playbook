@@ -26,9 +26,9 @@ clap_complete = { version = "=4.6.11", default-features = false }
 playbook-code = { path = "../code" }
 playbook-common = { path = "../common" }
 playbook-data = { path = "../data" }
+playbook-store = { path = "../store" }
 playbook-telemetry = { path = "../telemetry" }
 regex = "=1.13.1"
-rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.154", features = ["preserve_order"] }
 sha2 = "=0.11.0"

@@ -546,9 +546,11 @@ fn old_state_indexes(repos: &Path) -> Vec<PathBuf> {
 
 /// `PRAGMA user_version` of a SQLite file, or `None` for any other file.
 fn schema_version(file: &Path) -> Option<i64> {
-    let conn =
-        rusqlite::Connection::open_with_flags(file, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .ok()?;
+    let conn = playbook_store::Connection::open_with_flags(
+        file,
+        playbook_store::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .ok()?;
     conn.query_row("PRAGMA user_version", [], |r| r.get(0)).ok()
 }
 
@@ -3118,7 +3120,7 @@ mod tests {
 
     fn sqlite_file(path: &Path, user_version: i64) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let conn = rusqlite::Connection::open(path).unwrap();
+        let conn = playbook_store::Connection::open(path).unwrap();
         conn.execute_batch(&format!(
             "CREATE TABLE t(x); PRAGMA user_version = {user_version};"
         ))
