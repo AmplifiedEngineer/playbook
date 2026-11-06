@@ -276,6 +276,16 @@ fn reported_line(v: &LimitsView, now: i64) -> Option<String> {
     ))
 }
 
+/// Says that a manual monthly budget is set and the detected one applies.
+fn both_budgets_line(v: &LimitsView) -> Option<String> {
+    let (manual, detected) = v.manual_under_detected?;
+    Some(format!(
+        "Manual monthly budget {} and detected {}: the detected one applies",
+        money(manual),
+        money(detected)
+    ))
+}
+
 fn burn_text(b: &Burn) -> String {
     match (b.per_hour, b.per_day) {
         (Some(h), Some(d)) => format!("{}/h {}/day", money(h), money(d)),
@@ -371,6 +381,9 @@ pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette, icon: I
             width,
         ));
     }
+    if let Some(line) = both_budgets_line(v) {
+        lines.push(Line::styled(fit(&line, width), fg(pal, pal.warn)));
+    }
     if let Some(line) = reported_line(v, data.now) {
         lines.push(Line::styled(fit(&line, width), fg(pal, pal.fg)));
     }
@@ -412,6 +425,20 @@ mod tests {
         let (seg, _) = state_seg(&pal, icon, &limit(used), now);
         let span = &seg.spans[0];
         (span.content.to_string(), span.style.add_modifier)
+    }
+
+    #[test]
+    fn both_budgets_are_named_with_the_one_that_applies() {
+        let mut v = LimitsView::default();
+        assert_eq!(both_budgets_line(&v), None);
+        v.manual_under_detected = Some((1000.0, 2000.0));
+
+        assert_eq!(
+            both_budgets_line(&v).as_deref(),
+            Some(
+                "Manual monthly budget $1,000.00 and detected $2,000.00: the detected one applies"
+            )
+        );
     }
 
     #[test]
