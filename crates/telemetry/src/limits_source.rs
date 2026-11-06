@@ -620,6 +620,11 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
         }
         out.push(l);
     }
+    // On Enterprise the whole limit is the monthly extra usage budget, so a
+    // window reading has nothing to measure.
+    if s.account.plan == crate::plan::Plan::Enterprise {
+        out.retain(|l| !matches!(l.period, LimitPeriod::FiveHour | LimitPeriod::SevenDay));
+    }
     out
 }
 
@@ -697,6 +702,9 @@ pub fn compare_billed(
 /// version cannot tell apart from Enterprise, is told they are not available
 /// and where Pro and Max plans get them. `None` when one is known.
 pub fn windows_note(s: &Sources, limits: &[Limit]) -> Option<&'static str> {
+    if s.account.plan == crate::plan::Plan::Enterprise {
+        return Some("5 hour and weekly windows: not used on Enterprise, the whole limit is the monthly extra usage budget");
+    }
     if limits
         .iter()
         .any(|l| matches!(l.period, LimitPeriod::FiveHour | LimitPeriod::SevenDay))
@@ -1220,7 +1228,7 @@ mod tests {
         seven_day: Option<Window>,
     ) -> Account {
         Account {
-            plan: crate::plan::Plan::EnterpriseOrUnknown,
+            plan: crate::plan::Plan::Unknown,
             cache: Some(crate::plan::UsageCache {
                 fetched_at,
                 five_hour,
@@ -1450,8 +1458,8 @@ mod tests {
 
         let v = report_json(&s, &[], NOW, WeekStart::Monday);
 
-        assert_eq!(v["plan"], "enterprise_or_unknown");
-        assert_eq!(v["plan_label"], "Enterprise or unknown plan");
+        assert_eq!(v["plan"], "unknown");
+        assert_eq!(v["plan_label"], "Unknown plan");
         assert_eq!(v["cache"]["age_seconds"], 600);
         assert_eq!(v["limits"][0]["origin"], "cached");
         assert!(v["windows_note"]
@@ -1572,6 +1580,45 @@ mod tests {
 
         assert_eq!(none, Monthly::Unset);
         assert_eq!(manual, Monthly::Manual(100.0));
+    }
+
+    fn enterprise() -> Account {
+        Account {
+            plan: crate::plan::Plan::Enterprise,
+            cache: None,
+        }
+    }
+
+    #[test]
+    fn an_enterprise_account_shows_no_five_hour_or_weekly_window() {
+        let s = Sources {
+            snapshot: Some(window_snapshot(3600)),
+            account: enterprise(),
+            budgets: vec![(LimitPeriod::Monthly, 1000.0)],
+            ..Sources::default()
+        };
+
+        let l = all_limits(&s, &[], NOW, WeekStart::Monday);
+
+        assert!(l
+            .iter()
+            .all(|x| !matches!(x.period, LimitPeriod::FiveHour | LimitPeriod::SevenDay)));
+        assert!(l.iter().any(|x| x.period == LimitPeriod::Monthly));
+    }
+
+    #[test]
+    fn an_enterprise_account_says_the_whole_limit_is_the_extra_usage_budget() {
+        let s = Sources {
+            account: enterprise(),
+            ..Sources::default()
+        };
+
+        let note = windows_note(&s, &[]);
+
+        assert_eq!(
+            note,
+            Some("5 hour and weekly windows: not used on Enterprise, the whole limit is the monthly extra usage budget")
+        );
     }
 
     #[test]

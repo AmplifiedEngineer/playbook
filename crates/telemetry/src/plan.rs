@@ -11,7 +11,7 @@
 //!
 //! The plan is a guess from the rate limit tier names. Only the two tiers seen
 //! on real Max accounts are recognized. Any other value, including every
-//! Enterprise value, maps to [`Plan::EnterpriseOrUnknown`] instead of being
+//! Enterprise value, maps to [`Plan::Unknown`] instead of being
 //! guessed at.
 
 use crate::claude_code::parse_iso8601_utc;
@@ -44,9 +44,12 @@ const CLOCK_SKEW_SECONDS: i64 = 300;
 pub enum Plan {
     Max5x,
     Max20x,
-    /// Anything else: Enterprise, Team, Pro, an API account or a value that
-    /// this version does not know.
-    EnterpriseOrUnknown,
+    /// An Enterprise organization. The whole limit is the monthly extra usage
+    /// budget, so there are no 5 hour or weekly windows.
+    Enterprise,
+    /// Anything else: Team, Pro, an API account or a value that this version
+    /// does not know.
+    Unknown,
 }
 
 impl Plan {
@@ -55,7 +58,8 @@ impl Plan {
         match self {
             Plan::Max5x => "max_5x",
             Plan::Max20x => "max_20x",
-            Plan::EnterpriseOrUnknown => "enterprise_or_unknown",
+            Plan::Enterprise => "enterprise",
+            Plan::Unknown => "unknown",
         }
     }
 
@@ -63,13 +67,14 @@ impl Plan {
         match self {
             Plan::Max5x => "Max 5x",
             Plan::Max20x => "Max 20x",
-            Plan::EnterpriseOrUnknown => "Enterprise or unknown plan",
+            Plan::Enterprise => "Enterprise",
+            Plan::Unknown => "Unknown plan",
         }
     }
 
     /// Whether this plan is known to have the 5 hour and weekly windows.
     pub fn has_windows(self) -> bool {
-        !matches!(self, Plan::EnterpriseOrUnknown)
+        matches!(self, Plan::Max5x | Plan::Max20x)
     }
 
     fn from_tiers(tiers: &[&str]) -> Plan {
@@ -79,7 +84,26 @@ impl Plan {
         } else if has("max_5x") {
             Plan::Max5x
         } else {
-            Plan::EnterpriseOrUnknown
+            Plan::Unknown
+        }
+    }
+
+    /// The plan from the account fields: the Max tiers first, then an
+    /// Enterprise organization (`organizationType` is `claude_enterprise`, or
+    /// `seatTier` names enterprise), else unknown.
+    fn from_account(
+        tiers: &[&str],
+        organization_type: Option<&str>,
+        seat_tier: Option<&str>,
+    ) -> Plan {
+        match Plan::from_tiers(tiers) {
+            Plan::Unknown
+                if organization_type == Some("claude_enterprise")
+                    || seat_tier.is_some_and(|t| t.to_lowercase().contains("enterprise")) =>
+            {
+                Plan::Enterprise
+            }
+            plan => plan,
         }
     }
 }
@@ -248,7 +272,7 @@ pub struct Account {
 impl Default for Account {
     fn default() -> Self {
         Account {
-            plan: Plan::EnterpriseOrUnknown,
+            plan: Plan::Unknown,
             cache: None,
         }
     }
@@ -341,7 +365,7 @@ fn account(root: &Value) -> Account {
         .filter_map(|k| tier(k))
         .collect();
     Account {
-        plan: Plan::from_tiers(&tiers),
+        plan: Plan::from_account(&tiers, tier("organizationType"), tier("seatTier")),
         cache: cache(root),
     }
 }
@@ -823,11 +847,53 @@ mod tests {
     }
 
     #[test]
-    fn any_other_tier_name_is_enterprise_or_unknown() {
+    fn the_owners_enterprise_account_is_enterprise() {
+        let root: Value = serde_json::from_str(
+            r#"{"oauthAccount":{"organizationType":"claude_enterprise","seatTier":"enterprise_usage_based","organizationRateLimitTier":"default_raven_enterprise","hasExtraUsageEnabled":true}}"#,
+        )
+        .unwrap();
+
+        let plan = account(&root).plan;
+
+        assert_eq!(plan, Plan::Enterprise);
+        assert_eq!(plan.key(), "enterprise");
+        assert!(!plan.has_windows());
+    }
+
+    #[test]
+    fn either_enterprise_field_alone_is_enough() {
+        let by_type: Value =
+            serde_json::from_str(r#"{"oauthAccount":{"organizationType":"claude_enterprise"}}"#)
+                .unwrap();
+        let by_seat: Value =
+            serde_json::from_str(r#"{"oauthAccount":{"seatTier":"Enterprise_Usage_Based"}}"#)
+                .unwrap();
+
+        assert_eq!(account(&by_type).plan, Plan::Enterprise);
+        assert_eq!(account(&by_seat).plan, Plan::Enterprise);
+    }
+
+    #[test]
+    fn a_non_enterprise_account_stays_unknown_and_a_max_tier_stays_max() {
+        let team: Value = serde_json::from_str(
+            r#"{"oauthAccount":{"organizationType":"claude_team","seatTier":"standard","organizationRateLimitTier":"default_raven"}}"#,
+        )
+        .unwrap();
+        let max: Value = serde_json::from_str(
+            r#"{"oauthAccount":{"organizationType":"claude_enterprise","organizationRateLimitTier":"default_claude_max_5x"}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(account(&team).plan, Plan::Unknown);
+        assert_eq!(account(&max).plan, Plan::Max5x);
+    }
+
+    #[test]
+    fn any_other_tier_name_is_unknown() {
         let plan = Plan::from_tiers(&["default_raven", "something_new"]);
 
-        assert_eq!(plan, Plan::EnterpriseOrUnknown);
-        assert_eq!(plan.label(), "Enterprise or unknown plan");
+        assert_eq!(plan, Plan::Unknown);
+        assert_eq!(plan.label(), "Unknown plan");
         assert!(!plan.has_windows());
     }
 
@@ -1408,7 +1474,7 @@ mod tests {
         limits_source::Sources {
             snapshot: Some(snapshot),
             account: Account {
-                plan: Plan::EnterpriseOrUnknown,
+                plan: Plan::Unknown,
                 cache,
             },
             ..limits_source::Sources::default()
