@@ -153,6 +153,8 @@ Every artifact uses the same words and rules. The list gives the structure of ea
 - **Editing:** fix the flagged patterns, keep the meaning and the author's deliberate choices, score, revise once or twice.
 - **Review only:** list the flagged patterns with locations and a score. Do not rewrite.
 - If you leave a pattern in on purpose, say so in one line with the reason.
+- `playbook prose check` warns on passive voice: a form of "be" plus a past participle. It is a soft finding and never fails `--strict`. Present-tense status words pass ("is deprecated", "is required", "is merged", "is named", "is unused"); the same word after "was", "will be" or "been" is an event and warns. Rewrite the sentence with an actor.
+- A file `<file>.facts` next to the checked file turns on two more checks. Each number, identifier, path and reference in the text must appear in the facts, and the text must fit the limit of the `kind:` named on the first line of the facts (`pr-body`, `review-comment`, `reply`, `commit-message`, `ticket`). Both are hard findings.
 
 ## Loading the references
 
