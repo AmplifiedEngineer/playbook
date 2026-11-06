@@ -37,7 +37,7 @@ gaps() {
     /^jobs:/ { injobs = 1; next }
     injobs && /^  [A-Za-z0-9_-]+:/ { flush(); job = $1; sub(/:$/, "", job); next }
     /egress-policy: *["'\'']?block["'\'']? *$/ { block = 1 }
-    /gh attestation verify|^ +scripts\/verify-installers\.sh / { verify = 1 }
+    /gh attestation verify/ { verify = 1 }
     /^ +[a-z0-9.-]+:[0-9]+ *$/ { hosts = hosts $1 " " }
     END { flush() }
   ' "$1"
@@ -103,7 +103,7 @@ for f in .github/workflows/*.yml; do
 done
 # The jobs known to run gh attestation verify. When the call moves out of
 # the workflow text, the check would see nothing, so it fails instead.
-for job in publish verify verify-packages verify-installers nix aur scoop; do
+for job in publish verify nix; do
   grep -qx "checked .github/workflows/release.yml: $job" <<<"$checked" \
     || { echo "FAIL: the check did not find release.yml job $job." >&2; fail=1; }
 done

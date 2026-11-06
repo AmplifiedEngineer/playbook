@@ -4,16 +4,15 @@ To see every change `playbook setup` makes before you agree to it, read [What se
 
 Releases up to v0.34.0 have only the old name (older versions: `playbook init`). It takes the same flags, and it still works on newer releases ([ADR-0040](../adr/0040-rename-init-to-setup.md)).
 
-The first route to try is Homebrew. Use the install script when you have no Homebrew. This page covers every route, requirements, how the binary reaches `PATH`, upgrades, the settings merge and uninstall.
+The first route to try is Homebrew. Use the install script when you have no Homebrew. This page covers every route (Homebrew, Nix, the install script and the raw release assets), requirements, how the binary reaches `PATH`, upgrades, the settings merge and uninstall.
 
 Install order:
 
 1. Homebrew.
 2. The install script (`install.sh`), when you have no Homebrew.
-3. cargo binstall or mise.
-4. A `.deb` or `.rpm` package.
-5. Nix, the Arch Linux AUR, or scoop on Windows (experimental).
-6. The marketplace plugin, for the skills only.
+3. Nix.
+4. The raw release assets, for Windows (experimental) or when you want to check the files yourself.
+5. The marketplace plugin, for the skills only.
 
 ## Pick an install mode
 
@@ -106,102 +105,24 @@ Pass `--yes` to say yes to every question, including `playbook setup`. Flags go 
 Pin a version with `PLAYBOOK_REF`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | PLAYBOOK_REF=v0.40.1 bash
+curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | PLAYBOOK_REF=v0.40.2 bash
 ```
 
 A release tag installs that release. A branch or commit is refused, because it has no published binary.
 
-### cargo binstall and mise
-
-Both fetch the release binary for your platform. binstall builds from source only when no release binary matches.
-
-```bash
-cargo binstall --git https://github.com/pragmatic-engineer/playbook playbook
-mise use github:pragmatic-engineer/playbook
-```
-
-`cargo binstall` reads `[package.metadata.binstall]` in `crates/cli/Cargo.toml`, which names the `playbook-<version>-<target>` asset of the release. Pass `--git`: the crate name `playbook` on crates.io belongs to another project, so `cargo binstall playbook` without it installs that one, and playbook is not published there. The metadata turns off binstall's quick-install service for the same reason. mise's `github` backend finds the same asset by the operating system and architecture in its name, and needs no registry entry.
-
-Neither route checks `SHA256SUMS` or the attestation for you, so use [Without `curl | bash`](#without-curl--bash) below when you want those checks. Each release installs playbook both ways in an empty `HOME` and compares the file with its `SHA256SUMS` line and its attestation. A test (`scripts/asset-names.test.sh`) fails when the asset names change, because both tools depend on them. Neither tool links `pb`, so run `playbook setup` for the link.
-
 ### Nix
 
 ```bash
-nix run github:pragmatic-engineer/playbook -- --version
-nix profile install github:pragmatic-engineer/playbook
+nix run github:pragmatic-engineer/nix#playbook -- --version
+nix profile install github:pragmatic-engineer/nix#playbook
 playbook setup
 ```
 
-The flake in this repository fetches the release binary for `x86_64-linux`, `aarch64-linux`, `x86_64-darwin` or `aarch64-darwin` and checks it against a fixed hash. It ships `playbook` only. Run `playbook usage` for the dashboard, or link `pbtop` to `playbook` yourself: the binary starts the dashboard when its name is `pbtop`. After each release a pull request moves `flake.nix` to the new version, so `main` is one release behind for a short while. A tag does not help here: tags are made before the hashes exist, so `github:pragmatic-engineer/playbook/vX.Y.Z` carries the flake of the release before it. To pin a version, use the merge commit of the `chore(release): nix flake X.Y.Z` pull request, for example `github:pragmatic-engineer/playbook/<commit>`. To roll back, pin the commit of the earlier flake pull request. Each release runs the flake on Linux and macOS after the pull request merges. A Nix install is read-only. The automatic update shows a notice that the install directory is not writable, and `playbook update` stops with "cannot write to" the store path. Update with `nix profile upgrade playbook` instead. Your config is not touched.
-
-### Arch Linux (AUR)
-
-```bash
-yay -S playbook-bin        # or any AUR helper, or: git clone https://aur.archlinux.org/playbook-bin.git && cd playbook-bin && makepkg -si
-playbook setup
-```
-
-`playbook-bin` installs the static release binary for `x86_64` or `aarch64` as `/usr/bin/playbook`, after makepkg checks it against the SHA256 of the release `SHA256SUMS`. It ships `playbook` and a `pbtop` link to it, with no `pb` link (`playbook setup` makes it). It conflicts with and provides `playbook`. The package owns nothing under `/etc` or your home folder, so an upgrade or a removal leaves your config alone, and `playbook migrate` runs on first use. Pacman owns `/usr/bin/playbook`, so update with your AUR helper (`yay -Syu`). The automatic updater leaves a binary it cannot write alone and shows a notice, but do not run `sudo playbook update`, because it would replace a file pacman owns. The release workflow pushes the package right after a release and builds it from the AUR in a clean Arch container, so the AUR can trail a release by a few minutes. makepkg checks the SHA256 only. To check the build attestation too, use [Without `curl | bash`](#without-curl--bash) below.
-
-### Debian, Ubuntu and Fedora packages
-
-Each release has a `.deb` and an `.rpm` for x86_64 and arm64. They hold the static `playbook` and `pbtop` binaries and the `pb` link in `/usr/bin`, and the bash, fish and zsh completion files under `/usr/share`, with no dependencies. Download the file for your machine and `SHA256SUMS` from the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest), check them as in [Without `curl | bash`](#without-curl--bash) below, then install with your package manager, which asks for its own privileges (`playbook` never runs `sudo`):
-
-```bash
-sudo apt install ./playbook_<version>_amd64.deb     # Debian, Ubuntu (arm64: _arm64.deb)
-sudo dnf install ./playbook-<version>.x86_64.rpm    # Fedora, RHEL (arm64: aarch64.rpm)
-playbook setup
-```
-
-An upgrade installs the newer file the same way. The package owns no file under `/etc` or your home folder, so an upgrade or a removal leaves your config alone, and `playbook migrate` runs on first use. The package manager owns `/usr/bin/playbook`, so update with it. Do not run `playbook update` on a package install, because it would replace a file the package manager owns. Each release installs, reinstalls and removes the packages in Debian, Ubuntu and Fedora containers before and after it is published.
-
-### Debian, Ubuntu and Fedora repository
-
-The release workflow can publish a signed apt and dnf repository, so the package manager upgrades `playbook` for you ([ADR 0052](../adr/0052-signed-apt-and-dnf-repository.md)). It is live only after the maintainer has finished the one time setup in the [release channels guide](../internals/06-release-channels.md#apt-and-dnf-repository). Until then, install the downloaded package as above.
-
-```bash
-# Debian, Ubuntu
-sudo install -d -m 0755 /etc/apt/keyrings
-sudo curl -fsSL https://pragmatic-engineer.github.io/playbook/playbook.gpg -o /etc/apt/keyrings/playbook.gpg
-echo "deb [signed-by=/etc/apt/keyrings/playbook.gpg] https://pragmatic-engineer.github.io/playbook/apt stable main" | sudo tee /etc/apt/sources.list.d/playbook.list
-sudo apt update && sudo apt install playbook
-
-# Fedora, RHEL
-sudo tee /etc/yum.repos.d/playbook.repo <<'REPO'
-[playbook]
-name=playbook
-baseurl=https://pragmatic-engineer.github.io/playbook/rpm/$basearch
-enabled=1
-repo_gpgcheck=1
-gpgcheck=0
-gpgkey=https://pragmatic-engineer.github.io/playbook/playbook.asc
-REPO
-sudo dnf install playbook
-```
-
-The index is signed, and each package matches the attested release asset. The packages themselves are not signed one by one, so `gpgcheck` is 0 and `repo_gpgcheck` is 1. Compare the key fingerprint with the one in the release notes before you trust it. If the key is ever rotated, download `playbook.gpg` again and replace the file in `/etc/apt/keyrings`. `SHA256SUMS` stays unsigned.
-
-### Windows with scoop (experimental)
-
-```powershell
-scoop bucket add playbook https://github.com/pragmatic-engineer/scoop-bucket
-scoop install playbook
-playbook --version
-```
-
-Windows is an experimental CLI ([ADR 0053](../adr/0053-windows-experimental-cli.md)). The package puts `playbook.exe` on your PATH and nothing else: it does not run `playbook setup` and does not touch your config. CI checks on Windows that `playbook --version` and `playbook doctor check` run, and reports on `setup`, `uninstall` and the hooks. Not supported:
-
-- PATH wiring and PowerShell profile wiring by `setup`, and the `pb` short name.
-- `playbook update`. It is refused on Windows, so update with `scoop update playbook`. To go back, `scoop install playbook@<version>` needs the version in the bucket, or wait for a newer release.
-- `pbdoc` and the `doc` command, and `pbtop`.
-- Backslash paths in the `rm` guard.
-- Whether Claude Code on Windows finds `playbook hook <name>` from `settings.json` is not checked.
-
-The manifest holds the SHA256 of the release binary, copied from the attested `SHA256SUMS`, and scoop checks it on install. The binary has no Authenticode signature. Each release installs the manifest on a clean Windows runner before and after it reaches the bucket.
+The flake lives in [pragmatic-engineer/nix](https://github.com/pragmatic-engineer/nix). It fetches the release binary for `x86_64-linux`, `aarch64-linux`, `x86_64-darwin` or `aarch64-darwin` and checks it against a fixed hash. It has two outputs, `playbook` and `pbtop`, so `nix run github:pragmatic-engineer/nix#pbtop` starts the dashboard. After each release a pull request in that repository moves `flake.nix` to the new version, so `main` is one release behind for a short while. A tag does not help here, because the flake has no release tags. To pin a version, use the merge commit of the `chore(release): nix flake X.Y.Z` pull request, for example `github:pragmatic-engineer/nix/<commit>#playbook`. To roll back, pin the commit of the earlier flake pull request. Each release runs the flake on Linux and macOS after the pull request merges. A Nix install is read-only. The automatic update shows a notice that the install directory is not writable, and `playbook update` stops with "cannot write to" the store path. Update with `nix profile upgrade playbook` instead. Your config is not touched.
 
 ### Optional: pbtop alone
 
-You do not need this if you have `playbook`. `playbook usage` runs the same code, because playbook embeds the `playbook-telemetry` crate. The Homebrew formula and the AUR package of `playbook` also link `pbtop` to `playbook`, and the `.deb` and `.rpm` packages ship a `pbtop` of the same version. Install `pbtop`, the Agent Budget Dashboard, only on a machine that has no `playbook`. From release 0.35.0 each `vX.Y.Z` release has `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone, and there are two ways to install it:
+You do not need this if you have `playbook`. `playbook usage` runs the same code, because playbook embeds the `playbook-telemetry` crate. The Homebrew formula of `playbook` also links `pbtop` to `playbook`, and the Nix flake has a `pbtop` output. Install `pbtop`, the Agent Budget Dashboard, only on a machine that has no `playbook`. From release 0.35.0 each `vX.Y.Z` release has `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone, and there are two ways to install it:
 
 ```bash
 brew install pragmatic-engineer/tap/pbtop
@@ -214,7 +135,7 @@ The `pbtop` formula conflicts with the `playbook` formula, because `playbook` ow
 
 A `pbtop` from another source can fall behind `playbook`, for example the install script or an old package next to a newer `playbook`. `playbook doctor` then prints a WARN row with the version, the path and the command that fixes it. The first command after an upgrade by Homebrew, the install script or a manual download adds the same hint under the `playbook updated from A to B` line, once. When a Claude Code session starts first, its hook takes that line and only `playbook doctor` shows the hint. The check runs `pbtop --version`, and only in those two places: never in a hook or the status line.
 
-`install-pbtop.sh` needs `bash` and `curl`. It downloads `install.sh` from `main` and runs it in its pbtop mode, which checks the archive like the `playbook` binary (its line in `SHA256SUMS`, the build attestation when `gh` can check it, and `pbtop --version`), installs `pbtop` into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`) and puts that folder on `PATH`. It runs nothing else. To pin a release, set `PLAYBOOK_REF` for `sh`, as in `curl -fsSL .../install-pbtop.sh | PLAYBOOK_REF=v0.40.1 sh`. On a release before 0.35.0 it stops, because those have no `pbtop` archive. The old `install.sh --pbtop` still works for one more release and points to `install-pbtop.sh`.
+`install-pbtop.sh` needs `bash` and `curl`. It downloads `install.sh` from `main` and runs it in its pbtop mode, which checks the archive like the `playbook` binary (its line in `SHA256SUMS`, the build attestation when `gh` can check it, and `pbtop --version`), installs `pbtop` into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`) and puts that folder on `PATH`. It runs nothing else. To pin a release, set `PLAYBOOK_REF` for `sh`, as in `curl -fsSL .../install-pbtop.sh | PLAYBOOK_REF=v0.40.2 sh`. On a release before 0.35.0 it stops, because those have no `pbtop` archive. The old `install.sh --pbtop` still works for one more release and points to `install-pbtop.sh`.
 
 Type `pbtop`, `pbtop --summary`, `pbtop --json` or `pbtop --range 30d`. The [crate README](../../crates/telemetry/README.md) covers `cargo` builds. The `playbook-telemetry` command and formula are retired ([ADR 0041](../adr/0041-retire-playbook-telemetry.md)): with Homebrew, run `brew uninstall playbook-telemetry && brew install pragmatic-engineer/tap/pbtop`, and change a script that calls `playbook-telemetry` to call `pbtop` with the same arguments. Everything stays on your machine.
 
@@ -230,7 +151,7 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
    | macOS, Intel | `playbook-<version>-x86_64-apple-darwin` |
    | Linux, x86_64 | `playbook-<version>-x86_64-unknown-linux-musl` |
    | Linux, arm64 | `playbook-<version>-aarch64-unknown-linux-musl` |
-   | Windows (experimental, or use [scoop](#windows-with-scoop-experimental)) | `playbook-<version>-x86_64-pc-windows-msvc.exe` |
+   | Windows (experimental) | `playbook-<version>-x86_64-pc-windows-msvc.exe` |
 
 2. Verify it. `SHA256SUMS` is not signed, so it is only a corruption check. The attestation shows where the binary was built.
 
@@ -259,13 +180,24 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
 
 5. For the skills, run the two plugin commands from [Pick an install mode](#pick-an-install-mode). Then run `/playbook:doctor`, or `playbook doctor check` without the skills.
 
+### Windows (experimental)
+
+The Windows route is the raw `.exe` release asset. There is no installer, package or bucket. Download `playbook-<version>-x86_64-pc-windows-msvc.exe` and `SHA256SUMS`, check the file as in the steps above, rename it to `playbook.exe` and put it in a folder on your `PATH`. Windows is an experimental CLI ([ADR 0053](../adr/0053-windows-experimental-cli.md)). CI checks on Windows that `playbook --version` and `playbook doctor check` run, and reports on `setup`, `uninstall` and the hooks. Not supported:
+
+- PATH wiring and PowerShell profile wiring by `setup`, and the `pb` short name.
+- `playbook update`. It is refused on Windows, so download the new `.exe` yourself.
+- `pbdoc` and the `doc` command, and `pbtop`.
+- Backslash paths in the `rm` guard.
+- Whether Claude Code on Windows finds `playbook hook <name>` from `settings.json` is not checked.
+
+The binary has no Authenticode signature. The attestation and `SHA256SUMS` are the checks.
+
 ## Upgrade
 
 | Install | Command |
 |---|---|
 | Homebrew | `brew upgrade playbook` |
 | Install script | `playbook update`, or run the installer again (`--check` to look, `--list` for releases, `--pre` for pre-releases, `--yes` in auto mode) |
-| Arch Linux (AUR) | `yay -Syu`, or `git pull` in the clone of `playbook-bin` and `makepkg -si` |
 | Nix | `nix profile upgrade playbook` for a profile install, or `nix flake update` where the flake is an input |
 
 `playbook update` verifies SHA256SUMS and the attestation, keeps the old binary as `playbook.<version>.bak` (the newest three are kept), refuses a Homebrew install, and warns when another `playbook` earlier on `PATH` hides the new one. The binary and the plugin share one version line ([ADR 0038](../adr/0038-one-release-line.md)), and they work together while they are on the same MAJOR.MINOR. The plugin follows the binary on its own. After the binary, `playbook update` updates the plugin with `claude plugin update playbook@pragmatic-engineer` and says to restart Claude Code, and `playbook migrate` does the same. After a `brew upgrade` or an automatic update, the first playbook command you run at a terminal does it, and so does the next Claude Code session, which starts it in the background and never waits for it. Each binary version is updated once. A failed attempt, or one that leaves the plugin on the old version, is tried again after 24 hours. Without the `claude` command, or when the update fails, playbook prints that command for you to run, and `playbook doctor` warns until the plugin is on the binary's minor line. The automatic step after an upgrade is skipped in CI, in headless runs, when stderr is not a terminal (the session hook is not affected by that rule), when the plugin is turned off in Claude Code, and when `PLAYBOOK_SKIP_PLUGIN_UPDATE=1` is set. `playbook update` and `playbook migrate` still update in those runs unless `update.plugin` is `off`. `--no-plugin` skips the update for one run of either command. `playbook config set update.plugin ask` makes the first command at a terminal ask before it updates, and `playbook config set update.plugin off` turns it off, so you run `claude plugin update playbook@pragmatic-engineer` yourself. When something needs you after an upgrade, the next session lists it, one bullet per item with why it matters and the command that fixes it. It shows each item once, then at most once a day. A list that `playbook migrate` printed in your terminal counts as shown: a setup item comes back after a day and a report does not come back. `playbook migrate --status` shows the list again. See [What needs you](../internals/07-migrations.md#what-needs-you). A binary pinned with `PLAYBOOK_REF` gets the same warning once the plugin moves to a newer minor line. To roll back, move a backup over the binary:
@@ -348,7 +280,7 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 
 ## Shell completions
 
-`playbook completions bash`, `playbook completions zsh` and `playbook completions fish` print a completion script on stdout. Homebrew and the Linux packages ship the completion files. After a Nix install, `install.sh`, the AUR package, `cargo binstall` or mise, run `playbook setup` and answer yes to the completions question, or run `playbook setup --only completions` from the shell you use. Setup writes a small file for the shell in `$SHELL`, which asks the installed binary for the script, so an upgrade needs no rewrite. For zsh that file is a loader at `~/.local/share/playbook/completions.zsh` that does its work on the first Tab press, and setup also adds one marked line to `~/.zshrc` that sources it, creating that file when it is missing. `playbook uninstall` removes the loader and the line after a backup of `~/.zshrc`. It keeps the backup, so delete `~/.zshrc.bak-<stamp>` by hand when you no longer need it. Without a terminal and without `--yes`, setup skips this part. To load the script yourself instead, run `source <(playbook completions bash)` from your own shell setup. The script also completes `pb`, but only when `pb` on your `PATH` is the same file as `playbook`.
+`playbook completions bash`, `playbook completions zsh` and `playbook completions fish` print a completion script on stdout. Homebrew ships the completion files. After a Nix install or `install.sh`, run `playbook setup` and answer yes to the completions question, or run `playbook setup --only completions` from the shell you use. Setup writes a small file for the shell in `$SHELL`, which asks the installed binary for the script, so an upgrade needs no rewrite. For zsh that file is a loader at `~/.local/share/playbook/completions.zsh` that does its work on the first Tab press, and setup also adds one marked line to `~/.zshrc` that sources it, creating that file when it is missing. `playbook uninstall` removes the loader and the line after a backup of `~/.zshrc`. It keeps the backup, so delete `~/.zshrc.bak-<stamp>` by hand when you no longer need it. Without a terminal and without `--yes`, setup skips this part. To load the script yourself instead, run `source <(playbook completions bash)` from your own shell setup. The script also completes `pb`, but only when `pb` on your `PATH` is the same file as `playbook`.
 
 ## Skills without the binary
 

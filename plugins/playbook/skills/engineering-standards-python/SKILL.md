@@ -1,6 +1,7 @@
 ---
 name: engineering-standards-python
 description: Python rules for code and reviews, covering style, idioms, types, errors, async, testing, packaging, security and the Ruff rules that check them. Use when writing or reviewing Python, or a diff that touches .py or .pyi files.
+user-invocable: false
 ---
 
 # Engineering Standards: Python
