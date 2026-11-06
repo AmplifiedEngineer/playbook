@@ -228,7 +228,7 @@ arg playbook cc worktree id=branch long=- short=- value_names=BRANCH possible=- 
 arg playbook cc worktree id=env_base long=- short=- value_names=ENV_BASE possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 command playbook ccd subcommands=- aliases=- groups=Ccd[args]
 arg playbook ccd id=args long=- short=- value_names=ARGS possible=- defaults=- aliases=- required=false hidden=false global=false action=Append num_args=1.. parser=alloc::string::String conflicts=-
-command playbook usage subcommands=warm,ingest,collect,status,stop,doctor,prune,account aliases=- groups=Usage[json,summary,range,utc,local]
+command playbook usage subcommands=warm,ingest,collect,status,stop,doctor,prune,account,machine aliases=- groups=Usage[json,summary,range,utc,local]
 arg playbook usage id=json long=json short=- value_names=JSON possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=summary
 arg playbook usage id=summary long=summary short=- value_names=SUMMARY possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=json
 arg playbook usage id=range long=range short=- value_names=RANGE possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
@@ -272,6 +272,8 @@ arg playbook usage account assign id=was long=was short=- value_names=KEY_OR_NAM
 arg playbook usage account assign id=confirm long=confirm short=- value_names=CONFIRM possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
 command playbook usage account undo subcommands=- aliases=- groups=Undo[id]
 arg playbook usage account undo id=id long=- short=- value_names=ID possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=i64 conflicts=-
+command playbook usage machine subcommands=- aliases=- groups=Machine[name]
+arg playbook usage machine id=name long=name short=- value_names=NAME possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 command playbook sessions subcommands=list,sweep aliases=- groups=Sessions[json]
 arg playbook sessions id=json long=json short=- value_names=JSON possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
 command playbook sessions list subcommands=- aliases=- groups=List[json]

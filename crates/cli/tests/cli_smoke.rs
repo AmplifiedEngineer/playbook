@@ -577,6 +577,7 @@ fn table() -> Vec<Case> {
         case("usage ingest", &["usage", "ingest"]).code(1).err("was removed").writes(),
         case("usage prune", &["usage", "prune"]).out("removed 0").writes(),
         case("usage doctor", &["usage", "doctor"]).out("Where pbtop can read limits"),
+        case("usage machine", &["usage", "machine"]).out("id: ").writes(),
         case("usage stop", &["usage", "stop"]).out("not running"),
         case("usage account fingerprint", &["usage", "account", "fingerprint"]).code(1).err("CLAUDE_CODE_OAUTH_TOKEN is not set").writes(),
         case("usage account assign", &["usage", "account", "assign", "--from", "2026-01-01", "--to", "2026-01-02", "--as", "x"]).out("dry run: 0 events").writes(),

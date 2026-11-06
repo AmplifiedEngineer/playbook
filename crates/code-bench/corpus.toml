@@ -1,0 +1,98 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+
+# Pinned inputs for the code index benchmark. Every repo is pinned by commit,
+# cloned on demand and never redistributed. Only allowlisted licenses enter.
+# ripgrep is dual licensed (Unlicense or MIT); the MIT arm is recorded.
+
+[tools]
+rg = "15.2.0"
+ctags = "6.2.0"
+tokenizer = "playbook-lexical-v1"
+
+[tools.oracles]
+rust-analyzer = "2025-07-14"
+scip-go = "0.1.26"
+scip-python = "0.6.6"
+scip-typescript = "0.4.0"
+
+[[repos]]
+name = "ripgrep"
+url = "https://github.com/BurntSushi/ripgrep.git"
+commit = "4649aa9700619f94cf9c66876e9549d83420e16c"
+language = "rust"
+tier = "pilot"
+size_kb = 3500
+license = "MIT"
+
+[[repos]]
+name = "cobra"
+url = "https://github.com/spf13/cobra.git"
+commit = "40b5bc1437a564fc795d388b23835e84f54cd1d1"
+language = "go"
+tier = "pilot"
+size_kb = 2000
+license = "Apache-2.0"
+
+[[repos]]
+name = "express"
+url = "https://github.com/expressjs/express.git"
+commit = "cd7d4397c398a3f3ecadeaf9ef6ac1377bd414c4"
+language = "javascript"
+tier = "pilot"
+size_kb = 1500
+license = "MIT"
+
+[[repos]]
+name = "trpc"
+url = "https://github.com/trpc/trpc.git"
+commit = "204596418ac9d35bef7bc0b20d832f9e4542fd57"
+language = "typescript"
+tier = "full"
+size_kb = 30000
+license = "MIT"
+
+[[repos]]
+name = "nx"
+url = "https://github.com/nrwl/nx.git"
+commit = "ccbc750b7b187a7e10979221befd5ed299f86db5"
+language = "typescript"
+tier = "full"
+size_kb = 150000
+license = "MIT"
+
+[[repos]]
+name = "pandas"
+url = "https://github.com/pandas-dev/pandas.git"
+commit = "c888af6d0bb674932007623c0867e1fbd4bdc2c6"
+language = "python"
+tier = "full"
+size_kb = 90000
+license = "BSD-3-Clause"
+
+[[repos]]
+name = "transformers"
+url = "https://github.com/huggingface/transformers.git"
+commit = "37f8b0b53512e6aae0cfd15746c133c101783178"
+language = "python"
+tier = "full"
+size_kb = 100000
+license = "Apache-2.0"
+
+[[repos]]
+name = "hugo"
+url = "https://github.com/gohugoio/hugo.git"
+commit = "98ba786f2f5dca0866f47ab79f394370bcb77d2f"
+language = "go"
+tier = "full"
+size_kb = 40000
+license = "Apache-2.0"
+
+[[repos]]
+name = "webpack"
+url = "https://github.com/webpack/webpack.git"
+commit = "21fcdbb8f2bb3820d3309df8e399c6deced12b42"
+language = "javascript"
+tier = "full"
+size_kb = 25000
+license = "MIT"

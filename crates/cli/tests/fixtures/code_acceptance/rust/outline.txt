@@ -1,0 +1,9 @@
+exit: 0
+module:4-4  shape  pub mod shape
+const:6-6  SCALE  pub const SCALE: i32 = 2
+struct:8-11  Point  pub struct Point
+enum:13-16  Axis  pub enum Axis
+function:18-22  area  pub fn area(p: &Point) -> i32
+trait:24-26  Describe  pub trait Describe
+  method:25-25  Describe::describe  fn describe(&self) -> String
+method:29-31  Point::describe  fn describe(&self) -> String

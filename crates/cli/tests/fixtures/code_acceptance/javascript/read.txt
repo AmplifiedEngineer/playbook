@@ -1,0 +1,9 @@
+exit: 0
+     1  // SPDX-FileCopyrightText: 2026 Igor Santos
+     2  // SPDX-License-Identifier: Apache-2.0
+     3  export const START = 0;
+     4  
+     5  export class Counter {
+     6    constructor() {
+     7      this.value = START;
+     8    }
