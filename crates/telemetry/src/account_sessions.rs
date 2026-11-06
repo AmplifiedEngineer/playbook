@@ -3,10 +3,12 @@
 
 //! Sessions as boundaries for an account move. A user who does not know when
 //! the credential changed can list the sessions of a window, pick the first
-//! one that belonged to the other account, and move the sessions before it.
+//! one that belonged to the other account, and compare the cost on each side
+//! of every candidate boundary with the daily totals of an account dashboard.
 
 use crate::account_store::err;
 use rusqlite::{Connection, OptionalExtension};
+use std::collections::BTreeMap;
 
 /// One session with its first event in the window.
 #[derive(Debug, Clone, PartialEq)]
@@ -89,6 +91,113 @@ pub fn list_text(rows: &[SessionRow]) -> String {
     out.trim_end().to_string()
 }
 
+/// Parses `YYYY-MM-DD=amount`.
+pub fn parse_dashboard(text: &str) -> Result<(i64, f64), String> {
+    let bad = || format!("cannot read {text:?}; use 2026-11-02=45.10");
+    let (day, amount) = text.split_once('=').ok_or_else(bad)?;
+    let start = crate::account_move::parse_time(day, crate::tz::current())?;
+    let amount: f64 = amount.trim().parse().map_err(|_| bad())?;
+    if !amount.is_finite() || amount < 0.0 {
+        return Err(bad());
+    }
+    Ok((crate::tz::day_of(start), amount))
+}
+
+/// A session starting from the window start: its first time and cost per day.
+struct Costed {
+    id: String,
+    first: i64,
+    days: BTreeMap<i64, f64>,
+}
+
+fn costed(conn: &Connection, from: i64) -> Result<Vec<Costed>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT session_id, timestamp, cost_usd FROM usage_events
+             WHERE session_id IN (SELECT session_id FROM usage_events GROUP BY session_id
+                                  HAVING MIN(timestamp) >= ?1)",
+        )
+        .map_err(|e| err("read the costs", e))?;
+    let rows = stmt
+        .query_map([from], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, f64>(2)?,
+            ))
+        })
+        .map_err(|e| err("read the costs", e))?;
+    let mut by_id: BTreeMap<String, Costed> = BTreeMap::new();
+    for row in rows {
+        let (id, ts, cost) = row.map_err(|e| err("read the costs", e))?;
+        let s = by_id.entry(id.clone()).or_insert_with(|| Costed {
+            id,
+            first: i64::MAX,
+            days: BTreeMap::new(),
+        });
+        s.first = s.first.min(ts);
+        *s.days.entry(crate::tz::day_of(ts)).or_insert(0.0) += cost;
+    }
+    Ok(by_id.into_values().collect())
+}
+
+/// Takes each session that starts in `[from, to)` as the boundary. For each,
+/// it sums the cost of the listed days over the sessions that start before it
+/// and over those that start at or after it, and sets the later side against
+/// the dashboard amounts of the account that owns the later sessions. The
+/// best `top` boundaries by total difference print, or all when `top` is 0.
+pub fn reconcile(
+    conn: &Connection,
+    from: i64,
+    to: i64,
+    dashboard: &[(i64, f64)],
+    top: usize,
+) -> Result<String, String> {
+    let all = costed(conn, from)?;
+    let mut scored = Vec::new();
+    for boundary in all
+        .iter()
+        .filter(|s| s.first < to && s.days.values().sum::<f64>() > 0.0)
+    {
+        let mut sides = [vec![0.0; dashboard.len()], vec![0.0; dashboard.len()]];
+        for s in &all {
+            let side = &mut sides[usize::from(s.first >= boundary.first)];
+            for (i, (day, _)) in dashboard.iter().enumerate() {
+                side[i] += s.days.get(day).copied().unwrap_or(0.0);
+            }
+        }
+        let diff: f64 = dashboard
+            .iter()
+            .zip(&sides[1])
+            .map(|((_, want), got)| (got - want).abs())
+            .sum();
+        scored.push((diff, boundary, sides));
+    }
+    if scored.is_empty() {
+        return Ok("No sessions start in that window.".to_string());
+    }
+    scored.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.first.cmp(&b.1.first)));
+    let shown = if top == 0 { scored.len() } else { top };
+    let mut out = String::from("Each boundary is the first session of the later account.\n");
+    for (diff, boundary, [before, after]) in scored.into_iter().take(shown) {
+        out.push_str(&format!(
+            "\nboundary {} ({}), total difference ${diff:.2}\n",
+            boundary.id,
+            crate::tz::iso(boundary.first)
+        ));
+        for (i, (day, want)) in dashboard.iter().enumerate() {
+            out.push_str(&format!(
+                "  {}  before ${:.2}  from here ${:.2}  dashboard ${want:.2}  difference {:+.2}\n",
+                crate::aggregate::date_key(*day),
+                before[i],
+                after[i],
+                after[i] - want
+            ));
+        }
+    }
+    Ok(out.trim_end().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +265,27 @@ mod tests {
             )
             .unwrap();
         assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn reconcile_ranks_the_boundary_that_matches_the_dashboard_first() {
+        let conn = store();
+        let day2 = parse_dashboard("1970-01-03=12.00").unwrap();
+        assert_eq!(day2.0, 2);
+        let text = reconcile(&conn, 0, 3 * DAY, &[day2], 1).unwrap();
+        assert!(text.contains("boundary b ("), "{text}");
+        assert!(text.contains("total difference $0.00"), "{text}");
+        assert!(
+            text.contains("before $2.00  from here $12.00  dashboard $12.00"),
+            "{text}"
+        );
+        assert!(!text.contains("boundary c"), "{text}");
+    }
+
+    #[test]
+    fn a_dashboard_value_must_be_a_date_and_a_non_negative_amount() {
+        for bad in ["1970-01-03", "x=1", "1970-01-03=-1", "1970-01-03=abc"] {
+            assert!(parse_dashboard(bad).is_err(), "{bad}");
+        }
     }
 }

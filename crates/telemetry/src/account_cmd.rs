@@ -32,6 +32,18 @@ pub fn run(paths: &Paths, command: &AccountCommand) -> Result<String, String> {
             let to = to.as_deref().map_or(Ok(now + 1), time)?;
             Ok(sess::list_text(&sess::sessions(&conn, from, to)?))
         }
+        AccountCommand::Reconcile {
+            from,
+            to,
+            dashboard,
+            top,
+        } => {
+            let days = dashboard
+                .iter()
+                .map(|d| sess::parse_dashboard(d))
+                .collect::<Result<Vec<_>, _>>()?;
+            sess::reconcile(&conn, time(from)?, time(to)?, &days, *top)
+        }
         AccountCommand::Assign {
             from,
             to,
