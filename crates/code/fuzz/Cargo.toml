@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "playbook-code-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+# Standalone workspace: the default workspace build and CI never compile it.
+# Run with `cargo +nightly fuzz run <target>` from crates/code.
+[workspace]
+
+[lib]
+name = "playbook_code_fuzz"
+path = "src/lib.rs"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.12"
+playbook-code = { path = ".." }
+
+[[bin]]
+name = "parse_extract"
+path = "fuzz_targets/parse_extract.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "index_file"
+path = "fuzz_targets/index_file.rs"
+test = false
+doc = false
+bench = false
