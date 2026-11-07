@@ -9,6 +9,7 @@
 //! `code-bench mutants` judges a cargo-mutants run against the score floor.
 
 use code_bench::corpus::{fetch, GitTransport, Manifest, ThreadSleeper, Tier};
+use code_bench::e2e::{self, report::Report as E2eReport};
 use code_bench::fixtures;
 use code_bench::gate::{evaluate, Baseline, Floor, Inputs, Overrides, MIN_TASKS_PER_CELL};
 use code_bench::mutants::{judge, score_from_outcomes, MutantsError, Verdict};
@@ -25,7 +26,7 @@ const HOME_DIR: &str = "home";
 const DATA_DIR: &str = "crates/code-bench/data";
 const WRITE_BASELINE_FLAG: &str = "--write-baseline";
 const LANGUAGE_FLAG: &str = "--language";
-const USAGE: &str = "usage: code-bench pilot [--language LANG] CACHE_DIR REPORT_FILE [PLAYBOOK_BINARY]\n       code-bench gate [--language LANG] REPORT_FILE RUN_DATE\n       code-bench mutants OUTCOMES_FILE\n       code-bench fixtures --write-baseline";
+const USAGE: &str = "usage: code-bench pilot [--language LANG] CACHE_DIR REPORT_FILE [PLAYBOOK_BINARY]\n       code-bench gate [--language LANG] REPORT_FILE RUN_DATE\n       code-bench mutants OUTCOMES_FILE\n       code-bench decide REPORT_FILE\n       code-bench fixtures --write-baseline";
 
 struct Args {
     language: Option<String>,
@@ -185,6 +186,21 @@ fn mutants(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Prints the value `code.briefFactsTokens` should take for a real report.
+/// It only reports the decision; the flip is a committed change.
+fn decide(args: &[String]) -> Result<(), String> {
+    let [file] = args else {
+        return Err(USAGE.to_string());
+    };
+    let text = std::fs::read_to_string(file).map_err(|e| format!("{file}: {e}"))?;
+    let report: E2eReport = serde_json::from_str(&text).map_err(|e| format!("{file}: {e}"))?;
+    for failure in e2e::rule::failures(&report) {
+        eprintln!("{failure:?}");
+    }
+    println!("{}", e2e::rule::default_tokens(&report));
+    Ok(())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.split_first() {
@@ -194,6 +210,7 @@ fn main() {
             write_fixture_baseline()
         }
         Some((command, rest)) if command == "mutants" => mutants(rest),
+        Some((command, rest)) if command == "decide" => decide(rest),
         _ => Err(USAGE.to_string()),
     };
     if let Err(message) = result {
