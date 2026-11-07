@@ -8,7 +8,7 @@
 # Usage: asset-names.test.sh
 #
 # `cargo binstall` builds the download URL from `[package.metadata.binstall]`
-# in crates/cli/Cargo.toml, and `mise use github:amplified-engineer/playbook`
+# in crates/cli/Cargo.toml, and `mise use github:amplifiedengineer/playbook`
 # picks an asset by the operating system and architecture words in its name.
 # Both need the raw binary of each target at playbook-<version>-<target>[.exe]
 # (ADR 0039). This test expands the binstall template for every target in the

@@ -36,7 +36,7 @@ CALLER="$PWD"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-REPO="${GITHUB_REPOSITORY:-amplified-engineer/playbook}"
+REPO="${GITHUB_REPOSITORY:-amplifiedengineer/playbook}"
 
 fail() { echo "FAIL $*" >&2; exit 1; }
 
