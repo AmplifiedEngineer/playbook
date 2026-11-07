@@ -264,12 +264,14 @@ fn releases(
 }
 
 const PLAYBOOK: &str = "playbook";
-const PBDOC: &str = "pbdoc";
+/// The helper binaries installed beside playbook, each in its own tarball.
+/// Both are optional: a problem with one is a warning, never a failed update.
+const HELPERS: [&str; 2] = ["pbdoc", "pbsync"];
 /// What a missing helper reports as its old version.
-const NO_PBDOC: &str = "none";
+const NO_HELPER: &str = "none";
 
 /// Where a release's files live and what its SHA256SUMS says.
-struct PbdocRelease<'a> {
+struct HelperRelease<'a> {
     base: &'a str,
     sums: &'a str,
 }
@@ -284,10 +286,6 @@ struct Swapped {
 const SWAPPED_PLAYBOOK: Swapped = Swapped {
     name: PLAYBOOK,
     noun: "binary",
-};
-const SWAPPED_PBDOC: Swapped = Swapped {
-    name: PBDOC,
-    noun: PBDOC,
 };
 
 /// Adds the lines that say `name` was swapped, and where its backup is.
@@ -315,21 +313,39 @@ fn report_swap(
     }
 }
 
-/// Swaps the `pbdoc` helper beside the playbook binary. It never fails the
+/// Swaps the `name` helper beside the playbook binary. It never fails the
 /// update: any problem is a warning and the old helper stays.
-fn swap_pbdoc(
+fn swap_helper(
     o: &mut Outcome,
     env: &Env,
     fetcher: &dyn Fetcher,
     attest: &dyn Attest,
-    release: &PbdocRelease,
+    release: &HelperRelease,
+    name: &'static str,
     version: &str,
 ) {
-    match fetch_pbdoc(o, env, fetcher, attest, release, version) {
-        Ok((target, from, done)) => report_swap(o, SWAPPED_PBDOC, &target, &from, version, done),
+    match fetch_helper(o, env, fetcher, attest, release, name, version) {
+        Ok((target, from, done)) => {
+            let swapped = Swapped { name, noun: name };
+            report_swap(o, swapped, &target, &from, version, done);
+        }
         Err(err) => o.warnings.push(format!(
-            "{PBDOC} was not updated and the old one stays: {err}"
+            "{name} was not updated and the old one stays: {err}"
         )),
+    }
+}
+
+/// Swaps every helper that ships with this release.
+fn swap_helpers(
+    o: &mut Outcome,
+    env: &Env,
+    fetcher: &dyn Fetcher,
+    attest: &dyn Attest,
+    release: &HelperRelease,
+    version: &str,
+) {
+    for name in HELPERS {
+        swap_helper(o, env, fetcher, attest, release, name, version);
     }
 }
 
@@ -339,23 +355,24 @@ fn helper_version(bin: &Path) -> Option<String> {
     out.split_whitespace().last().map(str::to_string)
 }
 
-/// Downloads, verifies and installs pbdoc. Returns the target, the version it
-/// replaced and what the swap left behind.
-fn fetch_pbdoc(
+/// Downloads, verifies and installs a helper. Returns the target, the version
+/// it replaced and what the swap left behind.
+fn fetch_helper(
     o: &mut Outcome,
     env: &Env,
     fetcher: &dyn Fetcher,
     attest: &dyn Attest,
-    release: &PbdocRelease,
+    release: &HelperRelease,
+    name: &str,
     version: &str,
 ) -> Result<(PathBuf, String, swap::Installed), String> {
-    let asset = resolve::pbdoc_asset_name(version, &env.os, &env.arch)?;
+    let asset = resolve::helper_asset_name(name, version, &env.os, &env.arch)?;
     let bytes = fetcher
         .get(&format!("{}/{asset}", release.base))
         .map_err(|e| format!("could not download {asset}: {e}"))?;
     verify::verify_checksum(&bytes, release.sums, &asset)?;
     let file = tarball::gunzip(&bytes)
-        .and_then(|tar| tarball::extract_regular_file(&tar, PBDOC))
+        .and_then(|tar| tarball::extract_regular_file(&tar, name))
         .map_err(|e| format!("{asset}: {e}"))?;
     let dir = env
         .exe
@@ -374,15 +391,15 @@ fn fetch_pbdoc(
             return Err(err);
         }
     }
-    let target = dir.join(PBDOC);
-    let from = helper_version(&target).unwrap_or_else(|| NO_PBDOC.to_string());
+    let target = dir.join(name);
+    let from = helper_version(&target).unwrap_or_else(|| NO_HELPER.to_string());
     let done = swap::install(&stage, &target, &from, version, &swap::run_version)?;
     Ok((target, from, done))
 }
 
-/// On an equal version playbook stays, but a missing or older pbdoc is still
-/// installed, so an upgrade from a release without it gets the converter.
-fn complete_pbdoc(
+/// On an equal version playbook stays, but a missing or older helper is still
+/// installed, so an upgrade from a release without it gets the helper.
+fn complete_helpers(
     o: &mut Outcome,
     opts: &Options,
     env: &Env,
@@ -392,27 +409,27 @@ fn complete_pbdoc(
     version: &str,
 ) {
     let Some(dir) = env.exe.parent() else { return };
-    if helper_version(&dir.join(PBDOC)).as_deref() == Some(version)
-        || refusals(env).is_err()
-        || (env.auto_mode && !opts.yes)
-    {
+    let current = HELPERS
+        .iter()
+        .all(|name| helper_version(&dir.join(name)).as_deref() == Some(version));
+    if current || refusals(env).is_err() || (env.auto_mode && !opts.yes) {
         return;
     }
     let base = format!("{}/{tag}", env.download_base);
     match fetch_text(fetcher, &format!("{base}/SHA256SUMS")) {
-        Ok(sums) => swap_pbdoc(
-            o,
-            env,
-            fetcher,
-            attest,
-            &PbdocRelease {
+        Ok(sums) => {
+            let release = HelperRelease {
                 base: &base,
                 sums: &sums,
-            },
-            version,
-        ),
+            };
+            for name in HELPERS {
+                if helper_version(&dir.join(name)).as_deref() != Some(version) {
+                    swap_helper(o, env, fetcher, attest, &release, name, version);
+                }
+            }
+        }
         Err(err) => o.warnings.push(format!(
-            "{PBDOC} was not updated: could not download SHA256SUMS: {err}"
+            "the helpers were not updated: could not download SHA256SUMS: {err}"
         )),
     }
 }
@@ -460,7 +477,7 @@ pub fn run(
     if order.is_eq() {
         o.out
             .push(format!("playbook {current} is already installed"));
-        complete_pbdoc(&mut o, opts, env, fetcher, attest, &release.tag, &version);
+        complete_helpers(&mut o, opts, env, fetcher, attest, &release.tag, &version);
         return Ok(o);
     }
     if order.is_lt() && opts.version.is_none() {
@@ -519,12 +536,12 @@ pub fn run(
     let done = swap::install(&stage, &env.exe, current, &version, smoke)?;
     o.installed = Some(version.clone());
     report_swap(&mut o, SWAPPED_PLAYBOOK, &env.exe, current, &version, done);
-    swap_pbdoc(
+    swap_helpers(
         &mut o,
         env,
         fetcher,
         attest,
-        &PbdocRelease {
+        &HelperRelease {
             base: &base,
             sums: &sums,
         },
@@ -555,9 +572,11 @@ mod tests {
         let exe = dir.join("playbook");
         std::fs::write(&exe, script_bytes("0.16.0")).unwrap();
         swap::make_executable(&exe).unwrap();
-        let pbdoc = dir.join("pbdoc");
-        std::fs::write(&pbdoc, pbdoc_fixture::script("0.16.0")).unwrap();
-        swap::make_executable(&pbdoc).unwrap();
+        for name in ["pbdoc", "pbsync"] {
+            let helper = dir.join(name);
+            std::fs::write(&helper, pbdoc_fixture::script_of(name, "0.16.0")).unwrap();
+            swap::make_executable(&helper).unwrap();
+        }
         Env {
             exe,
             path_var: dir.clone().into_os_string(),
@@ -628,8 +647,10 @@ mod tests {
             crate::common::hash::sha256_hex(sums_hash_of)
         );
         f.0.insert(format!("{DL}/v0.17.0/SHA256SUMS"), sums.into_bytes());
-        let pbdoc = pbdoc_fixture::good("0.17.0");
-        pbdoc_fixture::serve(&mut f, &format!("{DL}/v0.17.0"), &pbdoc, &pbdoc);
+        for name in ["pbdoc", "pbsync"] {
+            let tar = pbdoc_fixture::good_of(name, "0.17.0");
+            pbdoc_fixture::serve_of(&mut f, &format!("{DL}/v0.17.0"), name, &tar, &tar);
+        }
         f
     }
 
@@ -1035,6 +1056,10 @@ echo ran\n",
 
     const RELEASE: &str = "https://dl.test/v0.17.0";
 
+    fn pbsync_of(env: &Env) -> PathBuf {
+        env.exe.with_file_name("pbsync")
+    }
+
     fn pbdoc_of(env: &Env) -> PathBuf {
         env.exe.with_file_name("pbdoc")
     }
@@ -1364,6 +1389,11 @@ echo ran\n",
         let mut env = env_in("up-same-pbdoc-ok");
         env.current_version = "0.17.0".into();
         std::fs::write(pbdoc_of(&env), pbdoc_fixture::script("0.17.0")).unwrap();
+        std::fs::write(
+            pbsync_of(&env),
+            pbdoc_fixture::script_of("pbsync", "0.17.0"),
+        )
+        .unwrap();
         let attest = ok_attest();
 
         let out = run(
@@ -1377,6 +1407,121 @@ echo ran\n",
 
         assert_eq!(out.out.len(), 1, "{:?}", out.out);
         assert!(attest.1.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_good_pbsync_is_swapped_with_the_playbook_and_backed_up() {
+        // Arrange
+        let env = env_in("up-pbsync-ok");
+        let bin = script_bytes("0.17.0");
+
+        // Act
+        let out = run(
+            &Options::default(),
+            &env,
+            &fixture(&bin, &bin),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+
+        // Assert
+        assert_eq!(
+            swap::run_version(&pbsync_of(&env)).unwrap(),
+            "pbsync 0.17.0"
+        );
+        assert!(env.exe.with_file_name("pbsync.0.16.0.bak").exists());
+        assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    }
+
+    #[test]
+    fn a_release_without_a_pbsync_asset_still_updates_playbook_and_warns() {
+        // Arrange
+        let env = env_in("up-pbsync-missing");
+        let bin = script_bytes("0.17.0");
+        let mut f = fixture(&bin, &bin);
+        pbdoc_fixture::remove_of(&mut f, RELEASE, "pbsync");
+
+        // Act
+        let out = run(
+            &Options::default(),
+            &env,
+            &f,
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+
+        // Assert
+        assert_eq!(swap::run_version(&env.exe).unwrap(), "playbook 0.17.0");
+        assert_eq!(
+            swap::run_version(&pbsync_of(&env)).unwrap(),
+            "pbsync 0.16.0"
+        );
+        assert_eq!(swap::run_version(&pbdoc_of(&env)).unwrap(), "pbdoc 0.17.0");
+        assert!(
+            out.warnings.iter().any(|w| w.contains("pbsync")),
+            "{:?}",
+            out.warnings
+        );
+    }
+
+    #[test]
+    fn a_pbsync_with_a_bad_checksum_is_left_untouched() {
+        // Arrange
+        let env = env_in("up-pbsync-badsum");
+        let bin = script_bytes("0.17.0");
+        let mut f = fixture(&bin, &bin);
+        let tar = pbdoc_fixture::good_of("pbsync", "0.17.0");
+        pbdoc_fixture::serve_of(&mut f, RELEASE, "pbsync", &tar, b"other");
+
+        // Act
+        let out = run(
+            &Options::default(),
+            &env,
+            &f,
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+
+        // Assert
+        assert_eq!(
+            swap::run_version(&pbsync_of(&env)).unwrap(),
+            "pbsync 0.16.0"
+        );
+        assert!(
+            out.warnings
+                .iter()
+                .any(|w| w.contains("pbsync") && w.contains("checksum")),
+            "{:?}",
+            out.warnings
+        );
+    }
+
+    #[test]
+    fn the_same_version_still_installs_a_missing_pbsync() {
+        // Arrange
+        let mut env = env_in("up-same-no-pbsync");
+        env.current_version = "0.17.0".into();
+        std::fs::remove_file(pbsync_of(&env)).unwrap();
+        let bin = script_bytes("0.17.0");
+
+        // Act
+        run(
+            &Options::default(),
+            &env,
+            &fixture(&bin, &bin),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+
+        // Assert
+        assert_eq!(
+            swap::run_version(&pbsync_of(&env)).unwrap(),
+            "pbsync 0.17.0"
+        );
     }
 
     #[test]
@@ -1488,8 +1633,8 @@ echo ran\n",
             &swap::run_version,
         )
         .unwrap();
-        // Once for playbook and once for pbdoc.
-        assert_eq!(*attest.1.borrow(), vec![true, true]);
+        // Once for playbook and once for each helper.
+        assert_eq!(*attest.1.borrow(), vec![true, true, true]);
     }
 
     #[test]

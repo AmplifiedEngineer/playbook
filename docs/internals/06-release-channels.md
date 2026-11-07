@@ -138,9 +138,14 @@ Release assets by tool:
 - playbook: `playbook-<version>-<target>`, the raw binary.
 - pbtop: `pbtop-<version>-<target>.tar.gz` holding `pbtop` alone.
 - pbdoc: `pbdoc-<version>-<target>.tar.gz` holding `pbdoc` and `NOTICE-pbdoc`, for the four macOS and Linux targets.
+- pbsync: `pbsync-<version>-<target>.tar.gz` holding `pbsync`, for the four macOS and Linux targets.
 - Windows: `playbook-<version>-x86_64-pc-windows-msvc.exe`, the raw binary and the only Windows route.
 
 The Homebrew tap maps each formula to its asset.
+
+### pbsync
+
+`install.sh` and `playbook update` install `pbsync` beside `playbook` the same way as `pbdoc`: the same download, SHA256 check, attestation check and atomic swap, with the old file kept as `pbsync.<version>.bak`. `playbook uninstall` removes it. A release without a `pbsync` archive, or a failed `pbsync` update, only warns and never fails the `playbook` install or update, because sync is optional and off by default. When the version of `playbook` is unchanged, `playbook update` still installs a missing or older `pbsync`.
 
 ### pbdoc
 

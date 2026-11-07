@@ -371,9 +371,11 @@ mod tests {
         let exe = dir.join("bin/playbook");
         std::fs::write(&exe, script("0.16.0")).unwrap();
         swap::make_executable(&exe).unwrap();
-        let pbdoc = dir.join("bin/pbdoc");
-        std::fs::write(&pbdoc, pbdoc_fixture::script("0.16.0")).unwrap();
-        swap::make_executable(&pbdoc).unwrap();
+        for name in ["pbdoc", "pbsync"] {
+            let helper = dir.join("bin").join(name);
+            std::fs::write(&helper, pbdoc_fixture::script_of(name, "0.16.0")).unwrap();
+            swap::make_executable(&helper).unwrap();
+        }
         let env = Env {
             exe,
             path_var: dir.join("bin").into_os_string(),
@@ -399,8 +401,10 @@ mod tests {
             format!("{DL}/v0.17.0/SHA256SUMS"),
             format!("{}  {ASSET}\n", crate::common::hash::sha256_hex(&bin)).into_bytes(),
         );
-        let pbdoc_tar = pbdoc_fixture::good("0.17.0");
-        pbdoc_fixture::serve(&mut f, &format!("{DL}/v0.17.0"), &pbdoc_tar, &pbdoc_tar);
+        for name in ["pbdoc", "pbsync"] {
+            let tar = pbdoc_fixture::good_of(name, "0.17.0");
+            pbdoc_fixture::serve_of(&mut f, &format!("{DL}/v0.17.0"), name, &tar, &tar);
+        }
         let root = dir.join("root");
         Cache::update(&root, |c| {
             c.latest = Some("0.17.0".into());
