@@ -174,9 +174,10 @@ fn bench_actions_are_pinned_by_sha() {
 const GATE_VARIABLE: &str = "vars.CODE_CI_PILOT_GATE_RAN == 'true'";
 
 /// (workflow file, command of its own pass or fail step)
-const GATED: [(&str, &str); 2] = [
+const GATED: [(&str, &str); 3] = [
     ("code-fuzz.yml", "fuzz run"),
     ("code-mutants.yml", "code-bench mutants"),
+    ("code-e2e.yml", "code-bench e2e"),
 ];
 const NIGHTLY: &str = "nightly";
 
@@ -230,7 +231,12 @@ fn gated_actions_are_pinned_by_sha() {
 
 #[test]
 fn only_the_fuzz_workflow_uses_nightly_rust() {
-    for file in ["code-bench.yml", "code-mutants.yml", "code-fuzz.yml"] {
+    for file in [
+        "code-bench.yml",
+        "code-mutants.yml",
+        "code-fuzz.yml",
+        "code-e2e.yml",
+    ] {
         let uses_nightly = load(file)
             .iter()
             .filter(|l| !l.trim_start().starts_with('#'))
@@ -259,4 +265,42 @@ fn fuzz_matrix_lists_every_fuzz_target() {
         .collect();
     files.sort_unstable();
     assert_eq!(listed, files);
+}
+
+const KEY_NAME: &str = "ANTHROPIC_API_KEY";
+const CLIENT_INSTALL: &str = "npm ci --prefix";
+
+#[test]
+fn e2e_key_is_visible_to_the_evaluation_step_only() {
+    let lines = load("code-e2e.yml");
+    let steps = steps(&lines);
+    let holders: Vec<usize> = (0..steps.len())
+        .filter(|&i| mentions(&steps[i], KEY_NAME))
+        .collect();
+    let run = steps
+        .iter()
+        .position(|s| mentions(s, "code-bench e2e"))
+        .unwrap();
+    assert_eq!(holders, [run]);
+    let secrets = lines.iter().filter(|l| l.contains("secrets.")).count();
+    assert_eq!(secrets, 1);
+}
+
+#[test]
+fn e2e_installs_the_client_from_its_lockfile_before_the_run() {
+    let lines = load("code-e2e.yml");
+    let steps = steps(&lines);
+    let install = steps
+        .iter()
+        .position(|s| mentions(s, CLIENT_INSTALL))
+        .expect("an install step");
+    let run = steps
+        .iter()
+        .position(|s| mentions(s, "code-bench e2e"))
+        .unwrap();
+    assert!(install < run);
+    let dir = root().join(".github/e2e-client");
+    assert!(dir.join("package-lock.json").is_file());
+    let manifest = std::fs::read_to_string(dir.join("package.json")).unwrap();
+    assert!(manifest.contains("\"@anthropic-ai/claude-code\": \"2."));
 }

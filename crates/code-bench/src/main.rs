@@ -9,11 +9,12 @@
 //! `code-bench mutants` judges a cargo-mutants run against the score floor.
 
 use code_bench::corpus::{fetch, GitTransport, Manifest, ThreadSleeper, Tier};
-use code_bench::e2e::{self, report::Report as E2eReport};
+use code_bench::e2e::{self, model::ClaudeCli, report::Report as E2eReport};
 use code_bench::fixtures;
 use code_bench::gate::{evaluate, Baseline, Floor, Inputs, Overrides, MIN_TASKS_PER_CELL};
 use code_bench::mutants::{judge, score_from_outcomes, MutantsError, Verdict};
 use code_bench::oracle::rg::Candidate;
+use code_bench::process::{ProcessRunner, SystemRunner};
 use code_bench::runner::{self, PlaybookBinary, RepoJob, Report};
 use code_bench::scope::scope_to_language;
 use code_bench::tasks::{TaskSet, TASKS_VERSION};
@@ -26,7 +27,7 @@ const HOME_DIR: &str = "home";
 const DATA_DIR: &str = "crates/code-bench/data";
 const WRITE_BASELINE_FLAG: &str = "--write-baseline";
 const LANGUAGE_FLAG: &str = "--language";
-const USAGE: &str = "usage: code-bench pilot [--language LANG] CACHE_DIR REPORT_FILE [PLAYBOOK_BINARY]\n       code-bench gate [--language LANG] REPORT_FILE RUN_DATE\n       code-bench mutants OUTCOMES_FILE\n       code-bench decide REPORT_FILE\n       code-bench fixtures --write-baseline";
+const USAGE: &str = "usage: code-bench pilot [--language LANG] CACHE_DIR REPORT_FILE [PLAYBOOK_BINARY]\n       code-bench gate [--language LANG] REPORT_FILE RUN_DATE\n       code-bench mutants OUTCOMES_FILE\n       code-bench e2e CACHE_DIR REPORT_FILE [PLAYBOOK_BINARY]\n       code-bench decide REPORT_FILE\n       code-bench fixtures --write-baseline";
 
 struct Args {
     language: Option<String>,
@@ -186,6 +187,36 @@ fn mutants(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+const E2E_SOURCE: &str = "scheduled end-to-end run";
+
+/// Runs the drawn tasks with and without the index and writes the report.
+/// Each checkout is indexed first so the with-index arm has an index to ask.
+fn end_to_end(args: &[String]) -> Result<(), String> {
+    let [cache, out, rest @ ..] = args else {
+        return Err(USAGE.to_string());
+    };
+    let program = rest.first().map_or(DEFAULT_PROGRAM, String::as_str);
+    let cache = Path::new(cache);
+    std::fs::create_dir_all(cache).map_err(|e| e.to_string())?;
+    let manifest = Manifest::bundled().map_err(|e| e.to_string())?;
+    let mut checkouts = BTreeMap::new();
+    for repo in manifest.tier(Tier::Pilot) {
+        let path = fetch(repo, cache, &GitTransport, &ThreadSleeper).map_err(|e| e.to_string())?;
+        let index = ["code".to_string(), "index".to_string()];
+        SystemRunner
+            .run(program, &index, &path)
+            .map_err(|e| format!("{}: {e:?}", repo.name))?;
+        checkouts.insert(repo.name.clone(), path);
+    }
+    let mut set = TaskSet::bundled().map_err(|e| e.to_string())?;
+    set.tasks.retain(|t| checkouts.contains_key(&t.repo));
+    let tasks = e2e::draw(&set, e2e::TASK_COUNT);
+    let cli = ClaudeCli::new(SystemRunner, checkouts);
+    let report =
+        e2e::run::run(&cli, &cli, &tasks, e2e::REPEATS, E2E_SOURCE).map_err(|e| e.to_string())?;
+    std::fs::write(out, report.to_json().map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+}
+
 /// Prints the value `code.briefFactsTokens` should take for a real report.
 /// It only reports the decision; the flip is a committed change.
 fn decide(args: &[String]) -> Result<(), String> {
@@ -210,6 +241,7 @@ fn main() {
             write_fixture_baseline()
         }
         Some((command, rest)) if command == "mutants" => mutants(rest),
+        Some((command, rest)) if command == "e2e" => end_to_end(rest),
         Some((command, rest)) if command == "decide" => decide(rest),
         _ => Err(USAGE.to_string()),
     };

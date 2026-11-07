@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "Pins the claude CLI that the weekly end-to-end evaluation runs",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.296"
+  }
+}
