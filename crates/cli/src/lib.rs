@@ -2057,6 +2057,16 @@ pub enum ConfigCommand {
         /// JSON file to read, or `-` for standard input
         file: String,
     },
+    /// Refresh the key list and values files that `pbsync` reads
+    ///
+    /// Writes `sync-keys.json` and `config-values.json` in the data folder
+    /// that holds `usage.db`. They hold only the keys allowed to sync between
+    /// your machines and their global values. `config set --global` refreshes
+    /// them for a shared key, so you rarely need this.
+    ///
+    /// Example: `playbook config sync-files`
+    #[command(hide = true)]
+    SyncFiles,
 }
 
 /// `playbook doctor` subcommands.
