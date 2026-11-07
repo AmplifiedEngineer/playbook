@@ -25,6 +25,7 @@ Task-oriented workflows.
 - [Models and effort](guides/14-models-and-effort.md): the model tiers, fallbacks, effort ceiling and routing.
 - [Memory](guides/15-memory.md): the local memory store and `memory.source`.
 - [Watch acceptance run](guides/16-watch-acceptance-run.md): the day-long run that proves watch mode on a real repository, step by step.
+- [Usage sync](guides/17-sync.md): the opt-in `pbsync` helper that shares usage between your own machines, what it sends and how to stop it.
 
 ## Reference
 

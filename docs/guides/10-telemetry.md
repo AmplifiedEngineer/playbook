@@ -2,7 +2,7 @@
 
 `playbook setup` asks whether to send Claude Code telemetry to a collector on your own machine. The answer defaults to yes. It writes eight OpenTelemetry variables into the `env` block of `~/.claude/settings.json`, so plain `claude`, the IDE and the desktop app feed `playbook usage`.
 
-Prompt text and tool content are never sent. Nothing leaves your machine. The collector listens on 127.0.0.1 only. Playbook's `session-init` hook (part of the hooks you install with setup) starts it when a session begins. Without those hooks, start it with `playbook usage collect`, or let `playbook cc` do it.
+Prompt text and tool content are never sent. Nothing leaves your machine unless you turn on [usage sync](17-sync.md), which is off by default. The collector listens on 127.0.0.1 only. Playbook's `session-init` hook (part of the hooks you install with setup) starts it when a session begins. Without those hooks, start it with `playbook usage collect`, or let `playbook cc` do it.
 
 - To turn it on later, or after you declined: `playbook setup --only telemetry`.
 - `playbook config set usage.telemetry auto` writes the same keys, and `... off` removes only those keys and puts back any value setup replaced. If telemetry is set up elsewhere, `auto` leaves it as it is and says so. Both print each key they touch with a one-line reason, the file path, the saved copy of the old file and the undo command. A settings file that is not valid JSON is left untouched.
@@ -14,4 +14,4 @@ Prompt text and tool content are never sent. Nothing leaves your machine. The co
 - When usage sync is on, `playbook doctor` also shows one `sync` row with the age of the last success and the rows pending. With sync off there is no row.
 - `playbook uninstall` removes exactly the keys setup wrote and puts back any value they replaced, unless you changed a key since.
 
-See also [Usage view](../internals/04-usage-dashboard.md) and [pbtop](11-pbtop.md).
+See also [Usage view](../internals/04-usage-dashboard.md), [pbtop](11-pbtop.md) and [usage sync](17-sync.md).

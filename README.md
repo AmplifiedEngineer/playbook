@@ -73,6 +73,7 @@ Start at the [docs index](docs/README.md).
 - [Install](docs/guides/00-install.md): every route, upgrade and uninstall.
 - [Launcher](docs/guides/09-launcher.md), [telemetry](docs/guides/10-telemetry.md) and [pbtop](docs/guides/11-pbtop.md).
 - [Settings](docs/guides/12-settings.md), [security defaults](docs/guides/13-security-defaults.md), [models and effort](docs/guides/14-models-and-effort.md), [memory](docs/guides/15-memory.md) and [auto mode](docs/guides/04-auto-mode.md).
+- [Usage sync](docs/guides/17-sync.md): the opt-in way to share usage between your own machines.
 - [CLI and config reference](docs/reference/cli-and-config.md), [hook reference](docs/reference/hooks.md), [config keys](docs/reference/config-keys.md), [slash commands](docs/reference/commands.md), [layers](docs/reference/layers.md) and [repository layout](docs/reference/repository-layout.md).
 - [Guides](docs/README.md#guides), [Reference](docs/README.md#reference), [Authoring](docs/README.md#authoring) and [Internals](docs/README.md#internals).
 - [Decisions](docs/adr/): the architecture decision records.
