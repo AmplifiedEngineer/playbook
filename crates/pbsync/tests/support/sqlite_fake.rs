@@ -3,6 +3,9 @@
 
 //! An in-memory SQLite database standing in for the remote, so tests run real SQL.
 
+// Each test binary uses a different part of these helpers.
+#![allow(dead_code)]
+
 use std::cell::RefCell;
 
 use pbsync::transport::{Statement, StatementResult, Transport, TransportError, Value};
