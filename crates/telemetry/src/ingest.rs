@@ -251,7 +251,7 @@ mod tests {
         // Arrange
         let dir = scratch_dir("ingest-machine");
         let conn = db::open_db(&dir.join("usage.db")).unwrap();
-        let id = crate::machine::load_or_create(&dir, uuid::Uuid::new_v4, "host")
+        let id = crate::machine::load_or_create(&dir, crate::machine::random_bytes, "host")
             .unwrap()
             .id;
         let tool = crate::ToolInvocationEvent {

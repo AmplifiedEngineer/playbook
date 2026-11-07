@@ -34,7 +34,8 @@ pub const LOCAL_MACHINE_SQL: &str =
 /// why, and the next open stamps them.
 pub fn adopt_local_machine(conn: &Connection, data_dir: &std::path::Path) -> Result<(), String> {
     let hostname = crate::machine::current_hostname();
-    let Ok(machine) = crate::machine::load_or_create(data_dir, uuid::Uuid::new_v4, &hostname)
+    let Ok(machine) =
+        crate::machine::load_or_create(data_dir, crate::machine::random_bytes, &hostname)
     else {
         return Ok(());
     };
