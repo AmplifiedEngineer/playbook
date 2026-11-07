@@ -80,13 +80,9 @@ impl Attest for GhAttest {
         for repo in crate::common::org::PLAYBOOK_REPOS {
             let Some(output) = run_with_timeout(&mut verify_command(file, repo), VERIFY_TIMEOUT)
             else {
-                return if strict {
-                    Err("gh attestation verify did not finish in time".into())
-                } else {
-                    Ok(Some(
-                        "checksum only, provenance not verified: gh attestation verify did not finish in time".into(),
-                    ))
-                };
+                // A slow name is a gap like any other: try the next name.
+                gaps.push("gh attestation verify did not finish in time".to_string());
+                continue;
             };
             if output.status.success() {
                 return Ok(None);

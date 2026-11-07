@@ -7,9 +7,9 @@
 //! `amplified-engineer`, then `amplifiedengineer`. GitHub redirects old names,
 //! but nothing here may depend on that, and a binary, plugin or state folder
 //! made before a rename still carries an old name. Code that builds a URL uses
-//! the current name. Code that checks identity (a download, an attestation, an
-//! installed plugin key, a cache folder, a state folder) accepts every name and
-//! tries the current one first.
+//! the current name. Code that checks identity (a download or an attestation
+//! today) accepts every name and tries the current one first. Plugin keys and
+//! state folders follow in later changes.
 
 /// The one place the current organization name is written. A macro, because
 /// `concat!` takes only literals, and every repo constant below derives from it.
