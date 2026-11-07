@@ -10,6 +10,11 @@
 use playbook_store::{params, Connection};
 
 const LOCAL_SQL: &str = "
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+INSERT INTO meta VALUES ('schema_version', '5');
+CREATE TABLE machine (
+    id INTEGER PRIMARY KEY CHECK (id = 1), machine_id TEXT NOT NULL, name TEXT
+);
 -- sync_state: keys `salt`, `last_success`, `last_error`, plus `failures`.
 CREATE TABLE sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE sync_cursors (
@@ -66,6 +71,15 @@ pub(crate) fn open_at(path: &std::path::Path) -> Connection {
     let conn = Connection::open(path).unwrap();
     conn.execute_batch(LOCAL_SQL).unwrap();
     conn
+}
+
+/// Sets the `usage.db` version the database claims.
+pub(crate) fn stamp(conn: &Connection, version: i64) {
+    conn.execute(
+        "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+        [version.to_string()],
+    )
+    .unwrap();
 }
 
 /// The optional `account_names(key, name)` table.

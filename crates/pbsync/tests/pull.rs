@@ -11,7 +11,7 @@ use std::cell::Cell;
 use pbsync::privacy::{salted_hash, Domain};
 use pbsync::pull::{pull, pull_with, PullError, PullSettings, PullStats};
 use pbsync::push::{push, PushSettings, SYNC_BATCH_ROWS, SYNC_RESEND_WINDOW_SECONDS};
-use pbsync::remote::{RemoteError, REMOTE_SCHEMA_VERSION};
+use pbsync::remote::RemoteError;
 use pbsync::tables::usage_events;
 use pbsync::transport::{Statement, StatementResult, Transport, TransportError};
 use playbook_store::Connection;
@@ -50,7 +50,6 @@ fn push_as(conn: &Connection, remote: &SqliteFake, machine: &str, accounts: &[&s
         machine: machine.to_string(),
         allowed_accounts: accounts.iter().map(|a| a.to_string()).collect(),
         salt: SALT.to_string(),
-        local_schema_version: REMOTE_SCHEMA_VERSION,
     };
     push(conn, remote, &usage_events(), &settings, &|| NOW).unwrap();
 }
@@ -443,6 +442,11 @@ fn a_local_database_without_the_contract_tables_is_refused_by_name() {
     // Arrange
     let remote = SqliteFake::new();
     let bare = Connection::open_in_memory().unwrap();
+    bare.execute_batch(
+        "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+         INSERT INTO meta VALUES ('schema_version', '5');",
+    )
+    .unwrap();
     // Act
     let result = pull_as(&bare, &remote, MACHINE_B);
     // Assert
@@ -452,4 +456,21 @@ fn a_local_database_without_the_contract_tables_is_refused_by_name() {
             table: "sync_state"
         })
     ));
+}
+
+#[test]
+fn a_usage_db_newer_or_older_than_sync_understands_stops_before_any_request() {
+    for (version, expected) in [(6, "update pbsync"), (4, "run any playbook command")] {
+        // Arrange
+        let remote = SqliteFake::new();
+        let b = local::open();
+        local::stamp(&b, version);
+        // Act
+        let result = pull_as(&b, &remote, MACHINE_B);
+        // Assert
+        let error = result.unwrap_err();
+        assert!(matches!(error, PullError::LocalSchema(_)));
+        assert!(error.to_string().contains(expected), "{error}");
+        assert!(remote.log().is_empty());
+    }
 }

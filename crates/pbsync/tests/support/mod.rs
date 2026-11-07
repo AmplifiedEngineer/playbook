@@ -11,6 +11,7 @@ use std::thread;
 /// Placeholder in a reply body, replaced by the received Authorization header.
 pub(crate) const ECHO_AUTH: &str = "{auth}";
 
+#[derive(Clone)]
 pub(crate) struct Reply {
     pub(crate) status: u16,
     pub(crate) body: String,
@@ -47,14 +48,18 @@ pub(crate) struct FakeServer {
 impl FakeServer {
     /// Replies follow the script in order; the last one repeats.
     pub(crate) fn start(script: Vec<Reply>) -> Self {
+        Self::start_with(move |turn, _| script[turn.min(script.len() - 1)].clone())
+    }
+
+    /// `respond` gets the zero-based request number and the request.
+    pub(crate) fn start_with(respond: impl Fn(usize, &Received) -> Reply + Send + 'static) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
         let seen = Arc::clone(&requests);
         thread::spawn(move || {
             for (turn, stream) in listener.incoming().flatten().enumerate() {
-                let reply = &script[turn.min(script.len() - 1)];
-                serve(stream, reply, &seen);
+                serve(stream, &|received| respond(turn, received), &seen);
             }
         });
         Self { url, requests }
@@ -65,7 +70,7 @@ impl FakeServer {
     }
 }
 
-fn serve(stream: TcpStream, reply: &Reply, seen: &Mutex<Vec<Received>>) {
+fn serve(stream: TcpStream, respond: &dyn Fn(&Received) -> Reply, seen: &Mutex<Vec<Received>>) {
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
@@ -90,6 +95,7 @@ fn serve(stream: TcpStream, reply: &Reply, seen: &Mutex<Vec<Received>>) {
         body: String::from_utf8(body).unwrap(),
     };
     let auth = received.header("authorization").unwrap_or("").to_string();
+    let reply = respond(&received);
     seen.lock().unwrap().push(received);
     let body = reply.body.replace(ECHO_AUTH, &auth);
     let text = format!(

@@ -97,6 +97,9 @@ pub const fn usage_events() -> TableDef {
     USAGE_EVENTS
 }
 
+/// Every shared table: push, pull and purge cover a new table once it is listed here.
+pub const SHARED_TABLES: [TableDef; 1] = [USAGE_EVENTS];
+
 #[cfg(test)]
 mod tests {
     use super::*;
