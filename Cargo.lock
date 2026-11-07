@@ -1268,7 +1268,9 @@ dependencies = [
 name = "pbsync"
 version = "0.41.0"
 dependencies = [
+ "playbook-store",
  "serde_json",
+ "sha2",
  "ureq",
 ]
 
