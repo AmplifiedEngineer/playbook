@@ -13,7 +13,7 @@ pub const REMOTE_SCHEMA_VERSION: u32 = 1;
 
 const KEY_SCHEMA_VERSION: &str = "schema_version";
 const KEY_CREATED_AT: &str = "created_at";
-const KEY_SALT: &str = "salt";
+pub(crate) const KEY_SALT: &str = "salt";
 const COLUMN_MACHINE: &str = "machine";
 const COLUMN_PUSHED_AT: &str = "pushed_at";
 const UPDATE_HINT: &str = "run `playbook update`";
