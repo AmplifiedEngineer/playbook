@@ -143,7 +143,7 @@ jobs:
       - name: Install playbook
         run: |
           V=v<version>; A=playbook-<version>-x86_64-unknown-linux-musl
-          gh release download "$V" --repo pragmatic-engineer/playbook --pattern "$A" --pattern SHA256SUMS
+          gh release download "$V" --repo amplifiedengineer/playbook --pattern "$A" --pattern SHA256SUMS
           grep " $A\$" SHA256SUMS | sha256sum -c -
           install -m 0755 "$A" /usr/local/bin/playbook
         env:

@@ -3,13 +3,13 @@
 `pbtop` is the Agent Budget Dashboard of playbook as a command of its own. The Cargo package is `playbook-telemetry`.
 
 ```sh
-brew install pragmatic-engineer/tap/pbtop
+brew install amplifiedengineer/tap/pbtop
 pbtop
 ```
 
 A token and cost dashboard for Claude Code sessions. It reads the session history Claude Code already keeps on your machine, prices it, and shows it in a terminal view or as a text or JSON report. Everything stays local.
 
-It is part of the [playbook](https://github.com/pragmatic-engineer/playbook) toolkit and also works on its own. If you use playbook, you do not need to download anything here: `playbook usage` runs this same code.
+It is part of the [playbook](https://github.com/amplifiedengineer/playbook) toolkit and also works on its own. If you use playbook, you do not need to download anything here: `playbook usage` runs this same code.
 
 ## What it shows
 
@@ -26,22 +26,22 @@ It is part of the [playbook](https://github.com/pragmatic-engineer/playbook) too
 From playbook 0.35.0, with Homebrew (macOS and Linux):
 
 ```sh
-brew install pragmatic-engineer/tap/pbtop
+brew install amplifiedengineer/tap/pbtop
 ```
 
-Since Homebrew 6.0.0 a tap that is not official needs trust. The fully qualified name above trusts only that formula. The install records that trust. To install by short name without the full name first, run `brew tap pragmatic-engineer/tap` and `brew trust --formula pragmatic-engineer/tap/pbtop`. To trust the whole tap, run `brew trust pragmatic-engineer/tap`.
+Since Homebrew 6.0.0 a tap that is not official needs trust. The fully qualified name above trusts only that formula. The install records that trust. To install by short name without the full name first, run `brew tap amplifiedengineer/tap` and `brew trust --formula amplifiedengineer/tap/pbtop`. To trust the whole tap, run `brew trust amplifiedengineer/tap`.
 
 Or with the install script, which checks the archive's checksum, its build attestation when `gh` can check it, and `pbtop --version`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install-pbtop.sh | sh
+curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install-pbtop.sh | sh
 ```
 
-Or download `pbtop-<version>-<target>.tar.gz` for your platform from the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest): macOS (arm64 and x86_64), Linux (arm64 and x86_64, static musl) or Windows (x86_64). `SHA256SUMS` and the build provenance attestations come with it.
+Or download `pbtop-<version>-<target>.tar.gz` for your platform from the [latest release](https://github.com/amplifiedengineer/playbook/releases/latest): macOS (arm64 and x86_64), Linux (arm64 and x86_64, static musl) or Windows (x86_64). `SHA256SUMS` and the build provenance attestations come with it.
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS
-gh attestation verify pbtop-<version>-<target>.tar.gz --repo pragmatic-engineer/playbook
+gh attestation verify pbtop-<version>-<target>.tar.gz --repo amplifiedengineer/playbook
 tar -xzf pbtop-<version>-<target>.tar.gz -C ~/.local/bin
 ```
 
@@ -116,7 +116,7 @@ Settings are playbook's own, from the global tier of its config store (`~/.confi
 The crate `playbook-telemetry` (library `playbook_telemetry`, built from the `crates/telemetry` folder of the playbook repository) exposes the same code the binary runs. A program that embeds it implements the `host::Host` trait (config lookup, state folder, program name, repo layout, sessions panel data) and installs it once with `host::install` before calling `entry::run`. `entry::run` picks the time zone itself when `tz::init` has not run, so an embedder gets the same local-time default and the same `usage.timeZone` setting. Without an installed host the standalone one described above is used.
 
 ```toml
-playbook-telemetry = { git = "https://github.com/pragmatic-engineer/playbook", tag = "v<version>", package = "playbook-telemetry" }
+playbook-telemetry = { git = "https://github.com/amplifiedengineer/playbook", tag = "v<version>", package = "playbook-telemetry" }
 ```
 
 Pin an exact tag (`telemetry-v<version>` for releases before 0.34.0). The API is still settling, so expect changes between minor versions until 1.0.

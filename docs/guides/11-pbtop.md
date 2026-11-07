@@ -11,11 +11,11 @@ The picture is drawn by a test from the real view and the default theme, so its 
 Install it with either command:
 
 ```bash
-brew install pragmatic-engineer/tap/pbtop
-curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install-pbtop.sh | sh
+brew install amplifiedengineer/tap/pbtop
+curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install-pbtop.sh | sh
 ```
 
-On Homebrew, `pbtop` is its own formula in the same tap. Read [Homebrew tap trust](00-install.md#homebrew-tap-trust) first. The full name records the trust. To install it by short name first, run `brew trust --formula pragmatic-engineer/tap/pbtop`.
+On Homebrew, `pbtop` is its own formula in the same tap. Read [Homebrew tap trust](00-install.md#homebrew-tap-trust) first. The full name records the trust. To install it by short name first, run `brew trust --formula amplifiedengineer/tap/pbtop`.
 
 Then run `pbtop`, `pbtop --summary` or `pbtop --json`.
 

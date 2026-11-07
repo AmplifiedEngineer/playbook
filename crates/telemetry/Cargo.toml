@@ -7,7 +7,7 @@ version.workspace = true
 edition.workspace = true
 description = "Agent Budget Dashboard for Claude Code sessions: a terminal view, reports and an optional telemetry receiver"
 license.workspace = true
-repository = "https://github.com/pragmatic-engineer/playbook"
+repository = "https://github.com/amplifiedengineer/playbook"
 publish = false
 
 [lib]

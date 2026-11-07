@@ -79,7 +79,7 @@ gh workflow run release.yml -f bump=patch -f dry_run=true   # rehearse
 gh workflow run release.yml -f bump=patch                   # or minor, major, or -f version=X.Y.Z
 ```
 
-It opens the release pull request with `scripts/bump-version.sh` and the changelog section, waits for the merge queue, tags the merged commit, builds and attests the assets, publishes the release as the latest and checks it, then opens the release pull requests in the Homebrew tap and the marketplace and waits for their own `vX.Y.Z` releases. It also opens the Nix flake pull request in pragmatic-engineer/nix. That is a leaf job: a red leaf job fails the run but leaves the release published. When a run fails, run it again with `-f version=X.Y.Z`: it goes on from where it stopped. [Release channels](docs/internals/06-release-channels.md) has the details and the rollback steps.
+It opens the release pull request with `scripts/bump-version.sh` and the changelog section, waits for the merge queue, tags the merged commit, builds and attests the assets, publishes the release as the latest and checks it, then opens the release pull requests in the Homebrew tap and the marketplace and waits for their own `vX.Y.Z` releases. It also opens the Nix flake pull request in amplifiedengineer/nix. That is a leaf job: a red leaf job fails the run but leaves the release published. When a run fails, run it again with `-f version=X.Y.Z`: it goes on from where it stopped. [Release channels](docs/internals/06-release-channels.md) has the details and the rollback steps.
 
 ### Breaking changes before 1.0
 
@@ -115,7 +115,7 @@ Renaming a command is a deprecation. Keep the old name as a hidden alias that ru
 
 ## Changing the plugin
 
-The skills, commands, agents and output style live in `plugins/playbook` and ship to users through the `pragmatic-engineer/marketplace` listing. See [ADR-0032](docs/adr/0032-plugin-in-the-playbook-repo.md) for how.
+The skills, commands, agents and output style live in `plugins/playbook` and ship to users through the `amplifiedengineer/marketplace` listing. See [ADR-0032](docs/adr/0032-plugin-in-the-playbook-repo.md) for how.
 
 - Keep the folder to markdown and `plugin.json`. The `payload-guard` check fails on anything else.
 - Do not bump the plugin version. The plugin ships with the next `vX.Y.Z` release, which sets one version for the binary and the plugin ([ADR-0038](docs/adr/0038-one-release-line.md)). Claude Code updates an installed plugin only when that version rises, so a plugin fix reaches users with the next release.
