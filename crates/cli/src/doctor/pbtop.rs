@@ -18,7 +18,7 @@ use std::process::Command;
 use std::time::Duration;
 
 /// The script that installs `pbtop` alone.
-const INSTALL_SCRIPT_FIX: &str = "curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install-pbtop.sh | sh";
+const INSTALL_SCRIPT_FIX: &str = "curl -fsSL https://raw.githubusercontent.com/amplified-engineer/playbook/main/install-pbtop.sh | sh";
 /// The Homebrew fix when playbook came from Homebrew too: the playbook
 /// formula links `pbtop`, so the separate formula goes.
 const BREW_LINK_FIX: &str = "brew uninstall pbtop && brew reinstall playbook";

@@ -213,14 +213,19 @@ pub fn is_system_package(exe: &Path) -> bool {
     exe.parent() == Some(Path::new("/usr/bin"))
 }
 
-const MANUAL_STEPS: &str = "To update by hand, download the asset for your platform from \
-https://github.com/pragmatic-engineer/playbook/releases/latest, check it against SHA256SUMS, \
-and replace the binary, or re-run install.sh.";
+fn manual_steps() -> String {
+    format!(
+        "To update by hand, download the asset for your platform from \
+https://github.com/{REPO}/releases/latest, check it against SHA256SUMS, \
+and replace the binary, or re-run install.sh."
+    )
+}
 
 fn refusals(env: &Env) -> Result<(), String> {
     if env.windows {
         return Err(format!(
-            "playbook update does not support Windows yet. {MANUAL_STEPS}"
+            "playbook update does not support Windows yet. {}",
+            manual_steps()
         ));
     }
     if is_homebrew(&env.exe) {
@@ -630,7 +635,7 @@ mod tests {
     }
 
     const LINK: &str =
-        "Full notes: https://github.com/pragmatic-engineer/playbook/releases/tag/v0.17.0\n";
+        "Full notes: https://github.com/amplified-engineer/playbook/releases/tag/v0.17.0\n";
 
     fn fixture(binary: &[u8], sums_hash_of: &[u8]) -> FakeFetcher {
         let asset = "playbook-0.17.0-x86_64-unknown-linux-musl";

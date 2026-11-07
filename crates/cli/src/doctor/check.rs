@@ -120,7 +120,7 @@ const DOCTOR_ROW_UNSUPPORTED: &str = "doc converter: not available on this platf
 /// The guards that must also be wired on PostToolUse.
 const POST_GUARDS: [&str; 1] = ["commit-message-sanitizer"];
 
-const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash, or brew install pragmatic-engineer/tap/playbook, and make sure its directory is on PATH";
+const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/amplified-engineer/playbook/main/install.sh | bash, or brew install amplified-engineer/tap/playbook, and make sure its directory is on PATH";
 
 /// One probe: reads the machine and returns its rows.
 type Probe = fn(&Env) -> Vec<Row>;
@@ -245,7 +245,7 @@ fn output_of(mut cmd: Command) -> Option<String> {
 }
 
 fn layer1(env: &Env) -> Row {
-    let miss = "run: claude plugin marketplace add pragmatic-engineer/marketplace && claude plugin install playbook@pragmatic-engineer";
+    let miss = "run: claude plugin marketplace add amplified-engineer/marketplace && claude plugin install playbook@pragmatic-engineer";
     let Some(claude) = on_path(env, "claude") else {
         return Row::new(
             "1",
