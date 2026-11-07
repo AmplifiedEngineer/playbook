@@ -1627,6 +1627,14 @@ fn real_main() {
                 None => hooks::rebuild_memory_graph::graph_text(&common::paths::memory_dir()),
             };
             let plan_path = plan.display().to_string();
+            let home = common::home_dir();
+            let slug_for_key = (!repo.is_empty()).then_some(repo.as_str());
+            let facts_tokens = config::resolve_valid("code.briefFactsTokens", &home, slug_for_key)
+                .ok()
+                .and_then(|(value, _, _)| value.as_u64())
+                .unwrap_or(0) as usize;
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let facts_source = |wu: &brief::Wu| brief::index_facts(wu, &cwd);
             let ctx = brief::Context {
                 plan_path: &plan_path,
                 worktree: worktree.as_deref(),
@@ -1634,6 +1642,10 @@ fn real_main() {
                 verify: verify.as_deref(),
                 repo: &repo,
                 graph_json: graph_json.as_deref(),
+                code_facts: (facts_tokens > 0).then_some(brief::CodeFacts {
+                    budget_tokens: facts_tokens,
+                    source: &facts_source,
+                }),
             };
             match brief::write_briefs(&text, &wus, &out, &ctx) {
                 Ok(paths) => {

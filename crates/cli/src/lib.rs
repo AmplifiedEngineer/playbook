@@ -1667,7 +1667,8 @@ pub enum PlanCommand {
     /// `/playbook:implement` gives these files to its subagents. Each `<OUT>/<wu-id>.brief.md` holds a short header (plan, worktree,
     /// scoped verify), the Work Unit's own section of the plan verbatim, and a
     /// "Relevant memory" list of the facts anchored to its files or matching
-    /// its title. Every id is checked first: a missing one writes nothing and
+    /// its title. With `code.briefFactsTokens` above 0 it adds a `Callers`
+    /// block of use sites from the code index, cut to that many tokens. Every id is checked first: a missing one writes nothing and
     /// exits 1. Prints the paths written, one per line.
     ///
     /// Example: `playbook plan brief docs/plan.md WU-1 WU-2 --out /tmp/briefs --verify 'cargo test {tests}'`

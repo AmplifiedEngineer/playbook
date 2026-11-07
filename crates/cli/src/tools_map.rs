@@ -14,6 +14,8 @@ use std::fmt::Write as _;
 /// The most tokens the printed map may cost, about 1.2 KB. One token is
 /// counted as four bytes, the usual rough rule for English and shell text.
 pub const TOKEN_BUDGET: usize = 300;
+/// Bytes the estimator counts as one token.
+const BYTES_PER_TOKEN: usize = 4;
 
 /// The last line of the map: where the full list of commands is.
 pub const FULL_LIST: &str = "Run `playbook commands` for the full list.";
@@ -367,7 +369,12 @@ pub fn render_json() -> String {
 
 /// Rough token cost of `text`: four bytes to a token, rounded up.
 pub fn tokens(text: &str) -> usize {
-    text.len().div_ceil(4)
+    text.len().div_ceil(BYTES_PER_TOKEN)
+}
+
+/// Whether `text` costs no more than [`TOKEN_BUDGET`] tokens.
+pub fn fits_budget(text: &str) -> bool {
+    tokens(text) <= TOKEN_BUDGET
 }
 
 #[cfg(test)]
@@ -440,9 +447,17 @@ mod tests {
     fn the_printed_map_fits_the_token_budget() {
         let cost = tokens(&render());
         assert!(
-            cost <= TOKEN_BUDGET,
+            fits_budget(&render()),
             "the tool map costs about {cost} tokens, budget {TOKEN_BUDGET}"
         );
+    }
+
+    #[test]
+    fn the_budget_passes_at_299_and_300_tokens_and_fails_at_301() {
+        let of_tokens = |n: usize| "x".repeat(n * BYTES_PER_TOKEN);
+        assert!(fits_budget(&of_tokens(TOKEN_BUDGET - 1)));
+        assert!(fits_budget(&of_tokens(TOKEN_BUDGET)));
+        assert!(!fits_budget(&of_tokens(TOKEN_BUDGET + 1)));
     }
 
     #[test]
@@ -475,7 +490,7 @@ mod tests {
         let text = render();
         assert!(text.ends_with(&format!("\n{FULL_LIST}\n")), "{text}");
         assert!(
-            text.len() <= TOKEN_BUDGET * 4,
+            text.len() <= TOKEN_BUDGET * BYTES_PER_TOKEN,
             "the map is {} bytes",
             text.len()
         );

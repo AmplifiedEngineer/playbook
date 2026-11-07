@@ -11,6 +11,18 @@ use crate::json::memorycontext::{parse_graph, Graph, Node};
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
+/// The heading of the code-facts block in a brief. `briefs.md` names the
+/// same heading for review briefs.
+pub const CODE_FACTS_HEADING: &str = "## Callers";
+/// Most names one brief looks up in the index.
+const MAX_FACT_NAMES: usize = 8;
+/// Most use sites kept for one name.
+const MAX_REFS_PER_NAME: usize = 3;
+/// A name shorter than this is too common to look up.
+const MIN_FACT_NAME_LEN: usize = 3;
+/// The role `playbook code refs` gives a plain use of a name.
+const USE_ROLE: &str = "use";
+
 /// One Work Unit's section of a plan.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Wu {
@@ -217,6 +229,73 @@ pub struct Context<'a> {
     pub verify: Option<&'a str>,
     pub repo: &'a str,
     pub graph_json: Option<&'a str>,
+    pub code_facts: Option<CodeFacts<'a>>,
+}
+
+/// The code facts of a brief and the token budget that bounds them.
+pub struct CodeFacts<'a> {
+    /// `code.briefFactsTokens`. 0 means no block.
+    pub budget_tokens: usize,
+    /// Ranked facts for one Work Unit, best first.
+    pub source: &'a dyn Fn(&Wu) -> Vec<String>,
+}
+
+/// The code-facts block for `facts`, best ranked first. Facts are cut from
+/// the lowest ranked end until the block fits `budget_tokens`, counted with
+/// the tool map's estimator. Empty when the budget is 0 or no fact fits.
+pub fn code_facts_block(facts: &[String], budget_tokens: usize) -> String {
+    let block = |n: usize| format!("\n{CODE_FACTS_HEADING}\n\n{}\n", facts[..n].join("\n"));
+    if budget_tokens == 0 {
+        return String::new();
+    }
+    (1..=facts.len())
+        .rev()
+        .map(block)
+        .find(|text| crate::tools_map::tokens(text) <= budget_tokens)
+        .unwrap_or_default()
+}
+
+/// Names a section puts in backticks and that look like identifiers, in the
+/// order they first appear.
+fn backticked_names(section: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for (i, token) in section.split('`').enumerate() {
+        let name = token.trim();
+        let ident = i % 2 == 1
+            && name.len() >= MIN_FACT_NAME_LEN
+            && name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if ident && seen.insert(name.to_string()) {
+            out.push(name.to_string());
+        }
+    }
+    out
+}
+
+/// Use sites from the index of the names a Work Unit's section lists, one
+/// line each, in the order the names appear. An unusable index gives none.
+pub fn index_facts(wu: &Wu, cwd: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for name in backticked_names(&wu.section)
+        .into_iter()
+        .take(MAX_FACT_NAMES)
+    {
+        let mut opts = playbook_code::refs::RefsOptions::new(&name);
+        opts.limit = MAX_REFS_PER_NAME;
+        let Ok(found) = playbook_code::find_refs(cwd, &opts) else {
+            return Vec::new();
+        };
+        out.extend(
+            found
+                .result
+                .refs
+                .iter()
+                .filter(|r| r.role == USE_ROLE)
+                .map(|r| format!("- `{name}` at {}:{}: {}", r.path, r.line, r.text.trim())),
+        );
+    }
+    out
 }
 
 /// The text of one WU's brief.
@@ -250,6 +329,9 @@ pub fn render(wu: &Wu, ctx: &Context<'_>) -> String {
         out.push_str("\n## Relevant memory\n\n");
         out.push_str(&facts.join("\n"));
         out.push('\n');
+    }
+    if let Some(code) = &ctx.code_facts {
+        out.push_str(&code_facts_block(&(code.source)(wu), code.budget_tokens));
     }
     out
 }
@@ -407,6 +489,7 @@ mod tests {
             verify: Some("cargo test {tests}"),
             repo: "o/r",
             graph_json: Some(GRAPH),
+            code_facts: None,
         };
         let text = render(wu, &ctx);
         assert!(text.starts_with("# Brief: WU-0 Types and schema\n"));
@@ -426,6 +509,7 @@ mod tests {
             verify: None,
             repo: "o/r",
             graph_json: None,
+            code_facts: None,
         };
         let text = render(wu, &ctx);
         assert!(!text.contains("Relevant memory") && !text.contains("Scoped verify"));
@@ -443,6 +527,7 @@ mod tests {
             verify: None,
             repo: "o/r",
             graph_json: None,
+            code_facts: None,
         };
         let err = write_briefs(PLAN, &["WU-0".into(), "WU-9".into()], &dir, &ctx).unwrap_err();
         assert!(err.contains("WU-9") && err.contains("WU-0, WU-1"), "{err}");
@@ -454,5 +539,124 @@ mod tests {
         assert_eq!(paths.len(), 2);
         assert!(dir.join("wu-0.brief.md").is_file() && dir.join("wu-1.brief.md").is_file());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn facts(n: usize) -> Vec<String> {
+        (0..n)
+            .map(|i| format!("- fact {i} at src/a.rs:{i}"))
+            .collect()
+    }
+
+    fn block_tokens(facts: &[String]) -> usize {
+        crate::tools_map::tokens(&code_facts_block(facts, usize::MAX))
+    }
+
+    #[test]
+    fn a_block_exactly_at_the_budget_is_not_cut() {
+        let f = facts(4);
+        let exact = block_tokens(&f);
+        let text = code_facts_block(&f, exact);
+        assert!(text.contains("fact 3"), "{text}");
+        assert!(text.starts_with(&format!("\n{CODE_FACTS_HEADING}\n\n")));
+    }
+
+    #[test]
+    fn one_token_over_the_budget_cuts_the_lowest_ranked_fact() {
+        let f = facts(4);
+        let text = code_facts_block(&f, block_tokens(&f) - 1);
+        assert!(
+            text.contains("fact 2") && !text.contains("fact 3"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn facts_above_the_budget_are_cut_from_the_end_and_stay_within_it() {
+        let f = facts(30);
+        let budget = block_tokens(&f) / 2;
+        let text = code_facts_block(&f, budget);
+        assert!(crate::tools_map::tokens(&text) <= budget);
+        assert!(
+            text.contains("fact 0") && !text.contains("fact 29"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_zero_budget_or_no_fact_gives_no_block() {
+        assert_eq!(code_facts_block(&facts(3), 0), "");
+        assert_eq!(code_facts_block(&[], 100), "");
+        assert_eq!(code_facts_block(&facts(3), 1), "");
+    }
+
+    #[test]
+    fn the_brief_has_the_block_only_with_a_budget() {
+        let wu = &parse_wus(PLAN)[1];
+        let source = |_: &Wu| vec!["- `run` at src/app.rs:7: run();".to_string()];
+        let mut ctx = Context {
+            plan_path: "p.md",
+            worktree: Some("/main"),
+            worktree_base: None,
+            verify: None,
+            repo: "o/r",
+            graph_json: None,
+            code_facts: Some(CodeFacts {
+                budget_tokens: 0,
+                source: &source,
+            }),
+        };
+        assert!(!render(wu, &ctx).contains("Callers"));
+        ctx.code_facts = Some(CodeFacts {
+            budget_tokens: 100,
+            source: &source,
+        });
+        let text = render(wu, &ctx);
+        assert!(
+            text.ends_with("\n## Callers\n\n- `run` at src/app.rs:7: run();\n"),
+            "{text}"
+        );
+        assert_eq!(text.matches("## Callers").count(), 1);
+    }
+
+    #[test]
+    fn names_come_from_backticks_that_look_like_identifiers() {
+        let names = backticked_names("call `run_it` and `src/a.rs`, then `run_it`, `ab`, `Foo`");
+        assert_eq!(names, vec!["run_it", "Foo"]);
+    }
+
+    #[test]
+    fn the_brief_with_a_budget_matches_the_golden_text() {
+        let wu = &parse_wus(PLAN)[1];
+        let source = |_: &Wu| {
+            vec![
+                "- `types` at src/app.rs:7: types::load();".to_string(),
+                "- `types` at src/main.rs:12: types::save();".to_string(),
+            ]
+        };
+        let ctx = Context {
+            plan_path: "plans/p.md",
+            worktree: Some("/main"),
+            worktree_base: None,
+            verify: Some("cargo test {tests}"),
+            repo: "o/r",
+            graph_json: None,
+            code_facts: Some(CodeFacts {
+                budget_tokens: 100,
+                source: &source,
+            }),
+        };
+        assert_eq!(
+            render(wu, &ctx),
+            include_str!("../tests/golden/brief_with_callers.md")
+        );
+    }
+
+    #[test]
+    fn briefs_md_has_one_callers_rule_gated_by_the_key() {
+        let rules = include_str!(
+            "../../../plugins/playbook/skills/delegating-subagents/references/briefs.md"
+        );
+        assert_eq!(rules.matches("**Callers,").count(), 1);
+        assert!(rules.contains("code.briefFactsTokens"));
     }
 }
