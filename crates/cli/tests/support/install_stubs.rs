@@ -64,6 +64,8 @@ const GH_STUB: &str = r#"case "${STUB_GH:-absent}" in
      [ "$1 $2" = "attestation verify" ] || exit 1
      echo "gh $*" >> "${GH_LOG:-/dev/null}"
      [ "$STUB_GH" = pass ] && exit 0
+     [ "$STUB_GH" = middle ] && { case "$*" in *"--repo amplified-engineer/"*) exit 0 ;; esac; echo "no matching attestation" >&2; exit 1; }
+     [ "$STUB_GH" = legacy ] && { case "$*" in *"--repo pragmatic-engineer/"*) exit 0 ;; esac; echo "no matching attestation" >&2; exit 1; }
      [ "$STUB_GH" = missing ] && { echo "no attestations found for subject" >&2; exit 1; }
      echo "no matching attestation" >&2; exit 1 ;;
 esac

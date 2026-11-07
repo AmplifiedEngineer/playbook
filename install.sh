@@ -19,7 +19,7 @@
 # When it replaces an older binary, it prints a line with the release notes
 # link and the breaking changes of the release (ADR 0037).
 #
-#   curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh | bash
 #
 # The binary comes from the latest GitHub release, or from the release named by
 # PLAYBOOK_REF (a tag such as v1.2.3). A branch or a commit has no published
@@ -32,13 +32,17 @@
 # for one more release.
 set -euo pipefail
 
-RELEASE_REPO="pragmatic-engineer/playbook"
+RELEASE_REPO="amplifiedengineer/playbook"
+# The organization was renamed twice. A release built before a rename carries
+# the old name in its build attestation, so the check below tries RELEASE_REPO
+# first and these after it, newest first.
+LEGACY_RELEASE_REPOS="amplified-engineer/playbook pragmatic-engineer/playbook"
 # Root for every directory playbook itself writes (memory, runtime state,
 # the statusline script); mirrors playbook_root_from() in
 # crates/common/src/paths.rs. Not overridable by env var: nothing downstream
 # of this script reads such an override. The Claude Code folder is fixed too,
 # because `playbook setup` always uses ~/.claude.
-SKILLS_INSTALL_CMD="claude plugin marketplace add pragmatic-engineer/marketplace"
+SKILLS_INSTALL_CMD="claude plugin marketplace add amplifiedengineer/marketplace"
 SKILLS_INSTALL_CMD="$SKILLS_INSTALL_CMD && claude plugin install playbook@pragmatic-engineer"
 PLAYBOOK_CONFIG_DIR="$HOME/.config/playbook"
 PLAYBOOK_BIN_DIR="${PLAYBOOK_BIN_DIR:-$HOME/.local/bin}"
@@ -132,7 +136,7 @@ print_help() {
 Install the playbook binary.
 
 Usage:
-  curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh | bash
   curl -fsSL .../install.sh | bash -s -- [flags]
   ./install.sh [flags]
 
@@ -147,7 +151,7 @@ What it does:
 
 It does not install the skills. They are a separate Claude Code plugin that works
 without the binary:
-  claude plugin marketplace add pragmatic-engineer/marketplace
+  claude plugin marketplace add amplifiedengineer/marketplace
   claude plugin install playbook@pragmatic-engineer
 
 Env:
@@ -375,17 +379,27 @@ show_release_notes() {
 verify_attestation() {
     local file="$1" strict="${PLAYBOOK_REQUIRE_ATTESTATION:-0}" err
     if command -v gh >/dev/null 2>&1 && gh attestation --help >/dev/null 2>&1; then
-        if err="$(gh attestation verify "$file" --repo "$RELEASE_REPO" \
-            --signer-workflow "$RELEASE_REPO/.github/workflows/release.yml" 2>&1)"; then
-            log "Verified the build attestation for $ASSET"
+        local repo gap="" real=""
+        # shellcheck disable=SC2086 # the list is words on purpose
+        for repo in "$RELEASE_REPO" $LEGACY_RELEASE_REPOS; do
+            if err="$(gh attestation verify "$file" --repo "$repo" \
+                --signer-workflow "$repo/.github/workflows/release.yml" 2>&1)"; then
+                log "Verified the build attestation for $ASSET"
+                return 0
+            fi
+            # Older releases and a gh that is not logged in cannot be verified; that
+            # is a gap, not a mismatch, so only strict mode treats it as fatal.
+            if printf '%s' "$err" | grep -qiE 'no attestations found|failed to fetch|gh auth login|GH_TOKEN|HTTP 401'; then
+                gap="${gap:-$err}"
+            else
+                real="${real:-$err}"
+            fi
+        done
+        if [ "$strict" != "1" ] && [ -z "$real" ] && [ -n "$gap" ]; then
+            warn "checksum only, provenance not verified: $(printf '%s' "$gap" | head -n 1)"
             return 0
         fi
-        # Older releases and a gh that is not logged in cannot be verified; that
-        # is a gap, not a mismatch, so only strict mode treats it as fatal.
-        if [ "$strict" != "1" ] && printf '%s' "$err" | grep -qiE 'no attestations found|failed to fetch|gh auth login|GH_TOKEN|HTTP 401'; then
-            warn "checksum only, provenance not verified: $(printf '%s' "$err" | head -n 1)"
-            return 0
-        fi
+        err="${real:-$gap}"
         die "attestation verification failed for $ASSET: $err"
     fi
     [ "$strict" = "1" ] && die "PLAYBOOK_REQUIRE_ATTESTATION=1 but gh with 'attestation' support is not available"

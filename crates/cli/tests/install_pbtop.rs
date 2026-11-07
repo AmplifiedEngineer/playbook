@@ -304,7 +304,7 @@ fn the_piped_script_downloads_install_sh_from_main_and_installs_pbtop() {
     assert!(text.contains("Installed pbtop 1.2.3"), "{text}");
     assert!(
         run.curl_log.contains(
-            "https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh"
+            "https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh"
         ),
         "{}",
         run.curl_log
