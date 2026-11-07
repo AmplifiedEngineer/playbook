@@ -8,6 +8,10 @@ name: libsql-evidence
 
 on:
   workflow_dispatch:
+  # A workflow that is not on the default branch cannot be dispatched, so the
+  # spike branch also runs it on push.
+  push:
+    branches: [spike/gh-1585-libsql-evidence]
 
 permissions:
   contents: read
