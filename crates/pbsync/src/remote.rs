@@ -26,6 +26,13 @@ const CREATE_META_SQL: &str =
 const INSERT_META_SQL: &str = "INSERT OR IGNORE INTO shared_meta (key, value) VALUES (?, ?)";
 const READ_SALT_SQL: &str = "SELECT value FROM shared_meta WHERE key = ?";
 
+/// Tables that are not row-synced from `usage.db`, created beside the shared ones.
+const EXTRA_DDL: [&str; 1] = [
+    "CREATE TABLE IF NOT EXISTS shared_config_snapshots (machine TEXT NOT NULL, key TEXT NOT NULL, \
+     value TEXT NOT NULL, pushed_at INTEGER NOT NULL, schema_version INTEGER NOT NULL, \
+     PRIMARY KEY (machine, key))",
+];
+
 /// Why a remote setup step failed.
 #[derive(Debug, PartialEq, Eq)]
 pub enum RemoteError {
@@ -155,6 +162,7 @@ pub fn ensure_schema(
         statements.push(statement(create_table_sql(table), vec![]));
         statements.push(statement(create_index_sql(table), vec![]));
     }
+    statements.extend(EXTRA_DDL.iter().map(|sql| statement(*sql, vec![])));
     transport.execute(&statements)?;
     Ok(())
 }

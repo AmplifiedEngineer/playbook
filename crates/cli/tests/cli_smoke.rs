@@ -551,6 +551,7 @@ fn table() -> Vec<Case> {
         case("config export", &["config", "export"]).out("\"version\": 1"),
         case("config import", &["config", "import", "{ROOT}/cfg.json"]).file( "cfg.json", r#"{"version":1,"global":{},"orgs":{},"repos":{}}"#, ).writes(),
         case("config sync-files", &["config", "sync-files"]).out("refreshed").writes(),
+        case("config apply-proposal", &["config", "apply-proposal"]).out("No sync proposal to apply."),
         case("state list", &["state", "list"]).writes(),
         case( "effort resolve", &["effort", "resolve", "agent", "reviewer"], ).out("no such component"),
         case("effort suggest", &["effort", "suggest"]).code(1).err("no plugin root"),
