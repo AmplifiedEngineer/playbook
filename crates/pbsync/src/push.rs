@@ -327,14 +327,21 @@ pub(crate) fn write_state(
     Ok(())
 }
 
+pub(crate) fn read_state(
+    local: &Connection,
+    key: &str,
+) -> Result<Option<String>, playbook_store::Error> {
+    local
+        .query_row(READ_STATE_SQL, [key], |r| r.get(0))
+        .optional()
+}
+
 /// Stores the error text and counts one more consecutive failure.
 pub(crate) fn record_failure(
     local: &Connection,
     error: &dyn fmt::Display,
 ) -> Result<(), playbook_store::Error> {
-    let previous: Option<String> = local
-        .query_row(READ_STATE_SQL, [KEY_FAILURES], |r| r.get(0))
-        .optional()?;
+    let previous = read_state(local, KEY_FAILURES)?;
     let failures = previous.and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
     write_state(local, KEY_LAST_ERROR, &error.to_string())?;
     write_state(local, KEY_FAILURES, &failures.saturating_add(1).to_string())
