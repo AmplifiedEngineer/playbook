@@ -35,6 +35,8 @@ pub struct ColumnDef {
     pub name: &'static str,
     pub kind: ColumnKind,
     pub transform: Transform,
+    /// Overwritten on the remote when a re-sent row has grown.
+    pub grows: bool,
 }
 
 /// One shared table. The remote table also carries the machine id as part of
@@ -44,6 +46,8 @@ pub struct TableDef {
     pub local_table: &'static str,
     pub remote_table: &'static str,
     pub key_columns: &'static [&'static str],
+    /// A re-sent row replaces the remote one only when this column is larger.
+    pub growth_column: &'static str,
     pub columns: &'static [ColumnDef],
 }
 
@@ -52,6 +56,14 @@ const fn col(name: &'static str, kind: ColumnKind, transform: Transform) -> Colu
         name,
         kind,
         transform,
+        grows: false,
+    }
+}
+
+const fn growing(name: &'static str, kind: ColumnKind) -> ColumnDef {
+    ColumnDef {
+        grows: true,
+        ..copy(name, kind)
     }
 }
 
@@ -63,6 +75,7 @@ const USAGE_EVENTS: TableDef = TableDef {
     local_table: "usage_events",
     remote_table: "shared_usage_events",
     key_columns: &["event_id"],
+    growth_column: "output_tokens",
     columns: &[
         copy("event_id", ColumnKind::Text),
         copy("timestamp", ColumnKind::Integer),
@@ -70,12 +83,12 @@ const USAGE_EVENTS: TableDef = TableDef {
         col("repo", ColumnKind::Text, Transform::HashRepo),
         copy("model", ColumnKind::Text),
         copy("effort", ColumnKind::Text),
-        copy("input_tokens", ColumnKind::Integer),
-        copy("output_tokens", ColumnKind::Integer),
-        copy("cache_creation_tokens", ColumnKind::Integer),
-        copy("cache_read_tokens", ColumnKind::Integer),
-        copy("cache_creation_1h_tokens", ColumnKind::Integer),
-        copy("cost_usd", ColumnKind::Real),
+        growing("input_tokens", ColumnKind::Integer),
+        growing("output_tokens", ColumnKind::Integer),
+        growing("cache_creation_tokens", ColumnKind::Integer),
+        growing("cache_read_tokens", ColumnKind::Integer),
+        growing("cache_creation_1h_tokens", ColumnKind::Integer),
+        growing("cost_usd", ColumnKind::Real),
     ],
 };
 
