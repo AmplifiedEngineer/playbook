@@ -145,9 +145,11 @@ pub fn mode(home: &Path) -> Mode {
 /// else the one `playbook@<marketplace>` entry. `None` when the plugin is
 /// not installed, or more than one other marketplace lists it.
 pub fn plugin_id(claude_home: &Path) -> Option<String> {
-    use crate::common::plugin_state::{installed_entry_at, PLUGIN_KEY};
-    if installed_entry_at(claude_home, PLUGIN_KEY).is_some() {
-        return Some(PLUGIN_KEY.to_string());
+    use crate::common::plugin_state::{installed_entry_at, plugin_keys};
+    for key in plugin_keys() {
+        if installed_entry_at(claude_home, &key).is_some() {
+            return Some(key);
+        }
     }
     let text = std::fs::read_to_string(claude_home.join("plugins/installed_plugins.json")).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
