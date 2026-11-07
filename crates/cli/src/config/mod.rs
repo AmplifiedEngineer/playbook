@@ -10,6 +10,8 @@
 //! defaults, not Claude Code's.
 
 pub mod keys;
+pub mod parse;
+pub mod proposal;
 pub mod store;
 pub mod sync_files;
 pub mod write;

@@ -416,7 +416,17 @@ Settings come from tiers, highest first: repo, org, global, then the built-in de
 
 Example: `playbook config set autoReview.enabled true`
 
-Subcommands: `export`, `get`, `import`, `list`, `set`
+Subcommands: `apply-proposal`, `export`, `get`, `import`, `list`, `set`
+
+### `playbook config apply-proposal`
+
+Apply the settings that `pbsync config pull` proposed
+
+Shows each proposed value next to your current global value and asks before it stores anything. Only keys that may sync are accepted, and each value is checked like `config set`. A project value still wins over the global one. Nothing changes unless you answer yes or pass `--yes`.
+
+Example: `playbook config apply-proposal --yes`
+
+- `--yes`: Apply without asking
 
 ### `playbook config export`
 

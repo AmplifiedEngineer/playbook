@@ -146,7 +146,7 @@ command playbook mode ask subcommands=- aliases=- groups=-
 command playbook mode status subcommands=- aliases=- groups=Status[json,flag]
 arg playbook mode status id=json long=json short=- value_names=JSON possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
 arg playbook mode status id=flag long=flag short=- value_names=FLAG possible=ask,auto defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=playbook::ModeArg conflicts=-
-command playbook config subcommands=get,set,list,export,import,sync-files aliases=- groups=Config[-]
+command playbook config subcommands=get,set,list,export,import,sync-files,apply-proposal aliases=- groups=Config[-]
 command playbook config get subcommands=- aliases=- groups=Get[key]
 arg playbook config get id=key long=- short=- value_names=KEY possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 command playbook config set subcommands=- aliases=- groups=Set[key,value,org,global]
@@ -159,6 +159,8 @@ command playbook config export subcommands=- aliases=- groups=-
 command playbook config import subcommands=- aliases=- groups=Import[file]
 arg playbook config import id=file long=- short=- value_names=FILE possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 command playbook config sync-files subcommands=- aliases=- groups=-
+command playbook config apply-proposal subcommands=- aliases=- groups=ApplyProposal[yes]
+arg playbook config apply-proposal id=yes long=yes short=- value_names=YES possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
 command playbook state subcommands=list aliases=- groups=State[-]
 command playbook state list subcommands=- aliases=- groups=List[prefix,json]
 arg playbook state list id=prefix long=- short=- value_names=PREFIX possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
