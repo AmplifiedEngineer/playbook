@@ -550,6 +550,7 @@ fn table() -> Vec<Case> {
         case("config list", &["config", "list"]).out("autoReview.enabled").plain(),
         case("config export", &["config", "export"]).out("\"version\": 1"),
         case("config import", &["config", "import", "{ROOT}/cfg.json"]).file( "cfg.json", r#"{"version":1,"global":{},"orgs":{},"repos":{}}"#, ).writes(),
+        case("config sync-files", &["config", "sync-files"]).out("refreshed").writes(),
         case("state list", &["state", "list"]).writes(),
         case( "effort resolve", &["effort", "resolve", "agent", "reviewer"], ).out("no such component"),
         case("effort suggest", &["effort", "suggest"]).code(1).err("no plugin root"),
