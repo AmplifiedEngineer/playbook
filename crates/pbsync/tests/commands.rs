@@ -232,7 +232,7 @@ fn a_missing_machine_id_or_usage_db_is_a_named_error() {
 fn every_command_has_help_and_rejects_unknown_flags() {
     // Arrange
     let machine = Machine::new("help", "m1");
-    for command in ["push", "pull", "sync"] {
+    for command in ["push", "pull", "sync", "purge"] {
         // Act
         let help = machine.pb(&[command, "--help"]);
         let unknown = machine.pb(&[command, "--bogus"]);
