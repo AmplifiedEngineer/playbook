@@ -5,7 +5,7 @@ description: Lists /playbook:* commands and when to use each, and points to the 
 
 # Playbook Usage
 
-`pragmatic-engineer/playbook` is a Claude Code plugin: slash commands under `/playbook:*` plus supporting skills and hooks. The main flow is a planning pipeline: `/playbook:plan` (or `/playbook:adr` for a hard-to-reverse decision), then `/playbook:implement`, which takes a raw idea through a verified plan to delivered code. `/playbook:plan` runs the moment the intent matches. `/playbook:adr` and `/playbook:implement` only offer in one line and wait for a yes. Each command's own description lists its trigger phrases.
+`amplifiedengineer/playbook` is a Claude Code plugin: slash commands under `/playbook:*` plus supporting skills and hooks. The main flow is a planning pipeline: `/playbook:plan` (or `/playbook:adr` for a hard-to-reverse decision), then `/playbook:implement`, which takes a raw idea through a verified plan to delivered code. `/playbook:plan` runs the moment the intent matches. `/playbook:adr` and `/playbook:implement` only offer in one line and wait for a yes. Each command's own description lists its trigger phrases.
 
 ## Planning pipeline
 

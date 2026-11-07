@@ -1,6 +1,6 @@
 # Release channels
 
-A release reaches users through these channels: the GitHub release assets (built by the `build` and `publish` jobs of `release.yml`), `install.sh`, which downloads those assets, the Homebrew tap `pragmatic-engineer/homebrew-tap`, the Nix flake in `pragmatic-engineer/nix` and the plugin marketplace `pragmatic-engineer/marketplace`. Nothing else ships playbook: there is no AUR package, apt or dnf repository, scoop bucket or winget package. On Windows the route is the raw `.exe` release asset.
+A release reaches users through these channels: the GitHub release assets (built by the `build` and `publish` jobs of `release.yml`), `install.sh`, which downloads those assets, the Homebrew tap `amplifiedengineer/homebrew-tap`, the Nix flake in `amplifiedengineer/nix` and the plugin marketplace `amplifiedengineer/marketplace`. Nothing else ships playbook: there is no AUR package, apt or dnf repository, scoop bucket or winget package. On Windows the route is the raw `.exe` release asset.
 
 After a release is published and checked, the `downstream` job of `release.yml` opens a pull request in the tap and in the marketplace, as the section on the release workflow describes. The tap also checks every 30 minutes for a newer release and bumps a formula itself when the `downstream` job has not done it within an hour.
 
@@ -14,7 +14,7 @@ The binary and the plugin share one version line ([ADR 0038](../adr/0038-one-rel
 - The `version-sync` check in `plugin-guards.yml` fails a pull request or a push to `main` when they differ. The `plan` job of `release.yml` checks again before a `v` release.
 - The release pull request runs `scripts/bump-version.sh X.Y.Z`, which sets all of them and the `PLAYBOOK_REF` pins together. A plugin change between releases needs no bump.
 
-The marketplace repository `pragmatic-engineer/marketplace` lists the plugin as a `git-subdir` source that points at `plugins/playbook` in this repository.
+The marketplace repository `amplifiedengineer/marketplace` lists the plugin as a `git-subdir` source that points at `plugins/playbook` in this repository.
 
 - The `downstream` job pins its `ref` to the release tag `vX.Y.Z` and sets `metadata.version` once the release is published.
 - Claude Code copies only that folder at the tag and updates an installed plugin when the `version` at the new pin is higher.
@@ -70,7 +70,7 @@ When `downstream` has moved the tap (its `moved` output, not set when the app se
 
 ### Nix flake
 
-The flake lives in [pragmatic-engineer/nix](https://github.com/pragmatic-engineer/nix), with the `playbook` and `pbtop` outputs. After `verify`, the `nix` job moves it, the way `downstream` moves the tap:
+The flake lives in [amplifiedengineer/nix](https://github.com/amplifiedengineer/nix), with the `playbook` and `pbtop` outputs. After `verify`, the `nix` job moves it, the way `downstream` moves the tap:
 
 1. It checks `SHA256SUMS` and the four Nix assets against their attestation.
 2. `scripts/render-flake.sh` rewrites the `releases` block of `flake.nix` in a checkout of that repository (the version and one SRI hash per system).
@@ -78,13 +78,13 @@ The flake lives in [pragmatic-engineer/nix](https://github.com/pragmatic-enginee
 
 - `scripts/release-notes.sh` still leaves such a commit out of the notes, for the history from before the flake moved.
 - The job skips when the release is not the latest or the flake is already ahead, so a backport does not move the flake back. Without the app secrets it warns and passes.
-- The app token covers `pragmatic-engineer/nix` only. When the igorjs app installation cannot reach that repository, the job fails and the summary names the owner step: add the repository to the installation, then run again with `version=X.Y.Z`.
+- The app token covers `amplifiedengineer/nix` only. When the igorjs app installation cannot reach that repository, the job fails and the summary names the owner step: add the repository to the installation, then run again with `version=X.Y.Z`.
 - If the flake repository moved between the checkout and the commit, `release-gh.sh` fails with "Run again": run the workflow with `version=X.Y.Z`.
 - A dry run renders from a stand-in `SHA256SUMS`, checks the token with read calls, shows the diff and opens nothing.
 - The flake has no release tags, so users pin the merge commit of the flake pull request.
 - To roll the flake back, open a pull request in that repository that reverts the flake change. The older hashes stay valid because release assets do not change.
 
-Then `verify-nix-linux` and `verify-nix-macos` run `nix run github:pragmatic-engineer/nix/<commit>#playbook -- --version` at the commit that carries the flake and compare it with the version. The Linux job also builds a copy with a wrong hash, which must fail. Both are leaf jobs, skipped in a dry run and when `nix` moved nothing. The flake repository also builds both outputs on Linux and macOS in its own CI.
+Then `verify-nix-linux` and `verify-nix-macos` run `nix run github:amplifiedengineer/nix/<commit>#playbook -- --version` at the commit that carries the flake and compare it with the version. The Linux job also builds a copy with a wrong hash, which must fail. Both are leaf jobs, skipped in a dry run and when `nix` moved nothing. The flake repository also builds both outputs on Linux and macOS in its own CI.
 
 ### Dry run
 
@@ -121,8 +121,8 @@ A published release is not deleted and its tag is not moved, because installs an
 
 1. Mark it as a pre-release, so it stops being the latest: `gh release edit vX.Y.Z --prerelease --latest=false`. Then mark the previous release as the latest with `gh release edit vA.B.C --latest`. `install.sh` and `playbook update` read the latest release.
 2. Add a warning at the top of its notes, saying what is wrong and which version to use. `--notes-file` replaces the whole body, so start from the current notes: `gh release view vX.Y.Z --json body --jq .body > notes.md`, add the warning at the top of `notes.md`, then `gh release edit vX.Y.Z --notes-file notes.md`.
-3. Move the plugin back: open a pull request in `pragmatic-engineer/marketplace` that sets the `ref` of the `playbook` entry to `vA.B.C` and `metadata.version` to `A.B.C`. New installs then get the previous plugin. Claude Code never installs a lower plugin version over an installed one, so users who already updated keep the bad plugin until the next patch.
-4. Move the formulas back: in `pragmatic-engineer/homebrew-tap`, run `SOURCE_REPO=playbook TAG_PREFIX=v .github/scripts/bump-formula.sh A.B.C Formula/<formula>.rb` for `playbook` and `pbtop`, and open a pull request with the result.
+3. Move the plugin back: open a pull request in `amplifiedengineer/marketplace` that sets the `ref` of the `playbook` entry to `vA.B.C` and `metadata.version` to `A.B.C`. New installs then get the previous plugin. Claude Code never installs a lower plugin version over an installed one, so users who already updated keep the bad plugin until the next patch.
+4. Move the formulas back: in `amplifiedengineer/homebrew-tap`, run `SOURCE_REPO=playbook TAG_PREFIX=v .github/scripts/bump-formula.sh A.B.C Formula/<formula>.rb` for `playbook` and `pbtop`, and open a pull request with the result.
    - The tap's scheduled check never moves a formula back to a lower version, and it skips a pre-release.
    - Before 0.35.0 the tap had no `pbtop` formula: for such an A.B.C, move only `playbook` this way and remove `Formula/pbtop.rb` by hand.
 5. Ship the fix as the next patch release, which moves the tap and the marketplace forward again.

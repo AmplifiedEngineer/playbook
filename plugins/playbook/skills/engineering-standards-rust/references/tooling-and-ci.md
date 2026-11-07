@@ -7,7 +7,7 @@ Formatter, lints, dependency checks and the CI steps that run them. A lint marke
 - Format and lint: rules 1 to 5
 - Toolchain and dependencies: rules 6 to 10
 - Features and releases: rules 11 to 13
-- Worked example: pragmatic-engineer/playbook
+- Worked example: amplifiedengineer/playbook
 
 ## Format and lint
 
@@ -61,6 +61,6 @@ Formatter, lints, dependency checks and the CI steps that run them. A lint marke
 
 13. **Libraries run `cargo semver-checks` before a release, and build docs with warnings denied:** `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps`.
 
-## Worked example: pragmatic-engineer/playbook
+## Worked example: amplifiedengineer/playbook
 
-[pragmatic-engineer/playbook](https://github.com/pragmatic-engineer/playbook), the source of this plugin, applies most of these rules. Its CI does not pass `--locked`. Its `rust-toolchain.toml` pins one Rust version. `[workspace.lints.clippy]` turns on `uninlined_format_args`, `manual_let_else` and `undocumented_unsafe_blocks`. CI runs `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, and a second Clippy pass on `--lib --bins` that denies `unwrap_used` and `expect_used`. Tests run under `cargo nextest` with retries set to 0, then `cargo test --doc`, and `cargo audit` checks advisories.
+[amplifiedengineer/playbook](https://github.com/amplifiedengineer/playbook), the source of this plugin, applies most of these rules. Its CI does not pass `--locked`. Its `rust-toolchain.toml` pins one Rust version. `[workspace.lints.clippy]` turns on `uninlined_format_args`, `manual_let_else` and `undocumented_unsafe_blocks`. CI runs `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, and a second Clippy pass on `--lib --bins` that denies `unwrap_used` and `expect_used`. Tests run under `cargo nextest` with retries set to 0, then `cargo test --doc`, and `cargo audit` checks advisories.

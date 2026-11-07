@@ -19,7 +19,7 @@ In the steps below, `playbook setup` means `playbook init` when Step 1 found an 
 
 ## Step 0: Read the run mode
 
-Do this first. If `command -v playbook` finds nothing, stop with one line: "playbook is not on PATH. If you just installed it, open a new terminal and run /playbook:setup again; otherwise run `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash` first."
+Do this first. If `command -v playbook` finds nothing, stop with one line: "playbook is not on PATH. If you just installed it, open a new terminal and run /playbook:setup again; otherwise run `curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh | bash` first."
 
 If `$ARGUMENTS` holds `--help` or `-h`, run `playbook setup --help`, or the old name with `--help` when that fails with "unrecognized subcommand" (older versions: `playbook init --help`). Print its output verbatim in a text block, with nothing before or after it, and stop. The help changes nothing.
 
@@ -104,7 +104,7 @@ The binary carries its own settings template, system prompt and Brewfile, so nei
 
 When the setup command fails, check these cases in order:
 
-1. It fails with "unexpected argument": the installed binary is older than the plugin. Run `playbook setup --help`, remove every flag it does not list, and run the command once more. Tell the user which flags were left out and to upgrade with `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash`.
+1. It fails with "unexpected argument": the installed binary is older than the plugin. Run `playbook setup --help`, remove every flag it does not list, and run the command once more. Tell the user which flags were left out and to upgrade with `curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh | bash`.
 2. It reports the settings step skipped with "no template shipped": the binary is also older than the plugin. Give the same upgrade advice, because no guards were wired.
 3. Any other non-zero exit: show the error verbatim, still run the second command, then report which setup steps failed.
 

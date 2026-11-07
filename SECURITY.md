@@ -6,7 +6,7 @@
 
 To report a vulnerability, use one of:
 
-- **GitHub Security Advisories**: [Report a vulnerability](https://github.com/pragmatic-engineer/playbook/security/advisories/new)
+- **GitHub Security Advisories**: [Report a vulnerability](https://github.com/amplifiedengineer/playbook/security/advisories/new)
 - **Email**: **oss@mail.igorjs.io**
 
 Include:
@@ -29,7 +29,7 @@ If the report is declined (not a vulnerability, or out of scope), you will recei
 
 ## Supported Versions
 
-Security fixes target [the latest released version](https://github.com/pragmatic-engineer/playbook/releases). Earlier versions don't receive patches. Upgrade to the latest release before reporting.
+Security fixes target [the latest released version](https://github.com/amplifiedengineer/playbook/releases). Earlier versions don't receive patches. Upgrade to the latest release before reporting.
 
 ## Scope
 

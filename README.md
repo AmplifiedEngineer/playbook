@@ -15,7 +15,7 @@ Pick the first route that fits. Each one installs the `playbook` binary. Then ru
 1. **Homebrew** (macOS and Linux):
 
    ```bash
-   brew install pragmatic-engineer/tap/playbook
+   brew install amplifiedengineer/tap/playbook
    playbook setup
    ```
 
@@ -24,13 +24,13 @@ Pick the first route that fits. Each one installs the `playbook` binary. Then ru
 2. **Install script**, when you have no Homebrew. It downloads the release binary, checks its SHA256 checksum, and its build attestation when `gh` can check it, puts it on `PATH`, and asks whether to run `playbook setup`:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh | bash
    ```
 
 3. **Marketplace plugin**, for the skills only. It adds no binary, hooks or guards:
 
    ```bash
-   claude plugin marketplace add pragmatic-engineer/marketplace
+   claude plugin marketplace add amplifiedengineer/marketplace
    claude plugin install playbook@pragmatic-engineer
    ```
 
@@ -43,17 +43,19 @@ Pin a version of the install script with `PLAYBOOK_REF=v0.41.0`. Update with `br
 Since Homebrew 6.0.0, a tap that is not official needs your trust. Installing a fully qualified name trusts only that formula:
 
 ```bash
-brew install pragmatic-engineer/tap/playbook
+brew install amplifiedengineer/tap/playbook
 ```
 
 The install records that trust, so a later `brew upgrade playbook` works by short name. To install by short name without using the full name first, trust the formula:
 
 ```bash
-brew tap pragmatic-engineer/tap
-brew trust --formula pragmatic-engineer/tap/playbook
+brew tap amplifiedengineer/tap
+brew trust --formula amplifiedengineer/tap/playbook
 ```
 
-`pbtop` is a separate formula: `brew trust --formula pragmatic-engineer/tap/pbtop`. To trust every current and future formula in the tap, run `brew trust pragmatic-engineer/tap`. This is broader, so prefer per-formula trust. Run `brew trust` to list trusted entries, and `brew untrust <target>` to remove one. If Homebrew says a formula is not trusted, run the trust command it names. More in the [install guide](docs/guides/00-install.md#homebrew-tap-trust).
+`pbtop` is a separate formula: `brew trust --formula amplifiedengineer/tap/pbtop`. To trust every current and future formula in the tap, run `brew trust amplifiedengineer/tap`. This is broader, so prefer per-formula trust. Run `brew trust` to list trusted entries, and `brew untrust <target>` to remove one. If Homebrew says a formula is not trusted, run the trust command it names. More in the [install guide](docs/guides/00-install.md#homebrew-tap-trust).
+
+Moving from the old tap `pragmatic-engineer/tap`: run `brew uninstall playbook`, `brew untap pragmatic-engineer/tap`, then `brew install amplifiedengineer/tap/playbook`. To keep the installed formula, run `git -C "$(brew --repository pragmatic-engineer/tap)" remote set-url origin https://github.com/amplifiedengineer/homebrew-tap.git` and then `brew update`. Details are in the [install guide](docs/guides/00-install.md#moving-from-the-old-tap-name).
 
 ## A first session
 

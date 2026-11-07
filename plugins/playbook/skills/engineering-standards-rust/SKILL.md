@@ -104,7 +104,7 @@ Load `references/testing.md` when you write or review a test, or reproduce a bug
 - CI runs `cargo fmt --check` and Clippy on all targets with warnings denied. Lint levels live in `[workspace.lints]`.
 - Check dependencies with `cargo deny` or `cargo audit`, keep features additive, and test the MSRV.
 
-Load `references/tooling-and-ci.md` when you change `Cargo.toml` lints, CI, the toolchain, features or dependencies. It ends with the setup of pragmatic-engineer/playbook, this plugin's source, as a worked example.
+Load `references/tooling-and-ci.md` when you change `Cargo.toml` lints, CI, the toolchain, features or dependencies. It ends with the setup of amplifiedengineer/playbook, this plugin's source, as a worked example.
 
 ### Project structure
 

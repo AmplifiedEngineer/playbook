@@ -18,8 +18,8 @@ Install order:
 
 | Mode | Commands, in order | You get | You lack |
 |---|---|---|---|
-| Skills only | `claude plugin marketplace add pragmatic-engineer/marketplace`, then `claude plugin install playbook@pragmatic-engineer` | Skills, commands and subagents. No hooks, no binary, no change to `settings.json` | Safety guards, status line, hooks, usage, and every step that needs the `playbook` binary |
-| Binary only | Homebrew: `brew install pragmatic-engineer/tap/playbook`, then `playbook setup`. Or, with no Homebrew, the install script: `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh \| bash` | The `playbook` command, hooks, guards, status line, memory and usage | The skills and slash commands |
+| Skills only | `claude plugin marketplace add amplifiedengineer/marketplace`, then `claude plugin install playbook@pragmatic-engineer` | Skills, commands and subagents. No hooks, no binary, no change to `settings.json` | Safety guards, status line, hooks, usage, and every step that needs the `playbook` binary |
+| Binary only | Homebrew: `brew install amplifiedengineer/tap/playbook`, then `playbook setup`. Or, with no Homebrew, the install script: `curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh \| bash` | The `playbook` command, hooks, guards, status line, memory and usage | The skills and slash commands |
 | Both (recommended) | The binary first, then the two skills commands | Everything | Nothing |
 
 The skills are a Claude Code plugin and work on their own. The binary is optional. Installing one never installs the other, and playbook never installs or removes a plugin for you.
@@ -43,7 +43,7 @@ Which one? Choose skills only if you want to read the skills and nothing else ru
 ### Homebrew (first choice)
 
 ```bash
-brew install pragmatic-engineer/tap/playbook
+brew install amplifiedengineer/tap/playbook
 playbook setup
 ```
 
@@ -58,29 +58,52 @@ Since Homebrew 6.0.0, a tap that is not official needs explicit trust. This is H
 Install with the fully qualified name. This trusts only that formula:
 
 ```bash
-brew install pragmatic-engineer/tap/playbook
+brew install amplifiedengineer/tap/playbook
 ```
 
 The install records that trust, so a later `brew upgrade playbook` works by short name. To install by short name without using the full name first, trust the formula:
 
 ```bash
-brew tap pragmatic-engineer/tap
-brew trust --formula pragmatic-engineer/tap/playbook
+brew tap amplifiedengineer/tap
+brew trust --formula amplifiedengineer/tap/playbook
 brew install playbook
 ```
 
-The `pbtop` link comes with the `playbook` formula, so it needs no trust of its own. The separate `pbtop` formula is for a machine without `playbook`. Trust it on its own: `brew trust --formula pragmatic-engineer/tap/pbtop`.
+The `pbtop` link comes with the `playbook` formula, so it needs no trust of its own. The separate `pbtop` formula is for a machine without `playbook`. Trust it on its own: `brew trust --formula amplifiedengineer/tap/pbtop`.
 
-To trust the whole tap, run `brew trust pragmatic-engineer/tap`. This covers every current and future formula in the tap. It is broader, so prefer per-formula trust.
+To trust the whole tap, run `brew trust amplifiedengineer/tap`. This covers every current and future formula in the tap. It is broader, so prefer per-formula trust.
 
-Run `brew trust` to list trusted entries. Run `brew untrust <target>` to remove trust, for example `brew untrust --formula pragmatic-engineer/tap/playbook`. If Homebrew says a formula is not trusted, run the trust command it names. Homebrew stores the entries in `~/.homebrew/trust.json`, or in `$XDG_CONFIG_HOME/homebrew/trust.json` when `XDG_CONFIG_HOME` is set. See Homebrew's own page on tap trust.
+Run `brew trust` to list trusted entries. Run `brew untrust <target>` to remove trust, for example `brew untrust --formula amplifiedengineer/tap/playbook`. If Homebrew says a formula is not trusted, run the trust command it names. Homebrew stores the entries in `~/.homebrew/trust.json`, or in `$XDG_CONFIG_HOME/homebrew/trust.json` when `XDG_CONFIG_HOME` is set. See Homebrew's own page on tap trust.
+
+### Moving from the old tap name
+
+The GitHub organization is now `amplifiedengineer`. It was `pragmatic-engineer` and, for a while, `amplified-engineer`. GitHub redirects the old tap address today, but do not rely on that. You have two ways to move an existing Homebrew install. Both keep your data in `~/.config/playbook`.
+
+To keep the installed formula and the tap name `pragmatic-engineer/tap`, point the tap at the new address:
+
+```bash
+git -C "$(brew --repository pragmatic-engineer/tap)" remote set-url origin https://github.com/amplifiedengineer/homebrew-tap.git
+brew update
+```
+
+To use the new tap name, remove the old formula and tap, then install from the new tap. Homebrew refuses `brew untap` while a formula from that tap is installed, so uninstall first. Add `pbtop` to the first command only if you installed that formula.
+
+```bash
+brew uninstall playbook
+brew untap pragmatic-engineer/tap
+brew install amplifiedengineer/tap/playbook
+```
+
+The full name in the last command trusts only that formula, as in [Homebrew tap trust](#homebrew-tap-trust). `brew tap --repair` does not do this move. It repairs symlinks and a renamed default branch, not a renamed tap. Check the result with `brew tap-info amplifiedengineer/tap`.
+
+The Claude Code marketplace keeps its name `pragmatic-engineer`, so the plugin id `playbook@pragmatic-engineer` does not change. New installs add the marketplace with `claude plugin marketplace add amplifiedengineer/marketplace`. An existing marketplace entry keeps working.
 
 ### Install script
 
 Use this when you have no Homebrew. install.sh is a bash script, so it does not run on Windows. On Windows, use [Without `curl | bash`](#without-curl--bash).
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh | bash
 ```
 
 It installs the `playbook` binary, the `pbdoc` document converter and the `pbsync` usage sync helper, and links `pb`, into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`). When a release has no `pbdoc` or `pbsync` archive, it warns and skips that helper. Installing `pbsync` does not turn sync on, which stays off until you opt in. It checks each download after checking its SHA256, its build attestation when `gh` can check it, and a `--version` smoke test. It puts that directory on `PATH`. It does not touch Claude Code's plugins or settings.
@@ -105,7 +128,7 @@ Pass `--yes` to say yes to every question, including `playbook setup`. Flags go 
 Pin a version with `PLAYBOOK_REF`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | PLAYBOOK_REF=v0.41.0 bash
+curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh | PLAYBOOK_REF=v0.41.0 bash
 ```
 
 A release tag installs that release. A branch or commit is refused, because it has no published binary.
@@ -113,20 +136,20 @@ A release tag installs that release. A branch or commit is refused, because it h
 ### Nix
 
 ```bash
-nix run github:pragmatic-engineer/nix#playbook -- --version
-nix profile install github:pragmatic-engineer/nix#playbook
+nix run github:amplifiedengineer/nix#playbook -- --version
+nix profile install github:amplifiedengineer/nix#playbook
 playbook setup
 ```
 
-The flake lives in [pragmatic-engineer/nix](https://github.com/pragmatic-engineer/nix). It fetches the release binary for `x86_64-linux`, `aarch64-linux`, `x86_64-darwin` or `aarch64-darwin` and checks it against a fixed hash. It has two outputs, `playbook` and `pbtop`, so `nix run github:pragmatic-engineer/nix#pbtop` starts the dashboard. After each release a pull request in that repository moves `flake.nix` to the new version, so `main` is one release behind for a short while. A tag does not help here, because the flake has no release tags. To pin a version, use the merge commit of the `chore(release): nix flake X.Y.Z` pull request, for example `github:pragmatic-engineer/nix/<commit>#playbook`. To roll back, pin the commit of the earlier flake pull request. Each release runs the flake on Linux and macOS after the pull request merges. A Nix install is read-only. The automatic update shows a notice that the install directory is not writable, and `playbook update` stops with "cannot write to" the store path. Update with `nix profile upgrade playbook` instead. Your config is not touched.
+The flake lives in [amplifiedengineer/nix](https://github.com/amplifiedengineer/nix). It fetches the release binary for `x86_64-linux`, `aarch64-linux`, `x86_64-darwin` or `aarch64-darwin` and checks it against a fixed hash. It has two outputs, `playbook` and `pbtop`, so `nix run github:amplifiedengineer/nix#pbtop` starts the dashboard. After each release a pull request in that repository moves `flake.nix` to the new version, so `main` is one release behind for a short while. A tag does not help here, because the flake has no release tags. To pin a version, use the merge commit of the `chore(release): nix flake X.Y.Z` pull request, for example `github:amplifiedengineer/nix/<commit>#playbook`. To roll back, pin the commit of the earlier flake pull request. Each release runs the flake on Linux and macOS after the pull request merges. A Nix install is read-only. The automatic update shows a notice that the install directory is not writable, and `playbook update` stops with "cannot write to" the store path. Update with `nix profile upgrade playbook` instead. Your config is not touched.
 
 ### Optional: pbtop alone
 
 You do not need this if you have `playbook`. `playbook usage` runs the same code, because playbook embeds the telemetry crate. The Homebrew formula of `playbook` also links `pbtop` to `playbook`, and the Nix flake has a `pbtop` output. Install `pbtop`, the Agent Budget Dashboard, only on a machine that has no `playbook`. From release 0.35.0 each `vX.Y.Z` release has `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone, and there are two ways to install it:
 
 ```bash
-brew install pragmatic-engineer/tap/pbtop
-curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install-pbtop.sh | sh
+brew install amplifiedengineer/tap/pbtop
+curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install-pbtop.sh | sh
 ```
 
 The Homebrew route needs tap trust. The full name trusts only `pbtop`. See [Homebrew tap trust](#homebrew-tap-trust).
@@ -143,7 +166,7 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
 
 ### Without `curl | bash`
 
-1. From the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest), download the asset for your platform and `SHA256SUMS`.
+1. From the [latest release](https://github.com/amplifiedengineer/playbook/releases/latest), download the asset for your platform and `SHA256SUMS`.
 
    | Platform | Asset |
    |---|---|
@@ -157,7 +180,7 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
 
    ```bash
    grep "  <asset>$" SHA256SUMS | shasum -a 256 -c -
-   gh attestation verify <asset> --repo pragmatic-engineer/playbook
+   gh attestation verify <asset> --repo amplifiedengineer/playbook
    ```
 
    `install.sh` and `playbook update` run the attestation check when `gh` is available. They warn when `gh` is missing or the release predates attestations, and abort on a real mismatch. Set `PLAYBOOK_REQUIRE_ATTESTATION=1` to abort on a missing check too.
