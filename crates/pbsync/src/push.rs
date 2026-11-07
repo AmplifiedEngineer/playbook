@@ -295,13 +295,16 @@ fn batch_statements(
 
 /// One pipeline per batch. The remote may run on after a failed statement, so
 /// any error is followed by a ROLLBACK, whose own result is of no use.
-fn send_batch(transport: &dyn Transport, statements: &[Statement]) -> Result<(), PushError> {
+pub(crate) fn send_batch(
+    transport: &dyn Transport,
+    statements: &[Statement],
+) -> Result<(), TransportError> {
     if let Err(error) = transport.execute(statements) {
         let _ = transport.execute(&[Statement {
             sql: "ROLLBACK".to_string(),
             args: vec![],
         }]);
-        return Err(error.into());
+        return Err(error);
     }
     Ok(())
 }

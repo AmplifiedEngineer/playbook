@@ -71,8 +71,12 @@ fn no_table_is_created_for_an_unlisted_definition() {
     // Act
     ensure_schema(&fake, &[], NOW).unwrap();
     // Assert
-    let names = fake.query("SELECT name FROM sqlite_master WHERE name LIKE 'shared_%'");
-    assert_eq!(names, [[text("shared_meta")]]);
+    let names =
+        fake.query("SELECT name FROM sqlite_master WHERE name LIKE 'shared_%' ORDER BY name");
+    assert_eq!(
+        names,
+        [[text("shared_config_snapshots")], [text("shared_meta")]]
+    );
 }
 
 #[test]
