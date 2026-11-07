@@ -153,10 +153,11 @@ pub struct AccountRow {
 pub fn accounts(conn: &Connection) -> Result<Vec<AccountRow>, String> {
     let named = names(conn)?;
     let mut stmt = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT account, COUNT(*), COALESCE(SUM(cost_usd), 0), MIN(timestamp), MAX(timestamp)
-             FROM usage_events GROUP BY account ORDER BY MAX(timestamp) DESC, account",
-        )
+             FROM {} GROUP BY account ORDER BY MAX(timestamp) DESC, account",
+            crate::sync_tables::account_source(conn)
+        ))
         .map_err(|e| err("list the accounts", e))?;
     let rows = stmt
         .query_map([], |r| {

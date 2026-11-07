@@ -51,6 +51,7 @@ pub mod session_view;
 pub mod spend;
 pub mod standalone;
 pub mod summary;
+pub mod sync_tables;
 pub mod telemetry_db;
 pub mod telemetry_detect;
 pub mod telemetry_status;

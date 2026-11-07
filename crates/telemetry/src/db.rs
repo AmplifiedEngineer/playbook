@@ -8,15 +8,17 @@
 
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};
 use crate::machine_rows::LOCAL_MACHINE_SQL;
+use crate::sync_tables::account_source;
 use crate::util::atomic::{ensure_private_dir, make_db_file_private};
 use playbook_store::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::time::Duration;
 
 /// The usage database layout this build writes (2 added the `machine` column,
-/// 3 the one-row `machine` table, 4 the `session_account_spans` table). A database without the row counts as
-/// version 0 and is stamped on open.
-pub const SCHEMA_VERSION: i64 = 4;
+/// 3 the one-row `machine` table, 4 the `session_account_spans` table, 5 the
+/// sync tables and the `usage_events_all` view). A database without the row
+/// counts as version 0 and is stamped on open.
+pub const SCHEMA_VERSION: i64 = 5;
 
 const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS usage_events (
@@ -162,6 +164,9 @@ fn open_prepared(path: &Path) -> Result<Connection, String> {
         BUSY_TIMEOUT,
     )
     .map_err(|e| format!("failed to create account move tables: {e}"))?;
+    let sync_sql = super::sync_tables::schema_sql();
+    retry_busy(|| conn.execute_batch(&sync_sql), BUSY_TIMEOUT)
+        .map_err(|e| format!("failed to create the sync tables: {e}"))?;
     Ok(conn)
 }
 
@@ -423,6 +428,7 @@ const USAGE_COLUMNS: &str = "event_id, timestamp, session_id, account, model, ef
     input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
     cache_creation_1h_tokens, agent, machine";
 
+const LOCAL_TABLE: &str = "usage_events";
 const TAIL_ALL: &str = "ORDER BY timestamp, event_id";
 const TAIL_SINCE: &str = "WHERE timestamp >= ?1 ORDER BY timestamp, event_id";
 const TAIL_LATEST: &str = "WHERE (?2 IS NULL OR machine = ?2)
@@ -434,11 +440,12 @@ fn tail_of_sessions(marks: &str) -> String {
 
 fn query_usage(
     conn: &Connection,
+    table: &str,
     tail: &str,
     params: &[&dyn playbook_store::ToSql],
 ) -> Result<Vec<UsageEvent>, String> {
     let mut stmt = conn
-        .prepare(&format!("SELECT {USAGE_COLUMNS} FROM usage_events {tail}"))
+        .prepare(&format!("SELECT {USAGE_COLUMNS} FROM {table} {tail}"))
         .map_err(|e| format!("failed to prepare usage query: {e}"))?;
     let rows = stmt
         .query_map(params, |r| {
@@ -472,12 +479,23 @@ fn query_usage(
 /// and the current price table. The stored `cost_usd` column is ignored, so a
 /// price correction never needs a re-ingest.
 pub fn load_usage_events(conn: &Connection) -> Result<Vec<UsageEvent>, String> {
-    query_usage(conn, TAIL_ALL, &[])
+    query_usage(conn, LOCAL_TABLE, TAIL_ALL, &[])
+}
+
+/// Every event of the account, this machine's and the synced ones of other
+/// machines, priced like `load_usage_events`.
+pub fn load_account_events(conn: &Connection) -> Result<Vec<UsageEvent>, String> {
+    query_usage(conn, account_source(conn), TAIL_ALL, &[])
+}
+
+/// The account's events at or after `since` (epoch seconds), oldest first.
+pub fn load_account_events_since(conn: &Connection, since: i64) -> Result<Vec<UsageEvent>, String> {
+    query_usage(conn, account_source(conn), TAIL_SINCE, &[&since])
 }
 
 /// Events at or after `since` (epoch seconds), oldest first.
 pub fn load_usage_events_since(conn: &Connection, since: i64) -> Result<Vec<UsageEvent>, String> {
-    query_usage(conn, TAIL_SINCE, &[&since])
+    query_usage(conn, LOCAL_TABLE, TAIL_SINCE, &[&since])
 }
 
 /// The newest `limit` events, newest first. `machine` keeps one machine's
@@ -487,7 +505,7 @@ pub fn load_latest_usage_events(
     limit: i64,
     machine: Option<&str>,
 ) -> Result<Vec<UsageEvent>, String> {
-    query_usage(conn, TAIL_LATEST, &[&limit, &machine])
+    query_usage(conn, LOCAL_TABLE, TAIL_LATEST, &[&limit, &machine])
 }
 
 /// Every event of the given sessions, oldest first.
@@ -503,7 +521,7 @@ pub fn load_usage_events_of_sessions(
         .iter()
         .map(|s| s as &dyn playbook_store::ToSql)
         .collect();
-    query_usage(conn, &tail_of_sessions(&marks), &params)
+    query_usage(conn, LOCAL_TABLE, &tail_of_sessions(&marks), &params)
 }
 
 pub fn load_tool_events(conn: &Connection) -> Result<Vec<ToolInvocationEvent>, String> {
@@ -690,6 +708,57 @@ mod tests {
     }
 
     #[test]
+    fn a_version_4_database_upgrades_to_5_with_its_rows_and_gains_the_sync_tables() {
+        // Arrange: a database as version 4 left it, without the sync objects.
+        let path = scratch_dir("usage-schema-v4").join("usage.db");
+        let conn = open_db(&path).unwrap();
+        conn.execute_batch(
+            "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
+                 repo, branch, input_tokens, output_tokens, cache_creation_tokens,
+                 cache_read_tokens, cost_usd)
+             VALUES ('e', 1, 's', 'a', 'm', '', 'r', 'b', 1, 1, 0, 0, 0.5);
+             DROP VIEW usage_events_all;
+             DROP TABLE usage_events_remote;
+             DROP TABLE account_aliases;
+             DROP TABLE sync_state;
+             DROP TABLE sync_watermarks;
+             DROP TABLE sync_cursors;
+             UPDATE meta SET value = '4' WHERE key = 'schema_version';",
+        )
+        .unwrap();
+        drop(conn);
+
+        // Act
+        let conn = open_db(&path).unwrap();
+
+        // Assert
+        assert_eq!(
+            stored_schema_version(&path),
+            Some(SCHEMA_VERSION.to_string())
+        );
+        assert_eq!(SCHEMA_VERSION, 5);
+        let names: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE name LIKE 'sync_%' OR name IN ('usage_events_remote', 'account_aliases', 'usage_events_all') ORDER BY name")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            names,
+            [
+                "account_aliases",
+                "sync_cursors",
+                "sync_state",
+                "sync_watermarks",
+                "usage_events_all",
+                "usage_events_remote"
+            ]
+        );
+        assert_eq!(load_account_events(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
     fn a_second_open_keeps_the_machine_id() {
         // Arrange
         let path = scratch_dir("usage-machine-twice").join("usage.db");
@@ -828,6 +897,7 @@ mod tests {
         assert_eq!(
             tables,
             vec![
+                "account_aliases",
                 "account_assignment_rows",
                 "account_assignments",
                 "account_names",
@@ -837,6 +907,9 @@ mod tests {
                 "session_accounts",
                 "session_reconcile",
                 "session_sources",
+                "sync_cursors",
+                "sync_state",
+                "sync_watermarks",
                 "telemetry_errors",
                 "telemetry_metrics",
                 "telemetry_requests",
@@ -844,6 +917,7 @@ mod tests {
                 "tool_invocation_events",
                 "usage_backfill_files",
                 "usage_events",
+                "usage_events_remote",
                 "usage_watermarks"
             ]
         );

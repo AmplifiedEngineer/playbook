@@ -237,6 +237,7 @@ mod tests {
         // Arrange
         let path = scratch_dir("machine-old").join("usage.db");
         let conn = db::open_db(&path).unwrap();
+        conn.execute("DROP VIEW usage_events_all", []).unwrap();
         for table in MACHINE_TABLES {
             conn.execute(&format!("ALTER TABLE {table} DROP COLUMN machine"), [])
                 .unwrap();
