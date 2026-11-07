@@ -7,10 +7,23 @@
 use crate::run::Paths;
 use crate::util::atomic::{ensure_private_dir, write_atomic_private};
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hasher};
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
 
 const FILE_NAME: &str = "machine.json";
+
+/// The random bytes in a version 4 UUID.
+pub type IdBytes = [u8; 16];
+
+const VERSION_BYTE: usize = 6;
+const VERSION_MASK: u8 = 0x0f;
+const VERSION_4: u8 = 0x40;
+const VARIANT_BYTE: usize = 8;
+const VARIANT_MASK: u8 = 0x3f;
+const VARIANT_RFC_4122: u8 = 0x80;
+/// The hex digits in each dash-separated group of the id text.
+const GROUP_LENGTHS: [usize; 5] = [8, 4, 4, 4, 12];
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Machine {
@@ -35,7 +48,7 @@ impl Machine {
 /// first call. A file that cannot be read is an error and is never replaced.
 pub fn load_or_create(
     dir: &Path,
-    generate: impl FnOnce() -> Uuid,
+    generate: impl FnOnce() -> IdBytes,
     hostname: &str,
 ) -> Result<Machine, String> {
     let path = file_path(dir);
@@ -43,7 +56,7 @@ pub fn load_or_create(
         Ok(text) => parse(&path, &text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             let machine = Machine {
-                id: generate().to_string(),
+                id: id_text(generate()),
                 hostname: hostname.to_string(),
                 name: None,
             };
@@ -58,7 +71,7 @@ pub fn load_or_create(
 pub fn rename(
     dir: &Path,
     name: &str,
-    generate: impl FnOnce() -> Uuid,
+    generate: impl FnOnce() -> IdBytes,
     hostname: &str,
 ) -> Result<Machine, String> {
     let mut machine = load_or_create(dir, generate, hostname)?;
@@ -96,10 +109,42 @@ pub fn run(paths: &Paths, name: Option<&str>) -> Result<String, String> {
         .ok_or_else(|| format!("{} has no data folder", paths.db.display()))?;
     let hostname = current_hostname();
     let machine = match name {
-        Some(name) => rename(dir, name, Uuid::new_v4, &hostname)?,
-        None => load_or_create(dir, Uuid::new_v4, &hostname)?,
+        Some(name) => rename(dir, name, random_bytes, &hostname)?,
+        None => load_or_create(dir, random_bytes, &hostname)?,
     };
     Ok(machine.text())
+}
+
+/// 16 random bytes. std seeds every `RandomState` with keys from the operating
+/// system's random source, so each one yields 8 unpredictable bytes. This
+/// avoids a platform-specific random API, since rustix has none on macOS.
+pub fn random_bytes() -> IdBytes {
+    let mut bytes = [0u8; 16];
+    for chunk in bytes.chunks_mut(8) {
+        let word = RandomState::new().build_hasher().finish();
+        chunk.copy_from_slice(&word.to_le_bytes());
+    }
+    bytes
+}
+
+/// The version 4 UUID text for `bytes`, with the version and variant bits set.
+fn id_text(mut bytes: IdBytes) -> String {
+    bytes[VERSION_BYTE] = (bytes[VERSION_BYTE] & VERSION_MASK) | VERSION_4;
+    bytes[VARIANT_BYTE] = (bytes[VARIANT_BYTE] & VARIANT_MASK) | VARIANT_RFC_4122;
+    let mut hex = bytes.iter().map(|b| format!("{b:02x}"));
+    let groups: Vec<String> = GROUP_LENGTHS
+        .iter()
+        .map(|digits| hex.by_ref().take(digits / 2).collect())
+        .collect();
+    groups.join("-")
+}
+
+fn is_id_text(text: &str) -> bool {
+    let groups: Vec<&str> = text.split('-').collect();
+    groups.len() == GROUP_LENGTHS.len()
+        && groups.iter().zip(GROUP_LENGTHS).all(|(group, digits)| {
+            group.len() == digits && group.bytes().all(|b| b.is_ascii_hexdigit())
+        })
 }
 
 fn file_path(dir: &Path) -> PathBuf {
@@ -114,7 +159,9 @@ fn parse(path: &Path, text: &str) -> Result<Machine, String> {
         )
     };
     let machine: Machine = serde_json::from_str(text).map_err(|e| corrupt(e.to_string()))?;
-    Uuid::parse_str(&machine.id).map_err(|e| corrupt(format!("bad id: {e}")))?;
+    if !is_id_text(&machine.id) {
+        return Err(corrupt("bad id: not a UUID".to_string()));
+    }
     Ok(machine)
 }
 
@@ -131,14 +178,14 @@ fn save(dir: &Path, machine: &Machine) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    const FIXED: Uuid = Uuid::from_u128(0x1234_5678_9abc_4def_8123_4567_89ab_cdef);
+    const FIXED: IdBytes = 0x1234_5678_9abc_4def_8123_4567_89ab_cdef_u128.to_be_bytes();
     const FIXED_TEXT: &str = "12345678-9abc-4def-8123-456789abcdef";
 
     fn dir(tag: &str) -> PathBuf {
         crate::util::scratch_dir(tag)
     }
 
-    fn never() -> Uuid {
+    fn never() -> IdBytes {
         panic!("the id exists, so no new one is made")
     }
 
@@ -170,10 +217,24 @@ mod tests {
         // Arrange
         let d = dir("machine-random");
         // Act
-        let machine = load_or_create(&d, Uuid::new_v4, "host-a").unwrap();
+        let machine = load_or_create(&d, random_bytes, "host-a").unwrap();
         // Assert
-        let id = Uuid::parse_str(&machine.id).unwrap();
-        assert_eq!(id.get_version_num(), 4);
+        assert!(is_id_text(&machine.id), "{}", machine.id);
+        assert_eq!(machine.id.as_bytes()[14], b'4');
+    }
+
+    #[test]
+    fn the_text_sets_the_version_and_variant_bits_and_the_shape() {
+        // Arrange
+        let all_ones = [0xff; 16];
+        let all_zeros = [0x00; 16];
+        // Act
+        let ones = id_text(all_ones);
+        let zeros = id_text(all_zeros);
+        // Assert
+        assert_eq!(ones, "ffffffff-ffff-4fff-bfff-ffffffffffff");
+        assert_eq!(zeros, "00000000-0000-4000-8000-000000000000");
+        assert_eq!(id_text(FIXED), FIXED_TEXT);
     }
 
     #[test]
@@ -230,8 +291,8 @@ mod tests {
         // Arrange
         let (a, b) = (dir("machine-path-a"), dir("machine-path-b"));
         // Act
-        let first = load_or_create(&a, Uuid::new_v4, "host-a").unwrap();
-        let second = load_or_create(&b, Uuid::new_v4, "host-a").unwrap();
+        let first = load_or_create(&a, random_bytes, "host-a").unwrap();
+        let second = load_or_create(&b, random_bytes, "host-a").unwrap();
         let moved = load_or_create(&a, never, "host-b").unwrap();
         // Assert
         assert_ne!(first.id, second.id);
