@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The playbook release (ADR 0038, ADR 0039). One run releases the binary, the
-# plugin and pbtop under one version and one tag:
+# plugin, pbtop and pbsync under one version and one tag:
 #
 #   gh workflow run release.yml -f bump=patch     (or minor, or major)
 #   gh workflow run release.yml -f version=X.Y.Z
@@ -40,9 +40,10 @@
 #   x86_64-unknown-linux-musl   ubuntu-latest, native musl-gcc + rust-lld
 #   aarch64-unknown-linux-musl  ubuntu-24.04-arm, native musl-gcc + rust-lld
 #   x86_64-pc-windows-msvc      windows-latest
-# Each target gives two assets: the raw `playbook` binary and
-# pbtop-X.Y.Z-<target>.tar.gz with pbtop alone. The four unix targets add a
-# third, pbdoc-X.Y.Z-<target>.tar.gz with the pbdoc helper and NOTICE-pbdoc.
+# Each target gives three assets: the raw `playbook` binary,
+# pbtop-X.Y.Z-<target>.tar.gz with pbtop alone and
+# pbsync-X.Y.Z-<target>.tar.gz with pbsync alone. The four unix targets add a
+# fourth, pbdoc-X.Y.Z-<target>.tar.gz with the pbdoc helper and NOTICE-pbdoc.
 #
 # rusqlite's `bundled` feature compiles SQLite's C source and needs a real C
 # compiler, which is why both musl legs install `musl-tools` and still link
@@ -506,9 +507,9 @@ jobs:
           fi
           # pbdoc ships on the unix targets only.
           if [ "$RUNNER_OS" = Windows ]; then
-            cargo build --release --locked -p playbook -p playbook-telemetry --bin playbook --bin pbtop --target "$TARGET"
+            cargo build --release --locked -p playbook -p playbook-telemetry -p pbsync --bin playbook --bin pbtop --bin pbsync --target "$TARGET"
           else
-            cargo build --release --locked -p playbook -p playbook-telemetry -p pbdoc --bin playbook --bin pbtop --bin pbdoc --target "$TARGET"
+            cargo build --release --locked -p playbook -p playbook-telemetry -p pbsync -p pbdoc --bin playbook --bin pbtop --bin pbsync --bin pbdoc --target "$TARGET"
           fi
 
       - name: Ad-hoc sign the macOS binaries
@@ -517,7 +518,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          for b in playbook pbtop pbdoc; do
+          for b in playbook pbtop pbsync pbdoc; do
             codesign --sign - --force "target/$TARGET/release/$b"
             codesign -dvv "target/$TARGET/release/$b" 2>&1 | grep -q 'Signature=adhoc'
           done
@@ -528,7 +529,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          for b in playbook pbtop pbdoc; do
+          for b in playbook pbtop pbsync pbdoc; do
             file -b "target/$TARGET/release/$b" | grep -qE 'static-pie linked|statically linked'
           done
 
@@ -549,7 +550,7 @@ jobs:
           # cannot run on the arm64 runner.
           want="$VERSION"
           if [ "$DRY_RUN" = true ]; then want="$(scripts/check-plugin.sh cargo-version)"; fi
-          bins="playbook pbtop"
+          bins="playbook pbtop pbsync"
           if [ "$RUNNER_OS" != Windows ]; then bins="$bins pbdoc"; fi
           if [ "$TARGET" != x86_64-apple-darwin ]; then
             for b in $bins; do
@@ -565,10 +566,11 @@ jobs:
           mac_flag=""
           if [ "$RUNNER_OS" = macOS ]; then mac_flag="--no-mac-metadata"; fi
           tar $mac_flag -czf "dist/pbtop-$VERSION-$TARGET.tar.gz" -C "$dir" "pbtop$EXT"
+          tar $mac_flag -czf "dist/pbsync-$VERSION-$TARGET.tar.gz" -C "$dir" "pbsync$EXT"
           if [ "$RUNNER_OS" != Windows ]; then
             tar $mac_flag -czf "dist/pbdoc-$VERSION-$TARGET.tar.gz" -C "$dir" pbdoc -C "$GITHUB_WORKSPACE" NOTICE-pbdoc
             # tar -t on macOS hides AppleDouble entries, so read the raw names.
-            for archive in "dist/pbtop-$VERSION-$TARGET.tar.gz" "dist/pbdoc-$VERSION-$TARGET.tar.gz"; do
+            for archive in "dist/pbtop-$VERSION-$TARGET.tar.gz" "dist/pbsync-$VERSION-$TARGET.tar.gz" "dist/pbdoc-$VERSION-$TARGET.tar.gz"; do
               python3 - "$archive" <<'PY'
           import sys, tarfile
           names = [m.name for m in tarfile.open(sys.argv[1])]
@@ -610,6 +612,26 @@ jobs:
             status=1
           fi
           exit "$status"
+
+      # pbsync is a small HTTP client, so the budget only catches a
+      # dependency that bloats it.
+      - name: Check the pbsync size budget
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          EXT: ${{ matrix.ext }}
+          MAX_BINARY_BYTES: "12582912"
+        run: |
+          set -euo pipefail
+          binary_bytes="$(wc -c < "target/$TARGET/release/pbsync$EXT" | tr -d ' ')"
+          {
+            echo "### pbsync size, $TARGET"
+            echo "- binary: $binary_bytes bytes (limit $MAX_BINARY_BYTES)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$binary_bytes" -gt "$MAX_BINARY_BYTES" ]; then
+            echo "::error::pbsync is $binary_bytes bytes on $TARGET, over the $MAX_BINARY_BYTES byte limit." >&2
+            exit 1
+          fi
 
       # Every command the session tool map and the playbook:playbook-usage skill name
       # must exist in the built binary's `playbook commands --json`.
@@ -688,14 +710,14 @@ jobs:
           [ "$(scripts/release-gh.sh state "$GH_REPO" "$TAG")" = release=draft ] \
             || { echo "::error::$TAG is not a draft. Nothing is published." >&2; exit 1; }
           mkdir -p dist && cd dist
-          # The binaries, the pbtop archives and the pbdoc archives of the
-          # four unix targets.
-          for p in "playbook-$VERSION-*" "pbtop-$VERSION-*" "pbdoc-$VERSION-*"; do
+          # The binaries, the pbtop and pbsync archives and the pbdoc archives
+          # of the four unix targets.
+          for p in "playbook-$VERSION-*" "pbtop-$VERSION-*" "pbsync-$VERSION-*" "pbdoc-$VERSION-*"; do
             gh release download "$TAG" --pattern "$p" --clobber
           done
           count="$(find . -type f | wc -l | tr -d ' ')"
-          if [ "$count" -ne 14 ]; then
-            echo "::error::expected 14 assets, found $count. Refusing to publish a partial release." >&2
+          if [ "$count" -ne 19 ]; then
+            echo "::error::expected 19 assets, found $count. Refusing to publish a partial release." >&2
             find . -type f
             exit 1
           fi
@@ -713,7 +735,7 @@ jobs:
           # Each asset must carry the attestation its build leg made. A fetch
           # failure, a missing attestation and a mismatch each get their own
           # message.
-          for f in playbook-* pbtop-* pbdoc-*; do
+          for f in playbook-* pbtop-* pbsync-* pbdoc-*; do
             if ! err="$(gh attestation verify "$f" --repo "$GH_REPO" --source-ref "$SOURCE_REF" \
               --signer-workflow "$GH_REPO/.github/workflows/release.yml" 2>&1 >/dev/null)"; then
               echo "$err" >&2
@@ -730,7 +752,7 @@ jobs:
             fi
           done
           gh release download "$TAG" --pattern release-notes.json --clobber
-          shasum -a 256 playbook-* pbtop-* pbdoc-* release-notes.json > SHA256SUMS
+          shasum -a 256 playbook-* pbtop-* pbsync-* pbdoc-* release-notes.json > SHA256SUMS
           shasum -a 256 -c SHA256SUMS
           gh release upload "$TAG" SHA256SUMS --clobber
 
@@ -790,7 +812,7 @@ jobs:
           mkdir -p check && cd check
           gh release download "$TAG"
           sha256sum -c SHA256SUMS
-          for f in playbook-* pbtop-* pbdoc-* release-notes.json SHA256SUMS; do
+          for f in playbook-* pbtop-* pbsync-* pbdoc-* release-notes.json SHA256SUMS; do
             gh attestation verify "$f" --repo "$GH_REPO" --source-ref "$SOURCE_REF" \
               --signer-workflow "$GH_REPO/.github/workflows/release.yml" >/dev/null
           done
@@ -798,10 +820,11 @@ jobs:
           chmod +x "playbook-$VERSION-$t"
           mkdir -p pb
           tar -xzf "pbtop-$VERSION-$t.tar.gz" -C pb
+          tar -xzf "pbsync-$VERSION-$t.tar.gz" -C pb
           tar -xzf "pbdoc-$VERSION-$t.tar.gz" -C pb
           [ -s pb/NOTICE-pbdoc ] \
             || { echo "::error::pbdoc-$VERSION-$t.tar.gz has no NOTICE-pbdoc." >&2; exit 1; }
-          for bin in "./playbook-$VERSION-$t" pb/pbtop pb/pbdoc; do
+          for bin in "./playbook-$VERSION-$t" pb/pbtop pb/pbsync pb/pbdoc; do
             out="$("$bin" --version)"
             [ "${out##* }" = "$VERSION" ] \
               || { echo "::error::$bin --version says '$out', not $VERSION." >&2; exit 1; }
@@ -859,7 +882,7 @@ jobs:
             sums="$RUNNER_TEMP/sums"
             mkdir -p "$sums"
             for t in aarch64-apple-darwin x86_64-apple-darwin aarch64-unknown-linux-musl x86_64-unknown-linux-musl; do
-              for a in "playbook-$VERSION-$t" "pbtop-$VERSION-$t.tar.gz" "pbdoc-$VERSION-$t.tar.gz"; do
+              for a in "playbook-$VERSION-$t" "pbtop-$VERSION-$t.tar.gz" "pbsync-$VERSION-$t.tar.gz" "pbdoc-$VERSION-$t.tar.gz"; do
                 printf '%s  %s\n' "$(printf '%s' "$a" | sha256sum | cut -d' ' -f1)" "$a"
               done
             done > "$sums/SHA256SUMS"
@@ -875,6 +898,10 @@ jobs:
           # PR 53 adds it and has to merge before a tag is cut.
           grep -q '^ *resource "pbdoc"' downstream/tap/Formula/playbook.rb \
             || { echo "::error::The tap's Formula/playbook.rb has no resource \"pbdoc\". Merge homebrew-tap PR 53 first." >&2; exit 1; }
+          # The release ships pbsync archives, so the playbook formula needs a
+          # pbsync resource to install the helper next to playbook.
+          grep -q '^ *resource "pbsync"' downstream/tap/Formula/playbook.rb \
+            || { echo "::error::The tap's Formula/playbook.rb has no resource \"pbsync\"." >&2; exit 1; }
           {
             echo "playbook=$(base64 -w0 < downstream/tap/Formula/playbook.rb)"
             echo "pbtop=$(base64 -w0 < downstream/tap/Formula/pbtop.rb)"
@@ -1236,6 +1263,7 @@ jobs:
             brew install pragmatic-engineer/tap/pbtop
             for b in playbook pbtop; do check_version "$b"; done
           fi
+          check_version pbsync
           # In an empty HOME the check has nothing to find and still must run.
           report="$(HOME="$scratch" "$(brew --prefix)/bin/playbook" doctor check)"
           [ -n "$report" ] || { echo "::error::playbook doctor check printed nothing." >&2; exit 1; }
