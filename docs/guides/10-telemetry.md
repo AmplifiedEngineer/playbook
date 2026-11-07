@@ -11,6 +11,7 @@ Prompt text and tool content are never sent. Nothing leaves your machine. The co
 - `DISABLE_TELEMETRY` and `DO_NOT_TRACK` only turn off Anthropic's own analytics and are left as they are.
 - Restart Claude Code after setup, because it reads settings at start.
 - `playbook doctor` checks that settings point at the collector, that the token Claude Code sends is the collector's, that it runs, and that rows arrived in the last day.
+- When usage sync is on, `playbook doctor` also shows one `sync` row with the age of the last success and the rows pending. With sync off there is no row.
 - `playbook uninstall` removes exactly the keys setup wrote and puts back any value they replaced, unless you changed a key since.
 
 See also [Usage view](../internals/04-usage-dashboard.md) and [pbtop](11-pbtop.md).

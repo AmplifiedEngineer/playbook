@@ -4,7 +4,7 @@ A release reaches users through these channels: the GitHub release assets (built
 
 After a release is published and checked, the `downstream` job of `release.yml` opens a pull request in the tap and in the marketplace, as the section on the release workflow describes. The tap also checks every 30 minutes for a newer release and bumps a formula itself when the `downstream` job has not done it within an hour.
 
-A release attaches five `playbook` binaries, five `pbtop` archives, four `pbdoc` archives (macOS and Linux only), `release-notes.json` and `SHA256SUMS`, which lists the other fifteen. It builds no plugin archive. The plugin in `plugins/playbook` ships with the same `vX.Y.Z`, as described next.
+A release attaches five `playbook` binaries, five `pbtop` archives, five `pbsync` archives, four `pbdoc` archives (macOS and Linux only), `release-notes.json` and `SHA256SUMS`, which lists the other twenty. It builds no plugin archive. The plugin in `plugins/playbook` ships with the same `vX.Y.Z`, as described next.
 
 ## The plugin release
 
@@ -49,7 +49,7 @@ When the gate still fails on the release commit, land the fix and tag `vX.Y.Z` o
 ### After the tag
 
 - `draft` creates a draft release with the notes and attaches `release-notes.json`.
-- `build` compiles the five targets with `--locked` and attaches the `playbook` binary and `pbtop-X.Y.Z-<target>.tar.gz` for each target. The four macOS and Linux targets also get `pbdoc-X.Y.Z-<target>.tar.gz`. Each build job first runs its binaries with `--version` (all but the cross built x86_64 macOS one), checks the pbdoc size budget and attests the assets it built.
+- `build` compiles the five targets with `--locked` and attaches the `playbook` binary and `pbtop-X.Y.Z-<target>.tar.gz` and `pbsync-X.Y.Z-<target>.tar.gz` for each target. The four macOS and Linux targets also get `pbdoc-X.Y.Z-<target>.tar.gz`. Each build job first runs its binaries with `--version` (all but the cross built x86_64 macOS one), checks the pbsync and pbdoc size budgets and attests the assets it built.
 - `publish` checks every draft asset against that attestation, writes `SHA256SUMS` over every asset, attests it and the notes, and makes the release public and the latest.
 - `verify` downloads the published release, checks the sums and the attestations of a run from `main`, and runs `--version` on the x86_64 Linux binaries.
 
@@ -66,7 +66,7 @@ After `verify`, `downstream` moves the tap and the marketplace to the release ([
 - When something here fails, the playbook release stays published, the job fails, and the summary prints the commands to finish it. Running the workflow again with `version=X.Y.Z` goes on from where it stopped.
 - When `BOT_APP_CLIENT_ID` or `BOT_APP_PRIVATE_KEY` is not set, the job skips this step with a notice. The summary says to move the tap and the marketplace by hand or run again once the secrets are set.
 
-When `downstream` has moved the tap (its `moved` output, not set when the app secrets are missing), `verify-homebrew-linux` runs `brew tap` and `brew install` for `playbook` and `pbtop` on an Ubuntu runner. It checks that both report the release version, then runs `playbook doctor check` in an empty `HOME`. It blocks no other job. A red result fails the run, and running again with `version=X.Y.Z` starts it again. A dry run skips it, because nothing is published to install.
+When `downstream` has moved the tap (its `moved` output, not set when the app secrets are missing), `verify-homebrew-linux` runs `brew tap` and `brew install` for `playbook` and `pbtop` on an Ubuntu runner. It checks that `playbook`, `pbtop` and `pbsync` report the release version, then runs `playbook doctor check` in an empty `HOME`. It blocks no other job. A red result fails the run, and running again with `version=X.Y.Z` starts it again. A dry run skips it, because nothing is published to install.
 
 ### Nix flake
 
@@ -137,6 +137,7 @@ Release assets by tool:
 
 - playbook: `playbook-<version>-<target>`, the raw binary.
 - pbtop: `pbtop-<version>-<target>.tar.gz` holding `pbtop` alone.
+- pbsync: `pbsync-<version>-<target>.tar.gz` holding `pbsync` alone.
 - pbdoc: `pbdoc-<version>-<target>.tar.gz` holding `pbdoc` and `NOTICE-pbdoc`, for the four macOS and Linux targets.
 - pbsync: `pbsync-<version>-<target>.tar.gz` holding `pbsync`, for the four macOS and Linux targets.
 - Windows: `playbook-<version>-x86_64-pc-windows-msvc.exe`, the raw binary and the only Windows route.
@@ -144,6 +145,8 @@ Release assets by tool:
 The Homebrew tap maps each formula to its asset.
 
 ### pbsync
+
+`pbsync`, the opt-in usage sync helper, ships in its own archive and installs only with the `playbook` formula in the tap, which adds it as a `resource "pbsync"`. There is no `pbsync` formula. The `formulas` job fails when the tap's `Formula/playbook.rb` has no `resource "pbsync"`, so merge that tap change before the release that adds the archives.
 
 `install.sh` and `playbook update` install `pbsync` beside `playbook` the same way as `pbdoc`: the same download, SHA256 check, attestation check and atomic swap, with the old file kept as `pbsync.<version>.bak`. `playbook uninstall` removes it. A release without a `pbsync` archive, or a failed `pbsync` update, only warns and never fails the `playbook` install or update, because sync is optional and off by default. When the version of `playbook` is unchanged, `playbook update` still installs a missing or older `pbsync`.
 

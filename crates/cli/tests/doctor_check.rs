@@ -839,6 +839,44 @@ fn the_probes_run_side_by_side_but_the_table_keeps_its_order() {
     }
 }
 
+fn sync_rows(rows: &[Value]) -> Vec<&Value> {
+    rows.iter()
+        .filter(|r| {
+            r["message"]
+                .as_str()
+                .is_some_and(|m| m.starts_with("sync:"))
+        })
+        .collect()
+}
+
+#[test]
+fn the_sync_row_shows_only_when_sync_is_enabled() {
+    // Arrange
+    let b = Box::new("sync-row");
+    b.settings("{}");
+    let dir = b.stub("bin", "1.2.3", true);
+    let pbsync = dir.join("pbsync");
+    fs::write(&pbsync, "#!/bin/sh\n").unwrap();
+    fs::set_permissions(&pbsync, fs::Permissions::from_mode(0o755)).unwrap();
+    let data = b.home().join(".config/playbook/data");
+    fs::create_dir_all(&data).unwrap();
+
+    // Act
+    let off = b.run(&[&dir], "/bin/zsh", None);
+    fs::write(data.join("sync.json"), r#"{"version":1,"enabled":true}"#).unwrap();
+    let on = b.run(&[&dir], "/bin/zsh", None);
+
+    // Assert
+    assert!(sync_rows(&off).is_empty(), "{off:?}");
+    assert_eq!(sync_rows(&on).len(), 1, "{on:?}");
+    let position = |rows: &[Value], prefix: &str| {
+        rows.iter()
+            .position(|r| r["message"].as_str().is_some_and(|m| m.starts_with(prefix)))
+            .unwrap()
+    };
+    assert!(position(&on, "store schema") < position(&on, "sync:"));
+}
+
 // The hooks `playbook setup` writes into settings.json
 
 fn wire_all(b: &Box) -> PathBuf {

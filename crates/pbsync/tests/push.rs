@@ -13,7 +13,7 @@ use local::{ACCOUNT, BRANCH, MACHINE, REPO, SESSION};
 use pbsync::push::{
     backoff_seconds, push, PushError, PushSettings, SYNC_BATCH_ROWS, SYNC_RESEND_WINDOW_SECONDS,
 };
-use pbsync::remote::{ensure_schema, REMOTE_SCHEMA_VERSION};
+use pbsync::remote::ensure_schema;
 use pbsync::tables::usage_events;
 use pbsync::token::resolve_token;
 use pbsync::transport::{
@@ -90,7 +90,6 @@ fn settings(accounts: &[&str]) -> PushSettings {
         machine: MACHINE.to_string(),
         allowed_accounts: accounts.iter().map(|a| (*a).to_string()).collect(),
         salt: SALT.to_string(),
-        local_schema_version: REMOTE_SCHEMA_VERSION,
     }
 }
 
@@ -391,18 +390,27 @@ fn a_local_column_missing_from_the_allowlist_stays_local() {
 }
 
 #[test]
-fn a_newer_local_schema_stops_with_no_remote_writes() {
-    // Arrange
-    let (local, fake) = (local::open(), SqliteFake::new());
-    local::insert(&local, "e1", OLD, 10);
-    let probe = Probe::new(&fake);
-    let mut newer = settings(&[ACCOUNT]);
-    newer.local_schema_version = REMOTE_SCHEMA_VERSION + 1;
-    // Act
-    let result = push(&local, &probe, &usage_events(), &newer, &|| NOW);
-    // Assert
-    assert!(matches!(result, Err(PushError::LocalSchemaNewer { .. })));
-    assert!(probe.seen.borrow().is_empty());
+fn a_usage_db_newer_or_older_than_sync_understands_stops_with_no_remote_requests() {
+    for (version, expected) in [(6, "update pbsync"), (4, "run any playbook command")] {
+        // Arrange
+        let (local, fake) = (local::open(), SqliteFake::new());
+        local::insert(&local, "e1", OLD, 10);
+        local::stamp(&local, version);
+        let probe = Probe::new(&fake);
+        // Act
+        let result = push(
+            &local,
+            &probe,
+            &usage_events(),
+            &settings(&[ACCOUNT]),
+            &|| NOW,
+        );
+        // Assert
+        let error = result.unwrap_err();
+        assert!(matches!(error, PushError::LocalSchema(_)));
+        assert!(error.to_string().contains(expected), "{error}");
+        assert!(probe.seen.borrow().is_empty());
+    }
 }
 
 #[test]
@@ -432,6 +440,6 @@ fn a_database_without_the_sync_tables_is_refused_by_name() {
     let result = try_run(&local, &fake, NOW);
     // Assert
     let error = result.unwrap_err();
-    assert!(matches!(error, PushError::LocalNotReady));
+    assert!(matches!(error, PushError::LocalSchema(_)));
     assert!(error.to_string().contains("any playbook command"));
 }
