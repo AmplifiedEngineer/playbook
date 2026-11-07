@@ -1265,6 +1265,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pbsync"
+version = "0.41.0"
+dependencies = [
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "pdf-inspector"
 version = "1.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

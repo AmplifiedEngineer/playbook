@@ -9,6 +9,7 @@ The Rust code is a Cargo workspace under `crates/`:
 - `code`
 - `telemetry`: the `playbook-telemetry` package, which builds `pbtop`.
 - `data`
+- `pbsync`: the opt-in usage sync helper, with the Turso HTTP transport.
 - `plugin-checks`: tests for the plugin.
 - `store`: the `playbook-store` package, a shim over the SQLite engine.
 
