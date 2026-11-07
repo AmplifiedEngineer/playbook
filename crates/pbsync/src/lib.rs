@@ -5,6 +5,7 @@
 //! The transport is the only layer that touches the network.
 
 pub mod cli;
+pub mod local_schema;
 pub mod privacy;
 pub mod pull;
 pub mod push;

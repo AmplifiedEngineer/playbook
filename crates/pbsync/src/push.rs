@@ -10,6 +10,7 @@ use std::fmt;
 use playbook_store::types::{Value as Sql, ValueRef};
 use playbook_store::{params, params_from_iter, Connection, OptionalExtension, Row};
 
+use crate::local_schema::{self, LocalSchemaError};
 use crate::privacy::{salted_hash, Domain};
 use crate::remote::{ensure_schema, RemoteError, REMOTE_SCHEMA_VERSION};
 use crate::tables::{ColumnDef, TableDef, Transform};
@@ -29,10 +30,7 @@ const SCHEMA_VERSION_COLUMN: &str = "schema_version";
 pub(crate) const KEY_LAST_SUCCESS: &str = "last_success";
 pub(crate) const KEY_LAST_ERROR: &str = "last_error";
 pub(crate) const KEY_FAILURES: &str = "failures";
-const NOT_READY_HINT: &str = "run any playbook command to create it";
 
-const TABLE_EXISTS_SQL: &str =
-    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sync_watermarks'";
 const READ_WATERMARK_SQL: &str = "SELECT rowid_mark FROM sync_watermarks WHERE table_name = ?1";
 const RAISE_WATERMARK_SQL: &str =
     "INSERT INTO sync_watermarks (table_name, rowid_mark) VALUES (?1, ?2)
@@ -48,8 +46,6 @@ pub struct PushSettings {
     /// Account keys as stored locally. Empty means send nothing.
     pub allowed_accounts: Vec<String>,
     pub salt: String,
-    /// The schema version of the local database.
-    pub local_schema_version: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -62,12 +58,7 @@ pub enum PushError {
     Transport(TransportError),
     Remote(RemoteError),
     Local(playbook_store::Error),
-    /// The local database has no `sync_watermarks` table yet.
-    LocalNotReady,
-    LocalSchemaNewer {
-        local: u32,
-        remote: u32,
-    },
+    LocalSchema(LocalSchemaError),
     /// A hashed column held something other than text.
     UnexpectedValue {
         column: &'static str,
@@ -80,14 +71,7 @@ impl fmt::Display for PushError {
             Self::Transport(error) => write!(f, "{error}"),
             Self::Remote(error) => write!(f, "{error}"),
             Self::Local(error) => write!(f, "the local database failed: {error}"),
-            Self::LocalNotReady => write!(
-                f,
-                "the local database has no sync_watermarks table: {NOT_READY_HINT}"
-            ),
-            Self::LocalSchemaNewer { local, remote } => write!(
-                f,
-                "the local database is on schema version {local} but the remote is on version {remote}: update the remote with a newer pbsync first"
-            ),
+            Self::LocalSchema(error) => write!(f, "{error}"),
             Self::UnexpectedValue { column } => {
                 write!(f, "column {column} holds a value that is not text")
             }
@@ -106,6 +90,12 @@ impl From<TransportError> for PushError {
 impl From<RemoteError> for PushError {
     fn from(error: RemoteError) -> Self {
         Self::Remote(error)
+    }
+}
+
+impl From<LocalSchemaError> for PushError {
+    fn from(error: LocalSchemaError) -> Self {
+        Self::LocalSchema(error)
     }
 }
 
@@ -135,7 +125,7 @@ pub fn push(
     settings: &PushSettings,
     clock: &dyn Fn() -> i64,
 ) -> Result<PushStats, PushError> {
-    ensure_ready(local)?;
+    local_schema::check(local)?;
     let now = clock();
     match send_all(local, transport, table, settings, now) {
         Ok(stats) => {
@@ -158,12 +148,6 @@ fn send_all(
     settings: &PushSettings,
     now: i64,
 ) -> Result<PushStats, PushError> {
-    if settings.local_schema_version > REMOTE_SCHEMA_VERSION {
-        return Err(PushError::LocalSchemaNewer {
-            local: settings.local_schema_version,
-            remote: REMOTE_SCHEMA_VERSION,
-        });
-    }
     if settings.allowed_accounts.is_empty() {
         return Ok(PushStats::default());
     }
@@ -184,13 +168,6 @@ fn send_all(
         stats.rows_sent += batch.len();
         cursor = last_rowid;
     }
-}
-
-fn ensure_ready(local: &Connection) -> Result<(), PushError> {
-    let found = local
-        .query_row(TABLE_EXISTS_SQL, [], |_| Ok(()))
-        .optional()?;
-    found.ok_or(PushError::LocalNotReady)
 }
 
 fn column_names(table: &TableDef) -> String {

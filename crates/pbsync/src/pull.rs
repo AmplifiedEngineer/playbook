@@ -10,6 +10,7 @@ use std::fmt;
 use playbook_store::types::Value as Sql;
 use playbook_store::{params, params_from_iter, Connection, OptionalExtension};
 
+use crate::local_schema::{self, LocalSchemaError};
 use crate::privacy::{salted_hash, Domain};
 use crate::push::{
     record_failure, write_state, KEY_FAILURES, KEY_LAST_SUCCESS, SYNC_BATCH_ROWS,
@@ -63,6 +64,7 @@ pub enum PullError {
     Transport(TransportError),
     Remote(RemoteError),
     Local(playbook_store::Error),
+    LocalSchema(LocalSchemaError),
     /// A table playbook creates is missing from the local database.
     LocalNotReady {
         table: &'static str,
@@ -79,6 +81,7 @@ impl fmt::Display for PullError {
             Self::Transport(error) => write!(f, "{error}"),
             Self::Remote(error) => write!(f, "{error}"),
             Self::Local(error) => write!(f, "the local database failed: {error}"),
+            Self::LocalSchema(error) => write!(f, "{error}"),
             Self::LocalNotReady { table } => {
                 write!(
                     f,
@@ -109,6 +112,12 @@ impl From<RemoteError> for PullError {
     }
 }
 
+impl From<LocalSchemaError> for PullError {
+    fn from(error: LocalSchemaError) -> Self {
+        Self::LocalSchema(error)
+    }
+}
+
 impl From<playbook_store::Error> for PullError {
     fn from(error: playbook_store::Error) -> Self {
         Self::Local(error)
@@ -136,6 +145,7 @@ pub fn pull_with(
     clock: &dyn Fn() -> i64,
     after_page: &mut dyn FnMut(),
 ) -> Result<PullStats, PullError> {
+    local_schema::check(local)?;
     ensure_ready(local)?;
     let now = clock();
     let result = pull_all(local, transport, table, settings, now, after_page);
