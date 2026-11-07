@@ -212,6 +212,11 @@ fn backoff(attempt: u32) -> Duration {
 }
 
 /// Returns the https base without a trailing slash, and whether it is a local http base.
+/// Checks a sync URL against the transport rules without building a transport.
+pub fn validate_url(url: &str) -> Result<(), TransportError> {
+    normalize_base(url).map(|_| ())
+}
+
 fn normalize_base(url: &str) -> Result<(String, bool), TransportError> {
     let trimmed = url.trim_end_matches('/');
     if let Some(rest) = trimmed.strip_prefix(SCHEME_LIBSQL) {
