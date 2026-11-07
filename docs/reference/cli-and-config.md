@@ -1630,6 +1630,8 @@ Move events to another account, by time range or by session
 
 Prints how many events and how much cost would move and changes no events until you add `--confirm`. Times are read on your local clock; add `--utc` for UTC. By time, give `--from` and `--to` (the end is not included) and each event moves by its own time. By session, give `--before-session` or `--through-session` with `--from` or `--from-session` as the start, and every event of each session that starts in that span moves. An applied move is numbered and `account undo` reverses it. Running the same move again moves nothing.
 
+To change one session only, add `--session`: it limits the move to the events of that session. With `--from` or `--to` it moves that part of the session; without them it moves the whole session.
+
 Example: `playbook usage account assign --from 2026-11-01T00:00 --to 2026-11-02T12:00 --as personal`
 
 - `--from <FROM>`: First instant to move, like 2026-11-01T00:00 (a bare date means midnight)
@@ -1637,6 +1639,7 @@ Example: `playbook usage account assign --from 2026-11-01T00:00 --to 2026-11-02T
 - `--from-session <SESSION>`: Start with the sessions from this one on (its id from `account sessions`)
 - `--before-session <SESSION>`: End before this session starts
 - `--through-session <SESSION>`: End with this session included
+- `--session <SESSION>`: Move only events of this session (its id from `account sessions`)
 - `--as <KEY_OR_NAME>`: Account key or name that receives the events
 - `--was <KEY_OR_NAME>`: Move only events now labeled with this account key or name
 - `--confirm`: Apply the move; without it nothing changes

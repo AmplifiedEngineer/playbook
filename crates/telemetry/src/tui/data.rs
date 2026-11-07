@@ -667,6 +667,28 @@ mod tests {
     }
 
     #[test]
+    fn the_limits_burn_uses_account_scope_and_counts_every_machine() {
+        // Arrange
+        let recent = |machines: usize| {
+            let conn = fleet(machines, 1);
+            let paths = crate::util::scratch_paths(&format!("data-limits-fleet-{machines}"));
+            load_limits(&conn, &paths, Range::LastDays(30), Some("acct0"), NOW)
+                .unwrap()
+                .recent_cost_24h
+        };
+
+        // Act
+        let (this_machine_only, both_machines) = (recent(1), recent(2));
+
+        // Assert
+        assert!(this_machine_only > 0.0, "{this_machine_only}");
+        assert!(
+            (both_machines - 2.0 * this_machine_only).abs() < 1e-9,
+            "{this_machine_only} {both_machines}"
+        );
+    }
+
+    #[test]
     fn one_other_machine_can_be_picked_by_its_id() {
         let conn = fleet(2, 1);
         let d = load(

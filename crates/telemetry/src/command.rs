@@ -207,6 +207,10 @@ pub enum AccountCommand {
     /// starts in that span moves. An applied move is numbered and `account
     /// undo` reverses it. Running the same move again moves nothing.
     ///
+    /// To change one session only, add `--session`: it limits the move to the
+    /// events of that session. With `--from` or `--to` it moves that part of
+    /// the session; without them it moves the whole session.
+    ///
     /// Example: `playbook usage account assign --from 2026-11-01T00:00 --to 2026-11-02T12:00 --as personal`
     Assign {
         /// First instant to move, like 2026-11-01T00:00 (a bare date means midnight)
@@ -224,6 +228,13 @@ pub enum AccountCommand {
         /// End with this session included
         #[arg(long, value_name = "SESSION")]
         through_session: Option<String>,
+        /// Move only events of this session (its id from `account sessions`)
+        #[arg(
+            long,
+            value_name = "SESSION",
+            conflicts_with_all = ["from_session", "before_session", "through_session"]
+        )]
+        session: Option<String>,
         /// Account key or name that receives the events
         #[arg(long = "as", value_name = "KEY_OR_NAME")]
         target: String,
