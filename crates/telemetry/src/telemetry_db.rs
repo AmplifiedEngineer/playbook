@@ -10,6 +10,7 @@
 //! effort, agent name). Prompts, tool content, paths, emails and user ids are
 //! never stored; the receiver strips them before a row reaches this module.
 
+use crate::machine_rows::LOCAL_MACHINE_SQL;
 use playbook_store::{params, Connection, OptionalExtension};
 
 pub(super) const UP_SQL: &str = "
@@ -180,7 +181,8 @@ pub struct TelemetryMetric {
 pub fn migrate_up(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(UP_SQL)
         .map_err(|e| format!("failed to create telemetry tables: {e}"))?;
-    ensure_columns(conn)
+    ensure_columns(conn)?;
+    crate::machine_rows::ensure_machine_column(conn)
 }
 
 /// Tables made before a column existed lack it.
@@ -225,10 +227,12 @@ pub fn insert_request(conn: &Connection, r: &TelemetryRequest) -> Result<usize, 
         0.0
     };
     conn.execute(
-        "INSERT OR IGNORE INTO telemetry_requests (session_id, request_id, timestamp, model,
+        &format!(
+            "INSERT OR IGNORE INTO telemetry_requests (session_id, request_id, timestamp, model,
             effort, agent_name, skill_name, input_tokens, output_tokens,
-            cache_creation_tokens, cache_read_tokens, cost_usd, duration_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            cache_creation_tokens, cache_read_tokens, cost_usd, duration_ms, machine)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, {LOCAL_MACHINE_SQL})"
+        ),
         params![
             r.session_id,
             r.request_id,
@@ -252,9 +256,11 @@ pub fn insert_request(conn: &Connection, r: &TelemetryRequest) -> Result<usize, 
 /// batch is a no-op.
 pub fn insert_tool(conn: &Connection, t: &TelemetryTool) -> Result<usize, String> {
     conn.execute(
-        "INSERT OR IGNORE INTO telemetry_tools
-            (session_id, tool_use_id, timestamp, tool_name, success, duration_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        &format!(
+            "INSERT OR IGNORE INTO telemetry_tools
+            (session_id, tool_use_id, timestamp, tool_name, success, duration_ms, machine)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, {LOCAL_MACHINE_SQL})"
+        ),
         params![
             t.session_id,
             t.tool_use_id,
@@ -270,9 +276,11 @@ pub fn insert_tool(conn: &Connection, t: &TelemetryTool) -> Result<usize, String
 /// Stores a failed API attempt. Keyed by session and event sequence.
 pub fn insert_metric(conn: &Connection, m: &TelemetryMetric) -> Result<usize, String> {
     conn.execute(
-        "INSERT OR IGNORE INTO telemetry_metrics
-         (session_id, metric, kind, start_ns, end_ns, timestamp, value)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        &format!(
+            "INSERT OR IGNORE INTO telemetry_metrics
+         (session_id, metric, kind, start_ns, end_ns, timestamp, value, machine)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, {LOCAL_MACHINE_SQL})"
+        ),
         params![
             m.session_id,
             m.metric,
@@ -292,9 +300,11 @@ pub fn insert_metric(conn: &Connection, m: &TelemetryMetric) -> Result<usize, St
 
 pub fn insert_error(conn: &Connection, e: &TelemetryError) -> Result<usize, String> {
     conn.execute(
-        "INSERT OR IGNORE INTO telemetry_errors
-            (session_id, sequence, timestamp, model, status_code, attempt, duration_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        &format!(
+            "INSERT OR IGNORE INTO telemetry_errors
+            (session_id, sequence, timestamp, model, status_code, attempt, duration_ms, machine)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, {LOCAL_MACHINE_SQL})"
+        ),
         params![
             e.session_id,
             to_i64(e.sequence),

@@ -7,14 +7,15 @@
 //! other processes, which is what WAL mode and `busy_timeout` are for.
 
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};
+use crate::machine_rows::LOCAL_MACHINE_SQL;
 use crate::util::atomic::{ensure_private_dir, make_db_file_private};
 use playbook_store::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::time::Duration;
 
-/// The usage database layout this build writes. A database without the row
-/// counts as version 0 and is stamped on open.
-pub const SCHEMA_VERSION: i64 = 1;
+/// The usage database layout this build writes (2 added `machine`). A database
+/// without the row counts as version 0 and is stamped on open.
+pub const SCHEMA_VERSION: i64 = 2;
 
 const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS usage_events (
@@ -97,7 +98,11 @@ pub fn open_db(path: &Path) -> Result<Connection, String> {
             .map_err(|e| format!("failed to create directory {}: {e}", parent.display()))?;
     }
     make_db_file_private(path)?;
-    open_prepared(path)
+    let conn = open_prepared(path)?;
+    if let Some(parent) = path.parent() {
+        super::machine_rows::adopt_local_machine(&conn, parent)?;
+    }
+    Ok(conn)
 }
 
 /// Opens a usage database file the user named, as it is: no folder or
@@ -134,6 +139,7 @@ fn open_prepared(path: &Path) -> Result<Connection, String> {
     )
     .map_err(|e| format!("failed to create telemetry schema: {e}"))?;
     super::telemetry_db::ensure_columns(&conn)?;
+    super::machine_rows::ensure_machine_column(&conn)?;
     retry_busy(
         || conn.execute_batch(super::account_store::SCHEMA_SQL),
         BUSY_TIMEOUT,
@@ -249,10 +255,11 @@ fn to_i64(value: u64) -> i64 {
 /// partial count. Returns the number of rows written (0 when nothing grew).
 pub fn upsert_usage_event(conn: &Connection, e: &UsageEvent) -> Result<usize, String> {
     conn.execute(
-        "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
+        &format!(
+            "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
             repo, branch, input_tokens, output_tokens, cache_creation_tokens,
-            cache_read_tokens, cost_usd, cache_creation_1h_tokens, agent)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+            cache_read_tokens, cost_usd, cache_creation_1h_tokens, agent, machine)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, {LOCAL_MACHINE_SQL})
          ON CONFLICT(event_id) DO UPDATE SET
             input_tokens = excluded.input_tokens,
             output_tokens = excluded.output_tokens,
@@ -260,7 +267,8 @@ pub fn upsert_usage_event(conn: &Connection, e: &UsageEvent) -> Result<usize, St
             cache_read_tokens = excluded.cache_read_tokens,
             cost_usd = excluded.cost_usd,
             cache_creation_1h_tokens = excluded.cache_creation_1h_tokens
-         WHERE excluded.output_tokens > usage_events.output_tokens",
+         WHERE excluded.output_tokens > usage_events.output_tokens"
+        ),
         params![
             e.event_id,
             e.timestamp,
@@ -386,8 +394,11 @@ pub fn set_repo_and_cache_tier(
 
 pub fn insert_tool_event(conn: &Connection, e: &ToolInvocationEvent) -> Result<(), String> {
     conn.execute(
-        "INSERT INTO tool_invocation_events (event_id, timestamp, session_id, account, kind, name)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        &format!(
+            "INSERT INTO tool_invocation_events
+                (event_id, timestamp, session_id, account, kind, name, machine)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, {LOCAL_MACHINE_SQL})"
+        ),
         params![
             e.event_id,
             e.timestamp,
@@ -623,7 +634,7 @@ mod tests {
             "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort, repo,
                 branch, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost_usd)
              VALUES ('e', 1, 's', 'a', 'm', '', 'r', 'b', 1, 1, 0, 0, 1.0);
-             INSERT INTO tool_invocation_events VALUES ('t', 1, 's', 'a', 'skill', 'n');
+             INSERT INTO tool_invocation_events VALUES ('t', 1, 's', 'a', 'skill', 'n', '');
              INSERT INTO usage_backfill_files VALUES ('/f', 1);
              INSERT INTO usage_watermarks VALUES ('claude-code', 5);
              INSERT INTO account_names (key, name) VALUES ('k', 'Work');",
