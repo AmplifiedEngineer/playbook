@@ -60,6 +60,8 @@ A file that is not a database is left where it is, or renamed to `.migrated` for
 
 `playbook doctor` has a row for the folder: path, file count, kilobytes, any `*.migrated` leftovers or `.tmp-` copies, and per-worktree databases that match no worktree of this clone. Those belong to removed worktrees or another clone of the repo. Check before deleting.
 
+A second row, `store schema`, shows the version stored in `usage.db` and `config.db` next to the one this build writes. It reads the files without changing them. A newer database shows as a failure with `run: playbook update`.
+
 `playbook worktree sweep` and `playbook worktree remove` delete the gate database of the worktree they remove, and drop its rows and run lock from the code store, unless another registered worktree still maps to the same id. `playbook code index` also removes content that no worktree lists and worktree rows whose folder has been gone for over a week. It deletes store files of older schema versions once nothing has touched them for thirty days. The first `playbook setup` after an upgrade deletes the old per-worktree code files.
 
 ## Uninstall
