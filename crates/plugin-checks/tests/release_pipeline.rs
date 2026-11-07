@@ -49,6 +49,10 @@ impl Repo {
             "Cargo.lock",
             &format!("[[package]]\nname = \"playbook\"\nversion = \"{version}\"\n"),
         );
+        repo.write(
+            "crates/cli/Cargo.toml",
+            "[package]\nname = \"playbook\"\nversion.workspace = true\n",
+        );
         repo.write("README.md", &format!("Pin `PLAYBOOK_REF=v{version}`.\n"));
         repo.write(
             "docs/guides/00-install.md",
