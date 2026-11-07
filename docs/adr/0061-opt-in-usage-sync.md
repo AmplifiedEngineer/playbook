@@ -9,34 +9,32 @@
 
 One person often uses playbook on more than one computer, for example a home machine and a work machine. The machines run different projects and can use different Claude accounts. Limits belong to the account. Sessions and consumption belong to the machine, and the next section sets the exact scopes. Today every number stays on the machine that made it. No view of one account across both machines exists.
 
-The owner chose libSQL as the shared store. Two facts make that choice costly.
-
-- Five crates call `rusqlite` directly, in 49 files, and nothing sits between the code and the engine.
-- `libsql` bundles its own SQLite. External reports say two SQLite libraries do not link into one binary, and the `libsql` API is async while the workspace has no async runtime. The evidence gate below rechecks both points.
+The owner first chose libSQL as the shared store and asked for a swap of the engine under `playbook-store`. An evidence spike measured that swap and the owner rejected it. The numbers are under Considered alternatives. Five crates call `rusqlite` directly, in 49 files, and nothing sits between the code and the engine.
 
 The user guides say nothing leaves the machine (`docs/guides/05-what-setup-installs.md`, `docs/guides/10-telemetry.md`). Sync changes that claim. The claim needs a precise new wording and a record of the rules behind it.
 
 ## Decision
 
-Take approach C: a storage crate first, then a `libsql` engine behind a feature, then sync code only after an evidence gate passes. The owner has decided the points in the Decisions section below.
+Keep `rusqlite` in `playbook-store`. Sync is a separate tool that talks to Turso Cloud over HTTP. The owner has decided the points in the Decisions section below.
 
-1. **Storage crate first.** Every crate imports `playbook-store` in place of `rusqlite`. The crate keeps rusqlite's names. Call sites change their `use` line and little else. A CI guard fails any `rusqlite` import outside the crate. This part ships with no behavior change and helps even if sync does not ship.
-2. **Engine behind a feature.** `engine-rusqlite` is the default. `engine-libsql` is a second feature, and building with both fails. `playbook-store` is the one place that depends on the engine, and the target is that it switches from rusqlite to `libsql` for the whole `playbook` binary.
-3. **Evidence gate before sync code.** A CI job builds the `playbook` binary with `engine-libsql` for the five release targets, including musl and Windows. It measures binary size, push time for 10,000 rows, and open overhead on the statusline path against a rusqlite baseline in the same job. If a build fails or the size jump is unacceptable, the work parks and reports back to this ADR. It does not force the port, and fallback B below applies. No sync code lands before the gate passes.
-4. **Opt-in, off by default.** Nothing leaves your machine unless you turn on sync with `playbook sync enable`. A fresh install, an upgrade and a doctor run do not contact a remote.
-5. **What leaves the machine.** Only usage rows (`usage_events`) and a snapshot of shareable config keys. The repo goes as a salted hash of the repo name (128 bits, a truncated SHA-256 written as hex) with a per-user salt kept in the remote `shared_meta`, like the account salt. The account goes as a salted hash, worked out per event (see the next section). Sync sends no `branch`, `cwd`, file path or raw email, and it does not send `session_id` or `agent`.
-6. **Allowlists.** A per-account list (`sync.accounts`, empty by default) decides which accounts sync. The work account syncs too, once the owner adds it to the list. An explicit column list picks the row columns, and an explicit key list (`SHARED_KEYS`) picks the config keys. A new column or key stays local until someone adds it to the list. Paths and machine-bound keys stay off the list.
-7. **Transcripts stay machine-local.** Sync does not read or upload a transcript. Memory facts, the code index, the gate databases and `watch.db` are out of scope for the same reason.
-8. **Remote keys.** The remote primary key is `(machine, local key)`, where the machine is the id described in the next section. Rows from two machines cannot collide. A push repeated with the same rows writes nothing new.
-9. **A pulled config is a proposal.** A pull writes a proposal and does not apply it. `playbook sync config apply` shows the diff first.
-10. **Schema safety.** An older binary refuses a newer schema with a message that names both versions. This stops two machines on different versions from corrupting a shared store.
+1. **Transport.** Sync uses the Turso SQL-over-HTTP API, the `/v2/pipeline` JSON endpoint, through `ureq`. `crates/cli` already pins `ureq`, so no new crate is added. The token comes from a config key or an environment variable. It is never printed or logged.
+2. **A separate binary.** The tool is `pbsync`, a new bin crate `crates/pbsync`, like pbtop and pbdoc. It ships as its own binary. `playbook` shows the sync state in doctor.
+3. **Three layers, kept apart.** The transport covers the HTTP client, auth and retries. The row push and pull engine covers batching, watermarks, idempotent upsert, the remote key and the schema-version refusal. The per-table definitions list the columns allowed, the key and the privacy transform. A new kind of data is then one small table definition.
+4. **Commands.** `pbsync enable`, `disable`, `status`, `push`, `pull` and `purge`. `purge` removes this machine's rows.
+5. **Opt-in, off by default.** Nothing leaves your machine unless you run `pbsync enable`. A fresh install, an upgrade and a doctor run do not contact a remote.
+6. **What leaves the machine.** Only usage rows (`usage_events`) and a snapshot of shareable config keys. The repo goes as a salted hash of the repo name (128 bits, a truncated SHA-256 written as hex) with a per-user salt kept in the remote `shared_meta`, like the account salt. The account goes as a salted hash, worked out per event (see the next section). Sync sends no `branch`, `cwd`, file path or raw email, and it does not send `session_id` or `agent`.
+7. **Allowlists.** A per-account list (`sync.accounts`, empty by default) decides which accounts sync. The work account syncs too, once the owner adds it to the list. An explicit column list picks the row columns, and an explicit key list (`SHARED_KEYS`) picks the config keys. A new column or key stays local until someone adds it to the list. Paths and machine-bound keys stay off the list.
+8. **Transcripts stay machine-local.** Sync does not read or upload a transcript. Memory facts, the code index, the gate databases and `watch.db` are out of scope for the same reason.
+9. **Remote keys.** The remote primary key is `(machine, local key)`, where the machine is the id described in the next section. Rows from two machines cannot collide. A push repeated with the same rows writes nothing new.
+10. **A pulled config is a proposal.** A pull writes a proposal and does not apply it. The user sees the diff before anything changes.
+11. **Schema safety.** An older binary refuses a newer schema with a message that names both versions. This stops two machines on different versions from corrupting a shared store.
 
 ## Scope of each panel and the account rule
 
 1. **Two scopes.** Limits and usage windows are per account, and budgets follow them. They sum across every machine of that account. Sessions and consumption rows are per machine, with their agents, and the machine selector filters exactly these. One machine can hold several accounts, so account and machine are separate filters.
 2. **The account is set per event.** Each assistant turn and each usage row gets its own account, not one account per session. One session can span two accounts, for example a resume under another login. The label comes from the credential recorded at the time of the event. The session hooks record spans of `(session, since time, account)`. Each event takes the latest span at or before its own timestamp. A session total sums its rows across accounts, and a session lists all of its accounts.
 3. **Correcting an account.** `playbook usage account assign` moves rows by time range. A follow-up adds a limit to one session. The move is reversible, and it applies inside a session.
-4. **Schema.** A new `session_account_spans` table replaces the `session_accounts` table, which holds one row per session. The migration copies each old row with `since` set to 0. The `usage.db` `schema_version` goes from 3 to 4. The migration runs on first open, and an older build refuses the newer database (decision 10).
+4. **Schema.** A new `session_account_spans` table replaces the `session_accounts` table, which holds one row per session. The migration copies each old row with `since` set to 0. The `usage.db` `schema_version` goes from 3 to 4. The migration runs on first open, and an older build refuses the newer database (decision 11).
 5. **Sync.** The pushed account hash is per event. A session that spans two accounts pushes each row under its own account hash.
 6. **Machine id.** The id lives in a one-row `machine` table in `usage.db`. `machine.json` is legacy and stays in place. The code reads the hostname live and does not store or sync it.
 
@@ -57,17 +55,29 @@ The account hash and the repo-name hash hide the email and the repo name from so
 ### Revoking access
 
 1. Rotate or delete the access token at the provider. This is what cuts off a machine, because the provider decides what a token can reach.
-2. Run `playbook sync disable` on each machine. It stops all remote traffic from that machine.
+2. Run `pbsync disable` on each machine. It stops all remote traffic from that machine.
 
-Data already in the remote stays there until the owner deletes it at the provider. A `playbook sync purge` command removes this machine's rows.
+Data already in the remote stays there until the owner deletes it at the provider. `pbsync purge` removes this machine's rows.
 
 ## Considered alternatives
 
-**A. Port every call site to `libsql` directly.** Rejected. Every call site changes once, then again if the engine changes. The storage crate gives the same port in one place.
+**A. Port every call site to `libsql` directly.** Rejected for the reasons under C. It also changes every call site once, then again if the engine changes.
 
-**B. A separate `pbsync` helper that shares no code with the shipped crates.** The fallback if the evidence gate fails. It duplicates SQL and the table code, and it adds a second build.
+**B. A `pbsync` helper that links `libsql`.** Rejected. The helper would keep its own copy of the table code, and it still pulls in the `libsql` crates and an async runtime.
 
-**D. Files only, with JSONL export and import.** Rejected because the owner chose libSQL. The row format keeps this option open.
+**C. Swap `playbook-store` to a `libsql` engine behind a feature.** Rejected after an evidence spike (branch `spike/gh-1585-libsql-evidence`, `libsql` 0.10.0 core, 25 days old). The size and startup were fine: the binary grew by 105 to 147 KB (0.7 to 0.9 percent), startup grew by about 1 ms per process, and all five targets built, including musl and Windows MSVC. The rest failed.
+
+- The `libsql` API is async only and the workspace has no async runtime.
+- About 360 `rusqlite` call sites in five crates would change.
+- The API has gaps: no `optional()`, no `pragma_update`, no `NO_MUTEX` or URI open flags, no `ErrorCode` enum, no `get_ref`, and a transaction that takes a shared reference.
+- It bundles SQLite 3.47, against 3.53.2 in `rusqlite`.
+- It links only when the repo's `SQLITE_OMIT_LOAD_EXTENSION` flag is removed, which loosens security.
+- It adds about 50 crates, against the owner's minimal-dependency rule.
+- Both engines link into one binary, but `rusqlite` then silently runs on the older SQLite, and `libsql` panics if `rusqlite` initialises first.
+
+**D. HTTP with `ureq` from a `pbsync` binary.** Chosen. See the Decision section.
+
+**E. Files only, with JSONL export and import.** Rejected. It has no shared view without a manual step. The row format keeps this option open.
 
 **Send the raw email, or the repo and branch, for a richer view.** Rejected. Those fields identify people and work, and the account view does not need them.
 
@@ -76,18 +86,19 @@ Data already in the remote stays there until the owner deletes it at the provide
 ## Consequences
 
 - The storage crate and the schema check help even if the owner cancels sync, and so does the machine scope in pbtop.
-- A failed evidence bar stops the plan at the gate. That is the intended cost control.
+- `playbook` keeps one engine, one SQLite version and no new dependency. Its binary size and startup do not change.
+- `pbsync` is one more binary in the release, built like pbtop and pbdoc.
+- A new kind of data costs one small table definition. The transport and the push and pull engine do not change.
 - The remote holds pseudonymous account data, with the limits described above.
-- If the gate passes, one build and one engine ship. If it fails, the fallback adds a second build, `pbsync`, compiled in a separate cargo run so both engines do not link into one binary, and the release carries one more file.
 - Sync runs off the hook and statusline paths. Local reads and hooks do not wait on the network.
-- Doctor and the guides need a sync section once sync exists.
+- Doctor shows the sync state, and the guides need a sync section once sync exists.
 
 ## Decisions
 
 The owner answered the earlier open questions.
 
-1. **Hosting: Turso Cloud.** The URL stays a setting. The token comes from an environment variable whose name sits in config. Playbook stores no token.
-2. **Link: port everything to `libsql`.** There is no separate `pbsync` helper unless the gate fails. `playbook-store` switches from rusqlite to `libsql`. The evidence gate measures binary size and the musl and Windows builds first. If a build fails or the size jump is unacceptable, the work parks and reports instead of forcing it. Local reads and hooks do not wait on the network, because sync runs off the hook and statusline paths.
+1. **Hosting: Turso Cloud, over HTTP.** The URL stays a setting. The token comes from a config key or an environment variable. Playbook never prints or logs it.
+2. **Engine: keep `rusqlite`.** The `libsql` swap is rejected. `playbook-store` stays on `rusqlite`. Sync is a separate `pbsync` binary that talks to Turso over HTTP with `ureq`.
 3. **Privacy: sync a salted repo-name hash.** The hash is 128 bits of hex from a truncated SHA-256, with a per-user salt in the remote `shared_meta`. Sync still sends no branch or working directory, no raw email, and no `session_id` or `agent`.
 4. **Work account: it syncs too.** The explicit per-account allowlist `sync.accounts` stays in config and starts empty. The owner adds accounts. Enabling sync stays a visible opt-in with a consent prompt, because company policy still applies.
 
