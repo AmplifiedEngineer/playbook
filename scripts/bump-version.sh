@@ -5,8 +5,8 @@
 # bump-version.sh <version>: sets the version of a playbook release (ADR 0038).
 # The binary and the plugin share one version line, so it writes the same
 # MAJOR.MINOR.PATCH to:
-#   - the workspace version in Cargo.toml, and the playbook,
-#     playbook-code, playbook-telemetry and pbdoc entries in Cargo.lock;
+#   - the workspace version in Cargo.toml, and the Cargo.lock entry of every
+#     crate that takes it with `version.workspace = true`;
 #   - version in the plugin's plugin.json, and metadata.minBinaryVersion as
 #     the X.Y.0 of the same minor line;
 #   - the PLAYBOOK_REF pins in README.md and docs/guides/00-install.md.
@@ -41,7 +41,15 @@ trap 'rm -rf "$tmp"' EXIT
 awk -v v="$new" '/^\[workspace.package\]/ { on = 1 } /^\[/ && !/^\[workspace.package\]/ { on = 0 }
   on && /^version = / { print "version = \"" v "\""; on = 0; next } { print }' Cargo.toml > "$tmp/Cargo.toml"
 
-awk -v v="$new" '/^name = "(playbook|playbook-code|playbook-telemetry|pbdoc)"$/ { hit = 1; print; next }
+# The lock entries to bump are the crates that take the workspace version, so a
+# new crate cannot be missed and make `cargo --locked` fail.
+names="$(for m in crates/*/Cargo.toml; do
+  grep -q '^version.workspace = true' "$m" || continue
+  awk -F'"' '/^name = / { print $2; exit }' "$m"
+done | paste -sd'|' -)"
+[ -n "$names" ] || fail "no crate uses version.workspace = true"
+
+awk -v v="$new" -v names="$names" '$0 ~ "^name = \"(" names ")\"$" { hit = 1; print; next }
   hit && /^version = / { print "version = \"" v "\""; hit = 0; next } { hit = 0; print }' Cargo.lock > "$tmp/Cargo.lock"
 
 jq --arg v "$new" --arg min "${new%.*}.0" '.version = $v | .metadata.minBinaryVersion = $min' \
