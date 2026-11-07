@@ -126,7 +126,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 26] = [
+const PROBES: [Probe; 27] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -140,6 +140,7 @@ const PROBES: [Probe; 26] = [
     migration_rows,
     data_rows,
     store_schema_rows,
+    super::sync::rows,
     hooks_rows,
     atlassian_rows,
     old_launcher_rows,
@@ -1851,7 +1852,7 @@ pub fn failed(rows: &[Row]) -> bool {
 mod tests {
     use super::*;
 
-    const PROBE_COUNT: usize = 26;
+    const PROBE_COUNT: usize = 27;
     const COMPLETION_PROBE_AT: usize = PROBE_COUNT - 2;
 
     fn env_for(home: &Path) -> Env {
