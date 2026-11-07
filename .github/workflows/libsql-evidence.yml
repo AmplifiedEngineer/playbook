@@ -79,7 +79,7 @@ jobs:
             echo '| step | result | bytes |'
             echo '| --- | --- | --- |'
           } >> "$GITHUB_STEP_SUMMARY"
-          row() { echo "| $1 | $2 | $3 |" >> "$GITHUB_STEP_SUMMARY"; }
+          row() { echo "| $1 | $2 | $3 |" | tee -a "$GITHUB_STEP_SUMMARY" | sed "s/^/RESULT $TARGET /"; }
 
           # 1. Baseline with the repo's own SQLite flags (.cargo/config.toml).
           if cargo build --release --locked -p playbook --target "$TARGET"; then
