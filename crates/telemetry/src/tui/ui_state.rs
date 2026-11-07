@@ -8,6 +8,7 @@
 //! unreadable or odd value gives the defaults; a bad part is dropped alone.
 
 use super::app::{ProjectsView, SpendView};
+use super::machine::MachineSel;
 use super::sort::{Panel, Sort, PANELS};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -30,6 +31,7 @@ pub struct UiState {
     /// Column and direction of each table, in `PANELS` order.
     pub sorts: Vec<Option<Sort>>,
     pub filter: Option<String>,
+    pub machine: Option<MachineSel>,
 }
 
 impl UiState {
@@ -49,6 +51,7 @@ impl UiState {
             "projects": self.projects_view.map(|v| v.name()),
             "sorts": sorts,
             "filter": self.filter,
+            "machine": self.machine.as_ref().map(MachineSel::to_text),
         })
         .to_string()
     }
@@ -80,6 +83,7 @@ impl UiState {
             projects_view: word("projects").and_then(|n| find_projects(&n)),
             sorts,
             filter: word("filter").map(|f| f.chars().take(MAX_FILTER).collect()),
+            machine: word("machine").map(|m| MachineSel::parse(&m)),
         }
     }
 
@@ -310,7 +314,29 @@ mod tests {
             projects_view: Some(ProjectsView::Agents),
             sorts: vec![None, None, Some(Sort::new(1, false)), None, None, None],
             filter: Some("alpha".into()),
+            machine: Some(MachineSel::Key("m-2".into())),
         }
+    }
+
+    #[test]
+    fn a_corrupt_machine_pick_falls_back_to_this_machine() {
+        for text in [
+            r#"{"machine":"???"}"#,
+            r#"{"machine":"key:"}"#,
+            r#"{"machine":7}"#,
+        ] {
+            let state = UiState::parse(text);
+            assert_ne!(
+                state.machine,
+                Some(MachineSel::All),
+                "{text} must not widen the scope"
+            );
+            assert!(
+                matches!(state.machine, None | Some(MachineSel::This)),
+                "{text}"
+            );
+        }
+        assert_eq!(UiState::parse("not json").machine, None);
     }
 
     #[test]

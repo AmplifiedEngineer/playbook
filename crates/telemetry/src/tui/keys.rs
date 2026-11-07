@@ -46,6 +46,7 @@ pub enum Cmd {
     Budget,
     Zone,
     Account,
+    Machine,
     ResetUsage,
 }
 
@@ -366,6 +367,16 @@ pub const BINDINGS: &[Binding] = &[
         group: Group::Filtering,
         panels: ALL_PANELS,
         text: "Next account; U shows all, or the newest",
+        hint: None,
+    },
+    Binding {
+        cmd: Cmd::Machine,
+        keys: &[c('x')],
+        ctrl: false,
+        shown: "x",
+        group: Group::Filtering,
+        panels: ALL_PANELS,
+        text: "Next machine, then all machines",
         hint: None,
     },
     Binding {

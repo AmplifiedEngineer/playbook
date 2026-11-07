@@ -385,7 +385,12 @@ impl ToolStat {
 /// when the call has no live row at all, so each call counts once whatever
 /// the agent name says. The same rule written as a view:
 /// `live UNION ALL (transcript events NOT IN live)`.
-pub fn tool_stats(conn: &Connection, since: i64, until: i64) -> Result<Vec<ToolStat>, String> {
+pub fn tool_stats(
+    conn: &Connection,
+    since: i64,
+    until: i64,
+    machine: Option<&str>,
+) -> Result<Vec<ToolStat>, String> {
     let transcript = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'tool_invocation_events')",
@@ -397,7 +402,7 @@ pub fn tool_stats(conn: &Connection, since: i64, until: i64) -> Result<Vec<ToolS
         "UNION ALL
          SELECT CASE e.kind WHEN 'agent' THEN 'Agent' ELSE 'Skill' END, NULL, NULL, 1
          FROM tool_invocation_events e
-         WHERE e.timestamp >= ?1 AND e.timestamp < ?2
+         WHERE e.timestamp >= ?1 AND e.timestamp < ?2 AND (?3 IS NULL OR e.machine = ?3)
            AND NOT EXISTS (SELECT 1 FROM telemetry_tools t
                            WHERE t.session_id = e.session_id AND t.tool_use_id = e.event_id)"
     } else {
@@ -406,7 +411,7 @@ pub fn tool_stats(conn: &Connection, since: i64, until: i64) -> Result<Vec<ToolS
     let sql = format!(
         "WITH calls(n, ok, ms, tr) AS (
             SELECT tool_name, success, duration_ms, 0 FROM telemetry_tools
-            WHERE timestamp >= ?1 AND timestamp < ?2
+            WHERE timestamp >= ?1 AND timestamp < ?2 AND (?3 IS NULL OR machine = ?3)
             {from_transcripts})
          SELECT CASE WHEN n = '' THEN 'unknown' ELSE n END AS name,
                 COUNT(*), SUM(tr), COALESCE(SUM(1 - ok), 0), COUNT(ok), COUNT(ms),
@@ -417,7 +422,7 @@ pub fn tool_stats(conn: &Connection, since: i64, until: i64) -> Result<Vec<ToolS
         .prepare(&sql)
         .map_err(|e| format!("failed to read telemetry tools: {e}"))?;
     let rows = stmt
-        .query_map(params![since, until], |r| {
+        .query_map(params![since, until, machine], |r| {
             let n = |i: usize| -> playbook_store::Result<u64> {
                 Ok(u64::try_from(r.get::<_, i64>(i)?).unwrap_or(0))
             };
@@ -494,9 +499,14 @@ fn ratio(part: u64, whole: u64) -> f64 {
 }
 
 /// The figures of `[since, until)`.
-pub fn health(conn: &Connection, since: i64, until: i64) -> Result<Health, String> {
+pub fn health(
+    conn: &Connection,
+    since: i64,
+    until: i64,
+    machine: Option<&str>,
+) -> Result<Health, String> {
     let one = |sql: &str| -> Result<Vec<u64>, String> {
-        conn.query_row(sql, params![since, until], |r| {
+        conn.query_row(sql, params![since, until, machine], |r| {
             (0..r.as_ref().column_count())
                 .map(|i| Ok(u64::try_from(r.get::<_, i64>(i)?).unwrap_or(0)))
                 .collect()
@@ -505,15 +515,16 @@ pub fn health(conn: &Connection, since: i64, until: i64) -> Result<Health, Strin
     };
     let req = one(
         "SELECT COUNT(*), COALESCE(SUM(duration_ms), 0) FROM telemetry_requests
-                   WHERE timestamp >= ?1 AND timestamp < ?2",
+                   WHERE timestamp >= ?1 AND timestamp < ?2 AND (?3 IS NULL OR machine = ?3)",
     )?;
     let err = one(
         "SELECT COUNT(*), COALESCE(SUM(attempt > 1), 0) FROM telemetry_errors
-                   WHERE timestamp >= ?1 AND timestamp < ?2",
+                   WHERE timestamp >= ?1 AND timestamp < ?2 AND (?3 IS NULL OR machine = ?3)",
     )?;
     let tool = one(
         "SELECT COUNT(*), COALESCE(SUM(1 - success), 0), COALESCE(SUM(duration_ms), 0)
-                    FROM telemetry_tools WHERE timestamp >= ?1 AND timestamp < ?2",
+                    FROM telemetry_tools
+                    WHERE timestamp >= ?1 AND timestamp < ?2 AND (?3 IS NULL OR machine = ?3)",
     )?;
     Ok(Health {
         requests: req[0],
@@ -523,20 +534,27 @@ pub fn health(conn: &Connection, since: i64, until: i64) -> Result<Health, Strin
         tool_calls: tool[0],
         tool_failures: tool[1],
         tool_ms: tool[2],
-        active_ms: metric_sum(conn, "active_time", since, until)?.saturating_mul(1000),
-        lines_changed: metric_sum(conn, "lines_of_code", since, until)?,
-        commits: metric_sum(conn, "commits", since, until)?,
-        pull_requests: metric_sum(conn, "pull_requests", since, until)?,
+        active_ms: metric_sum(conn, "active_time", since, until, machine)?.saturating_mul(1000),
+        lines_changed: metric_sum(conn, "lines_of_code", since, until, machine)?,
+        commits: metric_sum(conn, "commits", since, until, machine)?,
+        pull_requests: metric_sum(conn, "pull_requests", since, until, machine)?,
     })
 }
 
 /// Sum of one metric in `[since, until)`, over all kinds.
-fn metric_sum(conn: &Connection, metric: &str, since: i64, until: i64) -> Result<u64, String> {
+fn metric_sum(
+    conn: &Connection,
+    metric: &str,
+    since: i64,
+    until: i64,
+    machine: Option<&str>,
+) -> Result<u64, String> {
     let v: f64 = conn
         .query_row(
             "SELECT COALESCE(SUM(value), 0) FROM telemetry_metrics
-             WHERE metric = ?1 AND timestamp >= ?2 AND timestamp < ?3",
-            params![metric, since, until],
+             WHERE metric = ?1 AND timestamp >= ?2 AND timestamp < ?3
+               AND (?4 IS NULL OR machine = ?4)",
+            params![metric, since, until, machine],
             |r| r.get(0),
         )
         .map_err(|e| format!("failed to read telemetry metrics: {e}"))?;
@@ -690,8 +708,9 @@ pub fn agent_groups(
     conn: &Connection,
     since: i64,
     until: i64,
+    machine: Option<&str>,
 ) -> Result<Vec<super::aggregate::Group>, String> {
-    groups(conn, "agent_name", "main", since, until)
+    groups(conn, "agent_name", "main", since, until, machine)
 }
 
 /// Telemetry requests in `[since, until)` grouped by the skill that was
@@ -700,8 +719,9 @@ pub fn skill_groups(
     conn: &Connection,
     since: i64,
     until: i64,
+    machine: Option<&str>,
 ) -> Result<Vec<super::aggregate::Group>, String> {
-    groups(conn, "skill_name", "", since, until)
+    groups(conn, "skill_name", "", since, until, machine)
 }
 
 /// Agent or skill invocations in `[since, until)` counted from transcripts,
@@ -711,16 +731,18 @@ pub fn invocation_groups(
     kind: crate::ToolKind,
     since: i64,
     until: i64,
+    machine: Option<&str>,
 ) -> Result<Vec<super::aggregate::Group>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT name, COUNT(*) FROM tool_invocation_events
              WHERE kind = ?1 AND timestamp >= ?2 AND timestamp < ?3
+               AND (?4 IS NULL OR machine = ?4)
              GROUP BY name ORDER BY name",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map((kind.as_str(), since, until), |r| {
+        .query_map((kind.as_str(), since, until, machine), |r| {
             Ok(super::aggregate::Group {
                 key: r.get(0)?,
                 messages: r.get::<_, i64>(1)?.max(0) as u64,
@@ -738,6 +760,7 @@ fn groups(
     empty_as: &str,
     since: i64,
     until: i64,
+    machine: Option<&str>,
 ) -> Result<Vec<super::aggregate::Group>, String> {
     let filter = if empty_as.is_empty() {
         format!("AND {column} <> ''")
@@ -749,14 +772,14 @@ fn groups(
                 COUNT(*), SUM(input_tokens), SUM(output_tokens),
                 SUM(cache_creation_tokens), SUM(cache_read_tokens), SUM(cost_usd)
          FROM telemetry_requests
-         WHERE timestamp >= ?1 AND timestamp < ?2 {filter}
+         WHERE timestamp >= ?1 AND timestamp < ?2 AND (?4 IS NULL OR machine = ?4) {filter}
          GROUP BY k ORDER BY k"
     );
     let mut stmt = conn
         .prepare(&sql)
         .map_err(|e| format!("failed to read telemetry groups: {e}"))?;
     let rows = stmt
-        .query_map(params![since, until, empty_as], |r| {
+        .query_map(params![since, until, empty_as, machine], |r| {
             let n = |i: usize| -> playbook_store::Result<u64> {
                 Ok(u64::try_from(r.get::<_, i64>(i)?).unwrap_or(0))
             };
@@ -923,12 +946,12 @@ mod tests {
         for r in [&main, &sub, &sub2, &outside] {
             insert_request(&conn, r).unwrap();
         }
-        let groups = agent_groups(&conn, 0, 1_000).unwrap();
+        let groups = agent_groups(&conn, 0, 1_000, None).unwrap();
         let names: Vec<&str> = groups.iter().map(|g| g.key.as_str()).collect();
         assert_eq!(names, ["main", "reviewer"]);
         assert!((groups[1].cost_usd - 0.75).abs() < 1e-9);
         assert_eq!(groups[1].messages, 2);
-        assert!(agent_groups(&conn, 5_000, 6_000).unwrap().is_empty());
+        assert!(agent_groups(&conn, 5_000, 6_000, None).unwrap().is_empty());
     }
 
     #[test]
@@ -946,7 +969,7 @@ mod tests {
         for r in [&a, &b, &c, &none] {
             insert_request(&conn, r).unwrap();
         }
-        let groups = skill_groups(&conn, 0, 1_000).unwrap();
+        let groups = skill_groups(&conn, 0, 1_000, None).unwrap();
         let names: Vec<&str> = groups.iter().map(|g| g.key.as_str()).collect();
         assert_eq!(names, ["plan", "review"]);
         assert!((groups[1].cost_usd - 0.75).abs() < 1e-9);
@@ -970,7 +993,7 @@ mod tests {
         migrate_up(&conn).unwrap();
         migrate_up(&conn).unwrap();
         assert_eq!(count_requests(&conn).unwrap(), 1);
-        assert!(skill_groups(&conn, 0, 10).unwrap().is_empty());
+        assert!(skill_groups(&conn, 0, 10, None).unwrap().is_empty());
     }
 
     fn tool(id: &str, name: &str, ok: bool, ms: u64, ts: i64) -> TelemetryTool {
@@ -1060,7 +1083,7 @@ mod tests {
         ] {
             insert_tool(&conn, &t).unwrap();
         }
-        let stats = tool_stats(&conn, 0, 1_000).unwrap();
+        let stats = tool_stats(&conn, 0, 1_000, None).unwrap();
         let names: Vec<&str> = stats.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(names, ["Bash", "Read", "unknown"]);
         let bash = &stats[0];
@@ -1071,7 +1094,7 @@ mod tests {
             stats[1].calls, 1,
             "the call outside the window is not counted"
         );
-        assert!(tool_stats(&conn, 9_000, 9_100).unwrap().is_empty());
+        assert!(tool_stats(&conn, 9_000, 9_100, None).unwrap().is_empty());
     }
 
     #[test]
@@ -1083,14 +1106,14 @@ mod tests {
         insert_tool(&conn, &tool("a", "Bash", false, 500, 10)).unwrap();
         insert_error(&conn, &failure(1, 1, 10)).unwrap();
         insert_error(&conn, &failure(2, 2, 10)).unwrap();
-        let h = health(&conn, 0, 1_000).unwrap();
+        let h = health(&conn, 0, 1_000, None).unwrap();
         assert_eq!((h.requests, h.errors, h.retried), (1, 2, 1));
         assert_eq!((h.tool_calls, h.tool_failures), (1, 1));
         assert_eq!(h.busy_ms(), 1_500);
         assert!((h.api_error_rate() - 2.0 / 3.0).abs() < 1e-9);
         assert_eq!(h.tool_error_rate(), 1.0);
         assert!(!h.is_empty());
-        let none = health(&conn, 5_000, 6_000).unwrap();
+        let none = health(&conn, 5_000, 6_000, None).unwrap();
         assert!(none.is_empty());
         assert_eq!((none.api_error_rate(), none.tool_error_rate()), (0.0, 0.0));
     }
@@ -1119,11 +1142,11 @@ mod tests {
             insert_metric(&conn, &row).unwrap();
         }
         // The same interval, session, metric and kind is one point.
-        let h = health(&conn, 0, 100).unwrap();
+        let h = health(&conn, 0, 100, None).unwrap();
         assert_eq!(h.active_ms, 120_000);
         assert_eq!((h.lines_changed, h.commits, h.pull_requests), (50, 2, 1));
         assert!(!h.is_empty());
-        assert!(health(&conn, 100, 200).unwrap().is_empty());
+        assert!(health(&conn, 100, 200, None).unwrap().is_empty());
     }
 
     fn fill(conn: &Connection, n: i64) {
@@ -1240,7 +1263,7 @@ mod tests {
         )
         .unwrap();
         migrate_up(&conn).unwrap();
-        assert_eq!(health(&conn, 0, 10).unwrap().api_ms, 0);
+        assert_eq!(health(&conn, 0, 10, None).unwrap().api_ms, 0);
         insert_request(&conn, &request("r2")).unwrap();
     }
 
@@ -1269,7 +1292,7 @@ mod tests {
             crate::db::insert_tool_event(&conn, &e).unwrap();
         }
 
-        let groups = invocation_groups(&conn, crate::ToolKind::Agent, 0, 1_000).unwrap();
+        let groups = invocation_groups(&conn, crate::ToolKind::Agent, 0, 1_000, None).unwrap();
 
         let got: Vec<(&str, u64)> = groups
             .iter()
@@ -1284,7 +1307,8 @@ mod tests {
         conn.execute_batch(
             "CREATE TABLE tool_invocation_events (event_id TEXT PRIMARY KEY,
                 timestamp INTEGER NOT NULL, session_id TEXT NOT NULL, account TEXT NOT NULL,
-                kind TEXT NOT NULL, name TEXT NOT NULL);",
+                kind TEXT NOT NULL, name TEXT NOT NULL,
+                machine TEXT NOT NULL DEFAULT '');",
         )
         .unwrap();
         for (id, session, ts, kind) in events {
@@ -1294,7 +1318,8 @@ mod tests {
                 "playbook:plan"
             };
             conn.execute(
-                "INSERT INTO tool_invocation_events VALUES (?1, ?2, ?3, 'a', ?4, ?5)",
+                "INSERT INTO tool_invocation_events (event_id, timestamp, session_id, account, kind, name)
+                 VALUES (?1, ?2, ?3, 'a', ?4, ?5)",
                 params![id, ts, session, kind, name],
             )
             .unwrap();
@@ -1315,13 +1340,13 @@ mod tests {
             ("k1", "s1", 40, "skill"),
             ("k2", "s1", 50, "skill"),
         ]);
-        let stats = tool_stats(&conn, 0, 100).unwrap();
+        let stats = tool_stats(&conn, 0, 100, None).unwrap();
         let agent = stat(&stats, "Agent");
         assert_eq!((agent.calls, agent.transcript_calls), (3, 3));
         assert_eq!((agent.outcomes, agent.timed, agent.failures), (0, 0, 0));
         assert!(!agent.has_outcome() && !agent.has_duration());
         assert_eq!(stat(&stats, "Skill").calls, 2);
-        assert!(tool_stats(&conn, 100, 200).unwrap().is_empty());
+        assert!(tool_stats(&conn, 100, 200, None).unwrap().is_empty());
     }
 
     #[test]
@@ -1330,7 +1355,7 @@ mod tests {
         // may say `custom`; neither name is in the key, so one id is one call.
         let conn = with_events(&[("tu1", "s1", 10, "agent"), ("tu2", "s1", 20, "agent")]);
         insert_tool(&conn, &tool("tu1", "Agent", false, 300, 11)).unwrap();
-        let stats = tool_stats(&conn, 0, 100).unwrap();
+        let stats = tool_stats(&conn, 0, 100, None).unwrap();
         let agent = stat(&stats, "Agent");
         assert_eq!((agent.calls, agent.transcript_calls), (2, 1));
         assert_eq!((agent.failures, agent.outcomes, agent.timed), (1, 1, 1));
@@ -1341,7 +1366,7 @@ mod tests {
     fn the_same_tool_use_id_in_another_session_is_a_different_call() {
         let conn = with_events(&[("tu1", "other", 10, "agent")]);
         insert_tool(&conn, &tool("tu1", "Agent", true, 5, 11)).unwrap();
-        let stats = tool_stats(&conn, 0, 100).unwrap();
+        let stats = tool_stats(&conn, 0, 100, None).unwrap();
         let agent = stat(&stats, "Agent");
         assert_eq!((agent.calls, agent.transcript_calls), (2, 1));
     }
@@ -1350,7 +1375,7 @@ mod tests {
     fn a_live_row_outside_the_window_still_hides_its_transcript_twin() {
         let conn = with_events(&[("tu1", "s1", 10, "agent")]);
         insert_tool(&conn, &tool("tu1", "Agent", true, 5, 500)).unwrap();
-        assert!(tool_stats(&conn, 0, 100).unwrap().is_empty());
+        assert!(tool_stats(&conn, 0, 100, None).unwrap().is_empty());
     }
 
     #[test]
@@ -1358,7 +1383,7 @@ mod tests {
         let conn = with_events(&[("a1", "s1", 10, "agent"), ("a2", "s1", 11, "agent")]);
         insert_tool(&conn, &tool("live1", "Agent", true, 100, 12)).unwrap();
         insert_tool(&conn, &tool("live2", "Agent", false, 300, 13)).unwrap();
-        let stats = tool_stats(&conn, 0, 100).unwrap();
+        let stats = tool_stats(&conn, 0, 100, None).unwrap();
         let agent = stat(&stats, "Agent");
         assert_eq!(agent.calls, 4);
         assert_eq!(
@@ -1378,15 +1403,15 @@ mod tests {
         let day = 86_400;
         let conn = with_events(&[("old", "s1", 2 * day + 5, "skill")]);
         insert_tool(&conn, &tool("live", "Bash", true, 3, 5 * day + 5)).unwrap();
-        let transcript_day = tool_stats(&conn, 2 * day, 3 * day).unwrap();
+        let transcript_day = tool_stats(&conn, 2 * day, 3 * day, None).unwrap();
         assert_eq!(transcript_day.len(), 1);
         assert_eq!(transcript_day[0].transcript_calls, 1);
-        let live_day = tool_stats(&conn, 5 * day, 6 * day).unwrap();
+        let live_day = tool_stats(&conn, 5 * day, 6 * day, None).unwrap();
         assert_eq!(
             (live_day[0].name.as_str(), live_day[0].transcript_calls),
             ("Bash", 0)
         );
-        let health = health(&conn, 2 * day, 3 * day).unwrap();
+        let health = health(&conn, 2 * day, 3 * day, None).unwrap();
         assert!(health.is_empty(), "health stays live only");
     }
 }

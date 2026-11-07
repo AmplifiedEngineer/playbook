@@ -756,10 +756,13 @@ fn zone_note(app: &App) -> String {
         }
         _ => crate::tz::label().to_string(),
     };
-    match app.data.as_ref().map(|d| d.accounts.shown.as_str()) {
-        Some(account) if !account.is_empty() => format!("{zone}, {account}"),
-        _ => zone,
-    }
+    let Some(data) = app.data.as_ref() else {
+        return zone;
+    };
+    [&data.accounts.shown, &data.machines.shown]
+        .into_iter()
+        .filter(|name| !name.is_empty())
+        .fold(zone, |note, name| format!("{note}, {name}"))
 }
 
 fn render_header(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {

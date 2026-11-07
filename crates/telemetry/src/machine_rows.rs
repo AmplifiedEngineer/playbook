@@ -147,6 +147,11 @@ fn create_meta(conn: &Connection) -> Result<(), String> {
     .map_err(|e| format!("failed to create the meta table: {e}"))
 }
 
+/// The id this database stamps on new rows, empty when none is recorded.
+pub fn local_machine_id(conn: &Connection) -> Result<String, String> {
+    Ok(read_meta(conn, MACHINE_ID_KEY)?.unwrap_or_default())
+}
+
 fn read_meta(conn: &Connection, key: &str) -> Result<Option<String>, String> {
     conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0))
         .optional()
