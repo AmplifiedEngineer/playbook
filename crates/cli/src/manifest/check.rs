@@ -151,7 +151,7 @@ mod tests {
         assert!(violations(&tracked).is_empty());
     }
 
-    /// The Nix flake lives in amplified-engineer/nix, so a root flake is an offender.
+    /// The Nix flake lives in amplifiedengineer/nix, so a root flake is an offender.
     #[test]
     fn the_nix_flake_files_are_offenders() {
         let tracked = vec!["flake.nix".to_string(), "flake.lock".to_string()];

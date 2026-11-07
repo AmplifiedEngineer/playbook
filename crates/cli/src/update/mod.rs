@@ -635,7 +635,7 @@ mod tests {
     }
 
     const LINK: &str =
-        "Full notes: https://github.com/amplified-engineer/playbook/releases/tag/v0.17.0\n";
+        "Full notes: https://github.com/amplifiedengineer/playbook/releases/tag/v0.17.0\n";
 
     fn fixture(binary: &[u8], sums_hash_of: &[u8]) -> FakeFetcher {
         let asset = "playbook-0.17.0-x86_64-unknown-linux-musl";

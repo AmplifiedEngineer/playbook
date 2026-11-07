@@ -133,7 +133,7 @@ pub use usage::command::UsageCommand;
     version,
     after_help = "Run `playbook <command> --help` for details on one command. `pb` is a short alias for `playbook`.\n\
 Check your setup with `/playbook:doctor` inside Claude Code (`playbook doctor --help` lists its helpers).\n\
-Docs: https://github.com/amplified-engineer/playbook"
+Docs: https://github.com/amplifiedengineer/playbook"
 )]
 pub struct Cli {
     #[command(subcommand)]

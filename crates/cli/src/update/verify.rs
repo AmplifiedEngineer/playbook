@@ -181,21 +181,23 @@ mod tests {
                 .collect()
         };
         let new = args(crate::common::org::PLAYBOOK_REPO);
-        assert!(new.contains(&"amplified-engineer/playbook".to_string()));
+        assert!(new.contains(&"amplifiedengineer/playbook".to_string()));
         assert!(
-            new.contains(&"amplified-engineer/playbook/.github/workflows/release.yml".to_string())
+            new.contains(&"amplifiedengineer/playbook/.github/workflows/release.yml".to_string())
         );
-        let old = args(crate::common::org::LEGACY_PLAYBOOK_REPO);
+        let old = args(crate::common::org::PLAYBOOK_REPOS[2]);
         assert!(
             old.contains(&"pragmatic-engineer/playbook/.github/workflows/release.yml".to_string())
         );
     }
 
     #[test]
-    fn the_new_repo_is_tried_before_the_old_one() {
+    fn the_new_repo_is_tried_before_the_old_ones() {
+        let repos = crate::common::org::PLAYBOOK_REPOS;
+        assert_eq!(repos[0], REPO);
         assert_eq!(
-            crate::common::org::PLAYBOOK_REPOS,
-            [REPO, crate::common::org::LEGACY_PLAYBOOK_REPO]
+            &repos[1..],
+            ["amplified-engineer/playbook", "pragmatic-engineer/playbook"]
         );
     }
 
