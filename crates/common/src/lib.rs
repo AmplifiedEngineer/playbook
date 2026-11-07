@@ -10,6 +10,7 @@ pub mod atomic;
 pub mod git;
 pub mod gitfacts;
 pub mod hash;
+pub mod org;
 pub mod paths;
 pub mod payload;
 pub mod proc;

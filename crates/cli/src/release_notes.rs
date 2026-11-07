@@ -259,7 +259,7 @@ mod tests {
         assert_eq!(
             text,
             "Breaking changes in playbook 0.28.0:\n  - the flag moved; run playbook setup (#12)\n\
-             Full notes: https://github.com/pragmatic-engineer/playbook/releases/tag/v0.28.0\n"
+             Full notes: https://github.com/amplifiedengineer/playbook/releases/tag/v0.28.0\n"
         );
     }
 
@@ -275,10 +275,10 @@ mod tests {
 
         // Assert
         assert!(skipped
-            .contains("Their notes: https://github.com/pragmatic-engineer/playbook/releases\n"));
+            .contains("Their notes: https://github.com/amplifiedengineer/playbook/releases\n"));
         assert_eq!(
             next,
-            "Full notes: https://github.com/pragmatic-engineer/playbook/releases/tag/v0.28.0\n"
+            "Full notes: https://github.com/amplifiedengineer/playbook/releases/tag/v0.28.0\n"
         );
         assert_eq!(none, next);
     }
@@ -403,7 +403,7 @@ mod tests {
     fn the_updated_line_names_both_versions_or_only_the_new_one() {
         assert_eq!(
             updated_line(Some("0.27.0"), "0.28.0"),
-            "playbook updated from 0.27.0 to 0.28.0. Release notes: https://github.com/pragmatic-engineer/playbook/releases/tag/v0.28.0"
+            "playbook updated from 0.27.0 to 0.28.0. Release notes: https://github.com/amplifiedengineer/playbook/releases/tag/v0.28.0"
         );
         assert!(updated_line(None, "0.28.0").starts_with("playbook updated to 0.28.0. "));
     }

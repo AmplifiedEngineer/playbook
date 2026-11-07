@@ -6,8 +6,8 @@ A contributor signs the CLA by adding a row to `.github/CONTRIBUTORS.md` in a co
 
 - `.github/CONTRIBUTORS.md` is the register. The table sits between the `CLA-BOT:START` and `CLA-BOT:END` markers. A row is `| @login | YYYY-MM-DD | email |`. The email cell is optional. The marker names are kept so older tools can still read the table.
 - `.github/workflows/cla-dco.yml` is the caller. It runs on `pull_request` and `merge_group`, with read-only permissions and no secret. It has no `issue_comment` trigger, so zizmor's `dangerous-triggers` audit has nothing to report and no ignore is needed.
-- `cla-dco-checks.yml` in `pragmatic-engineer/.github` holds the two jobs, `dco` and `cla-check`. The caller job is named `cla-dco`, so the required checks keep their names: `cla-dco / dco` and `cla-dco / cla-check`.
-- `scripts/cla-check.sh` in `pragmatic-engineer/.github` makes both decisions from git history, and its tests live there. The caller sets `tooling-ref` to the pinned commit, so the script is fetched at that commit.
+- `cla-dco-checks.yml` in `amplifiedengineer/.github` holds the two jobs, `dco` and `cla-check`. The caller job is named `cla-dco`, so the required checks keep their names: `cla-dco / dco` and `cla-dco / cla-check`.
+- `scripts/cla-check.sh` in `amplifiedengineer/.github` makes both decisions from git history, and its tests live there. The caller sets `tooling-ref` to the pinned commit, so the script is fetched at that commit.
 
 ## What `cla-check` verifies
 
