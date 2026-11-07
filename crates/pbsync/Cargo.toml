@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "pbsync"
+version.workspace = true
+edition.workspace = true
+description = "Opt-in usage sync helper that ships next to playbook"
+license.workspace = true
+repository = "https://github.com/pragmatic-engineer/playbook"
+publish = false
+
+[lib]
+name = "pbsync"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pbsync"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "=1.0.154"
+ureq = { version = "=3.4.2", default-features = false, features = ["rustls"] }
+
+[lints]
+workspace = true
