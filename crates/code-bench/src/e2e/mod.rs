@@ -7,6 +7,8 @@
 //! are injected, so every test runs with stubs.
 
 pub mod model;
+pub mod report;
+pub mod run;
 
 use crate::tasks::TaskSet;
 use serde::{Deserialize, Serialize};
