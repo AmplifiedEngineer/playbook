@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The `pbsync` commands that manage the settings: `enable`, `disable` and
-//! `status`. None of them makes a network call.
+//! The `pbsync` command line. `enable`, `disable` and `status` manage the
+//! settings and make no network call; the others live in their own modules.
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -13,6 +13,7 @@ use playbook_store::{params_from_iter, Connection, OpenFlags, OptionalExtension}
 
 use crate::remote::REMOTE_SCHEMA_VERSION;
 use crate::settings::Settings;
+use crate::sync_cmd::{self, Kind};
 use crate::tables::usage_events;
 use crate::token::{resolve_token, DEFAULT_TOKEN_ENV};
 use crate::transport::validate_url;
@@ -33,7 +34,7 @@ const READ_STATE_SQL: &str = "SELECT value FROM sync_state WHERE key = ?1";
 const READ_MARK_SQL: &str = "SELECT rowid_mark FROM sync_watermarks WHERE table_name = ?1";
 
 const TOP_USAGE: &str =
-    "usage: pbsync <enable | disable | status> [--help]\n       pbsync --version";
+    "usage: pbsync <enable | disable | status | push | pull | sync> [--help]\n       pbsync --version";
 const ENABLE_USAGE: &str =
     "usage: pbsync enable --url URL [--account KEY]... [--token-env NAME] [--yes]\n\
   --url URL         the Turso database URL (https or libsql; http only for localhost)\n\
@@ -57,11 +58,11 @@ pub struct Context<'a> {
 }
 
 impl Context<'_> {
-    fn say(&mut self, line: &str) {
+    pub(crate) fn say(&mut self, line: &str) {
         let _ = writeln!(self.out, "{line}");
     }
 
-    fn fail(&mut self, code: u8, line: &str) -> u8 {
+    pub(crate) fn fail(&mut self, code: u8, line: &str) -> u8 {
         let _ = writeln!(self.err, "error: {line}");
         code
     }
@@ -83,6 +84,9 @@ pub fn run(args: &[String], ctx: &mut Context) -> u8 {
         "enable" => enable(rest, ctx),
         "disable" => no_flags(rest, DISABLE_USAGE, ctx, disable),
         "status" => no_flags(rest, STATUS_USAGE, ctx, status),
+        "push" => sync_cmd::run(Kind::Push, rest, ctx),
+        "pull" => sync_cmd::run(Kind::Pull, rest, ctx),
+        "sync" => sync_cmd::run(Kind::Both, rest, ctx),
         other => ctx.fail(EXIT_USAGE, &format!("unknown command {other}\n{TOP_USAGE}")),
     }
 }
