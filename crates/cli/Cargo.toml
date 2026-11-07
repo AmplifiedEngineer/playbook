@@ -19,6 +19,9 @@ pkg-fmt = "bin"
 # from the quick-install service by crate name could be that project's binary.
 disabled-strategies = ["quick-install"]
 
+[features]
+libsql-probe = ["playbook-store/engine-libsql"]
+
 [dependencies]
 chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
 clap = { version = "=4.6.7", features = ["derive"] }

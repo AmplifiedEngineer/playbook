@@ -1,0 +1,117 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+#
+# Throwaway spike: sizes of `playbook` with and without libsql on the five
+# release targets. Never merge this file.
+
+name: libsql-evidence
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  size:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            linker: rust-lld
+            cc: musl-gcc
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+            linker: rust-lld
+            cc: musl-gcc
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            ext: .exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Add the target
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: rustup target add "$TARGET"
+
+      - name: Install the musl C compiler
+        if: matrix.cc == 'musl-gcc'
+        run: sudo apt-get update -qq && sudo apt-get install -y musl-tools
+
+      - name: Build and measure
+        shell: bash
+        env:
+          RELEASE_LINKER: ${{ matrix.linker }}
+          RELEASE_CC: ${{ matrix.cc }}
+          TARGET: ${{ matrix.target }}
+          EXT: ${{ matrix.ext }}
+        run: |
+          set -uo pipefail
+          if [ -n "${RELEASE_LINKER:-}" ]; then
+            tu="$(echo "$TARGET" | tr 'a-z-' 'A-Z_')"
+            export "CARGO_TARGET_${tu}_LINKER=${RELEASE_LINKER}"
+          fi
+          if [ -n "${RELEASE_CC:-}" ]; then
+            tc="$(echo "$TARGET" | tr '-' '_')"
+            export "CC_${tc}=${RELEASE_CC}"
+          fi
+          bin="target/$TARGET/release/playbook${EXT:-}"
+          size() { wc -c < "$1" | tr -d ' '; }
+          {
+            echo "### $TARGET"
+            echo '| step | result | bytes |'
+            echo '| --- | --- | --- |'
+          } >> "$GITHUB_STEP_SUMMARY"
+          row() { echo "| $1 | $2 | $3 |" >> "$GITHUB_STEP_SUMMARY"; }
+
+          # 1. Baseline with the repo's own SQLite flags (.cargo/config.toml).
+          if cargo build --release --locked -p playbook --target "$TARGET"; then
+            row "playbook baseline (repo flags)" ok "$(size "$bin")"
+          else
+            row "playbook baseline (repo flags)" FAIL "-"
+          fi
+
+          # The repo flags add -DSQLITE_OMIT_LOAD_EXTENSION, which libsql's
+          # Rust code cannot link against. Same flags minus that one.
+          export LIBSQLITE3_FLAGS="-USQLITE_ENABLE_FTS3 -USQLITE_ENABLE_FTS3_PARENTHESIS -USQLITE_ENABLE_RTREE -USQLITE_ENABLE_DBSTAT_VTAB"
+
+          # 2. Baseline with load-extension on, to isolate the libsql delta.
+          if cargo build --release --locked -p playbook --target "$TARGET"; then
+            row "playbook baseline (load-extension on)" ok "$(size "$bin")"
+          else
+            row "playbook baseline (load-extension on)" FAIL "-"
+          fi
+
+          # 3. playbook with libsql linked next to rusqlite.
+          if cargo build --release --locked -p playbook --features libsql-probe --target "$TARGET"; then
+            row "playbook + libsql (both engines)" ok "$(size "$bin")"
+          else
+            row "playbook + libsql (both engines)" FAIL "-"
+          fi
+
+          # 4. libsql alone, no rusqlite.
+          ex="target/$TARGET/release/examples/bench${EXT:-}"
+          if cargo build --release --locked -p playbook-store --no-default-features \
+               --features engine-libsql --example bench --target "$TARGET"; then
+            row "store bench, libsql only" ok "$(size "$ex")"
+          else
+            row "store bench, libsql only" FAIL "-"
+          fi
+          if cargo build --release --locked -p playbook-store --example bench --target "$TARGET"; then
+            row "store bench, rusqlite only" ok "$(size "$ex")"
+          else
+            row "store bench, rusqlite only" FAIL "-"
+          fi

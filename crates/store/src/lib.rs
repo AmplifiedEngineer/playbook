@@ -6,9 +6,14 @@
 
 #![allow(clippy::disallowed_types)]
 
+#[cfg(feature = "engine-libsql")]
+pub mod libsql_probe;
+#[cfg(feature = "engine-rusqlite")]
 mod retry;
+#[cfg(feature = "engine-rusqlite")]
 pub mod schema;
 
+#[cfg(feature = "engine-rusqlite")]
 pub use retry::{retry_busy_only, retry_busy_or_locked, retry_with_pause, BUSY_PAUSE, OPEN_BUDGET};
 
 #[cfg(feature = "engine-rusqlite")]

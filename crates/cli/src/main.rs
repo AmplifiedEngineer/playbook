@@ -128,6 +128,12 @@ fn main() {
 }
 
 fn real_main() {
+    #[cfg(feature = "libsql-probe")]
+    if let Some(p) = std::env::var_os("PLAYBOOK_LIBSQL_PROBE") {
+        let n = playbook_store::libsql_probe::open_and_query(std::path::Path::new(&p)).unwrap();
+        println!("libsql rows: {n}");
+        return;
+    }
     restore_sigpipe();
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
     // The `pbtop` link of the Homebrew formula is the standalone dashboard,

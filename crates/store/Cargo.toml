@@ -16,9 +16,21 @@ path = "src/lib.rs"
 [features]
 default = ["engine-rusqlite"]
 engine-rusqlite = ["dep:rusqlite"]
+engine-libsql = ["dep:libsql"]
 
 [dependencies]
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"], optional = true }
+libsql = { version = "=0.10.0", default-features = false, features = ["core"], optional = true }
 
 [lints]
 workspace = true
+
+[[example]]
+name = "engine_bench"
+required-features = ["engine-rusqlite", "engine-libsql"]
+
+[[example]]
+name = "bench"
+
+[dev-dependencies]
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
