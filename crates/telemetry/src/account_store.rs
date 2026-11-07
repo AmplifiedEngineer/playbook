@@ -227,7 +227,7 @@ pub(crate) mod tests {
             .unwrap();
         }
         conn.execute(
-            "INSERT INTO tool_invocation_events VALUES ('t', 150, 's1', 'work@x.com', 'skill', 'k')",
+            "INSERT INTO tool_invocation_events VALUES ('t', 150, 's1', 'work@x.com', 'skill', 'k', '')",
             [],
         )
         .unwrap();

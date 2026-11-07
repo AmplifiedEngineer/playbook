@@ -247,6 +247,43 @@ mod tests {
     }
 
     #[test]
+    fn ingested_usage_and_tool_rows_carry_the_local_machine_id() {
+        // Arrange
+        let dir = scratch_dir("ingest-machine");
+        let conn = db::open_db(&dir.join("usage.db")).unwrap();
+        let id = crate::machine::load_or_create(&dir, uuid::Uuid::new_v4, "host")
+            .unwrap()
+            .id;
+        let tool = crate::ToolInvocationEvent {
+            event_id: "t".into(),
+            timestamp: 1,
+            session_id: "s".into(),
+            account: String::new(),
+            kind: ToolKind::Skill,
+            name: "n".into(),
+        };
+        let source = Fake(Events {
+            usage: vec![usage("u", 1, 0.0)],
+            tools: vec![tool],
+        });
+
+        // Act
+        ingest(&source, "a", &conn).unwrap();
+
+        // Assert
+        for table in ["usage_events", "tool_invocation_events"] {
+            let found: i64 = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE machine = ?1"),
+                    [&id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(found, 1, "{table}");
+        }
+    }
+
+    #[test]
     fn ingest_writes_events_tags_the_account_and_advances_the_watermark() {
         let dir = scratch_dir("usage-ingest");
         let conn = db::open_db(&dir.join("usage.db")).unwrap();

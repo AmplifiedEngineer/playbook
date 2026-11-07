@@ -210,6 +210,42 @@ mod tests {
     }
 
     #[test]
+    fn live_rows_of_every_telemetry_table_carry_the_local_machine_id() {
+        // Arrange
+        let (conn, reader) = db("writer-machine");
+        let id: String = reader
+            .query_row("SELECT value FROM meta WHERE key = 'machine_id'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let rows = crate::otlp::Parsed {
+            requests: vec![Default::default()],
+            tools: vec![Default::default()],
+            errors: vec![Default::default()],
+        };
+
+        // Act
+        assert!(commit(&conn, &[job(Kind::Logs(rows)).0, job(metric()).0]));
+
+        // Assert
+        for table in [
+            "telemetry_requests",
+            "telemetry_tools",
+            "telemetry_errors",
+            "telemetry_metrics",
+        ] {
+            let found: i64 = reader
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE machine = ?1"),
+                    [&id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(found, 1, "{table}");
+        }
+    }
+
+    #[test]
     fn a_hundred_queued_jobs_land_in_at_most_two_commits() {
         let (conn, reader) = db("writer-batch");
         let (tx, rx) = sync_channel(CHANNEL_BOUND);
