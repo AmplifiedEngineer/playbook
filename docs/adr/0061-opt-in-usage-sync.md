@@ -7,7 +7,7 @@
 
 ## Context
 
-One person often uses playbook on more than one computer, for example a home machine and a work machine. The machines run different projects and can use different Claude accounts. Limits belong to the account and usage belongs to the machine. Today every number stays on the machine that made it. No view of one account across both machines exists.
+One person often uses playbook on more than one computer, for example a home machine and a work machine. The machines run different projects and can use different Claude accounts. Limits belong to the account. Sessions and consumption belong to the machine, and the next section sets the exact scopes. Today every number stays on the machine that made it. No view of one account across both machines exists.
 
 The owner chose libSQL as the shared store. Two facts make that choice costly.
 
@@ -20,16 +20,25 @@ The user guides say nothing leaves the machine (`docs/guides/05-what-setup-insta
 
 Take approach C: a storage crate first, then a `libsql` engine behind a feature, then sync code only after an evidence gate passes. The owner has decided the points in the Decisions section below.
 
-1. **Storage crate first.** Every crate imports `playbook-store` in place of `rusqlite`. The crate keeps rusqlite's names. Call sites change their `use` line and little else. A CI guard fails any `rusqlite` import outside the crate. This part ships with no behavior change and helps even if sync never ships.
+1. **Storage crate first.** Every crate imports `playbook-store` in place of `rusqlite`. The crate keeps rusqlite's names. Call sites change their `use` line and little else. A CI guard fails any `rusqlite` import outside the crate. This part ships with no behavior change and helps even if sync does not ship.
 2. **Engine behind a feature.** `engine-rusqlite` is the default. `engine-libsql` is a second feature, and building with both fails. `playbook-store` is the one place that depends on the engine, and the target is that it switches from rusqlite to `libsql` for the whole `playbook` binary.
 3. **Evidence gate before sync code.** A CI job builds the `playbook` binary with `engine-libsql` for the five release targets, including musl and Windows. It measures binary size, push time for 10,000 rows, and open overhead on the statusline path against a rusqlite baseline in the same job. If a build fails or the size jump is unacceptable, the work parks and reports back to this ADR. It does not force the port, and fallback B below applies. No sync code lands before the gate passes.
 4. **Opt-in, off by default.** Nothing leaves your machine unless you turn on sync with `playbook sync enable`. A fresh install, an upgrade and a doctor run do not contact a remote.
-5. **What leaves the machine.** Only usage rows (`usage_events`) and a snapshot of shareable config keys. The repo goes as a salted hash of the repo name (128 bits, a truncated SHA-256 written as hex) with a per-user salt kept in the remote `shared_meta`, like the account salt. The account goes as a salted hash. Sync sends no `branch`, `cwd`, file path or raw email, and it does not send `session_id` or `agent`.
+5. **What leaves the machine.** Only usage rows (`usage_events`) and a snapshot of shareable config keys. The repo goes as a salted hash of the repo name (128 bits, a truncated SHA-256 written as hex) with a per-user salt kept in the remote `shared_meta`, like the account salt. The account goes as a salted hash, worked out per event (see the next section). Sync sends no `branch`, `cwd`, file path or raw email, and it does not send `session_id` or `agent`.
 6. **Allowlists.** A per-account list (`sync.accounts`, empty by default) decides which accounts sync. The work account syncs too, once the owner adds it to the list. An explicit column list picks the row columns, and an explicit key list (`SHARED_KEYS`) picks the config keys. A new column or key stays local until someone adds it to the list. Paths and machine-bound keys stay off the list.
 7. **Transcripts stay machine-local.** Sync does not read or upload a transcript. Memory facts, the code index, the gate databases and `watch.db` are out of scope for the same reason.
-8. **Remote keys.** The remote primary key is `(machine, local key)`. Rows from two machines cannot collide. A push repeated with the same rows writes nothing new.
+8. **Remote keys.** The remote primary key is `(machine, local key)`, where the machine is the id described in the next section. Rows from two machines cannot collide. A push repeated with the same rows writes nothing new.
 9. **A pulled config is a proposal.** A pull writes a proposal and does not apply it. `playbook sync config apply` shows the diff first.
 10. **Schema safety.** An older binary refuses a newer schema with a message that names both versions. This stops two machines on different versions from corrupting a shared store.
+
+## Scope of each panel and the account rule
+
+1. **Two scopes.** Limits and usage windows are per account, and budgets follow them. They sum across every machine of that account. Sessions and consumption rows are per machine, with their agents, and the machine selector filters exactly these. One machine can hold several accounts, so account and machine are separate filters.
+2. **The account is set per event.** Each assistant turn and each usage row gets its own account, not one account per session. One session can span two accounts, for example a resume under another login. The label comes from the credential recorded at the time of the event. The session hooks record spans of `(session, since time, account)`. Each event takes the latest span at or before its own timestamp. A session total sums its rows across accounts, and a session lists all of its accounts.
+3. **Correcting an account.** `playbook usage account assign` moves rows by time range. A follow-up adds a limit to one session. The move is reversible, and it applies inside a session.
+4. **Schema.** A new `session_account_spans` table replaces the `session_accounts` table, which holds one row per session. The migration copies each old row with `since` set to 0. The `usage.db` `schema_version` goes from 3 to 4. The migration runs on first open, and an older build refuses the newer database (decision 10).
+5. **Sync.** The pushed account hash is per event. A session that spans two accounts pushes each row under its own account hash.
+6. **Machine id.** The id lives in a one-row `machine` table in `usage.db`. `machine.json` is legacy and stays in place. The code reads the hostname live and does not store or sync it.
 
 ## Privacy and the opt-in carve-out
 
