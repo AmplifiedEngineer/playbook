@@ -1,0 +1,99 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+#
+# Weekly end-to-end evaluation of the code index. The same tasks run with and
+# without the index through the pinned model, and `code-bench decide` prints
+# the value the brief facts default should take. The run only reports: the
+# default flips by a committed change after the owner reads the report. Runs
+# on a schedule and on demand only, never on a pull request, and stays off
+# until the repository variable CODE_CI_PILOT_GATE_RAN is "true". The model
+# key is a secret that only the evaluation step can read.
+
+name: code-e2e
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: code-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CLONE_CACHE: ${{ github.workspace }}/.code-bench-cache
+  REPORT: ${{ github.workspace }}/code-e2e-report.json
+  CLIENT_DIR: ${{ github.workspace }}/.github/e2e-client
+
+jobs:
+  e2e:
+    name: e2e
+    if: vars.CODE_CI_PILOT_GATE_RAN == 'true'
+    # Holds the model key. The owner adds the secret CODE_E2E_ANTHROPIC_API_KEY here.
+    environment: code-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.anthropic.com:443
+            api.github.com:443
+            crates.io:443
+            github.com:443
+            index.crates.io:443
+            objects.githubusercontent.com:443
+            registry.npmjs.org:443
+            release-assets.githubusercontent.com:443
+            static.crates.io:443
+            static.rust-lang.org:443
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Cache cargo registry and build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: code-e2e-cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            code-e2e-cargo-v1-${{ runner.os }}-
+
+      - name: Cache the pinned clones
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CLONE_CACHE }}
+          key: code-bench-clones-v1-e2e-${{ hashFiles('crates/code-bench/corpus.toml') }}
+
+      - name: Build the binaries
+        run: cargo build --release -p playbook -p code-bench
+
+      - name: Install the model client from its lockfile
+        run: npm ci --prefix "$CLIENT_DIR"
+
+      - name: Run the evaluation
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CODE_E2E_ANTHROPIC_API_KEY }}
+        run: PATH="$PWD/target/release:$CLIENT_DIR/node_modules/.bin:$PATH" target/release/code-bench e2e "$CLONE_CACHE" "$REPORT"
+
+      - name: Print the default decision
+        run: target/release/code-bench decide "$REPORT"
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: code-e2e-report
+          path: ${{ env.REPORT }}
+          if-no-files-found: warn
+          retention-days: 90
