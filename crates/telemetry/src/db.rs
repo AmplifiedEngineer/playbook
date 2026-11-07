@@ -14,9 +14,9 @@ use std::path::Path;
 use std::time::Duration;
 
 /// The usage database layout this build writes (2 added the `machine` column,
-/// 3 the one-row `machine` table). A database without the row counts as
+/// 3 the one-row `machine` table, 4 the `session_account_spans` table). A database without the row counts as
 /// version 0 and is stamped on open.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS usage_events (
@@ -156,6 +156,7 @@ fn open_prepared(path: &Path) -> Result<Connection, String> {
         BUSY_TIMEOUT,
     )
     .map_err(|e| format!("failed to create the session accounts table: {e}"))?;
+    super::session_account::copy_legacy_rows(&conn)?;
     retry_busy(
         || conn.execute_batch(super::account_move::SCHEMA_SQL),
         BUSY_TIMEOUT,
@@ -615,7 +616,7 @@ mod tests {
     }
 
     #[test]
-    fn a_version_2_database_upgrades_to_3_with_its_rows_and_id_intact() {
+    fn a_version_2_database_upgrades_to_current_with_its_rows_and_id_intact() {
         // Arrange: a database as the previous build left it, with no machine table.
         let path = scratch_dir("usage-schema-v2").join("usage.db");
         let conn = open_db(&path).unwrap();
@@ -634,13 +635,58 @@ mod tests {
         let conn = open_db(&path).unwrap();
 
         // Assert
-        assert_eq!(stored_schema_version(&path), Some("3".to_string()));
+        assert_eq!(
+            stored_schema_version(&path),
+            Some(SCHEMA_VERSION.to_string())
+        );
         let rows: i64 = conn
             .query_row("SELECT COUNT(*) FROM usage_events", [], |r| r.get(0))
             .unwrap();
         assert_eq!(rows, 1);
         let id = crate::machine::stored(&conn).unwrap().unwrap().id;
         assert_eq!(crate::machine_rows::local_machine_id(&conn).unwrap(), id);
+    }
+
+    #[test]
+    fn a_version_3_database_upgrades_to_4_with_its_rows_and_spans_copied() {
+        // Arrange: a database as version 3 left it, with a session account row.
+        let path = scratch_dir("usage-schema-v3").join("usage.db");
+        let conn = open_db(&path).unwrap();
+        conn.execute_batch(
+            "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
+                 repo, branch, input_tokens, output_tokens, cache_creation_tokens,
+                 cache_read_tokens, cost_usd)
+             VALUES ('e', 1, 's', 'a', 'm', '', 'r', 'b', 1, 1, 0, 0, 0.5);
+             INSERT INTO session_accounts VALUES ('s', 'token:aaaa1111');
+             DROP TABLE session_account_spans;
+             DELETE FROM usage_watermarks WHERE source = 'session-account-spans-copied';
+             UPDATE meta SET value = '3' WHERE key = 'schema_version';",
+        )
+        .unwrap();
+        drop(conn);
+
+        // Act
+        let conn = open_db(&path).unwrap();
+        let again = open_db(&path).unwrap();
+
+        // Assert
+        assert_eq!(
+            stored_schema_version(&path),
+            Some(SCHEMA_VERSION.to_string())
+        );
+        let count = |c: &Connection, table: &str| -> i64 {
+            c.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(count(&conn, "usage_events"), 1);
+        assert_eq!(count(&conn, "session_account_spans"), 1);
+        assert_eq!(count(&again, "session_account_spans"), 1);
+        assert_eq!(
+            crate::session_account::of_session_at(&conn, "s", 5)
+                .unwrap()
+                .as_deref(),
+            Some("token:aaaa1111")
+        );
     }
 
     #[test]
@@ -787,6 +833,7 @@ mod tests {
                 "account_names",
                 "machine",
                 "meta",
+                "session_account_spans",
                 "session_accounts",
                 "session_reconcile",
                 "session_sources",

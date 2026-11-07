@@ -15,21 +15,32 @@ pub fn run(payload: &Payload) {
         return;
     }
     let dir = crate::common::paths::usage_db_dir();
+    let home = crate::common::home_dir();
+    let mut paths = Paths::from_home(&home);
     // Only a session start sees the credential the session begins with. The
-    // token itself is hashed here and never leaves this call.
+    // token itself is hashed here and never leaves this call. Without one the
+    // session uses the signed in account, which is named now because a later
+    // sign in must not relabel it.
     if payload.field(".hook_event_name") == "SessionStart" {
         let _ = std::fs::create_dir_all(&dir);
         crate::usage::session_account::record(
             &dir,
             &payload.field(".session_id"),
-            crate::usage::session_account::env_fingerprint().as_deref(),
+            crate::usage::session_account::env_fingerprint()
+                .or_else(|| signed_in_label(&paths.claude_json))
+                .as_deref(),
+            crate::common::time::now_secs(),
         );
     }
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
-    let home = crate::common::home_dir();
-    let mut paths = Paths::from_home(&home);
     paths.db = dir.join("usage.db");
     crate::usage::warm::maybe_spawn(&home, &paths, &exe);
+}
+
+/// The account `~/.claude.json` is signed in to, or none when it names none.
+fn signed_in_label(claude_json: &std::path::Path) -> Option<String> {
+    Some(crate::usage::account::account_label(claude_json))
+        .filter(|label| label != crate::usage::account::UNKNOWN_ACCOUNT)
 }
