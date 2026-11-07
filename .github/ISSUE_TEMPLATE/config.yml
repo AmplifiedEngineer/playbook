@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security Vulnerability
-    url: https://github.com/pragmatic-engineer/playbook/blob/main/SECURITY.md
+    url: https://github.com/amplifiedengineer/playbook/blob/main/SECURITY.md
     about: Do NOT open a public issue. Follow the security disclosure process instead.
