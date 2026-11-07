@@ -383,13 +383,36 @@ fn attestation_passes_and_names_the_repo_and_signer_workflow() {
     let (_, out, gh, _) = attest("att-pass", &[("STUB_GH", "pass")]);
     assert!(out.contains("Verified the build attestation"), "{out}");
     assert!(
-        gh.contains(&format!("/{ASSET} --repo pragmatic-engineer/playbook")),
+        gh.contains(&format!("/{ASSET} --repo amplifiedengineer/playbook")),
         "{gh}"
     );
     assert!(
-        gh.contains("--signer-workflow pragmatic-engineer/playbook/.github/workflows/release.yml"),
+        gh.contains("--signer-workflow amplifiedengineer/playbook/.github/workflows/release.yml"),
         "{gh}"
     );
+    assert!(!gh.contains("pragmatic-engineer"), "{gh}");
+}
+
+#[test]
+fn a_release_attested_under_the_second_org_name_still_verifies() {
+    let (rc, out, gh, _) = attest("att-middle", &[("STUB_GH", "middle")]);
+    assert_eq!(rc, 0, "{out}");
+    assert!(out.contains("Verified the build attestation"), "{out}");
+    assert!(gh.contains("--repo amplified-engineer/playbook"), "{gh}");
+}
+
+#[test]
+fn a_release_attested_under_the_old_org_still_verifies() {
+    let (rc, out, gh, _) = attest("att-legacy", &[("STUB_GH", "legacy")]);
+    assert_eq!(rc, 0, "{out}");
+    assert!(out.contains("Verified the build attestation"), "{out}");
+    let new = gh
+        .find("--repo amplifiedengineer/playbook")
+        .expect("new repo tried");
+    let old = gh
+        .find("--signer-workflow pragmatic-engineer/playbook/.github/workflows/release.yml")
+        .expect("old repo tried");
+    assert!(new < old, "the new repo comes first: {gh}");
 }
 
 #[test]

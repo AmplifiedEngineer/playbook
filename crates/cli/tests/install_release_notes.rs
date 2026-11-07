@@ -56,7 +56,7 @@ esac"#;
 const NOTES: &str = r#"{"format":1,"version":"0.17.0","sections":[]}"#;
 
 const LINK: &str =
-    "Release notes: https://github.com/pragmatic-engineer/playbook/releases/tag/v0.17.0";
+    "Release notes: https://github.com/amplifiedengineer/playbook/releases/tag/v0.17.0";
 
 struct Sandbox {
     work: Work,
