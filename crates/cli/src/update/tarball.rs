@@ -1,15 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Reading the `pbdoc` release tarball without trusting it: gunzip it, then
+//! Reading a helper release tarball without trusting it: gunzip it, then
 //! walk the tar blocks by hand and hand back the one regular file asked for.
 
-/// Longest `gzip -dc` may take on the pbdoc tarball.
+/// Longest `gzip -dc` may take on a helper tarball.
 const GUNZIP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-/// The most a pbdoc binary may weigh once unpacked.
-const MAX_PBDOC_BYTES: usize = 64 * 1024 * 1024;
-/// The licence notice that ships beside `pbdoc` and is never installed.
-const TAR_NOTICE: &str = "NOTICE-pbdoc";
+/// The most a helper binary may weigh once unpacked.
+const MAX_HELPER_BYTES: usize = 64 * 1024 * 1024;
+/// The licence notice that ships beside a helper is named `NOTICE-<helper>`
+/// and is never installed.
+const NOTICE_PREFIX: &str = "NOTICE-";
 const TAR_BLOCK: usize = 512;
 const TAR_NAME_LEN: usize = 100;
 const TAR_SIZE_FIELD: std::ops::Range<usize> = 124..136;
@@ -33,7 +34,7 @@ pub fn gunzip(bytes: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 /// The contents of the `name` entry in `tar`. Every entry must be a regular
-/// file, and besides `name` only the release notice may appear. Metadata that
+/// file, and besides `name` only its release notice may appear. Metadata that
 /// no file lands from is skipped: pax headers and macOS `._` entries.
 pub fn extract_regular_file(tar: &[u8], name: &str) -> Result<Vec<u8>, String> {
     let mut found = None;
@@ -53,7 +54,7 @@ pub fn extract_regular_file(tar: &[u8], name: &str) -> Result<Vec<u8>, String> {
         let size = std::str::from_utf8(&head[TAR_SIZE_FIELD])
             .ok()
             .and_then(|s| usize::from_str_radix(s.trim_matches(['\0', ' ']), TAR_OCTAL).ok())
-            .filter(|&n| n <= MAX_PBDOC_BYTES)
+            .filter(|&n| n <= MAX_HELPER_BYTES)
             .ok_or_else(|| format!("{entry} has an unreadable or oversized length"))?;
         let data = rest
             .get(TAR_BLOCK..TAR_BLOCK + size)
@@ -64,7 +65,7 @@ pub fn extract_regular_file(tar: &[u8], name: &str) -> Result<Vec<u8>, String> {
             if found.replace(data).is_some() {
                 return Err(format!("it holds {name} more than once"));
             }
-        } else if entry != TAR_NOTICE {
+        } else if entry.strip_prefix(NOTICE_PREFIX) != Some(name) {
             return Err(format!("it holds {entry}, expected only {name}"));
         }
         rest = rest
@@ -76,15 +77,21 @@ pub fn extract_regular_file(tar: &[u8], name: &str) -> Result<Vec<u8>, String> {
         .ok_or_else(|| format!("it does not hold {name}"))
 }
 
-/// Builds the `pbdoc` release tarballs the update tests serve.
+/// Builds the helper release tarballs the update tests serve.
 #[cfg(all(test, unix))]
 pub(crate) mod pbdoc_fixture {
     use crate::update::download::fake::FakeFetcher;
 
-    pub(crate) const ASSET: &str = "pbdoc-0.17.0-x86_64-unknown-linux-musl.tar.gz";
+    fn asset_of(name: &str) -> String {
+        format!("{name}-0.17.0-x86_64-unknown-linux-musl.tar.gz")
+    }
+
+    pub(crate) fn script_of(name: &str, version: &str) -> Vec<u8> {
+        format!("#!/bin/sh\necho '{name} {version}'\n").into_bytes()
+    }
 
     pub(crate) fn script(version: &str) -> Vec<u8> {
-        format!("#!/bin/sh\necho 'pbdoc {version}'\n").into_bytes()
+        script_of("pbdoc", version)
     }
 
     /// One ustar entry: `kind` is the type flag, `link` the link target.
@@ -117,17 +124,27 @@ pub(crate) mod pbdoc_fixture {
     }
 
     pub(crate) fn good(version: &str) -> Vec<u8> {
-        tarball(&[entry("pbdoc", b'0', "", &script(version))])
+        good_of("pbdoc", version)
+    }
+
+    pub(crate) fn good_of(name: &str, version: &str) -> Vec<u8> {
+        tarball(&[entry(name, b'0', "", &script_of(name, version))])
     }
 
     /// Drops the pbdoc asset and its SHA256SUMS line from the release.
     pub(crate) fn remove(f: &mut FakeFetcher, base: &str) {
-        f.0.remove(&format!("{base}/{ASSET}"));
+        remove_of(f, base, "pbdoc");
+    }
+
+    /// Drops the `name` asset and its SHA256SUMS line from the release.
+    pub(crate) fn remove_of(f: &mut FakeFetcher, base: &str, name: &str) {
+        let asset = asset_of(name);
+        f.0.remove(&format!("{base}/{asset}"));
         let url = format!("{base}/SHA256SUMS");
         let sums = String::from_utf8(f.0[&url].clone()).unwrap();
         let kept: String = sums
             .lines()
-            .filter(|line| !line.ends_with(ASSET))
+            .filter(|line| !line.ends_with(&asset))
             .map(|line| format!("{line}\n"))
             .collect();
         f.0.insert(url, kept.into_bytes());
@@ -136,12 +153,23 @@ pub(crate) mod pbdoc_fixture {
     /// Serves `tarball` under `base` and lists it in that release's
     /// SHA256SUMS with the hash of `hashed`, replacing any earlier one.
     pub(crate) fn serve(f: &mut FakeFetcher, base: &str, tarball: &[u8], hashed: &[u8]) {
-        remove(f, base);
-        f.0.insert(format!("{base}/{ASSET}"), tarball.to_vec());
+        serve_of(f, base, "pbdoc", tarball, hashed);
+    }
+
+    pub(crate) fn serve_of(
+        f: &mut FakeFetcher,
+        base: &str,
+        name: &str,
+        tarball: &[u8],
+        hashed: &[u8],
+    ) {
+        remove_of(f, base, name);
+        let asset = asset_of(name);
+        f.0.insert(format!("{base}/{asset}"), tarball.to_vec());
         let url = format!("{base}/SHA256SUMS");
         let mut sums = String::from_utf8(f.0[&url].clone()).unwrap();
         sums.push_str(&format!(
-            "{}  {ASSET}\n",
+            "{}  {asset}\n",
             crate::common::hash::sha256_hex(hashed)
         ));
         f.0.insert(url, sums.into_bytes());
@@ -202,7 +230,7 @@ mod tests {
         let dir = scratch_dir("tarball-system-tar");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("pbdoc"), body()).unwrap();
-        std::fs::write(dir.join(TAR_NOTICE), b"notice").unwrap();
+        std::fs::write(dir.join("NOTICE-pbdoc"), b"notice").unwrap();
         let _ = Command::new("xattr")
             .args(["-w", "com.apple.test", "x"])
             .arg(dir.join("pbdoc"))
@@ -213,7 +241,7 @@ mod tests {
             .arg(&archive)
             .arg("-C")
             .arg(&dir)
-            .args(["pbdoc", TAR_NOTICE])
+            .args(["pbdoc", "NOTICE-pbdoc"])
             .status()
             .unwrap();
         assert!(made.success());

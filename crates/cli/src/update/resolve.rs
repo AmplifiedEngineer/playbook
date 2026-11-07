@@ -150,10 +150,15 @@ pub fn asset_name(version: &str, os: &str, arch: &str) -> Result<String, String>
     Ok(format!("playbook-{version}-{}", target_triple(os, arch)?))
 }
 
-/// The tarball holding the `pbdoc` helper for this platform.
-pub fn pbdoc_asset_name(version: &str, os: &str, arch: &str) -> Result<String, String> {
+/// The tarball holding the `name` helper for this platform.
+pub fn helper_asset_name(
+    name: &str,
+    version: &str,
+    os: &str,
+    arch: &str,
+) -> Result<String, String> {
     Ok(format!(
-        "pbdoc-{version}-{}.tar.gz",
+        "{name}-{version}-{}.tar.gz",
         target_triple(os, arch)?
     ))
 }
@@ -225,11 +230,13 @@ mod tests {
     }
 
     #[test]
-    fn the_pbdoc_asset_is_a_tarball_for_the_same_triple() {
-        assert_eq!(
-            pbdoc_asset_name("0.17.0", "macos", "aarch64").unwrap(),
-            "pbdoc-0.17.0-aarch64-apple-darwin.tar.gz"
-        );
-        assert!(pbdoc_asset_name("0.17.0", "freebsd", "x86_64").is_err());
+    fn a_helper_asset_is_a_tarball_for_the_same_triple() {
+        for name in ["pbdoc", "pbsync"] {
+            assert_eq!(
+                helper_asset_name(name, "0.17.0", "macos", "aarch64").unwrap(),
+                format!("{name}-0.17.0-aarch64-apple-darwin.tar.gz")
+            );
+        }
+        assert!(helper_asset_name("pbsync", "0.17.0", "freebsd", "x86_64").is_err());
     }
 }

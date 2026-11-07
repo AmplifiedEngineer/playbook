@@ -479,18 +479,28 @@ stage_tool_binary() {
     check_runs "$STAGE/out/$name" "$version"
 }
 
-# Stages the pbdoc helper from pbdoc-<version>-<target>.tar.gz when the release
-# lists it in the SHA256SUMS already fetched for playbook, else warns and moves
-# on. A listed asset that fails any check is fatal, before anything is placed.
-stage_pbdoc() {
-    local version="$1"
-    ASSET="pbdoc-${version}-${TARGET}.tar.gz"
+# Stages the helper $1 (described as $2) from <helper>-<version>-<target>.tar.gz
+# when the release lists it in the SHA256SUMS already fetched for playbook, else
+# warns and moves on. A listed asset that fails any check is fatal, before
+# anything is placed.
+stage_helper() {
+    local name="$1" what="$2" version="$3"
+    ASSET="${name}-${version}-${TARGET}.tar.gz"
     if ! grep -q -- "  ${ASSET}\$" "$STAGE/SHA256SUMS"; then
-        warn "$RESOLVED_TAG has no $ASSET; skipping the pbdoc document converter. Re-run this installer once a release includes it."
+        warn "$RESOLVED_TAG has no $ASSET; skipping $what. Re-run this installer once a release includes it."
         return 0
     fi
     log "Fetching $ASSET"
-    stage_tool_binary pbdoc "$version"
+    stage_tool_binary "$name" "$version"
+}
+
+# Places the staged helper $1, if there is one, beside playbook.
+place_helper() {
+    local name="$1" version="$2"
+    if [ -f "$STAGE/out/$name" ]; then
+        place_binary "$STAGE/out/$name" "$name"
+        log "Installed $name $version to $PLAYBOOK_BIN_DIR/$name"
+    fi
 }
 
 # Fetches, verifies, and installs the release binary matching $RESOLVED_TAG.
@@ -510,7 +520,8 @@ install_release_binary() {
     chmod 0755 "$STAGE/$ASSET"
     mv "$STAGE/$ASSET" "$STAGE/playbook"
     check_runs "$STAGE/playbook" "$version"
-    stage_pbdoc "$version"
+    stage_helper pbdoc "the pbdoc document converter" "$version"
+    stage_helper pbsync "the pbsync usage sync helper" "$version"
 
     PREVIOUS_VERSION="$(installed_version)"
 
@@ -525,10 +536,8 @@ install_release_binary() {
     if [ -n "$PREVIOUS_VERSION" ] && version_lt "$PREVIOUS_VERSION" "$version"; then
         show_release_notes "$PREVIOUS_VERSION" "$version"
     fi
-    if [ -f "$STAGE/out/pbdoc" ]; then
-        place_binary "$STAGE/out/pbdoc" pbdoc
-        log "Installed pbdoc $version to $PLAYBOOK_BIN_DIR/pbdoc"
-    fi
+    place_helper pbdoc "$version"
+    place_helper pbsync "$version"
     install_pb_alias
 
     rm -rf "$STAGE"

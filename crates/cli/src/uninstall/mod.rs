@@ -440,7 +440,7 @@ fn rc_step(opts: &Options, stamp: u64, report: &mut Report) {
 
 /// Binaries the installer puts in the bin directory, each with the
 /// `<name>.<version>.bak` copies an update leaves beside it.
-const BINARIES: [&str; 2] = ["playbook", "pbdoc"];
+const BINARIES: [&str; 3] = ["playbook", "pbdoc", "pbsync"];
 
 fn binary_step(opts: &Options, verb: &str, report: &mut Report) {
     for name in BINARIES {
@@ -556,7 +556,14 @@ mod tests {
         }
     }
 
-    const INSTALLED: [&str; 4] = ["playbook", "pbdoc", "pbdoc.0.1.0.bak", "playbook.0.1.0.bak"];
+    const INSTALLED: [&str; 6] = [
+        "playbook",
+        "pbdoc",
+        "pbsync",
+        "pbdoc.0.1.0.bak",
+        "pbsync.0.1.0.bak",
+        "playbook.0.1.0.bak",
+    ];
 
     #[test]
     fn dry_run_lists_pbdoc_and_its_backups_without_removing_them() {
@@ -571,7 +578,9 @@ mod tests {
         let listed = report.lines.join("\n");
         assert!(listed.contains("would remove") && listed.contains("pbdoc"));
         assert!(listed.contains("pbdoc.0.1.0.bak"));
+        assert!(listed.contains("pbsync") && listed.contains("pbsync.0.1.0.bak"));
         assert!(dir.join("pbdoc").exists() && dir.join("pbdoc.0.1.0.bak").exists());
+        assert!(dir.join("pbsync").exists() && dir.join("pbsync.0.1.0.bak").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 
