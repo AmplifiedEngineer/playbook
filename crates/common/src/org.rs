@@ -50,6 +50,16 @@ pub fn is_playbook_org(owner: &str) -> bool {
     ORGS.iter().any(|o| o.eq_ignore_ascii_case(owner))
 }
 
+/// The old organization names that stand in for `owner`: all of them when
+/// `owner` is the current organization, none for any other owner.
+pub fn legacy_owners_for(owner: &str) -> &'static [&'static str] {
+    if owner.eq_ignore_ascii_case(ORG) {
+        &LEGACY_ORGS
+    } else {
+        &[]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,6 +71,13 @@ mod tests {
         assert!(is_playbook_org("Amplified-Engineer"));
         assert!(is_playbook_org("pragmatic-engineer"));
         assert!(!is_playbook_org("acme"));
+    }
+
+    #[test]
+    fn only_the_current_org_has_legacy_stand_ins() {
+        assert_eq!(legacy_owners_for("amplifiedengineer"), LEGACY_ORGS);
+        assert!(legacy_owners_for("pragmatic-engineer").is_empty());
+        assert!(legacy_owners_for("acme").is_empty());
     }
 
     #[test]

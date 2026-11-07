@@ -264,6 +264,17 @@ fn tier_values(
         Some((owner, _)) => (repo_slug.unwrap_or_default(), owner),
         None => ("\u{0}", "\u{0}"),
     };
+    // Rows written under an old org name still apply to a repo of the current
+    // org. The current name wins; the old names follow, newest first.
+    let (repo_name, owner) = repo_slug
+        .and_then(|s| s.split_once('/'))
+        .map_or(("", ""), |(o, r)| (r, o));
+    let mut repo_scopes = vec![repo_scope.to_string()];
+    let mut org_scopes = vec![org_scope.to_string()];
+    for legacy in crate::common::org::legacy_owners_for(owner) {
+        repo_scopes.push(format!("{legacy}/{repo_name}"));
+        org_scopes.push((*legacy).to_string());
+    }
     let mut stmt = conn
         .prepare(
             "SELECT tier, value_json FROM config WHERE key = ?1 AND \
@@ -271,19 +282,24 @@ fn tier_values(
               OR (tier = 'global' AND scope = ''))",
         )
         .map_err(broken(root))?;
-    let rows = stmt
-        .query_map(params![key, repo_scope, org_scope], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(broken(root))?;
-    for row in rows {
-        let (tier, raw) = row.map_err(broken(root))?;
-        let value: Value =
-            serde_json::from_str(&raw).map_err(|_| ConfigError::Malformed(db_path(root)))?;
-        match tier.as_str() {
-            "repo" => out.repo = Some(value),
-            "org" => out.org = Some(value),
-            _ => out.global = Some(value),
+    for (repo_scope, org_scope) in repo_scopes.iter().zip(&org_scopes) {
+        let rows = stmt
+            .query_map(params![key, repo_scope, org_scope], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(broken(root))?;
+        for row in rows {
+            let (tier, raw) = row.map_err(broken(root))?;
+            let value: Value =
+                serde_json::from_str(&raw).map_err(|_| ConfigError::Malformed(db_path(root)))?;
+            let slot = match tier.as_str() {
+                "repo" => &mut out.repo,
+                "org" => &mut out.org,
+                _ => &mut out.global,
+            };
+            if slot.is_none() {
+                *slot = Some(value);
+            }
         }
     }
     Ok(out)
@@ -817,6 +833,47 @@ mod tests {
         assert!(other.org.is_none() && other.repo.is_none());
         let none = lookup(&r, "mode", None).unwrap();
         assert!(none.org.is_none() && none.repo.is_none());
+    }
+
+    #[test]
+    fn rows_written_under_an_old_org_name_still_apply_to_the_current_org() {
+        let r = root("store-legacy-org");
+        put(
+            &r,
+            Tier::Org,
+            Some("pragmatic-engineer/playbook"),
+            "mode",
+            &json!("ask"),
+        )
+        .unwrap();
+        put(
+            &r,
+            Tier::Repo,
+            Some("amplified-engineer/playbook"),
+            "mode",
+            &json!("auto"),
+        )
+        .unwrap();
+
+        let got = lookup(&r, "mode", Some("amplifiedengineer/playbook")).unwrap();
+        assert_eq!(got.org, Some(json!("ask")));
+        assert_eq!(got.repo, Some(json!("auto")));
+
+        // A row under the current name wins over the old ones.
+        put(
+            &r,
+            Tier::Org,
+            Some("amplifiedengineer/playbook"),
+            "mode",
+            &json!("auto"),
+        )
+        .unwrap();
+        let got = lookup(&r, "mode", Some("amplifiedengineer/playbook")).unwrap();
+        assert_eq!(got.org, Some(json!("auto")));
+
+        // A repo of another org never reads the old org rows.
+        let other = lookup(&r, "mode", Some("acme/playbook")).unwrap();
+        assert!(other.org.is_none() && other.repo.is_none());
     }
 
     #[test]

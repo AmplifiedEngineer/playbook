@@ -136,6 +136,8 @@ fn real_main() {
         playbook::usage::cli::main();
         return;
     }
+    // Copy state keyed by an old org name to the current one, once.
+    let _ = playbook::common::org_state::migrate(&playbook::common::paths::playbook_root());
     playbook::usage_host::install();
     // Hot paths skip building the clap tree. See `fastpath`.
     match playbook::fastpath::classify(&args) {
