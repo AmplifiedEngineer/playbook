@@ -1523,6 +1523,10 @@ fn real_main() {
                     match config::write::set(tier, &key, &value_json, &home, repo_slug) {
                         Ok(()) => {
                             println!("config set: {key} updated to {shown}");
+                            if tier == config::write::Tier::Global && config::keys::is_shared(&key)
+                            {
+                                refresh_sync_files(&home);
+                            }
                             if key == "usage.telemetry" && tier != config::write::Tier::Global {
                                 println!(
                                     "telemetry: Claude Code settings follow the global value, so they were not changed; to change them, run: playbook config set --global usage.telemetry {}",
@@ -1589,6 +1593,13 @@ fn real_main() {
                         }
                     }
                 }
+                ConfigCommand::SyncFiles => match config::sync_files::write_sync_files(&home) {
+                    Ok(()) => println!("config sync-files: key list and values refreshed"),
+                    Err(err) => {
+                        eprintln!("config sync-files: {err}");
+                        std::process::exit(1);
+                    }
+                },
                 ConfigCommand::List => {
                     for &key in config::keys::KNOWN_KEYS {
                         match config::resolve_valid(key, &home, repo_slug) {
@@ -2732,6 +2743,14 @@ fn source_label(source: config::Source) -> &'static str {
         config::Source::Org => "org",
         config::Source::Global => "global",
         config::Source::Default => "default",
+    }
+}
+
+/// Refresh the files `pbsync` reads after a shared key changed. A failure only
+/// warns, because the value itself is already stored.
+fn refresh_sync_files(home: &std::path::Path) {
+    if let Err(err) = config::sync_files::write_sync_files(home) {
+        eprintln!("config set: warning: sync files not refreshed: {err}");
     }
 }
 

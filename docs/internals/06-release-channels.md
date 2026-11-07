@@ -139,6 +139,7 @@ Release assets by tool:
 - pbtop: `pbtop-<version>-<target>.tar.gz` holding `pbtop` alone.
 - pbsync: `pbsync-<version>-<target>.tar.gz` holding `pbsync` alone.
 - pbdoc: `pbdoc-<version>-<target>.tar.gz` holding `pbdoc` and `NOTICE-pbdoc`, for the four macOS and Linux targets.
+- pbsync: `pbsync-<version>-<target>.tar.gz` holding `pbsync`, for the four macOS and Linux targets.
 - Windows: `playbook-<version>-x86_64-pc-windows-msvc.exe`, the raw binary and the only Windows route.
 
 The Homebrew tap maps each formula to its asset.
@@ -146,6 +147,8 @@ The Homebrew tap maps each formula to its asset.
 ### pbsync
 
 `pbsync`, the opt-in usage sync helper, ships in its own archive and installs only with the `playbook` formula in the tap, which adds it as a `resource "pbsync"`. There is no `pbsync` formula. The `formulas` job fails when the tap's `Formula/playbook.rb` has no `resource "pbsync"`, so merge that tap change before the release that adds the archives.
+
+`install.sh` and `playbook update` install `pbsync` beside `playbook` the same way as `pbdoc`: the same download, SHA256 check, attestation check and atomic swap, with the old file kept as `pbsync.<version>.bak`. `playbook uninstall` removes it. A release without a `pbsync` archive, or a failed `pbsync` update, only warns and never fails the `playbook` install or update, because sync is optional and off by default. When the version of `playbook` is unchanged, `playbook update` still installs a missing or older `pbsync`.
 
 ### pbdoc
 
