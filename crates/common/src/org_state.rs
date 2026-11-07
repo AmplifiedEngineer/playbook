@@ -34,7 +34,9 @@ pub struct Report {
 
 /// Copy the state of every old organization name into the current one, then
 /// write [`MARKER`]. One `stat` and one small read when the work is done. A
-/// failure leaves the marker unwritten, so the next run tries again.
+/// failure leaves the marker unwritten, so the next run tries again. A root
+/// with no old-name folder gets no marker: a read-only command must not write
+/// to a machine that has nothing to migrate.
 pub fn migrate(root: &Path) -> io::Result<Report> {
     if !root.is_dir() {
         return Ok(Report::default());
@@ -46,16 +48,20 @@ pub fn migrate(root: &Path) -> io::Result<Report> {
         });
     }
     let mut copied = 0;
+    let mut found_old_state = false;
     for kind in OWNER_KEYED_DIRS {
         let base = root.join(kind);
         for legacy in LEGACY_ORGS {
             let from = base.join(legacy);
             if from.is_dir() && !fs::symlink_metadata(&from)?.file_type().is_symlink() {
+                found_old_state = true;
                 copied += copy_missing(&from, &base.join(ORG))?;
             }
         }
     }
-    fs::write(root.join(MARKER), format!("{ORG}\n"))?;
+    if found_old_state {
+        fs::write(root.join(MARKER), format!("{ORG}\n"))?;
+    }
     Ok(Report {
         copied,
         already_done: false,
@@ -170,14 +176,14 @@ mod tests {
     }
 
     #[test]
-    fn a_machine_with_no_old_state_gets_only_the_marker() {
+    fn a_machine_with_no_old_state_is_left_untouched() {
         let root = scratch_dir("org-state-none");
         fs::create_dir_all(root.join("memory/acme/repo")).unwrap();
 
         let report = migrate(&root).unwrap();
 
         assert_eq!(report.copied, 0);
-        assert!(root.join(MARKER).is_file());
+        assert!(!root.join(MARKER).exists());
         assert!(!root.join(format!("memory/{ORG}")).exists());
         let _ = fs::remove_dir_all(&root);
     }
