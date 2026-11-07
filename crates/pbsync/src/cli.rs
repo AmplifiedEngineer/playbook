@@ -12,6 +12,7 @@ use playbook_store::types::Value as Sql;
 use playbook_store::{params_from_iter, Connection, OpenFlags, OptionalExtension};
 
 use crate::config_cmd;
+use crate::purge;
 use crate::remote::REMOTE_SCHEMA_VERSION;
 use crate::settings::Settings;
 use crate::sync_cmd::{self, Kind};
@@ -35,7 +36,8 @@ const READ_STATE_SQL: &str = "SELECT value FROM sync_state WHERE key = ?1";
 const READ_MARK_SQL: &str = "SELECT rowid_mark FROM sync_watermarks WHERE table_name = ?1";
 
 const TOP_USAGE: &str =
-    "usage: pbsync <enable | disable | status | push | pull | sync | config> [--help]\n       pbsync --version";
+    "usage: pbsync <enable | disable | status | push | pull | sync | config | purge> [--help]
+       pbsync --version";
 const ENABLE_USAGE: &str =
     "usage: pbsync enable --url URL [--account KEY]... [--token-env NAME] [--yes]\n\
   --url URL         the Turso database URL (https or libsql; http only for localhost)\n\
@@ -89,6 +91,7 @@ pub fn run(args: &[String], ctx: &mut Context) -> u8 {
         "pull" => sync_cmd::run(Kind::Pull, rest, ctx),
         "sync" => sync_cmd::run(Kind::Both, rest, ctx),
         "config" => config_cmd::run(rest, ctx),
+        "purge" => purge::run(rest, ctx),
         other => ctx.fail(EXIT_USAGE, &format!("unknown command {other}\n{TOP_USAGE}")),
     }
 }

@@ -10,6 +10,7 @@ pub mod config_sync;
 pub mod local_schema;
 pub mod privacy;
 pub mod pull;
+pub mod purge;
 pub mod push;
 pub mod remote;
 pub mod session;
