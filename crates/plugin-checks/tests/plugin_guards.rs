@@ -43,7 +43,22 @@ impl Repo {
         );
         repo.write(
             "Cargo.lock",
-            "[[package]]\nname = \"other\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"playbook\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"playbook-code\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"playbook-telemetry\"\nversion = \"1.0.0\"\n",
+            "[[package]]\nname = \"other\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"playbook\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"playbook-code\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"playbook-telemetry\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"code-bench\"\nversion = \"1.0.0\"\n",
+        );
+        for name in [
+            "playbook",
+            "playbook-code",
+            "playbook-telemetry",
+            "code-bench",
+        ] {
+            repo.write(
+                &format!("crates/{name}/Cargo.toml"),
+                &format!("[package]\nname = \"{name}\"\nversion.workspace = true\n"),
+            );
+        }
+        repo.write(
+            "crates/other/Cargo.toml",
+            "[package]\nname = \"other\"\nversion = \"1.0.0\"\n",
         );
         repo.write("README.md", "Pin with `PLAYBOOK_REF=v1.0.0`.\n");
         repo.write(
@@ -218,11 +233,11 @@ fn the_bump_script_sets_one_version_everywhere() {
     let lock = r.read("Cargo.lock");
     assert_eq!(
         lock.matches("version = \"1.1.3\"").count(),
-        3,
-        "only the playbook, playbook-code and playbook-telemetry entries move"
+        4,
+        "only the crates that take the workspace version move"
     );
     assert!(
-        lock.contains("name = \"playbook-telemetry\"\nversion = \"1.1.3\"")
+        lock.contains("name = \"code-bench\"\nversion = \"1.1.3\"")
             && lock.contains("name = \"other\"\nversion = \"1.0.0\""),
         "{lock}"
     );
