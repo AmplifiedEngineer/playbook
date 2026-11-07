@@ -4,10 +4,12 @@
 //! `pbsync` pushes and pulls opt-in usage data to and from a Turso database over SQL-over-HTTP.
 //! The transport is the only layer that touches the network.
 
+pub mod cli;
 pub mod privacy;
 pub mod pull;
 pub mod push;
 pub mod remote;
+pub mod settings;
 pub mod tables;
 pub mod token;
 pub mod transport;
