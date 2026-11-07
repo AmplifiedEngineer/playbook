@@ -11,6 +11,7 @@
 
 pub mod keys;
 pub mod store;
+pub mod sync_files;
 pub mod write;
 
 use serde_json::Value;
