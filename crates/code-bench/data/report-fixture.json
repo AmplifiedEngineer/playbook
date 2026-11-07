@@ -1,0 +1,27 @@
+{
+  "source": "fixture, not a measured result: illustrative numbers for the docs test",
+  "model": "claude-sonnet-4-5-20250929",
+  "repeats": 5,
+  "tasks": 20,
+  "excluded": 2,
+  "complete": true,
+  "spent_cents": 1200,
+  "trials_with": 100,
+  "trials_without": 100,
+  "with_accuracy_bp": 8000,
+  "without_accuracy_bp": 8200,
+  "difference_bp": -200,
+  "lower_bp": -700,
+  "upper_bp": 300,
+  "with_repeat_variance": 400,
+  "without_repeat_variance": 500,
+  "with_tokens_per_task": 4200,
+  "without_tokens_per_task": 6100,
+  "kinds": [
+    {
+      "kind": "symbol",
+      "tasks": 20,
+      "difference_bp": -200
+    }
+  ]
+}
