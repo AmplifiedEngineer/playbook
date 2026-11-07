@@ -16,7 +16,8 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Longest `gh attestation verify` may run; it makes network calls.
 const VERIFY_TIMEOUT: Duration = Duration::from_secs(60);
 
-pub const REPO: &str = "pragmatic-engineer/playbook";
+/// The repository new downloads and API calls use.
+pub const REPO: &str = crate::common::org::PLAYBOOK_REPO;
 
 /// Checks `bytes` against the `<hash>  <asset>` line of a SHA256SUMS file.
 pub fn verify_checksum(bytes: &[u8], sums: &str, asset: &str) -> Result<(), String> {
@@ -72,37 +73,58 @@ impl Attest for GhAttest {
                 Ok(Some("checksum only, provenance not verified: install gh to check the build attestation".into()))
             };
         }
-        let mut verify = Command::new("gh");
-        verify
-            .args(["attestation", "verify"])
-            .arg(file)
-            .args(["--repo", REPO, "--signer-workflow"])
-            .arg(format!("{REPO}/.github/workflows/release.yml"));
-        let Some(output) = run_with_timeout(&mut verify, VERIFY_TIMEOUT) else {
-            return if strict {
-                Err("gh attestation verify did not finish in time".into())
-            } else {
-                Ok(Some(
-                    "checksum only, provenance not verified: gh attestation verify did not finish in time".into(),
-                ))
+        // A release built before the rename carries the old organization in its
+        // signer identity, so try the new name first and fall back to the old.
+        let mut gaps: Vec<String> = Vec::new();
+        let mut failure: Option<String> = None;
+        for repo in crate::common::org::PLAYBOOK_REPOS {
+            let Some(output) = run_with_timeout(&mut verify_command(file, repo), VERIFY_TIMEOUT)
+            else {
+                return if strict {
+                    Err("gh attestation verify did not finish in time".into())
+                } else {
+                    Ok(Some(
+                        "checksum only, provenance not verified: gh attestation verify did not finish in time".into(),
+                    ))
+                };
             };
-        };
-        if output.status.success() {
-            return Ok(None);
+            if output.status.success() {
+                return Ok(None);
+            }
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stderr),
+                String::from_utf8_lossy(&output.stdout)
+            );
+            if is_gap(&text) {
+                gaps.push(text);
+            } else if failure.is_none() {
+                failure = Some(text);
+            }
         }
-        let text = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stderr),
-            String::from_utf8_lossy(&output.stdout)
-        );
-        if !strict && is_gap(&text) {
+        // Lenient only when neither name produced a real mismatch.
+        if let (false, None, Some(text)) = (strict, &failure, gaps.first()) {
             let first = text.lines().next().unwrap_or("").trim();
             return Ok(Some(format!(
                 "checksum only, provenance not verified: {first}"
             )));
         }
+        let text = failure
+            .or_else(|| gaps.into_iter().next())
+            .unwrap_or_default();
         Err(format!("attestation verification failed: {}", text.trim()))
     }
+}
+
+/// `gh attestation verify` for `file`, pinned to `repo`'s release workflow.
+fn verify_command(file: &Path, repo: &str) -> Command {
+    let mut verify = Command::new("gh");
+    verify
+        .args(["attestation", "verify"])
+        .arg(file)
+        .args(["--repo", repo, "--signer-workflow"])
+        .arg(format!("{repo}/.github/workflows/release.yml"));
+    verify
 }
 
 #[cfg(test)]
@@ -148,6 +170,35 @@ mod tests {
     #[test]
     fn a_missing_checksum_line_aborts() {
         assert!(verify_checksum(b"x", "abc  other\n", "playbook-1-x").is_err());
+    }
+
+    #[test]
+    fn the_verify_command_pins_the_repo_it_is_given() {
+        let args = |repo: &str| -> Vec<String> {
+            verify_command(Path::new("f"), repo)
+                .get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect()
+        };
+        let new = args(crate::common::org::PLAYBOOK_REPO);
+        assert!(new.contains(&"amplifiedengineer/playbook".to_string()));
+        assert!(
+            new.contains(&"amplifiedengineer/playbook/.github/workflows/release.yml".to_string())
+        );
+        let old = args(crate::common::org::PLAYBOOK_REPOS[2]);
+        assert!(
+            old.contains(&"pragmatic-engineer/playbook/.github/workflows/release.yml".to_string())
+        );
+    }
+
+    #[test]
+    fn the_new_repo_is_tried_before_the_old_ones() {
+        let repos = crate::common::org::PLAYBOOK_REPOS;
+        assert_eq!(repos[0], REPO);
+        assert_eq!(
+            &repos[1..],
+            ["amplified-engineer/playbook", "pragmatic-engineer/playbook"]
+        );
     }
 
     #[test]
