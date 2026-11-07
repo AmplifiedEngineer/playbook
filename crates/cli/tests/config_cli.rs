@@ -943,3 +943,81 @@ fn setting_telemetry_with_a_malformed_claude_file_leaves_it_untouched() {
         "{ not json"
     );
 }
+
+#[test]
+fn set_of_a_shared_global_key_refreshes_the_sync_files() {
+    // Arrange
+    let cwd = scratch_dir("sync-set-cwd");
+    let home = scratch_dir("sync-set-home");
+
+    // Act
+    let out = run_playbook(
+        &cwd,
+        &home,
+        &["config", "set", "--global", "usage.theme", "dark"],
+    );
+
+    // Assert
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    let data = home.join(".config").join("playbook").join("data");
+    let values: Value =
+        serde_json::from_str(&fs::read_to_string(data.join("config-values.json")).unwrap())
+            .unwrap();
+    assert_eq!(values["values"]["usage.theme"], "dark");
+    assert!(data.join("sync-keys.json").is_file());
+}
+
+#[test]
+fn set_of_a_local_key_writes_no_sync_files() {
+    // Arrange
+    let cwd = scratch_dir("sync-local-cwd");
+    let home = scratch_dir("sync-local-home");
+
+    // Act
+    let out = run_playbook(&cwd, &home, &["config", "set", "--global", "mode", "auto"]);
+
+    // Assert
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    let data = home.join(".config").join("playbook").join("data");
+    assert!(!data.join("config-values.json").exists());
+}
+
+#[test]
+fn set_still_succeeds_with_a_warning_when_the_sync_files_cannot_be_written() {
+    // Arrange
+    let cwd = scratch_dir("sync-warn-cwd");
+    let home = scratch_dir("sync-warn-home");
+    let data = home.join(".config").join("playbook").join("data");
+    fs::create_dir_all(data.join("sync-keys.json")).unwrap();
+
+    // Act
+    let out = run_playbook(
+        &cwd,
+        &home,
+        &["config", "set", "--global", "usage.theme", "dark"],
+    );
+
+    // Assert
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    assert!(stderr_of(&out).contains("sync files not refreshed"));
+    assert_eq!(stored(&home)["global"]["usage.theme"], "dark");
+}
+
+#[test]
+fn sync_files_command_writes_both_files_and_fails_clearly_when_blocked() {
+    // Arrange
+    let cwd = scratch_dir("sync-cmd-cwd");
+    let home = scratch_dir("sync-cmd-home");
+    let data = home.join(".config").join("playbook").join("data");
+
+    // Act
+    let ok = run_playbook(&cwd, &home, &["config", "sync-files"]);
+    fs::remove_file(data.join("sync-keys.json")).unwrap();
+    fs::create_dir_all(data.join("sync-keys.json")).unwrap();
+    let blocked = run_playbook(&cwd, &home, &["config", "sync-files"]);
+
+    // Assert
+    assert!(ok.status.success(), "{}", stderr_of(&ok));
+    assert!(!blocked.status.success());
+    assert!(stderr_of(&blocked).contains("config sync-files: cannot write"));
+}

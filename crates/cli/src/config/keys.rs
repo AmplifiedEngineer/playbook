@@ -248,6 +248,124 @@ pub fn is_user_key(key: &str) -> bool {
     USER_KEYS.contains(&key)
 }
 
+/// The only keys that may sync between one user's machines: plain
+/// preferences that mean the same on every machine. A key missing from this
+/// list stays local, so a new key never leaks by default.
+pub const SHARED_KEYS: &[&str] = &[
+    "usage.theme",
+    "usage.weekStart",
+    "usage.budget.monthlyUsd",
+    "usage.budget.weeklyUsd",
+    "usage.ui.layout",
+    "maxEffortLevel",
+    "effort.auto",
+    "routing.escalate",
+    "agents.variants",
+    "auto.budgetUsd",
+    "auto.agentBudgetUsd",
+    "auto.sessionCeilingUsd",
+    "auto.warnPct",
+    "pr.draft",
+    "commit.signOff",
+];
+
+/// Every other known key. Paths, hosts, token names, machine state, safety
+/// and automation switches, and per-repo rules stay on the machine that set
+/// them. A test requires each known key in exactly one of the two lists.
+pub const LOCAL_ONLY_KEYS: &[&str] = &[
+    "autoReview.enabled",
+    "autoReview.type",
+    "autoReview.fix",
+    "autoMerge.enabled",
+    "handoff.onClear",
+    "pr.rules.template",
+    "pr.rules.length",
+    "pr.rules.issue",
+    "pr.rules.ticketLine",
+    "pr.rules.scope",
+    "pr.bodyMaxChars",
+    "pr.ticketPatterns",
+    "worktreeCleanup.enabled",
+    "worktreeCleanup.staleAfterDays",
+    "worktreeCleanup.conflictGracePeriodDays",
+    "mode",
+    "memory.source",
+    "models.haiku",
+    "models.sonnet",
+    "models.opus",
+    "gate.maxRounds",
+    "fix.maxFiles",
+    "fix.maxLines",
+    "review.stackMaxPrs",
+    "review.stackMaxLines",
+    "review.suggest.deepLines",
+    "review.suggest.quickLines",
+    "review.suggest.deepFiles",
+    "review.suggest.packageSpan",
+    "review.suggest.untestedLines",
+    "security.defaults",
+    "usage.refreshSeconds",
+    "usage.telemetry",
+    "usage.telemetryRetentionDays",
+    "usage.telemetryMaxRows",
+    "usage.autoIngest",
+    "usage.autoIngestMinutes",
+    "usage.ui.state",
+    "sessions.staleAfterDays",
+    "sessions.recentDays",
+    "sessions.autoClose",
+    "hygiene.enabled",
+    "hygiene.thresholdTokens",
+    "docs.convert",
+    "docs.maxBytes",
+    "docs.timeoutSeconds",
+    "docs.maxOutputChars",
+    "docs.maxMemoryMb",
+    "docs.displayChars",
+    "docs.anydocPath",
+    "code.briefFactsTokens",
+    "launcher.claudeOverride",
+    "launcher.shortName",
+    "systemPrompt.enabled",
+    "attribution.enabled",
+    "hooks.proseLint.mode",
+    "hooks.policyGuard.enabled",
+    "update.mode",
+    "update.checkIntervalHours",
+    "update.plugin",
+    "watch.enabled",
+    "watch.repos",
+    "watch.autonomy",
+    "watch.pollSeconds",
+    "watch.maxCatchupHours",
+    "watch.allowedAuthors",
+    "watch.tokenEnv",
+    "watch.limits.actionsPerDay",
+    "watch.limits.usdPerDay",
+    "gc.enabled",
+    "gc.graceDays",
+    "gc.handoffGraceDays",
+    "gc.sessionDirIdleDays",
+    "gc.logMaxDays",
+    "gc.logMaxMiB",
+    "gc.leftoverDays",
+    "gc.gateDbIdleDays",
+    "gc.buildOutputIdleDays",
+    "gc.buildOutputPressureIdleDays",
+    "gc.buildOutputActiveMinutes",
+    "gc.freeSpaceWarnGiB",
+    "gc.freeSpaceWarnPercent",
+];
+
+/// Keys that start with this prefix never sync, whatever `SHARED_KEYS` holds.
+pub const SYNC_EXCLUDED_PREFIX: &str = "sync.";
+
+/// Whether `key` may sync between machines: in [`SHARED_KEYS`] and not a
+/// `sync.*` key.
+pub fn is_shared(key: &str) -> bool {
+    !key.starts_with(SYNC_EXCLUDED_PREFIX) && SHARED_KEYS.contains(&key)
+}
+
 /// The component kinds an `effort.<kind>.<name>` key can name.
 pub const EFFORT_COMPONENT_KINDS: [&str; 3] = ["agents", "commands", "skills"];
 
@@ -427,6 +545,73 @@ pub fn model_override_error(key: &str, value: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    const MACHINE_BOUND_KEYS: &[&str] = &[
+        "docs.anydocPath",
+        "launcher.shortName",
+        "launcher.claudeOverride",
+        "watch.allowedAuthors",
+        "watch.repos",
+        "watch.tokenEnv",
+        "usage.ui.state",
+    ];
+
+    #[test]
+    fn every_known_key_is_classified_shared_or_local() {
+        // Arrange
+        let mut classified: Vec<&str> =
+            SHARED_KEYS.iter().chain(LOCAL_ONLY_KEYS).copied().collect();
+        let mut known: Vec<&str> = KNOWN_KEYS.to_vec();
+
+        // Act
+        classified.sort_unstable();
+        known.sort_unstable();
+
+        // Assert
+        assert_eq!(classified, known);
+    }
+
+    #[test]
+    fn shared_and_local_lists_do_not_overlap() {
+        // Arrange
+        let local: std::collections::HashSet<&str> = LOCAL_ONLY_KEYS.iter().copied().collect();
+
+        // Act
+        let both: Vec<&&str> = SHARED_KEYS.iter().filter(|k| local.contains(**k)).collect();
+
+        // Assert
+        assert!(both.is_empty(), "classified twice: {both:?}");
+    }
+
+    #[test]
+    fn no_sync_or_machine_bound_key_is_shared() {
+        // Arrange
+        let forbidden = |key: &&&str| {
+            key.starts_with(SYNC_EXCLUDED_PREFIX) || MACHINE_BOUND_KEYS.contains(*key)
+        };
+
+        // Act
+        let leaked: Vec<&&str> = SHARED_KEYS.iter().filter(forbidden).collect();
+
+        // Assert
+        assert!(leaked.is_empty(), "must stay local: {leaked:?}");
+    }
+
+    #[test]
+    fn is_shared_rejects_sync_keys_and_unclassified_keys() {
+        // Arrange
+        let cases = [
+            ("usage.theme", true),
+            ("sync.url", false),
+            ("docs.anydocPath", false),
+            ("not.a.key", false),
+        ];
+
+        // Act and Assert
+        for (key, expected) in cases {
+            assert_eq!(is_shared(key), expected, "{key}");
+        }
+    }
     use super::*;
 
     #[test]
