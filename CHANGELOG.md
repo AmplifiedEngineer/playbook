@@ -2,6 +2,60 @@
 
 Release notes for playbook: the binary and the plugin in `plugins/playbook`. From 0.34.0 they ship together as one `vX.Y.Z` release with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). Each release has a section named `## playbook <version>`, newest first, which the release pull request adds from the notes that `scripts/release-notes.sh` builds. The sections from 0.33.0 down are plugin releases from before the two lines joined. The binary skips 0.27 to 0.33: it goes from 0.26 to 0.34.0.
 
+## playbook 0.41.0
+
+### Features
+
+- **pbtop**: add a usage reset key with a confirmation ([#1600](https://github.com/pragmatic-engineer/playbook/pull/1600))
+- **review**: review each stacked PR alone with a digest above it ([#1602](https://github.com/pragmatic-engineer/playbook/pull/1602))
+- **handoff**: write a handoff when /clear ends a session ([#1606](https://github.com/pragmatic-engineer/playbook/pull/1606))
+- **code-bench**: add bench crate with metrics and dependency guard ([#1624](https://github.com/pragmatic-engineer/playbook/pull/1624))
+- **usage**: add a stable machine id and name ([#1626](https://github.com/pragmatic-engineer/playbook/pull/1626))
+- **code-bench**: add corpus manifest and fetcher ([#1628](https://github.com/pragmatic-engineer/playbook/pull/1628))
+- **code-bench**: add process runner and universal-ctags adapter ([#1635](https://github.com/pragmatic-engineer/playbook/pull/1635))
+- **code-bench**: add frozen task generator and task set v1 ([#1637](https://github.com/pragmatic-engineer/playbook/pull/1637))
+- **code-bench**: add tuned rg candidates and baseline ([#1638](https://github.com/pragmatic-engineer/playbook/pull/1638))
+- **code-bench**: add scip oracle adapter and audit sample rate ([#1640](https://github.com/pragmatic-engineer/playbook/pull/1640))
+- **code-bench**: add pilot runner and report ([#1641](https://github.com/pragmatic-engineer/playbook/pull/1641))
+- **code-bench**: add pilot command and runner integration test ([#1642](https://github.com/pragmatic-engineer/playbook/pull/1642))
+- **code-bench**: add gate rules in basis points ([#1643](https://github.com/pragmatic-engineer/playbook/pull/1643))
+- **code-bench**: add gate cases and the merge-base data check ([#1644](https://github.com/pragmatic-engineer/playbook/pull/1644))
+- **code-bench**: add baseline, floor and override data files ([#1645](https://github.com/pragmatic-engineer/playbook/pull/1645))
+- **code**: bind refs to the declaring module when a name repeats ([#1653](https://github.com/pragmatic-engineer/playbook/pull/1653))
+- **code**: guard the parse with a tick budget and a nesting cap ([#1654](https://github.com/pragmatic-engineer/playbook/pull/1654))
+- **store**: refuse a newer usage and config database schema ([#1656](https://github.com/pragmatic-engineer/playbook/pull/1656))
+- **code**: skip generated files when indexing ([#1657](https://github.com/pragmatic-engineer/playbook/pull/1657))
+- **code**: store the language list of each worktree at index time ([#1658](https://github.com/pragmatic-engineer/playbook/pull/1658))
+
+### Fixes
+
+- **update**: stop pointing at the retired apt and dnf packages ([#1609](https://github.com/pragmatic-engineer/playbook/pull/1609))
+- **pbtop**: keep a model's colour the same across ranges and charts ([#1619](https://github.com/pragmatic-engineer/playbook/pull/1619))
+- **code**: accept go in the --lang filter of search and symbol ([#1621](https://github.com/pragmatic-engineer/playbook/pull/1621))
+- **common**: keep a child's unread stdin from killing the hook ([#1627](https://github.com/pragmatic-engineer/playbook/pull/1627))
+
+### Other changes
+
+- refactor(agents): spawn the base agent with an effort parameter ([#1612](https://github.com/pragmatic-engineer/playbook/pull/1612))
+- refactor(agents): remove the per-session agent variants ([#1615](https://github.com/pragmatic-engineer/playbook/pull/1615))
+- docs(telemetry): drop text about the retired playbook-telemetry command ([#1620](https://github.com/pragmatic-engineer/playbook/pull/1620))
+- refactor(store): add the playbook-store crate over rusqlite ([#1623](https://github.com/pragmatic-engineer/playbook/pull/1623))
+- test(code): add hand-labeled fixtures and conformance tests ([#1625](https://github.com/pragmatic-engineer/playbook/pull/1625))
+- refactor(store): move common and data onto playbook-store ([#1629](https://github.com/pragmatic-engineer/playbook/pull/1629))
+- test(cli): add per-language acceptance tests for code commands ([#1632](https://github.com/pragmatic-engineer/playbook/pull/1632))
+- test(code): add insta snapshots of extracted symbols per language ([#1630](https://github.com/pragmatic-engineer/playbook/pull/1630))
+- test(code): add fuzz targets and file-system edge tests ([#1631](https://github.com/pragmatic-engineer/playbook/pull/1631))
+- refactor(store): move telemetry onto playbook-store ([#1633](https://github.com/pragmatic-engineer/playbook/pull/1633))
+- test(cli): stop three tests from reading the host machine ([#1634](https://github.com/pragmatic-engineer/playbook/pull/1634))
+- refactor(store): move the code index onto playbook-store ([#1636](https://github.com/pragmatic-engineer/playbook/pull/1636))
+- refactor(store): move the cli onto playbook-store ([#1639](https://github.com/pragmatic-engineer/playbook/pull/1639))
+- test(code): add metamorphic and equivalence tests on the fixtures ([#1647](https://github.com/pragmatic-engineer/playbook/pull/1647))
+- ci(code-bench): add the nightly benchmark workflow ([#1648](https://github.com/pragmatic-engineer/playbook/pull/1648))
+- ci(code-bench): add the mutation workflow and score floor ([#1650](https://github.com/pragmatic-engineer/playbook/pull/1650))
+- test(code-bench): run the gate on the committed fixtures in nextest ([#1652](https://github.com/pragmatic-engineer/playbook/pull/1652))
+- test(code-bench): read the workflow by line and drop serde\_norway ([#1651](https://github.com/pragmatic-engineer/playbook/pull/1651))
+- ci(code-bench): add the fuzz workflow ([#1655](https://github.com/pragmatic-engineer/playbook/pull/1655))
+
 ## playbook 0.40.2
 
 ### Features
