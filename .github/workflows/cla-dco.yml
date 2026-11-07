@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 name: CLA & DCO
 
-# Calls the shared checks in cla-dco-checks.yml of pragmatic-engineer/.github,
+# Calls the shared checks in cla-dco-checks.yml of amplified-engineer/.github,
 # pinned by commit like any other action. Bump the commit and tooling-ref
 # together when the shared workflow changes. A contributor signs the CLA by adding
 # a row to .github/CONTRIBUTORS.md in a commit of their own, so this workflow
@@ -25,6 +25,6 @@ jobs:
     permissions:
       contents: read # the called jobs fetch the pull request commits
       pull-requests: read # the called jobs list the commits with their logins
-    uses: pragmatic-engineer/.github/.github/workflows/cla-dco-checks.yml@c05ff4d8c6afd0f6a4506fdbddc35aacb8667160 # v0.1.0
+    uses: amplified-engineer/.github/.github/workflows/cla-dco-checks.yml@c05ff4d8c6afd0f6a4506fdbddc35aacb8667160 # v0.1.0
     with:
       tooling-ref: c05ff4d8c6afd0f6a4506fdbddc35aacb8667160 # same commit as v0.1.0

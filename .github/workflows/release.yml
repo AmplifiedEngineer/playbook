@@ -22,9 +22,9 @@
 #   publish  build the five targets, attach the assets to a draft release,
 #            write SHA256SUMS, attest, publish the release as the latest,
 #            then download it again and check it.
-# Then `downstream` opens release/vX.Y.Z in pragmatic-engineer/homebrew-tap and
-# pragmatic-engineer/marketplace and waits for their own vX.Y.Z releases.
-# Then `nix` moves flake.nix in pragmatic-engineer/nix to the release with a
+# Then `downstream` opens release/vX.Y.Z in amplified-engineer/homebrew-tap and
+# amplified-engineer/marketplace and waits for their own vX.Y.Z releases.
+# Then `nix` moves flake.nix in amplified-engineer/nix to the release with a
 # release/nix-vX.Y.Z pull request, and two leaf jobs run the flake on Linux
 # and macOS.
 # A published release is never built or uploaded again. A tag is never moved.
@@ -867,7 +867,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: pragmatic-engineer/homebrew-tap
+          repository: amplified-engineer/homebrew-tap
           path: downstream/tap
           persist-credentials: false
 
@@ -933,8 +933,8 @@ jobs:
       # true only when the tap and the marketplace releases are published.
       moved: ${{ steps.move.outputs.moved }}
     env:
-      TAP: pragmatic-engineer/homebrew-tap
-      MARKETPLACE: pragmatic-engineer/marketplace
+      TAP: amplified-engineer/homebrew-tap
+      MARKETPLACE: amplified-engineer/marketplace
       VERSION: ${{ needs.plan.outputs.version }}
       TAG: ${{ needs.plan.outputs.tag }}
       DRY_RUN: ${{ needs.plan.outputs.dry_run }}
@@ -953,13 +953,13 @@ jobs:
       # Only files are read from these checkouts. No code from them runs here.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: pragmatic-engineer/homebrew-tap
+          repository: amplified-engineer/homebrew-tap
           path: downstream/tap
           persist-credentials: false
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: pragmatic-engineer/marketplace
+          repository: amplified-engineer/marketplace
           path: downstream/marketplace
           persist-credentials: false
 
@@ -1035,7 +1035,7 @@ jobs:
         with:
           client-id: ${{ secrets.BOT_APP_CLIENT_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
-          owner: pragmatic-engineer
+          owner: amplified-engineer
           repositories: homebrew-tap
           permission-contents: ${{ needs.plan.outputs.dry_run == 'true' && 'read' || 'write' }}
           permission-pull-requests: ${{ needs.plan.outputs.dry_run == 'true' && 'read' || 'write' }}
@@ -1046,7 +1046,7 @@ jobs:
         with:
           client-id: ${{ secrets.BOT_APP_CLIENT_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
-          owner: pragmatic-engineer
+          owner: amplified-engineer
           repositories: marketplace
           permission-contents: ${{ needs.plan.outputs.dry_run == 'true' && 'read' || 'write' }}
           permission-pull-requests: ${{ needs.plan.outputs.dry_run == 'true' && 'read' || 'write' }}
@@ -1232,7 +1232,7 @@ jobs:
           [ -x "$brew" ] || { echo "::error::Homebrew is not on this runner image." >&2; exit 1; }
           eval "$("$brew" shellenv)"
           # A fresh tap clone, so the formula is the one the tap has now.
-          brew tap pragmatic-engineer/tap
+          brew tap amplified-engineer/tap
           scratch="$(mktemp -d)"
           bin="$(brew --prefix)/bin"
           # The version a binary prints must be the release version.
@@ -1244,23 +1244,23 @@ jobs:
           }
           # A tap whose pbtop formula conflicts with playbook links pbtop to
           # playbook (homebrew-tap, issue 1587). An older tap installs both.
-          if grep -q '^ *conflicts_with "playbook"' "$(brew --repository pragmatic-engineer/tap)/Formula/pbtop.rb"; then
-            brew install pragmatic-engineer/tap/pbtop
+          if grep -q '^ *conflicts_with "playbook"' "$(brew --repository amplified-engineer/tap)/Formula/pbtop.rb"; then
+            brew install amplified-engineer/tap/pbtop
             check_version pbtop
-            brew uninstall pragmatic-engineer/tap/pbtop
-            brew install pragmatic-engineer/tap/playbook
+            brew uninstall amplified-engineer/tap/pbtop
+            brew install amplified-engineer/tap/playbook
             [ "$(readlink -f "$bin/pbtop")" = "$(readlink -f "$bin/playbook")" ] \
               || { echo "::error::The playbook formula did not link pbtop to playbook." >&2; exit 1; }
             for b in playbook pb pbtop; do check_version "$b"; done
-            if brew install pragmatic-engineer/tap/pbtop 2> "$scratch/conflict"; then
+            if brew install amplified-engineer/tap/pbtop 2> "$scratch/conflict"; then
               echo "::error::The pbtop formula installed next to playbook; conflicts_with does not hold." >&2
               exit 1
             fi
             grep -q "brew uninstall pbtop" "$scratch/conflict" \
               || { echo "::error::The conflict message does not give the migration command." >&2; cat "$scratch/conflict" >&2; exit 1; }
           else
-            brew install pragmatic-engineer/tap/playbook
-            brew install pragmatic-engineer/tap/pbtop
+            brew install amplified-engineer/tap/playbook
+            brew install amplified-engineer/tap/pbtop
             for b in playbook pbtop; do check_version "$b"; done
           fi
           check_version pbsync
@@ -1271,7 +1271,7 @@ jobs:
           echo "Homebrew on Linux installed playbook and pbtop $VERSION." >> "$GITHUB_STEP_SUMMARY"
 
   # Moves the Nix flake to the release (issue 1147). The flake lives in
-  # pragmatic-engineer/nix and fetches the release binaries by a fixed hash,
+  # amplified-engineer/nix and fetches the release binaries by a fixed hash,
   # so the hashes exist only after the release is built. This job checks the
   # four Nix assets against SHA256SUMS and their attestation, rewrites the
   # releases block of flake.nix in a checkout of that repository with
@@ -1302,11 +1302,11 @@ jobs:
       contents: read
       attestations: read # gh attestation verify reads the attestations
     outputs:
-      # The commit of pragmatic-engineer/nix that carries the flake of this release, or empty.
+      # The commit of amplified-engineer/nix that carries the flake of this release, or empty.
       sha: ${{ steps.pr.outputs.sha || steps.render.outputs.sha }}
     env:
       GH_REPO: ${{ github.repository }}
-      NIX_REPO: pragmatic-engineer/nix
+      NIX_REPO: amplified-engineer/nix
       VERSION: ${{ needs.plan.outputs.version }}
       TAG: ${{ needs.plan.outputs.tag }}
       DRY_RUN: ${{ needs.plan.outputs.dry_run }}
@@ -1330,7 +1330,7 @@ jobs:
       # Only the flake file is read and written here. No code from it runs.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: pragmatic-engineer/nix
+          repository: amplified-engineer/nix
           path: downstream/nix
           persist-credentials: false
 
@@ -1429,7 +1429,7 @@ jobs:
         with:
           client-id: ${{ secrets.BOT_APP_CLIENT_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
-          owner: pragmatic-engineer
+          owner: amplified-engineer
           repositories: nix
           permission-contents: ${{ needs.plan.outputs.dry_run == 'true' && 'read' || 'write' }}
           permission-pull-requests: ${{ needs.plan.outputs.dry_run == 'true' && 'read' || 'write' }}
@@ -1488,7 +1488,7 @@ jobs:
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || manual "The merge commit of pull request $n is unknown."
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
-  # Runs the flake the way a user does, at the commit of pragmatic-engineer/nix that carries it, on
+  # Runs the flake the way a user does, at the commit of amplified-engineer/nix that carries it, on
   # Linux, and tampers with a copy to see that a wrong hash fails. A leaf
   # job. The host list is written from reasoning and not from a run: when the
   # first release blocks a host, add it here.
@@ -1501,7 +1501,7 @@ jobs:
     permissions:
       contents: read
     env:
-      NIX_REPO: pragmatic-engineer/nix
+      NIX_REPO: amplified-engineer/nix
       VERSION: ${{ needs.plan.outputs.version }}
       SHA: ${{ needs.nix.outputs.sha }}
     steps:
@@ -1521,7 +1521,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: pragmatic-engineer/nix
+          repository: amplified-engineer/nix
           ref: ${{ needs.nix.outputs.sha }}
           persist-credentials: false
 
@@ -1560,7 +1560,7 @@ jobs:
     permissions:
       contents: read
     env:
-      NIX_REPO: pragmatic-engineer/nix
+      NIX_REPO: amplified-engineer/nix
       VERSION: ${{ needs.plan.outputs.version }}
       SHA: ${{ needs.nix.outputs.sha }}
     steps:
