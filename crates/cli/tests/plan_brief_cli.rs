@@ -157,3 +157,40 @@ fn an_unreadable_plan_is_an_error() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("/no/such/plan.md"));
 }
+
+#[test]
+fn a_facts_budget_with_no_index_adds_no_block_and_still_writes_the_brief() {
+    let (dir, plan, graph) = setup("facts");
+    let out_dir = dir.join("briefs");
+    let set = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["config", "set", "--global", "code.briefFactsTokens", "500"])
+        .current_dir(&dir)
+        .env("HOME", &dir)
+        .output()
+        .unwrap();
+    assert!(
+        set.status.success(),
+        "{}",
+        String::from_utf8_lossy(&set.stderr)
+    );
+
+    let out = run(
+        &dir,
+        &[
+            plan.to_str().unwrap(),
+            "WU-0",
+            "--out",
+            out_dir.to_str().unwrap(),
+            "--graph",
+            graph.to_str().unwrap(),
+        ],
+    );
+
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = fs::read_to_string(out_dir.join("wu-0.brief.md")).unwrap();
+    assert!(!text.contains("## Callers"), "{text}");
+}

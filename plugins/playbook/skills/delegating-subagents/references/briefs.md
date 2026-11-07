@@ -67,7 +67,7 @@ Reviewers (`reviewer`, `cheap-checker`) used to spend about 14 messages per run 
 3. **Test command.** The scoped verify command, and the `CHECK_OUTPUT` the orchestrator already captured. Reviewers read it as context and never re-run it.
 4. **Limit.** The sentence: "Everything needed to judge this change is above: the diff and the numbered excerpts. Read or search beyond it only when a claim cannot be settled from the excerpt (a caller, a definition, a test). Do not browse the repository."
 
-**Callers, when the index answers.** Reviewers have no Bash. When `playbook code status` reports `fresh`, after `playbook code index` when it said stale or missing, add the `playbook code refs <name>` output for each public name the diff changes, under a `Callers` header.
+**Callers, when the index answers and the key allows.** Reviewers have no Bash. Run `playbook config get code.briefFactsTokens`: at 0, the default, add no code facts to any brief. Above 0, when `playbook code status` reports `fresh`, after `playbook code index` when it said stale or missing, add the `playbook code refs <name>` output for each public name the diff changes, under a `Callers` header, ranked by the order of the changed names and cut from the last line to that many tokens (four bytes to a token). `playbook plan brief` writes the same block into implementer briefs on its own.
 
 The lens, the output shape and the voice rules stay exactly as the command specifies. The limit narrows where the reviewer looks for evidence, never what it must look for: every lens still covers its whole scope, and a reviewer that needs a caller or a test still reads it.
 

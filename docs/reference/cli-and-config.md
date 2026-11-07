@@ -79,6 +79,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `docs.maxMemoryMb` | `1024` | a number, see the config keys page for the range |
 | `docs.displayChars` | `24000` | a number, see the config keys page for the range |
 | `docs.anydocPath` | empty | see the config keys page |
+| `code.briefFactsTokens` | `0` | a number, see the config keys page for the range |
 | `launcher.claudeOverride` | `false` | `true`, `false` (retired, no effect) |
 | `launcher.shortName` | `false` | `true`, `false` |
 | `systemPrompt.enabled` | `true` | `true`, `false` |
@@ -1042,7 +1043,7 @@ Subcommands: `brief`, `checkpoint`, `cleanup`
 
 Write the brief file for each Work Unit
 
-`/playbook:implement` gives these files to its subagents. Each `<OUT>/<wu-id>.brief.md` holds a short header (plan, worktree, scoped verify), the Work Unit's own section of the plan verbatim, and a "Relevant memory" list of the facts anchored to its files or matching its title. Every id is checked first: a missing one writes nothing and exits 1. Prints the paths written, one per line.
+`/playbook:implement` gives these files to its subagents. Each `<OUT>/<wu-id>.brief.md` holds a short header (plan, worktree, scoped verify), the Work Unit's own section of the plan verbatim, and a "Relevant memory" list of the facts anchored to its files or matching its title. With `code.briefFactsTokens` above 0 it adds a `Callers` block of use sites from the code index, cut to that many tokens. Every id is checked first: a missing one writes nothing and exits 1. Prints the paths written, one per line.
 
 Example: `playbook plan brief docs/plan.md WU-1 WU-2 --out /tmp/briefs --verify 'cargo test {tests}'`
 
