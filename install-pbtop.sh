@@ -13,7 +13,7 @@
 # PATH. Nothing else runs. Run from a checkout, it uses the install.sh next
 # to it when that is playbook's and knows the pbtop mode, else the one on
 # main. Homebrew has the same binary as the `pbtop`
-# formula of pragmatic-engineer/tap.
+# formula of amplifiedengineer/tap.
 set -eu
 
 command -v bash >/dev/null 2>&1 || { echo "error: bash is required" >&2; exit 1; }
@@ -23,7 +23,7 @@ case "$0" in
         here="$(cd "$(dirname "$0")" && pwd)"
         local_sh="$here/install.sh"
         if [ -f "$local_sh" ] &&
-            grep -q '^RELEASE_REPO="pragmatic-engineer/playbook"$' "$local_sh" &&
+            grep -Eq '^RELEASE_REPO="(amplifiedengineer|amplified-engineer|pragmatic-engineer)/playbook"$' "$local_sh" &&
             grep -q PLAYBOOK_INSTALL_ONLY "$local_sh"; then
             PLAYBOOK_INSTALL_ONLY=pbtop exec bash "$local_sh" "$@"
         fi
@@ -31,6 +31,6 @@ case "$0" in
 esac
 
 command -v curl >/dev/null 2>&1 || { echo "error: curl is required" >&2; exit 1; }
-url="https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh"
+url="https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh"
 script="$(curl -fsSL "$url")" || { echo "error: could not download $url" >&2; exit 1; }
 PLAYBOOK_INSTALL_ONLY=pbtop exec bash -c "$script" install.sh "$@"
