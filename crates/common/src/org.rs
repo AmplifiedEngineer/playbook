@@ -10,26 +10,35 @@
 //! checks identity (a download, an attestation, an installed plugin key, a
 //! cache folder) accepts both and tries the new name first.
 
+/// The one place the current organization name is written. A macro, because
+/// `concat!` takes only literals, and every repo constant below derives from it.
+/// A later rename changes this line and the docs.
+macro_rules! current_org {
+    () => {
+        "amplified-engineer"
+    };
+}
+
 /// The current organization.
-pub const ORG: &str = "amplified-engineer";
+pub const ORG: &str = current_org!();
 /// The organization before the rename. Old installs and old releases use it.
 pub const LEGACY_ORG: &str = "pragmatic-engineer";
 /// Every organization name to accept, preferred name first.
 pub const ORGS: [&str; 2] = [ORG, LEGACY_ORG];
 
 /// The playbook repository under the current organization.
-pub const PLAYBOOK_REPO: &str = "amplified-engineer/playbook";
+pub const PLAYBOOK_REPO: &str = concat!(current_org!(), "/playbook");
 /// The playbook repository under the old organization.
 pub const LEGACY_PLAYBOOK_REPO: &str = "pragmatic-engineer/playbook";
 /// Every playbook repository to accept, preferred name first.
 pub const PLAYBOOK_REPOS: [&str; 2] = [PLAYBOOK_REPO, LEGACY_PLAYBOOK_REPO];
 
 /// The marketplace repository, for `claude plugin marketplace add`.
-pub const MARKETPLACE_REPO: &str = "amplified-engineer/marketplace";
+pub const MARKETPLACE_REPO: &str = concat!(current_org!(), "/marketplace");
 /// The fully qualified Homebrew formula, for `brew install`.
-pub const BREW_FORMULA: &str = "amplified-engineer/tap/playbook";
+pub const BREW_FORMULA: &str = concat!(current_org!(), "/tap/playbook");
 /// The fully qualified Homebrew formula for the pbtop viewer.
-pub const BREW_PBTOP_FORMULA: &str = "amplified-engineer/tap/pbtop";
+pub const BREW_PBTOP_FORMULA: &str = concat!(current_org!(), "/tap/pbtop");
 
 /// Whether `owner` is the current or the old organization name, ignoring case.
 pub fn is_playbook_org(owner: &str) -> bool {
