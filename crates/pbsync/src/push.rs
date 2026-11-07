@@ -26,9 +26,9 @@ const ACCOUNT_COLUMN: &str = "account";
 const MACHINE_COLUMN: &str = "machine";
 const PUSHED_AT_COLUMN: &str = "pushed_at";
 const SCHEMA_VERSION_COLUMN: &str = "schema_version";
-const KEY_LAST_SUCCESS: &str = "last_success";
-const KEY_LAST_ERROR: &str = "last_error";
-const KEY_FAILURES: &str = "failures";
+pub(crate) const KEY_LAST_SUCCESS: &str = "last_success";
+pub(crate) const KEY_LAST_ERROR: &str = "last_error";
+pub(crate) const KEY_FAILURES: &str = "failures";
 const NOT_READY_HINT: &str = "run any playbook command to create it";
 
 const TABLE_EXISTS_SQL: &str =
@@ -341,12 +341,20 @@ fn raise_watermark(local: &Connection, table: &TableDef, rowid: i64) -> Result<(
     Ok(())
 }
 
-fn write_state(local: &Connection, key: &str, value: &str) -> Result<(), PushError> {
+pub(crate) fn write_state(
+    local: &Connection,
+    key: &str,
+    value: &str,
+) -> Result<(), playbook_store::Error> {
     local.execute(WRITE_STATE_SQL, params![key, value])?;
     Ok(())
 }
 
-fn record_failure(local: &Connection, error: &PushError) -> Result<(), PushError> {
+/// Stores the error text and counts one more consecutive failure.
+pub(crate) fn record_failure(
+    local: &Connection,
+    error: &dyn fmt::Display,
+) -> Result<(), playbook_store::Error> {
     let previous: Option<String> = local
         .query_row(READ_STATE_SQL, [KEY_FAILURES], |r| r.get(0))
         .optional()?;
