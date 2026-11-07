@@ -3,9 +3,9 @@
 
 //! Reversible moves of past events between accounts.
 //!
-//! `assign` moves every event in a time range to another key. A dry run
-//! counts what would move. An applied move records the previous label of each
-//! row, so `undo` puts it back. A row already on the target is left alone, so
+//! `assign` moves every event in a time range, or of one session, to another
+//! key. A dry run counts what would move. An applied move records the previous
+//! label of each row, so `undo` puts it back. A row already on the target is left alone, so
 //! applying the same move twice changes nothing the second time.
 
 use crate::account_store::err;
@@ -61,29 +61,45 @@ pub struct Moved {
     pub cost_usd: f64,
 }
 
-/// What a move covers: the events whose own time is in `[from, to)`, or all
-/// events of the sessions whose first event is in `[from, to)`.
+/// What a move covers: the events whose own time is in `[from, to)`, all
+/// events of the sessions whose first event is in `[from, to)`, or the events
+/// of one session whose own time is in `[from, to)`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Scope {
+pub struct Scope<'a> {
     pub from: i64,
     pub to: i64,
     pub by_session: bool,
+    pub session: Option<&'a str>,
 }
 
-impl Scope {
-    pub fn time(from: i64, to: i64) -> Scope {
+/// Bounds of a move limited to one session that gives no start or end.
+pub const UNBOUNDED_FROM: i64 = i64::MIN;
+pub const UNBOUNDED_TO: i64 = i64::MAX;
+
+impl<'a> Scope<'a> {
+    pub fn time(from: i64, to: i64) -> Scope<'a> {
         Scope {
             from,
             to,
             by_session: false,
+            session: None,
         }
     }
 
-    pub fn sessions(from: i64, to: i64) -> Scope {
+    pub fn sessions(from: i64, to: i64) -> Scope<'a> {
         Scope {
             from,
             to,
             by_session: true,
+            session: None,
+        }
+    }
+
+    /// The events of `session` whose own time is in `[from, to)`.
+    pub fn in_session(session: &'a str, from: i64, to: i64) -> Scope<'a> {
+        Scope {
+            session: Some(session),
+            ..Scope::time(from, to)
         }
     }
 
@@ -98,17 +114,28 @@ impl Scope {
 }
 
 /// The rows of `scope` that are not on `target`, and are on `was` when given.
-fn selection(table: &str, scope: Scope) -> String {
+fn selection(table: &str, scope: Scope<'_>) -> String {
     format!(
-        "FROM {table} WHERE {} AND account <> :target AND (:was IS NULL OR account = :was)",
+        "FROM {table} WHERE {} AND (:session IS NULL OR session_id = :session)
+         AND account <> :target AND (:was IS NULL OR account = :was)",
         scope.clause()
     )
+}
+
+/// Whether any usage event belongs to session `id`.
+pub fn session_exists(conn: &Connection, id: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM usage_events WHERE session_id = ?1)",
+        [id],
+        |r| r.get(0),
+    )
+    .map_err(|e| err("find the session", e))
 }
 
 /// Counts what `assign` would move. Changes nothing.
 pub fn plan(
     conn: &Connection,
-    scope: Scope,
+    scope: Scope<'_>,
     target: &str,
     was: Option<&str>,
 ) -> Result<Moved, String> {
@@ -119,7 +146,7 @@ pub fn plan(
                 "SELECT COUNT(*), COALESCE(SUM(cost_usd), 0) {}",
                 selection("usage_events", scope)
             ),
-            named_params! {":from": from, ":to": to, ":target": target, ":was": was},
+            named_params! {":from": from, ":to": to, ":target": target, ":was": was, ":session": scope.session},
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .map_err(|e| err("count the events", e))?;
@@ -129,7 +156,7 @@ pub fn plan(
                 "SELECT COUNT(*) {}",
                 selection("tool_invocation_events", scope)
             ),
-            named_params! {":from": from, ":to": to, ":target": target, ":was": was},
+            named_params! {":from": from, ":to": to, ":target": target, ":was": was, ":session": scope.session},
             |r| r.get(0),
         )
         .map_err(|e| err("count the events", e))?;
@@ -144,7 +171,7 @@ pub fn plan(
 /// Returns the id of the move, or `None` when nothing needed to move.
 pub fn assign(
     conn: &Connection,
-    scope: Scope,
+    scope: Scope<'_>,
     target: &str,
     was: Option<&str>,
     now: i64,
@@ -169,7 +196,7 @@ pub fn assign(
                  SELECT :id, :kind, event_id, account {}",
                 selection(table, scope)
             ),
-            named_params! {":id": id, ":kind": kind, ":from": from, ":to": to, ":target": target, ":was": was},
+            named_params! {":id": id, ":kind": kind, ":from": from, ":to": to, ":target": target, ":was": was, ":session": scope.session},
         )
         .map_err(|e| err("record the old labels", e))?;
         tx.execute(
@@ -356,6 +383,69 @@ mod tests {
         undo(&conn, None).unwrap().unwrap();
         assert!(labels(&conn).iter().all(|l| l == "personal"));
         assert_ne!(labels(&conn), before);
+    }
+
+    #[test]
+    fn a_session_move_takes_only_that_session_inside_the_time_range() {
+        let conn = store();
+        // s1 holds t=100 and t=200 on work@x.com; add t=300 and t=400 to it,
+        // and a row of another session at t=350.
+        for (id, ts, session) in [("e", 300, "s1"), ("f", 400, "s1"), ("g", 350, "s9")] {
+            conn.execute(
+                "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
+                    repo, branch, input_tokens, output_tokens, cache_creation_tokens,
+                    cache_read_tokens, cost_usd) VALUES (?1, ?2, ?3, 'work@x.com', 'm', '', 'r', 'b', 1, 1, 0, 0, 1.0)",
+                playbook_store::params![id, ts, session],
+            )
+            .unwrap();
+        }
+        let scope = Scope::in_session("s1", 250, UNBOUNDED_TO);
+        let dry = plan(&conn, scope, "personal", None).unwrap();
+        assert_eq!((dry.events, dry.tool_events), (2, 0));
+        assert_eq!(labels(&conn).iter().filter(|l| *l == "personal").count(), 0);
+
+        let (id, moved) = assign(&conn, scope, "personal", None, 1).unwrap().unwrap();
+        assert_eq!(moved.events, 2);
+        let on = |event: &str| -> String {
+            conn.query_row(
+                "SELECT account FROM usage_events WHERE event_id = ?1",
+                [event],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        let moved_ids: Vec<_> = ["a", "b", "c", "e", "f", "g"].map(on).into();
+        assert_eq!(
+            moved_ids,
+            [
+                "work@x.com",
+                "work@x.com",
+                "work@x.com",
+                "personal",
+                "personal",
+                "work@x.com"
+            ]
+        );
+        assert!(assign(&conn, scope, "personal", None, 2).unwrap().is_none());
+
+        let (undone, restored, skipped) = undo(&conn, Some(id)).unwrap().unwrap();
+        assert_eq!((undone, restored, skipped), (id, 2, 0));
+        assert_eq!(on("e"), "work@x.com");
+    }
+
+    #[test]
+    fn a_session_move_without_a_range_takes_the_whole_session_and_its_tool_events() {
+        let conn = store();
+        let scope = Scope::in_session("s1", UNBOUNDED_FROM, UNBOUNDED_TO);
+        let m = assign(&conn, scope, "personal", Some("work@x.com"), 1)
+            .unwrap()
+            .unwrap()
+            .1;
+        assert_eq!((m.events, m.tool_events), (2, 1));
+        assert_eq!(
+            labels(&conn),
+            ["personal", "personal", "work@x.com", "other@x.com"]
+        );
     }
 
     #[test]

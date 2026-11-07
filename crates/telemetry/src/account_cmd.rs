@@ -76,6 +76,7 @@ pub fn run_on(conn: Connection, command: &AccountCommand) -> Result<String, Stri
             from_session,
             before_session,
             through_session,
+            session,
             target,
             was,
             confirm,
@@ -83,6 +84,7 @@ pub fn run_on(conn: Connection, command: &AccountCommand) -> Result<String, Stri
             let scope = scope(
                 &conn,
                 [from, to, from_session, before_session, through_session],
+                session.as_deref(),
                 zone,
             )?;
             let target = store::resolve(&conn, target)?;
@@ -90,16 +92,7 @@ pub fn run_on(conn: Connection, command: &AccountCommand) -> Result<String, Stri
                 .as_deref()
                 .map(|w| store::resolve(&conn, w))
                 .transpose()?;
-            let span = format!(
-                "{} to {}",
-                crate::tz::iso(scope.from),
-                crate::tz::iso(scope.to)
-            );
-            let what = if scope.by_session {
-                "of the sessions that start from"
-            } else {
-                "from"
-            };
+            let (what, span) = describe(scope);
             if !confirm {
                 let m = mv::plan(&conn, scope, &target, was.as_deref())?;
                 return Ok(format!(
@@ -132,13 +125,41 @@ pub fn run_on(conn: Connection, command: &AccountCommand) -> Result<String, Stri
     }
 }
 
+/// The words that name what a move covers, as a lead-in and the span.
+fn describe(scope: Scope<'_>) -> (String, String) {
+    let bounds = match (scope.from, scope.to) {
+        (mv::UNBOUNDED_FROM, mv::UNBOUNDED_TO) => String::new(),
+        (mv::UNBOUNDED_FROM, to) => format!(" before {}", crate::tz::iso(to)),
+        (from, mv::UNBOUNDED_TO) => format!(" from {}", crate::tz::iso(from)),
+        (from, to) => format!(" from {} to {}", crate::tz::iso(from), crate::tz::iso(to)),
+    };
+    if let Some(id) = scope.session {
+        return ("of session".to_string(), format!("{id}{bounds}"));
+    }
+    let span = format!(
+        "{} to {}",
+        crate::tz::iso(scope.from),
+        crate::tz::iso(scope.to)
+    );
+    let what = if scope.by_session {
+        "of the sessions that start from"
+    } else {
+        "from"
+    };
+    (what.to_string(), span)
+}
+
 /// The scope of an `assign` from its five options: `[from, to, from_session,
-/// before_session, through_session]`.
-fn scope(
+/// before_session, through_session]`, and the session that limits it, if any.
+fn scope<'a>(
     conn: &Connection,
     [from, to, from_session, before, through]: [&Option<String>; 5],
+    session: Option<&'a str>,
     zone: crate::tz::Zone,
-) -> Result<Scope, String> {
+) -> Result<Scope<'a>, String> {
+    if let Some(id) = session {
+        return session_scope(conn, id, from.as_deref(), to.as_deref(), zone);
+    }
     let start = |id: &str| sess::session_start(conn, id);
     if before.is_none() && through.is_none() {
         let (Some(from), Some(to)) = (from, to) else {
@@ -167,6 +188,30 @@ fn scope(
     }
     Ok(Scope::sessions(lo, hi))
 }
+/// One session, limited to `[from, to)` when either is given.
+fn session_scope<'a>(
+    conn: &Connection,
+    id: &'a str,
+    from: Option<&str>,
+    to: Option<&str>,
+    zone: crate::tz::Zone,
+) -> Result<Scope<'a>, String> {
+    if !mv::session_exists(conn, id)? {
+        return Err(format!(
+            "no session {id} in the usage store; list them with `account sessions`"
+        ));
+    }
+    let bound = |text: Option<&str>, open: i64| text.map_or(Ok(open), |t| mv::parse_time(t, zone));
+    let (from, to) = (
+        bound(from, mv::UNBOUNDED_FROM)?,
+        bound(to, mv::UNBOUNDED_TO)?,
+    );
+    if from >= to {
+        return Err("--from must be earlier than --to".to_string());
+    }
+    Ok(Scope::in_session(id, from, to))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,6 +233,7 @@ mod tests {
         let s = scope(
             &c,
             [&some("1970-01-01"), &none, &none, &some("s2"), &none],
+            None,
             Zone::Utc,
         )
         .unwrap();
@@ -196,6 +242,7 @@ mod tests {
         let s = scope(
             &c,
             [&none, &none, &some("s1"), &none, &some("s2")],
+            None,
             Zone::Utc,
         )
         .unwrap();
@@ -207,10 +254,11 @@ mod tests {
         let c = conn();
         let none = None;
         let t = Zone::Utc;
-        assert!(scope(&c, [&some("1970-01-01"), &none, &none, &none, &none], t).is_err());
-        assert!(scope(&c, [&none, &none, &none, &some("s2"), &none], t).is_err());
-        assert!(scope(&c, [&none, &none, &some("s3"), &some("s2"), &none], t).is_err());
-        assert!(scope(&c, [&none, &none, &none, &some("nope"), &none], t).is_err());
+        let bad = |opts: [&Option<String>; 5]| scope(&c, opts, None, t).is_err();
+        assert!(bad([&some("1970-01-01"), &none, &none, &none, &none]));
+        assert!(bad([&none, &none, &none, &some("s2"), &none]));
+        assert!(bad([&none, &none, &some("s3"), &some("s2"), &none]));
+        assert!(bad([&none, &none, &none, &some("nope"), &none]));
         let both = scope(
             &c,
             [
@@ -220,8 +268,38 @@ mod tests {
                 &none,
                 &none,
             ],
+            None,
             t,
         );
         assert!(both.is_err());
+    }
+
+    #[test]
+    fn a_session_scope_takes_optional_bounds_and_needs_a_known_session() {
+        let c = conn();
+        let none = None;
+        let t = Zone::Utc;
+        let whole = scope(&c, [&none; 5], Some("s1"), t).unwrap();
+        assert_eq!(
+            (whole.session, whole.from, whole.to),
+            (Some("s1"), mv::UNBOUNDED_FROM, mv::UNBOUNDED_TO)
+        );
+        let from = scope(
+            &c,
+            [&some("1970-01-02"), &none, &none, &none, &none],
+            Some("s1"),
+            t,
+        );
+        assert_eq!(from.unwrap().from, 86_400);
+        let backwards = [
+            &some("1970-01-02"),
+            &some("1970-01-01"),
+            &none,
+            &none,
+            &none,
+        ];
+        assert!(scope(&c, backwards, Some("s1"), t).is_err());
+        let err = scope(&c, [&none; 5], Some("nope"), t).unwrap_err();
+        assert!(err.contains("no session nope"), "{err}");
     }
 }
