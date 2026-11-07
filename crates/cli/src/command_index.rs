@@ -209,6 +209,7 @@ pub(crate) const META: &[Meta] = &[
     free("config")
         .purpose("Read and change playbook settings in the repo, org or global tier")
         .for_users(),
+    user("config apply-proposal"),
     ro("config export"),
     ro("config get"),
     user("config import"),

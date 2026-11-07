@@ -62,14 +62,16 @@ fn shared_global_values(root: &Path) -> Result<BTreeMap<String, String>, ConfigE
     Ok(global
         .into_iter()
         .filter(|(key, _)| keys::is_shared(key))
-        .map(|(key, value)| {
-            let text = match value {
-                Value::String(text) => text,
-                other => other.to_string(),
-            };
-            (key, text)
-        })
+        .map(|(key, value)| (key, value_text(&value)))
         .collect())
+}
+
+/// A config value as text: a string without its quotes, anything else as JSON.
+pub fn value_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
 }
 
 fn write_private(path: &Path, doc: &Value) -> Result<(), SyncFilesError> {

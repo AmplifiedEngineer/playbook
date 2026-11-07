@@ -1512,7 +1512,7 @@ fn real_main() {
                     } else {
                         config::write::Tier::Repo
                     };
-                    let value_json = match parse_config_value(&key, &value) {
+                    let value_json = match config::parse::parse_config_value(&key, &value) {
                         Ok(value_json) => value_json,
                         Err(err) => {
                             eprintln!("config set: {err}");
@@ -1600,6 +1600,24 @@ fn real_main() {
                         std::process::exit(1);
                     }
                 },
+                ConfigCommand::ApplyProposal { yes } => {
+                    let stdin = std::io::stdin();
+                    let (mut input, mut out, mut err) =
+                        (stdin.lock(), std::io::stdout(), std::io::stderr());
+                    let mut streams = config::proposal::Streams {
+                        input: &mut input,
+                        out: &mut out,
+                        err: &mut err,
+                    };
+                    match config::proposal::run(&home, repo_slug, yes, &mut streams) {
+                        Ok(0) => {}
+                        Ok(code) => std::process::exit(code),
+                        Err(err) => {
+                            eprintln!("config apply-proposal: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
                 ConfigCommand::List => {
                     for &key in config::keys::KNOWN_KEYS {
                         match config::resolve_valid(key, &home, repo_slug) {
@@ -2859,67 +2877,6 @@ fn run_skills_sync(agent: Option<&str>, dry_run: bool, json: bool) -> i32 {
         eprintln!("skills sync: not every folder was synced");
     }
     i32::from(!clean)
-}
-
-/// Parse `config set`'s raw `value` string into the JSON type `key` expects,
-/// using `config::keys::default_value` to learn that type generically so an
-/// unknown key or a wrong-type value is rejected before `write::set` ever
-/// runs and touches a file. A boolean key accepts `true`/`false`
-/// case-insensitively; a numeric key accepts any finite number, left to `write::set` to range check; any
-/// other known key is passed through as a string, leaving an out-of-enum
-/// value for `write::set`'s own check to reject.
-fn parse_config_value(key: &str, value: &str) -> Result<serde_json::Value, config::ConfigError> {
-    let default = config::keys::default_value(key)
-        .ok_or_else(|| config::ConfigError::UnknownKey(key.to_string()))?;
-    match default {
-        serde_json::Value::Bool(_) => match value.to_ascii_lowercase().as_str() {
-            "true" => Ok(serde_json::Value::Bool(true)),
-            "false" => Ok(serde_json::Value::Bool(false)),
-            _ => Err(config::ConfigError::WrongType {
-                key: key.to_string(),
-                expected: "boolean",
-            }),
-        },
-        serde_json::Value::Number(_) => {
-            parse_number(value).ok_or_else(|| config::ConfigError::InvalidNumber {
-                key: key.to_string(),
-                value: value.to_string(),
-            })
-        }
-        serde_json::Value::Array(_) => Ok(parse_path_list(value)),
-        _ => Ok(serde_json::Value::String(value.to_string())),
-    }
-}
-
-/// A list value: a JSON array, or a colon-separated list like `$PATH`. Empty
-/// clears the list. Each item is validated by `write::set`.
-fn parse_path_list(value: &str) -> serde_json::Value {
-    if let Ok(parsed @ serde_json::Value::Array(_)) = serde_json::from_str(value) {
-        return parsed;
-    }
-    serde_json::Value::Array(
-        value
-            .split(':')
-            .filter(|s| !s.is_empty())
-            .map(|s| serde_json::Value::String(s.to_string()))
-            .collect(),
-    )
-}
-
-/// A whole number stays an integer so the stored JSON has no `.0`; anything
-/// else finite parses as a decimal. Range checks are left to `write::set`.
-fn parse_number(value: &str) -> Option<serde_json::Value> {
-    if let Ok(whole) = value.parse::<i64>() {
-        return Some(whole.into());
-    }
-    if let Ok(whole) = value.parse::<u64>() {
-        return Some(whole.into());
-    }
-    value
-        .parse::<f64>()
-        .ok()
-        .and_then(serde_json::Number::from_f64)
-        .map(serde_json::Value::Number)
 }
 
 /// Reads all of stdin into a `String`, for the `json` subcommands that
