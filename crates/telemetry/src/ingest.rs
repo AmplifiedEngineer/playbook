@@ -71,23 +71,25 @@ fn write_events(
     mut newest: i64,
     stats: &mut IngestStats,
 ) -> Result<i64, String> {
-    // The account of each session is read once: a token fingerprint when the
-    // session ran on one, else the account Claude Code is signed in to.
-    let mut labels: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    let mut label_of = |session: &str| -> Result<String, String> {
-        if let Some(known) = labels.get(session) {
-            return Ok(known.clone());
+    // The spans of each session are read once; each event then takes the
+    // account in effect at its own time, else the account Claude Code is
+    // signed in to.
+    let mut spans: std::collections::HashMap<String, crate::session_account::Spans> =
+        std::collections::HashMap::new();
+    let mut label_at = |session: &str, ts: i64| -> Result<String, String> {
+        if !spans.contains_key(session) {
+            spans.insert(
+                session.to_string(),
+                crate::session_account::spans_of(tx, session)?,
+            );
         }
-        let label =
-            crate::session_account::of_session(tx, session)?.unwrap_or_else(|| account.to_string());
-        labels.insert(session.to_string(), label.clone());
-        Ok(label)
+        Ok(spans[session].account_at(ts).unwrap_or(account).to_string())
     };
     for event in events.usage {
         newest = newest.max(event.timestamp);
         let existed = db::has_usage_event(tx, &event.event_id)?;
         let mut event = event;
-        event.account = label_of(&event.session_id)?;
+        event.account = label_at(&event.session_id, event.timestamp)?;
         if event.agent.is_empty() {
             event.agent = name.to_string();
         }
@@ -105,7 +107,7 @@ fn write_events(
             continue;
         }
         let mut event = event;
-        event.account = label_of(&event.session_id)?;
+        event.account = label_at(&event.session_id, event.timestamp)?;
         db::insert_tool_event(tx, &event)?;
         stats.tools_inserted += 1;
     }
@@ -202,7 +204,7 @@ mod tests {
     use super::*;
     use crate::claude_code::ClaudeCodeSource;
     use crate::util::scratch_dir;
-    use crate::{Events, ToolKind, UsageEvent};
+    use crate::{Events, ToolInvocationEvent, ToolKind, UsageEvent};
     use std::fs;
     use std::path::PathBuf;
 
@@ -313,7 +315,7 @@ mod tests {
         )
         .unwrap();
         let conn = db::open_db(&dir.join("usage.db")).unwrap();
-        crate::session_account::record(&dir, "s1", Some("token:aaaa1111"));
+        crate::session_account::record(&dir, "s1", Some("token:aaaa1111"), 0);
         crate::session_account::import(&conn, &dir).unwrap();
 
         ingest(
@@ -341,6 +343,72 @@ mod tests {
             ["dev@example.com"]
         );
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_session_that_moves_between_accounts_is_labeled_per_event_by_time() {
+        // Arrange: events at 100, 200, 300 and 400 and spans A from 0, B from 250.
+        let dir = scratch_dir("usage-span-labels");
+        let conn = db::open_db(&dir.join("usage.db")).unwrap();
+        crate::session_account::record(&dir, "sx", Some("token:aaaa1111"), 0);
+        crate::session_account::record(&dir, "sx", Some("token:bbbb2222"), 250);
+        crate::session_account::import(&conn, &dir).unwrap();
+        let usage = [100, 200, 300, 400]
+            .map(|t| {
+                let mut event = usage(&format!("u{t}"), t, 0.5);
+                event.session_id = "sx".into();
+                event
+            })
+            .into();
+        let tools = [100, 400]
+            .map(|t| ToolInvocationEvent {
+                event_id: format!("t{t}"),
+                timestamp: t,
+                session_id: "sx".into(),
+                account: String::new(),
+                kind: ToolKind::Skill,
+                name: "n".into(),
+            })
+            .into();
+        let tx = conn.unchecked_transaction().unwrap();
+
+        // Act
+        let mut stats = IngestStats::default();
+        write_events(
+            &tx,
+            Events { usage, tools },
+            "dev@example.com",
+            "claude-code",
+            0,
+            &mut stats,
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        // Assert
+        let labels = |table: &str| -> Vec<String> {
+            let mut stmt = conn
+                .prepare(&format!("SELECT account FROM {table} ORDER BY timestamp"))
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        let (a, b) = ("token:aaaa1111", "token:bbbb2222");
+        assert_eq!(labels("usage_events"), [a, a, b, b]);
+        assert_eq!(labels("tool_invocation_events"), [a, b]);
+        let total: i64 = conn
+            .query_row(
+                "SELECT SUM(input_tokens) FROM usage_events WHERE session_id = 'sx'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(total, 4);
+        let sessions = crate::account_sessions::sessions(&conn, 0, 1_000).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert!(sessions[0].accounts.contains(a) && sessions[0].accounts.contains(b));
     }
 
     #[test]
