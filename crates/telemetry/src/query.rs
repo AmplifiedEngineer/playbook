@@ -297,11 +297,16 @@ impl AgentView {
 
 /// The agent split of the range, read from the telemetry tables. The
 /// transcript totals are not touched.
-pub fn load_agents(conn: &Connection, range: Range, now: i64) -> Result<AgentView, String> {
+pub fn load_agents(
+    conn: &Connection,
+    range: Range,
+    now: i64,
+    machine: Option<&str>,
+) -> Result<AgentView, String> {
     let (since, until) = window_seconds(range, now);
-    let rows = super::telemetry_db::agent_groups(conn, since, until)?;
+    let rows = super::telemetry_db::agent_groups(conn, since, until, machine)?;
     if rows.is_empty() {
-        return transcript_view(conn, crate::ToolKind::Agent, since, until);
+        return transcript_view(conn, crate::ToolKind::Agent, since, until, machine);
     }
     let cost_usd = rows.iter().map(|g| g.cost_usd).sum();
     Ok(AgentView {
@@ -320,16 +325,21 @@ const HIDDEN_PLUGIN_SKILL: &str = "third-party";
 /// an official one as `third-party`, the real name is hidden unless tool
 /// details are logged, which playbook never asks for. The row is relabeled so
 /// it does not read as a skill with that name.
-pub fn load_skills(conn: &Connection, range: Range, now: i64) -> Result<AgentView, String> {
+pub fn load_skills(
+    conn: &Connection,
+    range: Range,
+    now: i64,
+    machine: Option<&str>,
+) -> Result<AgentView, String> {
     let (since, until) = window_seconds(range, now);
-    let mut rows = super::telemetry_db::skill_groups(conn, since, until)?;
+    let mut rows = super::telemetry_db::skill_groups(conn, since, until, machine)?;
     for row in &mut rows {
         if row.key == HIDDEN_PLUGIN_SKILL {
             row.key = "plugin skills (names hidden)".to_string();
         }
     }
     if rows.is_empty() {
-        return transcript_view(conn, crate::ToolKind::Skill, since, until);
+        return transcript_view(conn, crate::ToolKind::Skill, since, until, machine);
     }
     let cost_usd = rows.iter().map(|g| g.cost_usd).sum();
     Ok(AgentView {
@@ -347,8 +357,9 @@ fn transcript_view(
     kind: crate::ToolKind,
     since: i64,
     until: i64,
+    machine: Option<&str>,
 ) -> Result<AgentView, String> {
-    let rows = super::telemetry_db::invocation_groups(conn, kind, since, until)?;
+    let rows = super::telemetry_db::invocation_groups(conn, kind, since, until, machine)?;
     Ok(AgentView {
         rows,
         cost_usd: 0.0,
@@ -368,22 +379,27 @@ pub struct HealthView {
     pub before: Option<super::telemetry_db::Health>,
 }
 
-pub fn load_health(conn: &Connection, range: Range, now: i64) -> Result<HealthView, String> {
+pub fn load_health(
+    conn: &Connection,
+    range: Range,
+    now: i64,
+    machine: Option<&str>,
+) -> Result<HealthView, String> {
     use super::telemetry_db::{health, tool_stats};
     if let Some(period) = super::period::Period::of_range(range) {
         let w = period.windows(now);
         return Ok(HealthView {
-            tools: tool_stats(conn, w.current.start, w.current.end)?,
-            tools_before: tool_stats(conn, w.previous.start, w.previous.end)?,
-            now: health(conn, w.current.start, w.current.end)?,
-            before: Some(health(conn, w.previous.start, w.previous.end)?),
+            tools: tool_stats(conn, w.current.start, w.current.end, machine)?,
+            tools_before: tool_stats(conn, w.previous.start, w.previous.end, machine)?,
+            now: health(conn, w.current.start, w.current.end, machine)?,
+            before: Some(health(conn, w.previous.start, w.previous.end, machine)?),
         });
     }
     let (since, until) = window_seconds(range, now);
     Ok(HealthView {
-        tools: tool_stats(conn, since, until)?,
+        tools: tool_stats(conn, since, until, machine)?,
         tools_before: Vec::new(),
-        now: health(conn, since, until)?,
+        now: health(conn, since, until, machine)?,
         before: None,
     })
 }
@@ -624,11 +640,17 @@ pub struct LiveInputs {
 /// The three event sets `live_view` takes, read from the store at `now`: the
 /// last hour and today, every event of the active sessions, and the newest
 /// messages. Not the whole dataset.
-pub fn load_live_inputs(conn: &Connection, now: i64) -> Result<LiveInputs, String> {
-    let window = db::load_usage_events_since(conn, live_window_start(now))?;
+pub fn load_live_inputs(
+    conn: &Connection,
+    now: i64,
+    machine: Option<&str>,
+) -> Result<LiveInputs, String> {
+    let mut window = db::load_usage_events_since(conn, live_window_start(now))?;
+    crate::tui::machine::keep(&mut window, machine);
     let ids = active_session_ids(&window, now);
-    let sessions = db::load_usage_events_of_sessions(conn, &ids)?;
-    let latest = db::load_latest_usage_events(conn, FEED_LIMIT as i64)?;
+    let mut sessions = db::load_usage_events_of_sessions(conn, &ids)?;
+    crate::tui::machine::keep(&mut sessions, machine);
+    let latest = db::load_latest_usage_events(conn, FEED_LIMIT as i64, machine)?;
     Ok(LiveInputs {
         window,
         sessions,
@@ -636,8 +658,8 @@ pub fn load_live_inputs(conn: &Connection, now: i64) -> Result<LiveInputs, Strin
     })
 }
 
-pub fn load_live(conn: &Connection, now: i64) -> Result<LiveView, String> {
-    let i = load_live_inputs(conn, now)?;
+pub fn load_live(conn: &Connection, now: i64, machine: Option<&str>) -> Result<LiveView, String> {
+    let i = load_live_inputs(conn, now, machine)?;
     Ok(live_view(&i.window, &i.sessions, &i.latest, now))
 }
 
@@ -989,7 +1011,7 @@ mod tests {
             };
             insert_request(&conn, &r).unwrap();
         }
-        let v = load_skills(&conn, Range::LastDays(1), NOW).unwrap();
+        let v = load_skills(&conn, Range::LastDays(1), NOW, None).unwrap();
         let keys: Vec<&str> = v.rows.iter().map(|g| g.key.as_str()).collect();
         assert!(keys.contains(&"review") && keys.contains(&"plugin skills (names hidden)"));
         assert!(!keys.contains(&"third-party"));
@@ -1012,11 +1034,11 @@ mod tests {
         insert_tool(&conn, &tool("today", day)).unwrap();
         insert_tool(&conn, &tool("yesterday", day - SECONDS_PER_DAY + 60)).unwrap();
         insert_tool(&conn, &tool("old", day - 3 * SECONDS_PER_DAY)).unwrap();
-        let v = load_health(&conn, Range::Today, NOW).unwrap();
+        let v = load_health(&conn, Range::Today, NOW, None).unwrap();
         assert_eq!(v.now.tool_calls, 1);
         assert_eq!(v.before.as_ref().unwrap().tool_calls, 1);
         assert_eq!(v.tools_before.len(), 1);
-        let v = load_health(&conn, Range::LastDays(30), NOW).unwrap();
+        let v = load_health(&conn, Range::LastDays(30), NOW, None).unwrap();
         assert_eq!(v.now.tool_calls, 3);
         assert!(v.before.is_none() && v.tools_before.is_empty());
     }
@@ -1048,8 +1070,8 @@ mod tests {
     fn agents_and_skills_fall_back_to_transcript_counts_when_telemetry_is_empty() {
         let (conn, dir) = transcript_db("fallback");
 
-        let agents = load_agents(&conn, Range::All, NOW).unwrap();
-        let skills = load_skills(&conn, Range::All, NOW).unwrap();
+        let agents = load_agents(&conn, Range::All, NOW, None).unwrap();
+        let skills = load_skills(&conn, Range::All, NOW, None).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
 
         assert!(agents.from_transcripts && skills.from_transcripts);
@@ -1079,7 +1101,7 @@ mod tests {
         };
         crate::telemetry_db::insert_request(&conn, &r).unwrap();
 
-        let agents = load_agents(&conn, Range::All, NOW).unwrap();
+        let agents = load_agents(&conn, Range::All, NOW, None).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
 
         assert!(!agents.from_transcripts);

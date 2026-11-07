@@ -414,11 +414,12 @@ pub fn insert_tool_event(conn: &Connection, e: &ToolInvocationEvent) -> Result<(
 
 const USAGE_COLUMNS: &str = "event_id, timestamp, session_id, account, model, effort, repo, branch,
     input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
-    cache_creation_1h_tokens, agent";
+    cache_creation_1h_tokens, agent, machine";
 
 const TAIL_ALL: &str = "ORDER BY timestamp, event_id";
 const TAIL_SINCE: &str = "WHERE timestamp >= ?1 ORDER BY timestamp, event_id";
-const TAIL_LATEST: &str = "ORDER BY timestamp DESC, event_id DESC LIMIT ?1";
+const TAIL_LATEST: &str = "WHERE (?2 IS NULL OR machine = ?2)
+    ORDER BY timestamp DESC, event_id DESC LIMIT ?1";
 
 fn tail_of_sessions(marks: &str) -> String {
     format!("WHERE session_id IN ({marks}) ORDER BY timestamp, event_id")
@@ -449,6 +450,7 @@ fn query_usage(
                 cache_read_tokens: r.get::<_, i64>(11)?.max(0) as u64,
                 cache_creation_1h_tokens: r.get::<_, i64>(12)?.max(0) as u64,
                 agent: r.get(13)?,
+                machine: r.get(14)?,
                 ..UsageEvent::default()
             };
             event.apply_pricing();
@@ -471,9 +473,14 @@ pub fn load_usage_events_since(conn: &Connection, since: i64) -> Result<Vec<Usag
     query_usage(conn, TAIL_SINCE, &[&since])
 }
 
-/// The newest `limit` events, newest first.
-pub fn load_latest_usage_events(conn: &Connection, limit: i64) -> Result<Vec<UsageEvent>, String> {
-    query_usage(conn, TAIL_LATEST, &[&limit])
+/// The newest `limit` events, newest first. `machine` keeps one machine's
+/// events, `None` keeps all of them.
+pub fn load_latest_usage_events(
+    conn: &Connection,
+    limit: i64,
+    machine: Option<&str>,
+) -> Result<Vec<UsageEvent>, String> {
+    query_usage(conn, TAIL_LATEST, &[&limit, &machine])
 }
 
 /// Every event of the given sessions, oldest first.
@@ -880,7 +887,7 @@ mod tests {
 
         let all = plan(&conn, TAIL_ALL, &[]);
         let since = plan(&conn, TAIL_SINCE, &[&10_i64]);
-        let latest = plan(&conn, TAIL_LATEST, &[&5_i64]);
+        let latest = plan(&conn, TAIL_LATEST, &[&5_i64, &None::<&str>]);
         let sessions = plan(&conn, &tail_of_sessions("?,?"), &id_params);
 
         assert!(all.contains("usage_events_by_time"), "{all}");
@@ -936,7 +943,10 @@ mod tests {
             ids(load_usage_events_since(&conn, 401).unwrap()),
             Vec::<String>::new()
         );
-        assert_eq!(ids(load_latest_usage_events(&conn, 2).unwrap()), ["d", "c"]);
+        assert_eq!(
+            ids(load_latest_usage_events(&conn, 2, None).unwrap()),
+            ["d", "c"]
+        );
         let wanted = vec!["s1".to_string(), "s3".to_string()];
         assert_eq!(
             ids(load_usage_events_of_sessions(&conn, &wanted).unwrap()),

@@ -157,6 +157,27 @@ fn the_help_window_at_three_sizes() {
 }
 
 #[test]
+fn the_title_names_the_machine_for_each_choice() {
+    for (name, key, shown) in [
+        ("title_machine_this", Some("me"), "work, laptop"),
+        ("title_machine_other", Some("b2c3d4e5"), "work, b2c3d4e5"),
+        ("title_machine_all", None, "work, all machines"),
+    ] {
+        let mut a = app(Theme::Standard);
+        if let Some(d) = a.data.as_mut() {
+            d.accounts.shown = "work".to_string();
+            d.machines.key = key.map(String::from);
+            d.machines.local = "me".to_string();
+            d.machines.shown = shown.rsplit(", ").next().unwrap().to_string();
+        }
+        let screen = draw(&a, 100, 30);
+        let title: Vec<&str> = screen.lines().take(3).collect();
+        assert!(title.join("\n").contains(shown), "{name}: {title:?}");
+        check(name, &(title.join("\n") + "\n"));
+    }
+}
+
+#[test]
 fn the_help_window_scrolled_to_the_end_at_80x24() {
     let mut a = app(Theme::Standard);
     a.area = ratatui::layout::Rect::new(0, 0, 80, 24);

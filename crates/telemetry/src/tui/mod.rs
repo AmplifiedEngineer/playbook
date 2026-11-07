@@ -22,6 +22,7 @@ pub mod fmt;
 pub mod icon;
 pub mod keys;
 pub mod layout;
+pub mod machine;
 pub mod notice;
 pub mod panels;
 #[cfg(test)]
@@ -176,6 +177,7 @@ fn event_loop(
         app.range,
         app.filter.clone(),
         app.account.clone(),
+        app.machine.clone(),
         every,
     );
     let mut sessions = SessionsLoop::new(paths.clone());
@@ -201,12 +203,14 @@ fn event_loop(
                     }
                 }
                 Event::Key(key) if key.kind == KeyEventKind::Press => match app.key(key) {
-                    Effect::Requery => worker.ask(app.range, &app.filter, &app.account),
+                    Effect::Requery => {
+                        worker.ask(app.range, &app.filter, &app.account, &app.machine)
+                    }
                     Effect::Sessions => sessions.open(),
                     Effect::SaveLayout(text) => autosave.push(text),
                     Effect::SaveBudget(usd) => {
                         app.note = Some(save_budget(&home, usd));
-                        worker.ask(app.range, &app.filter, &app.account);
+                        worker.ask(app.range, &app.filter, &app.account, &app.machine);
                     }
                     Effect::ResetUsage => worker.reset(),
                     Effect::ResetPrefs => {
@@ -219,7 +223,7 @@ fn event_loop(
                             last_saved: &mut last_saved,
                         };
                         if let Effect::Requery = reset.finish(cleared) {
-                            worker.ask(app.range, &app.filter, &app.account);
+                            worker.ask(app.range, &app.filter, &app.account, &app.machine);
                         }
                     }
                     Effect::None => {}

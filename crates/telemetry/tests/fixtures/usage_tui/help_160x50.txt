@@ -39,12 +39,12 @@
 │live  alpha                      opus-5 │                                                                            │opus-5                2   47.6K    $1.25│
 │                                        │Filtering                                                                   │sonnet-5              1   23.8K    $1.25│
 │                                        │u, U       Next account; U shows all, or the newest all panels              │sonnet-5              1   23.8K    $0.55│
-│                                        │/          Type a filter on any field               all panels              │opus-5                1   23.8K    $0.80│
-│                                        │Enter      Filter to selected row; again to undo    tables 3-6              │sonnet-5              1   23.8K    $0.95│
-│                                        │c          Clear the filter                         all panels              │opus-5                1   23.8K    $1.40│
-│                                        │                                                                            │sonnet-5              1   23.8K    $0.20│
-│                                        │Refresh                                                                     │opus-5                1   23.8K    $6.00│
-│                                        │R, B       Read usage and budget limits now         all panels              │haiku-5               1   23.8K    $0.01│
-│                                        │b          Set the manual monthly budget            all panels              │haiku-5               1   23.8K    $0.02│
+│                                        │x          Next machine, then all machines          all panels              │opus-5                1   23.8K    $0.80│
+│                                        │/          Type a filter on any field               all panels              │sonnet-5              1   23.8K    $0.95│
+│                                        │Enter      Filter to selected row; again to undo    tables 3-6              │opus-5                1   23.8K    $1.40│
+│                                        │c          Clear the filter                         all panels              │sonnet-5              1   23.8K    $0.20│
+│                                        │                                                                            │opus-5                1   23.8K    $6.00│
+│                                        │Refresh                                                                     │haiku-5               1   23.8K    $0.01│
+│                                        │R, B       Read usage and budget limits now         all panels              │haiku-5               1   23.8K    $0.02│
 ╰────────────────────────────────────────╰┤ ↑/↓ j/k scroll, any other key closes ├────────────────────────────────────╯────────────────────────────────────────╯
  1-6 panel d day w week m month a all ←/→ day r range v view / filter s/S sort t theme (default) ? help enter select q quit      updated 01:46:40 UTC, every 5s

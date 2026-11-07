@@ -66,7 +66,9 @@ pub mod writer;
 /// the part of `cache_creation_tokens` written to the one hour cache; the rest
 /// is the five minute cache. `agent` names the source (empty is filled with
 /// the source name at ingest). `cost_usd` and `unpriced` are derived from the
-/// token counts by `apply_pricing`, never read back from storage.
+/// token counts by `apply_pricing`, never read back from storage. `machine` is
+/// the id of the computer that wrote the row, filled when the event is read
+/// from the store and ignored when one is written (the store stamps its own).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct UsageEvent {
     pub event_id: String,
@@ -85,6 +87,7 @@ pub struct UsageEvent {
     pub cache_read_tokens: u64,
     pub cost_usd: f64,
     pub unpriced: bool,
+    pub machine: String,
 }
 
 impl UsageEvent {

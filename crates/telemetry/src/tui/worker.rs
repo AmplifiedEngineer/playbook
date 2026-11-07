@@ -9,6 +9,7 @@
 
 use super::account::AccountSel;
 use super::data::{self, Data};
+use super::machine::MachineSel;
 use crate::query::Range;
 use crate::run::{ingest_into, Paths};
 use crate::util::time::now_secs;
@@ -26,6 +27,7 @@ pub enum Request {
         range: Range,
         filter: String,
         account: AccountSel,
+        machine: MachineSel,
     },
     /// Delete the usage history, then read every transcript again.
     Reset,
@@ -48,14 +50,28 @@ pub struct Worker {
 /// How often a partial snapshot is sent while a first read runs.
 const PARTIAL_EVERY: Duration = Duration::from_secs(1);
 
+/// The range, filter, account and machine a snapshot is read for.
+type Query = (Range, String, AccountSel, MachineSel);
+
+/// The name of this machine, `None` when its record cannot be read.
+fn this_machine_name(paths: &Paths) -> Option<String> {
+    let dir = paths.db.parent()?;
+    crate::machine::load_or_create(
+        dir,
+        crate::machine::random_bytes,
+        &crate::machine::current_hostname(),
+    )
+    .ok()
+    .map(|m| m.name().to_string())
+}
+
 /// Reads the store into a snapshot.
-fn snapshot(
-    conn: &playbook_store::Connection,
-    paths: &Paths,
-    query: &(Range, String, AccountSel),
-) -> Update {
-    match data::load(conn, query.0, &query.1, &query.2, now_secs()) {
+fn snapshot(conn: &playbook_store::Connection, paths: &Paths, query: &Query) -> Update {
+    match data::load(conn, query.0, &query.1, &query.2, &query.3, now_secs()) {
         Ok(mut d) => {
+            if let Some(name) = this_machine_name(paths) {
+                d.machines.name_local(&name);
+            }
             // A limits failure never hides the rest of the view.
             if let Ok(l) = data::load_limits(conn, paths, query.0, d.accounts.key.as_deref(), d.now)
             {
@@ -69,13 +85,14 @@ fn snapshot(
 
 /// Applies a request: a new query replaces the old one and a reset is noted
 /// for the loop to carry out before its next read.
-fn apply(request: Request, query: &mut (Range, String, AccountSel), reset: &mut bool) {
+fn apply(request: Request, query: &mut Query, reset: &mut bool) {
     match request {
         Request::Query {
             range,
             filter,
             account,
-        } => *query = (range, filter, account),
+            machine,
+        } => *query = (range, filter, account, machine),
         Request::Reset => *reset = true,
     }
 }
@@ -86,12 +103,13 @@ impl Worker {
         range: Range,
         filter: String,
         account: AccountSel,
+        machine: MachineSel,
         every: Duration,
     ) -> Worker {
         let (requests, request_rx) = mpsc::channel::<Request>();
         let (update_tx, updates) = mpsc::channel::<Update>();
         let handle = std::thread::spawn(move || {
-            let mut query = (range, filter, account);
+            let mut query = (range, filter, account, machine);
             let mut first = true;
             let mut reset = false;
             loop {
@@ -184,11 +202,12 @@ impl Worker {
         let _ = self.requests.send(Request::Reset);
     }
 
-    pub fn ask(&self, range: Range, filter: &str, account: &AccountSel) {
+    pub fn ask(&self, range: Range, filter: &str, account: &AccountSel, machine: &MachineSel) {
         let _ = self.requests.send(Request::Query {
             range,
             filter: filter.to_string(),
             account: account.clone(),
+            machine: machine.clone(),
         });
     }
 }
@@ -223,6 +242,7 @@ mod tests {
             Range::All,
             String::new(),
             AccountSel::default(),
+            MachineSel::default(),
             Duration::from_secs(1),
         );
         let conn = crate::db::open_db(&paths.db).unwrap();

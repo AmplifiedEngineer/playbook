@@ -6,6 +6,7 @@
 //! (`usage::query`), so both views report the same numbers.
 
 use super::account::{self, AccountSel, AccountsView};
+use super::machine::{self, MachineSel, MachinesView};
 use super::theme::SERIES;
 use crate::aggregate::{group_usage, unpriced_models, Dimension, Group};
 use crate::burnup::{burnups_for, spend_only, Burnup};
@@ -300,6 +301,8 @@ pub struct Data {
     pub store: StoreSpan,
     /// The account shown and the accounts to pick from, set by `load`.
     pub accounts: AccountsView,
+    /// The machine shown and the machines to pick from, set by `load`.
+    pub machines: MachinesView,
 }
 
 /// Days charted for today, since a single bar says nothing.
@@ -426,6 +429,7 @@ impl Data {
             limits: LimitsView::default(),
             store: StoreSpan::default(),
             accounts: AccountsView::default(),
+            machines: MachinesView::default(),
         }
     }
 }
@@ -445,29 +449,53 @@ fn window_start(range: Range, now: i64) -> Option<i64> {
     Some(start)
 }
 
-/// Reads the store and builds the snapshot.
+impl Data {
+    /// Narrows the tables of the machine panels to `events`, the window of
+    /// the machine shown. The account panels keep every machine's rows.
+    fn scope_machine_tables(&mut self, events: &[UsageEvent]) {
+        let (inside, _) = query::in_range(events, &[], self.now, self.range);
+        let inside: Vec<UsageEvent> = inside
+            .into_iter()
+            .filter(|e| matches(e, &self.filter))
+            .collect();
+        self.repos = group_usage(&inside, Dimension::Repo);
+        self.sessions = query::session_days(&inside);
+    }
+}
+
+/// Reads the store and builds the snapshot. Budget, projection, burnup, spend,
+/// tokens and models count every machine of the account. Live, agents, skills,
+/// tools, health, sessions and projects follow the machine.
 pub fn load(
     conn: &Connection,
     range: Range,
     filter: &str,
     sel: &AccountSel,
+    machine_sel: &MachineSel,
     now: i64,
 ) -> Result<Data, String> {
     let accounts = account::view(conn, sel)?;
+    let machines = machine::view(conn, machine_sel)?;
+    let machine = machines.key.as_deref();
     let mut window = match window_start(range, now) {
         Some(since) => db::load_usage_events_since(conn, since)?,
         None => db::load_usage_events(conn)?,
     };
     account::keep(&mut window, accounts.key.as_deref());
-    let live = query::load_live(conn, now)?;
+    let live = query::load_live(conn, now, machine)?;
     let mut data = Data::build(&window, live, now, range, filter);
-    data.agents = query::load_agents(conn, range, now)?;
-    data.skills = query::load_skills(conn, range, now)?;
-    data.health = query::load_health(conn, range, now)?;
+    if machine.is_some() {
+        machine::keep(&mut window, machine);
+        data.scope_machine_tables(&window);
+    }
+    data.agents = query::load_agents(conn, range, now, machine)?;
+    data.skills = query::load_skills(conn, range, now, machine)?;
+    data.health = query::load_health(conn, range, now, machine)?;
     data.telemetry_rows =
         (!data.agents.is_empty() && !data.agents.from_transcripts) || !data.health.now.is_empty();
     data.store = crate::db::usage_span(conn)?;
     data.accounts = accounts;
+    data.machines = machines;
     Ok(data)
 }
 
@@ -531,7 +559,7 @@ mod tests {
         crate::account_store::set_name(&conn, "work", "Company").unwrap();
         let range = Range::LastDays(30);
         let shown = |sel: &AccountSel| {
-            let d = load(&conn, range, "", sel, NOW).unwrap();
+            let d = load(&conn, range, "", sel, &MachineSel::default(), NOW).unwrap();
             (d.totals.messages, d.accounts.shown.clone())
         };
 
@@ -541,9 +569,120 @@ mod tests {
             (2, "home".to_string())
         );
         assert_eq!(shown(&AccountSel::All), (3, "all accounts".to_string()));
-        let d = load(&conn, range, "", &AccountSel::Latest, NOW).unwrap();
+        let d = load(
+            &conn,
+            range,
+            "",
+            &AccountSel::Latest,
+            &MachineSel::default(),
+            NOW,
+        )
+        .unwrap();
         assert_eq!(d.accounts.choices.len(), 2);
         assert_eq!(d.accounts.choices[0].0, "work");
+    }
+
+    /// One event and one telemetry request per machine and account pair. The
+    /// first machine is this one, the others are stamped with their own ids.
+    fn fleet(machines: usize, accounts: usize) -> Connection {
+        let dir = crate::util::scratch_dir(&format!("data-fleet-{machines}-{accounts}"));
+        let conn = db::open_db(&dir.join("u.db")).unwrap();
+        for m in 0..machines {
+            for a in 0..accounts {
+                let id = format!("m{m}a{a}");
+                let mut e = event(NOW - 100 - (m * 10 + a) as i64, "claude-opus-5", &id, 1.0);
+                e.event_id = id.clone();
+                e.session_id = id.clone();
+                e.account = format!("acct{a}");
+                db::upsert_usage_event(&conn, &e).unwrap();
+                let request = crate::telemetry_db::TelemetryRequest {
+                    session_id: id.clone(),
+                    request_id: id.clone(),
+                    timestamp: NOW - 100,
+                    agent_name: format!("agent-m{m}"),
+                    ..Default::default()
+                };
+                crate::telemetry_db::insert_request(&conn, &request).unwrap();
+                if m > 0 {
+                    for table in ["usage_events", "telemetry_requests"] {
+                        let key = if table == "usage_events" {
+                            "event_id"
+                        } else {
+                            "request_id"
+                        };
+                        conn.execute(
+                            &format!("UPDATE {table} SET machine = ?1 WHERE {key} = ?2"),
+                            [&format!("other{m}"), &id],
+                        )
+                        .unwrap();
+                    }
+                }
+            }
+        }
+        conn
+    }
+
+    #[test]
+    fn account_panels_sum_every_machine_and_machine_panels_filter() {
+        let range = Range::LastDays(30);
+        for machines in 0..=2usize {
+            for accounts in 0..=2usize {
+                // Arrange
+                let conn = fleet(machines, accounts);
+                let one_account = AccountSel::Key("acct0".into());
+                let events_of_acct0 = if accounts > 0 { machines } else { 0 };
+                let on_this_machine = usize::from(machines > 0 && accounts > 0);
+                let agents_here = usize::from(machines > 0 && accounts > 0);
+
+                // Act
+                let here = load(&conn, range, "", &one_account, &MachineSel::This, NOW).unwrap();
+                let everywhere =
+                    load(&conn, range, "", &one_account, &MachineSel::All, NOW).unwrap();
+
+                // Assert
+                let case = format!("{machines} machines, {accounts} accounts");
+                for d in [&here, &everywhere] {
+                    assert_eq!(d.totals.messages, events_of_acct0, "totals, {case}");
+                    assert_eq!(
+                        d.models.iter().map(|g| g.messages).sum::<u64>() as usize,
+                        events_of_acct0,
+                        "models, {case}"
+                    );
+                }
+                assert_eq!(here.sessions.len(), on_this_machine, "sessions, {case}");
+                assert_eq!(here.repos.len(), on_this_machine, "projects, {case}");
+                assert_eq!(here.agents.rows.len(), agents_here, "agents, {case}");
+                assert_eq!(
+                    everywhere.sessions.len(),
+                    events_of_acct0,
+                    "sessions, {case}"
+                );
+                assert_eq!(
+                    everywhere.agents.rows.len(),
+                    if accounts > 0 { machines } else { 0 },
+                    "agents, {case}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn one_other_machine_can_be_picked_by_its_id() {
+        let conn = fleet(2, 1);
+        let d = load(
+            &conn,
+            Range::LastDays(30),
+            "",
+            &AccountSel::All,
+            &MachineSel::Key("other1".into()),
+            NOW,
+        )
+        .unwrap();
+
+        assert_eq!(d.sessions.len(), 1);
+        assert_eq!(d.agents.rows[0].key, "agent-m1");
+        assert_eq!(d.machines.choices.len(), 2);
+        assert_eq!(d.machines.shown, "other1");
     }
 
     #[test]

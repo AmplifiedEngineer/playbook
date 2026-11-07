@@ -9,6 +9,7 @@ use super::chart::Plot;
 use super::data::Data;
 use super::keys::{self, Cmd};
 use super::layout::PanelId;
+use super::machine::MachineSel;
 use super::panels;
 use super::sort::{
     day_rows, group_rows, pair_rows, session_day_rows, session_rows, Panel, Sort, PANELS,
@@ -128,6 +129,8 @@ pub struct App {
     pub filter: String,
     /// Which account the numbers belong to.
     pub account: AccountSel,
+    /// Which machine the machine panels belong to.
+    pub machine: MachineSel,
     /// The last store error, shown in the header until the next good refresh.
     pub error: Option<String>,
     pub quit: bool,
@@ -209,6 +212,7 @@ impl App {
             week_start: WeekStart::default(),
             filter: String::new(),
             account: AccountSel::default(),
+            machine: MachineSel::default(),
             error: None,
             quit: false,
             theme: Theme::default(),
@@ -246,6 +250,7 @@ impl App {
             projects_view: Some(self.projects_view),
             sorts: self.sorts.iter().map(|s| Some(*s)).collect(),
             filter: Some(self.filter.clone()),
+            machine: Some(self.machine.clone()),
         }
     }
 
@@ -271,6 +276,9 @@ impl App {
         }
         if let Some(filter) = &state.filter {
             self.filter = filter.clone();
+        }
+        if let Some(machine) = &state.machine {
+            self.machine = machine.clone();
         }
         self.fix_focus();
     }
@@ -957,6 +965,17 @@ impl App {
                     return Effect::Requery;
                 }
             }
+            Cmd::Machine => {
+                let (shown, choices) = self.machines_shown();
+                let next = self.machine.next(shown.as_deref(), &choices);
+                if next == self.machine {
+                    self.note = Some("Only one machine has usage".to_string());
+                } else {
+                    self.machine = next;
+                    self.cursor = None;
+                    return Effect::Requery;
+                }
+            }
             Cmd::Refresh => return Effect::Requery,
             Cmd::ResetUsage => self.reset_popup = true,
         }
@@ -968,6 +987,14 @@ impl App {
     fn accounts_shown(&self) -> (Option<String>, Vec<(String, String)>) {
         self.data.as_ref().map_or((None, Vec::new()), |d| {
             (d.accounts.key.clone(), d.accounts.choices.clone())
+        })
+    }
+
+    /// The machine on screen and every machine to pick from, as the last
+    /// refresh found them.
+    fn machines_shown(&self) -> (Option<String>, Vec<String>) {
+        self.data.as_ref().map_or((None, Vec::new()), |d| {
+            (d.machines.key.clone(), d.machines.choices.clone())
         })
     }
 
@@ -1182,6 +1209,62 @@ mod tests {
         assert_eq!(app.account, Sel::Latest);
         assert_eq!(app.key(press(KeyCode::Char('U'))), Effect::Requery);
         assert_eq!(app.account, Sel::All);
+    }
+
+    fn with_machines(ids: &[&str]) -> App {
+        let mut app = loaded();
+        let choices: Vec<String> = ids.iter().map(|k| k.to_string()).collect();
+        if let Some(d) = app.data.as_mut() {
+            d.machines.key = app.machine.resolve(&choices[0], &choices);
+            d.machines.choices = choices;
+        }
+        app
+    }
+
+    #[test]
+    fn x_cycles_this_machine_each_other_machine_then_all() {
+        let mut app = with_machines(&["me", "b"]);
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            assert_eq!(app.key(press(KeyCode::Char('x'))), Effect::Requery);
+            seen.push(app.machine.clone());
+            let shown = app
+                .machine
+                .resolve("me", &["me".to_string(), "b".to_string()]);
+            if let Some(d) = app.data.as_mut() {
+                d.machines.key = shown;
+            }
+        }
+        assert_eq!(
+            seen,
+            [
+                MachineSel::Key("b".into()),
+                MachineSel::All,
+                MachineSel::This
+            ]
+        );
+    }
+
+    #[test]
+    fn x_with_one_machine_changes_nothing_and_says_so() {
+        let mut app = with_machines(&["me"]);
+
+        assert_eq!(app.key(press(KeyCode::Char('x'))), Effect::None);
+        assert_eq!(app.machine, MachineSel::This);
+        assert_eq!(app.note.as_deref(), Some("Only one machine has usage"));
+    }
+
+    #[test]
+    fn the_machine_pick_is_restored_from_the_saved_screen_setup() {
+        let mut first = App::new(Range::All);
+        first.machine = MachineSel::Key("b".into());
+        let mut second = App::new(Range::All);
+
+        second.apply_ui_state(&super::super::ui_state::UiState::parse(
+            &first.ui_state().to_text(),
+        ));
+
+        assert_eq!(second.machine, MachineSel::Key("b".into()));
     }
 
     #[test]
@@ -1806,7 +1889,7 @@ mod tests {
     #[test]
     fn an_unbound_key_does_nothing() {
         let mut app = App::new(Range::All);
-        assert_eq!(app.key(press(KeyCode::Char('x'))), Effect::None);
+        assert_eq!(app.key(press(KeyCode::Char('y'))), Effect::None);
         assert!(!app.quit);
     }
 
