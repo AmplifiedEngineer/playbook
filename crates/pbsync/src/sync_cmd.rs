@@ -6,6 +6,7 @@
 use playbook_store::{params, Connection};
 
 use crate::cli::{Context, EXIT_FAILED, EXIT_OK, EXIT_USAGE};
+use crate::config_cmd;
 use crate::local_schema;
 use crate::privacy::random_salt;
 use crate::pull::{pull, PullSettings};
@@ -31,7 +32,7 @@ const PULL_USAGE: &str = "usage: pbsync pull [--force]\n\
   Copies the usage rows the other machines sent.\n\
   --force  run even while backing off after failures";
 const SYNC_USAGE: &str = "usage: pbsync sync [--force]\n\
-  Runs push, then pull.\n\
+  Runs push, then pull, then the shared config push and pull.\n\
   --force  run even while backing off after failures";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -102,13 +103,19 @@ fn execute(kind: Kind, force: bool, ctx: &mut Context) -> Result<String, String>
         totals.pushed = push_tables(&local, &transport, &mut settings, ctx, &machine, &salt)?;
     }
     if kind != Kind::Push {
-        let pull_settings = PullSettings { machine, salt };
+        let pull_settings = PullSettings {
+            machine: machine.clone(),
+            salt,
+        };
         for table in &SHARED_TABLES {
             let stats = pull(&local, &transport, table, &pull_settings, ctx.now)
                 .map_err(|e| e.to_string())?;
             totals.pulled += stats.rows_written;
             totals.overlaps += stats.overlaps;
         }
+    }
+    if kind == Kind::Both {
+        config_cmd::sync_config(&transport, &machine, ctx);
     }
     Ok(format!(
         "pushed {} rows, pulled {} rows, {} overlaps",
