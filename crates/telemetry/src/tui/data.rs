@@ -134,6 +134,8 @@ pub struct LimitsView {
     /// The cached monthly bar is the stale amount Claude Code read plus this
     /// machine's messages since, not this machine alone.
     pub cached_plus_local: bool,
+    /// Other machines have synced events, so a manual budget counts them too.
+    pub all_machines: bool,
     /// The manual and the detected monthly budget in dollars, when both are
     /// set and differ. The detected one applies.
     pub manual_beside_detected: Option<(f64, f64)>,
@@ -175,6 +177,7 @@ impl Default for LimitsView {
             cache_age: None,
             reported: None,
             cached_plus_local: false,
+            all_machines: false,
             manual_beside_detected: None,
             windows_note: None,
             period: Period::Week(WeekStart::default()),
@@ -233,6 +236,7 @@ impl LimitsView {
             cache_age,
             reported: limits_source::billed_anchor(sources, now),
             cached_plus_local: limits_source::reported_plus_local(sources, now),
+            all_machines: false,
             manual_beside_detected: limits_source::manual_beside_detected(sources, now),
             windows_note,
             period,
@@ -478,8 +482,8 @@ pub fn load(
     let machines = machine::view(conn, machine_sel)?;
     let machine = machines.key.as_deref();
     let mut window = match window_start(range, now) {
-        Some(since) => db::load_usage_events_since(conn, since)?,
-        None => db::load_usage_events(conn)?,
+        Some(since) => db::load_account_events_since(conn, since)?,
+        None => db::load_account_events(conn)?,
     };
     account::keep(&mut window, accounts.key.as_deref());
     let live = query::load_live(conn, now, machine)?;
@@ -510,10 +514,12 @@ pub fn load_limits(
 ) -> Result<LimitsView, String> {
     let week = crate::entry::configured_week_start();
     let since = limits_source::events_since(now, week);
-    let mut events = db::load_usage_events_since(conn, since)?;
+    let mut events = db::load_account_events_since(conn, since)?;
     account::keep(&mut events, account);
     let sources = crate::run::limit_sources(paths, conn, since, now);
-    Ok(LimitsView::build(&sources, &events, now, week, range))
+    let mut view = LimitsView::build(&sources, &events, now, week, range);
+    view.all_machines = crate::sync_tables::has_remote_rows(conn);
+    Ok(view)
 }
 
 #[cfg(test)]
@@ -664,6 +670,43 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_account_panels_sum_a_synced_row_of_another_machine() {
+        // Arrange
+        let conn = fleet(1, 1);
+        conn.execute(
+            "INSERT INTO usage_events_remote (machine, event_id, timestamp, account, model,
+                 effort, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
+                 cost_usd, pushed_at)
+             VALUES ('far', 'synced1', ?1, 'hash', 'claude-opus-5', '', 10, 5, 0, 0, 1.0, 1)",
+            [NOW - 50],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO account_aliases (hash, key) VALUES ('hash', 'acct0')",
+            [],
+        )
+        .unwrap();
+        let paths = crate::util::scratch_paths("data-synced-limits");
+
+        // Act
+        let d = load(
+            &conn,
+            Range::LastDays(30),
+            "",
+            &AccountSel::Key("acct0".into()),
+            &MachineSel::This,
+            NOW,
+        )
+        .unwrap();
+        let limits = load_limits(&conn, &paths, Range::LastDays(30), Some("acct0"), NOW).unwrap();
+
+        // Assert
+        assert_eq!(d.totals.messages, 2);
+        assert!(limits.all_machines);
+        assert!(limits.recent_cost_24h > 0.0);
     }
 
     #[test]

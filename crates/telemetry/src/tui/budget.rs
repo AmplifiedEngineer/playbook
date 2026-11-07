@@ -143,11 +143,19 @@ fn state_seg(pal: &Palette, icon: Icon, l: &Limit, now: i64) -> (Seg, Option<Sta
 
 /// The source label of a limit: where it came from, and how old when that
 /// matters.
-fn tag(origin: Origin, stale: bool, cache_age: Option<i64>, plus_local: bool) -> String {
+fn tag(
+    origin: Origin,
+    stale: bool,
+    cache_age: Option<i64>,
+    plus_local: bool,
+    all_machines: bool,
+) -> String {
     match (origin, stale) {
         (Origin::Measured, true) => "measured, stale".to_string(),
         (Origin::Measured, _) => "measured".to_string(),
-        // A manual budget is counted against the transcripts of this machine.
+        // A manual budget is counted from this machine's transcripts, plus the
+        // synced events of other machines when there are any.
+        (Origin::Manual, _) if all_machines => "manual, all machines".to_string(),
         (Origin::Manual, _) => "manual, local".to_string(),
         (Origin::Cached, _) => match cache_age {
             // Past the freshness limit the cache's used amount is the floor
@@ -178,7 +186,13 @@ fn limit_line(
     v: &LimitsView,
     width: usize,
 ) -> Line<'static> {
-    let tag = tag(l.origin, v.stale, v.cache_age, v.cached_plus_local);
+    let tag = tag(
+        l.origin,
+        v.stale,
+        v.cache_age,
+        v.cached_plus_local,
+        v.all_machines,
+    );
     let mut segs = vec![Seg {
         drop: 0,
         spans: vec![
@@ -402,6 +416,18 @@ pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette, icon: I
 mod tests {
     use super::*;
     use crate::tui::theme::{ColorDepth, Theme};
+
+    #[test]
+    fn a_manual_budget_names_the_machines_it_counts() {
+        // (other machines synced, label)
+        for (all_machines, want) in [(false, "manual, local"), (true, "manual, all machines")] {
+            // Act
+            let label = tag(Origin::Manual, false, None, false, all_machines);
+
+            // Assert
+            assert_eq!(label, want);
+        }
+    }
 
     const HOUR: i64 = 3600;
 
