@@ -17,6 +17,31 @@ use std::path::Path;
 /// The plugin's key in `enabledPlugins`.
 pub const PLUGIN_KEY: &str = "playbook@pragmatic-engineer";
 
+/// Marketplace names Claude Code may list the plugin under besides the one in
+/// [`PLUGIN_KEY`]. The marketplace is named `pragmatic-engineer` today. If its
+/// owner renames it to a new organization name, installs under that name must
+/// work too, and so must installs that kept the old one.
+pub const ALT_MARKETPLACES: [&str; 2] = ["amplifiedengineer", "amplified-engineer"];
+
+/// Every key the plugin may have in `enabledPlugins` and `installed_plugins.json`,
+/// the preferred one first.
+pub fn plugin_keys() -> Vec<String> {
+    std::iter::once(PLUGIN_KEY.to_string())
+        .chain(ALT_MARKETPLACES.iter().map(|m| format!("playbook@{m}")))
+        .collect()
+}
+
+/// Every key the retired `playbook-hooks` plugin may have.
+pub fn hooks_plugin_keys() -> Vec<String> {
+    std::iter::once(HOOKS_PLUGIN_KEY.to_string())
+        .chain(
+            ALT_MARKETPLACES
+                .iter()
+                .map(|m| format!("playbook-hooks@{m}")),
+        )
+        .collect()
+}
+
 /// Set to `1` to run hooks and the status line even when the plugin is disabled.
 pub const IGNORE_ENV: &str = "PLAYBOOK_IGNORE_PLUGIN_DISABLED";
 
@@ -40,7 +65,7 @@ pub fn disabled_in_file(path: &Path) -> bool {
         return false;
     };
     // Most users have no entry, so skip the JSON parse unless the key is there.
-    if !text.contains(PLUGIN_KEY) {
+    if !plugin_keys().iter().any(|k| text.contains(k.as_str())) {
         return false;
     }
     serde_json::from_str::<serde_json::Value>(&text)
@@ -51,10 +76,10 @@ pub fn disabled_in_file(path: &Path) -> bool {
 /// Whether a parsed settings value sets the plugin to `false`, which pauses
 /// every hook.
 pub fn disables_plugin(settings: &serde_json::Value) -> bool {
-    settings
-        .pointer("/enabledPlugins")
-        .and_then(|e| e.get(PLUGIN_KEY))
-        == Some(&serde_json::Value::Bool(false))
+    plugin_keys().iter().any(|key| {
+        settings.pointer("/enabledPlugins").and_then(|e| e.get(key))
+            == Some(&serde_json::Value::Bool(false))
+    })
 }
 
 /// The key of the `playbook-hooks` plugin. `playbook uninstall` and the doctor
@@ -93,14 +118,16 @@ pub fn other_playbook_plugins(claude_home: &Path, cwd: &Path) -> Vec<String> {
     };
     let map = value.get("plugins").unwrap_or(&value);
     let active = |key: &str| map.get(key).is_some_and(|v| loaded_here(v, cwd));
-    let ours = active(PLUGIN_KEY);
+    let own_keys = plugin_keys();
+    let hooks_keys = hooks_plugin_keys();
+    let ours = own_keys.iter().any(|k| active(k));
     let mut keys: Vec<String> = map
         .as_object()
         .into_iter()
         .flat_map(|m| m.keys())
         .filter(|k| {
-            k.as_str() == HOOKS_PLUGIN_KEY
-                || (ours && k.starts_with("playbook@") && k.as_str() != PLUGIN_KEY)
+            hooks_keys.iter().any(|h| h == k.as_str())
+                || (ours && k.starts_with("playbook@") && !own_keys.iter().any(|o| o == k.as_str()))
         })
         .filter(|k| active(k))
         .cloned()
@@ -138,7 +165,11 @@ pub fn listed_in(home: &Path, key: &str) -> Option<bool> {
 /// Whether Claude Code lists the plugin as installed, or `None` when
 /// `installed_plugins.json` is missing or cannot be parsed.
 pub fn installed_in(home: &Path) -> Option<bool> {
-    listed_in(home, PLUGIN_KEY)
+    let seen: Vec<bool> = plugin_keys()
+        .iter()
+        .filter_map(|k| listed_in(home, k))
+        .collect();
+    (!seen.is_empty()).then(|| seen.contains(&true))
 }
 
 /// Whether the marketplace is listed in `known_marketplaces.json`.
@@ -146,13 +177,57 @@ pub fn marketplace_known_in(home: &Path) -> bool {
     std::fs::read_to_string(home.join(".claude/plugins/known_marketplaces.json"))
         .ok()
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .is_some_and(|v| v.get(MARKETPLACE).is_some())
+        .is_some_and(|v| {
+            std::iter::once(MARKETPLACE)
+                .chain(ALT_MARKETPLACES)
+                .any(|name| v.get(name).is_some())
+        })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
+
+    #[test]
+    fn a_plugin_key_under_a_renamed_marketplace_pauses_and_counts_as_installed() {
+        for marketplace in ALT_MARKETPLACES {
+            let home = home_with(Some(&format!(
+                r#"{{"enabledPlugins":{{"playbook@{marketplace}":false}}}}"#
+            )));
+            assert!(is_disabled_in(&home), "{marketplace}");
+            std::fs::create_dir_all(home.join(".claude/plugins")).unwrap();
+            std::fs::write(
+                home.join(".claude/plugins/installed_plugins.json"),
+                format!(
+                    r#"{{"version":2,"plugins":{{"playbook@{marketplace}":[{{"scope":"user"}}]}}}}"#
+                ),
+            )
+            .unwrap();
+            assert_eq!(installed_in(&home), Some(true), "{marketplace}");
+            std::fs::write(
+                home.join(".claude/plugins/known_marketplaces.json"),
+                format!(r#"{{"{marketplace}":{{}}}}"#),
+            )
+            .unwrap();
+            assert!(marketplace_known_in(&home), "{marketplace}");
+        }
+    }
+
+    #[test]
+    fn the_old_key_and_the_new_key_listed_together_are_not_reported_as_extra_installs() {
+        let home = home_with(None);
+        std::fs::create_dir_all(home.join(".claude/plugins")).unwrap();
+        std::fs::write(
+            home.join(".claude/plugins/installed_plugins.json"),
+            r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{}],"playbook@amplifiedengineer":[{}],"playbook-hooks@amplifiedengineer":[{}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            other_playbook_plugins(&home.join(".claude"), Path::new("/p")),
+            vec!["playbook-hooks@amplifiedengineer"]
+        );
+    }
 
     fn home_with(settings: Option<&str>) -> std::path::PathBuf {
         let home = scratch_dir("plugin-state");

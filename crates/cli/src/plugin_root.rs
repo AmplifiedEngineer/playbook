@@ -18,6 +18,13 @@ pub const INSTALL_HINT: &str = "claude plugin install playbook@pragmatic-enginee
 pub const OVERRIDE_ENV: &str = "PLAYBOOK_PLUGIN_DIR";
 
 const CACHE_DIR: &str = "plugins/cache/pragmatic-engineer/playbook";
+/// Every cache folder the plugin may sit in, by marketplace name: the one
+/// above, then the names a renamed marketplace would use.
+const CACHE_DIRS: [&str; 3] = [
+    CACHE_DIR,
+    "plugins/cache/amplifiedengineer/playbook",
+    "plugins/cache/amplified-engineer/playbook",
+];
 /// The file Claude Code writes into a plugin cache version it no longer uses.
 pub const ORPHAN_MARKER: &str = ".orphaned_at";
 const PLUGIN_NAME: &str = "playbook";
@@ -148,7 +155,7 @@ pub fn resolve(inputs: &Inputs) -> Result<Resolved, NotFound> {
     }
 
     let cache = inputs.claude_home.join(CACHE_DIR);
-    if let Some(root) = newest_cached(&cache) {
+    if let Some(root) = newest_in_any_cache(inputs.claude_home) {
         return Ok(Resolved {
             root,
             source: Source::Cache,
@@ -308,10 +315,10 @@ pub fn cache_dir(claude_home: &Path) -> PathBuf {
 /// Version folders in the plugin cache that Claude Code marked orphaned. The
 /// resolver skips them; Claude Code deletes them later.
 pub fn orphaned_cache_dirs(claude_home: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(claude_home.join(CACHE_DIR)) else {
-        return Vec::new();
-    };
-    let mut dirs: Vec<PathBuf> = entries
+    let mut dirs: Vec<PathBuf> = CACHE_DIRS
+        .iter()
+        .filter_map(|d| std::fs::read_dir(claude_home.join(d)).ok())
+        .flatten()
         .filter_map(Result::ok)
         .map(|e| e.path())
         .filter(|p| p.join(ORPHAN_MARKER).exists())
@@ -343,10 +350,10 @@ fn manifest_field(dir: &Path, pointer: &str) -> Option<String> {
 /// then other entries without a `projectPath`. An entry for another project is
 /// dropped, because Claude Code does not load it here.
 fn install_paths(claude_home: &Path, cwd: &Path) -> Vec<PathBuf> {
-    let entries: Vec<serde_json::Value> = match crate::common::plugin_state::installed_entry_at(
-        claude_home,
-        crate::common::plugin_state::PLUGIN_KEY,
-    ) {
+    let found = crate::common::plugin_state::plugin_keys()
+        .iter()
+        .find_map(|key| crate::common::plugin_state::installed_entry_at(claude_home, key));
+    let entries: Vec<serde_json::Value> = match found {
         Some(serde_json::Value::Array(list)) => list,
         Some(obj @ serde_json::Value::Object(_)) => vec![obj],
         _ => return Vec::new(),
@@ -376,6 +383,13 @@ fn install_paths(claude_home: &Path, cwd: &Path) -> Vec<PathBuf> {
 /// The highest usable version directory directly under `cache`. Names that do
 /// not parse as `major.minor.patch` (with an optional pre-release suffix) are
 /// skipped, and a pre-release sorts below its release.
+fn newest_in_any_cache(claude_home: &Path) -> Option<PathBuf> {
+    CACHE_DIRS
+        .iter()
+        .filter_map(|d| newest_cached(&claude_home.join(d)))
+        .max_by_key(|p| p.file_name().and_then(|n| n.to_str()).and_then(version_key))
+}
+
 fn newest_cached(cache: &Path) -> Option<PathBuf> {
     std::fs::read_dir(cache)
         .ok()?
@@ -654,6 +668,28 @@ mod tests {
         // Assert
         assert_eq!(got.root, want);
         assert_eq!(got.source, Source::Cache);
+    }
+
+    #[test]
+    fn a_cache_under_a_renamed_marketplace_resolves_and_the_newest_wins() {
+        // Arrange
+        let home = scratch_dir("plugin-root-renamed-cache");
+        cached(&home, "0.9.0");
+        let want = plugin_at(
+            &home.join(CACHE_DIRS[1]).join("0.15.0"),
+            "playbook",
+            "0.15.0",
+        );
+        let orphan = plugin_at(
+            &home.join(CACHE_DIRS[2]).join("0.40.0"),
+            "playbook",
+            "0.40.0",
+        );
+        fs::write(orphan.join(ORPHAN_MARKER), "1").unwrap();
+
+        // Act and assert
+        assert_eq!(run(&home, None).unwrap().root, want);
+        assert_eq!(orphaned_cache_dirs(&home), vec![orphan]);
     }
 
     #[test]
