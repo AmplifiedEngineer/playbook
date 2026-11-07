@@ -53,23 +53,21 @@ const PARTIAL_EVERY: Duration = Duration::from_secs(1);
 /// The range, filter, account and machine a snapshot is read for.
 type Query = (Range, String, AccountSel, MachineSel);
 
-/// The name of this machine, `None` when its record cannot be read.
-fn this_machine_name(paths: &Paths) -> Option<String> {
-    let dir = paths.db.parent()?;
-    crate::machine::load_or_create(
-        dir,
-        crate::machine::random_bytes,
-        &crate::machine::current_hostname(),
+/// The name of this machine, `None` when its row cannot be read; the hostname when no name is set.
+fn this_machine_name(conn: &playbook_store::Connection) -> Option<String> {
+    let machine = crate::machine::stored(conn).ok().flatten()?;
+    Some(
+        machine
+            .name_or(&crate::machine::current_hostname())
+            .to_string(),
     )
-    .ok()
-    .map(|m| m.name().to_string())
 }
 
 /// Reads the store into a snapshot.
 fn snapshot(conn: &playbook_store::Connection, paths: &Paths, query: &Query) -> Update {
     match data::load(conn, query.0, &query.1, &query.2, &query.3, now_secs()) {
         Ok(mut d) => {
-            if let Some(name) = this_machine_name(paths) {
+            if let Some(name) = this_machine_name(conn) {
                 d.machines.name_local(&name);
             }
             // A limits failure never hides the rest of the view.

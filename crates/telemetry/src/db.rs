@@ -13,9 +13,10 @@ use playbook_store::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::time::Duration;
 
-/// The usage database layout this build writes (2 added `machine`). A database
-/// without the row counts as version 0 and is stamped on open.
-pub const SCHEMA_VERSION: i64 = 2;
+/// The usage database layout this build writes (2 added the `machine` column,
+/// 3 the one-row `machine` table). A database without the row counts as
+/// version 0 and is stamped on open.
+pub const SCHEMA_VERSION: i64 = 3;
 
 const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS usage_events (
@@ -140,6 +141,11 @@ fn open_prepared(path: &Path) -> Result<Connection, String> {
     .map_err(|e| format!("failed to create telemetry schema: {e}"))?;
     super::telemetry_db::ensure_columns(&conn)?;
     super::machine_rows::ensure_machine_column(&conn)?;
+    retry_busy(
+        || conn.execute_batch(super::machine::SCHEMA_SQL),
+        BUSY_TIMEOUT,
+    )
+    .map_err(|e| format!("failed to create the machine table: {e}"))?;
     retry_busy(
         || conn.execute_batch(super::account_store::SCHEMA_SQL),
         BUSY_TIMEOUT,
@@ -609,6 +615,49 @@ mod tests {
     }
 
     #[test]
+    fn a_version_2_database_upgrades_to_3_with_its_rows_and_id_intact() {
+        // Arrange: a database as the previous build left it, with no machine table.
+        let path = scratch_dir("usage-schema-v2").join("usage.db");
+        let conn = open_db(&path).unwrap();
+        conn.execute_batch(
+            "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
+                 repo, branch, input_tokens, output_tokens, cache_creation_tokens,
+                 cache_read_tokens, cost_usd)
+             VALUES ('e', 1, 's', '', 'm', '', 'r', 'b', 1, 1, 0, 0, 0.5);
+             DROP TABLE machine;
+             UPDATE meta SET value = '2' WHERE key = 'schema_version';",
+        )
+        .unwrap();
+        drop(conn);
+
+        // Act
+        let conn = open_db(&path).unwrap();
+
+        // Assert
+        assert_eq!(stored_schema_version(&path), Some("3".to_string()));
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM usage_events", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1);
+        let id = crate::machine::stored(&conn).unwrap().unwrap().id;
+        assert_eq!(crate::machine_rows::local_machine_id(&conn).unwrap(), id);
+    }
+
+    #[test]
+    fn a_second_open_keeps_the_machine_id() {
+        // Arrange
+        let path = scratch_dir("usage-machine-twice").join("usage.db");
+        let first = crate::machine::stored(&open_db(&path).unwrap()).unwrap();
+
+        // Act
+        let second = crate::machine::stored(&open_db(&path).unwrap()).unwrap();
+
+        // Assert
+        assert!(first.is_some());
+        assert_eq!(first, second);
+    }
+
+    #[test]
     fn a_newer_database_is_refused_naming_both_versions_and_stays_as_it_was() {
         // Arrange
         let path = scratch_dir("usage-schema-newer").join("usage.db");
@@ -736,6 +785,7 @@ mod tests {
                 "account_assignment_rows",
                 "account_assignments",
                 "account_names",
+                "machine",
                 "meta",
                 "session_accounts",
                 "session_reconcile",

@@ -4,7 +4,7 @@
 //! The `machine` column of the six usage and telemetry tables: its migration,
 //! the id new rows carry, and the one-time backfill of rows written before it.
 //!
-//! The local machine id is mirrored into the `meta` table when the usage
+//! The local machine id, kept in the `machine` table, is mirrored into the `meta` table when the usage
 //! database opens, so every insert stamps it in SQL without carrying the id
 //! through each call.
 
@@ -28,17 +28,11 @@ pub const BACKFILL_BATCH_ROWS: usize = 5000;
 pub const LOCAL_MACHINE_SQL: &str =
     "COALESCE((SELECT value FROM meta WHERE key = 'machine_id'), '')";
 
-/// Opens a usage database for this machine: reads or makes the machine id next
-/// to the database, records it for new rows and stamps older rows. An id that
-/// cannot be read leaves rows unstamped until `playbook usage machine` shows
-/// why, and the next open stamps them.
+/// Opens a usage database for this machine: reads or makes the machine row
+/// (carrying over a legacy `machine.json` next to the database), records the id
+/// for new rows and stamps older rows.
 pub fn adopt_local_machine(conn: &Connection, data_dir: &std::path::Path) -> Result<(), String> {
-    let hostname = crate::machine::current_hostname();
-    let Ok(machine) =
-        crate::machine::load_or_create(data_dir, crate::machine::random_bytes, &hostname)
-    else {
-        return Ok(());
-    };
+    let machine = crate::machine::load_or_create(conn, data_dir, crate::machine::random_bytes)?;
     record_local_machine(conn, &machine.id)?;
     backfill_machine(conn, &machine.id, &mut |_| true).map(drop)
 }

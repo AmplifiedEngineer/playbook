@@ -1,17 +1,27 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The id and display name of this machine, kept in `machine.json` in the
-//! data folder. The id is random, so it never derives from a path or hostname.
+//! The id and display name of this machine, kept in the one-row `machine`
+//! table of `usage.db`. The id is random, so it never derives from a path or
+//! hostname. An older build kept them in `machine.json` beside the database;
+//! that file is read once to carry its id over and is never changed or deleted.
 
 use crate::run::Paths;
-use crate::util::atomic::{ensure_private_dir, write_atomic_private};
-use serde::{Deserialize, Serialize};
+use playbook_store::{params, Connection, OptionalExtension};
+use serde::Deserialize;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-const FILE_NAME: &str = "machine.json";
+const LEGACY_FILE_NAME: &str = "machine.json";
+
+/// The table holds at most one row, enforced by the `id = 1` check.
+pub const SCHEMA_SQL: &str = "
+CREATE TABLE IF NOT EXISTS machine (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    machine_id TEXT NOT NULL,
+    name TEXT
+);";
 
 /// The random bytes in a version 4 UUID.
 pub type IdBytes = [u8; 16];
@@ -25,65 +35,86 @@ const VARIANT_RFC_4122: u8 = 0x80;
 /// The hex digits in each dash-separated group of the id text.
 const GROUP_LENGTHS: [usize; 5] = [8, 4, 4, 4, 12];
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Machine {
     pub id: String,
-    /// The hostname when the id was made.
-    pub hostname: String,
-    name: Option<String>,
+    /// The name set with `--name`; `None` means the hostname is shown.
+    pub name: Option<String>,
 }
 
 impl Machine {
-    /// The name set with `--name`, or the creation hostname.
-    pub fn name(&self) -> &str {
-        self.name.as_deref().unwrap_or(&self.hostname)
+    /// The name set with `--name`, else `hostname`.
+    pub fn name_or<'a>(&'a self, hostname: &'a str) -> &'a str {
+        self.name.as_deref().unwrap_or(hostname)
     }
 
-    pub fn text(&self) -> String {
-        format!("id: {}\nname: {}", self.id, self.name())
+    pub fn text(&self, hostname: &str) -> String {
+        format!("id: {}\nname: {}", self.id, self.name_or(hostname))
     }
 }
 
-/// Reads this machine's record, making it with `generate` and `hostname` on the
-/// first call. A file that cannot be read is an error and is never replaced.
+/// The shape of the legacy `machine.json`.
+#[derive(Deserialize)]
+struct LegacyMachine {
+    id: String,
+    hostname: String,
+    name: Option<String>,
+}
+
+/// Reads this machine's row, making it on the first call: from a valid legacy
+/// `machine.json` in `dir` when there is one, else with an id from `generate`.
 pub fn load_or_create(
+    conn: &Connection,
     dir: &Path,
     generate: impl FnOnce() -> IdBytes,
-    hostname: &str,
 ) -> Result<Machine, String> {
-    let path = file_path(dir);
-    match std::fs::read_to_string(&path) {
-        Ok(text) => parse(&path, &text),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let machine = Machine {
-                id: id_text(generate()),
-                hostname: hostname.to_string(),
-                name: None,
-            };
-            save(dir, &machine)?;
-            Ok(machine)
-        }
-        Err(e) => Err(format!("failed to read {}: {e}", path.display())),
+    if let Some(machine) = stored(conn)? {
+        return Ok(machine);
     }
+    let machine = read_legacy(dir).unwrap_or_else(|| Machine {
+        id: id_text(generate()),
+        name: None,
+    });
+    // OR IGNORE: a concurrent opener may have won; the re-read returns its row.
+    conn.execute(
+        "INSERT OR IGNORE INTO machine (id, machine_id, name) VALUES (1, ?1, ?2)",
+        params![machine.id, machine.name],
+    )
+    .map_err(|e| format!("failed to store the machine id: {e}"))?;
+    stored(conn)?.ok_or_else(|| "the machine row is missing after it was stored".to_string())
+}
+
+/// The row of this machine, `None` before it is made.
+pub fn stored(conn: &Connection) -> Result<Option<Machine>, String> {
+    conn.query_row(
+        "SELECT machine_id, name FROM machine WHERE id = 1",
+        [],
+        |r| {
+            Ok(Machine {
+                id: r.get(0)?,
+                name: r.get(1)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| format!("failed to read the machine row: {e}"))
 }
 
 /// Keeps `name` as the display name. An empty name restores the hostname.
 pub fn rename(
+    conn: &Connection,
     dir: &Path,
     name: &str,
     generate: impl FnOnce() -> IdBytes,
-    hostname: &str,
 ) -> Result<Machine, String> {
-    let mut machine = load_or_create(dir, generate, hostname)?;
+    let mut machine = load_or_create(conn, dir, generate)?;
     machine.name = Some(name.trim().to_string()).filter(|n| !n.is_empty());
-    save(dir, &machine)?;
+    conn.execute(
+        "UPDATE machine SET name = ?1 WHERE id = 1",
+        params![machine.name],
+    )
+    .map_err(|e| format!("failed to store the machine name: {e}"))?;
     Ok(machine)
-}
-
-/// The hostname stored at creation when it differs from `current`, such as
-/// after a copied data folder or a renamed machine.
-pub fn changed_hostname<'a>(machine: &'a Machine, current: &str) -> Option<&'a str> {
-    (machine.hostname != current).then_some(machine.hostname.as_str())
 }
 
 /// The hostname of this computer.
@@ -107,12 +138,12 @@ pub fn run(paths: &Paths, name: Option<&str>) -> Result<String, String> {
         .db
         .parent()
         .ok_or_else(|| format!("{} has no data folder", paths.db.display()))?;
-    let hostname = current_hostname();
+    let conn = crate::db::open_db(&paths.db)?;
     let machine = match name {
-        Some(name) => rename(dir, name, random_bytes, &hostname)?,
-        None => load_or_create(dir, random_bytes, &hostname)?,
+        Some(name) => rename(&conn, dir, name, random_bytes)?,
+        None => load_or_create(&conn, dir, random_bytes)?,
     };
-    Ok(machine.text())
+    Ok(machine.text(&current_hostname()))
 }
 
 /// 16 random bytes. std seeds every `RandomState` with keys from the operating
@@ -147,42 +178,48 @@ fn is_id_text(text: &str) -> bool {
         })
 }
 
-fn file_path(dir: &Path) -> PathBuf {
-    dir.join(FILE_NAME)
-}
-
-fn parse(path: &Path, text: &str) -> Result<Machine, String> {
-    let corrupt = |why: String| {
-        format!(
-            "{} is not a valid machine file ({why}); fix or remove it to make a new id",
-            path.display()
-        )
-    };
-    let machine: Machine = serde_json::from_str(text).map_err(|e| corrupt(e.to_string()))?;
-    if !is_id_text(&machine.id) {
-        return Err(corrupt("bad id: not a UUID".to_string()));
-    }
-    Ok(machine)
-}
-
-fn save(dir: &Path, machine: &Machine) -> Result<(), String> {
-    let path = file_path(dir);
-    let json = serde_json::to_string_pretty(machine)
-        .map_err(|e| format!("failed to encode the machine record: {e}"))?;
-    ensure_private_dir(dir).map_err(|e| format!("failed to create {}: {e}", dir.display()))?;
-    write_atomic_private(&path, json)
-        .map_err(|e| format!("failed to write {}: {e}", path.display()))
+/// The machine in `dir/machine.json`, `None` when the file is missing, cannot be
+/// parsed or holds a bad id: the row is then made fresh and the file is ignored.
+/// Its hostname is dropped, and a name equal to it was only the default.
+fn read_legacy(dir: &Path) -> Option<Machine> {
+    let text = std::fs::read_to_string(dir.join(LEGACY_FILE_NAME)).ok()?;
+    let legacy: LegacyMachine = serde_json::from_str(&text).ok()?;
+    let name = legacy
+        .name
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty() && *n != legacy.hostname);
+    is_id_text(&legacy.id).then_some(Machine {
+        id: legacy.id,
+        name,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     const FIXED: IdBytes = 0x1234_5678_9abc_4def_8123_4567_89ab_cdef_u128.to_be_bytes();
     const FIXED_TEXT: &str = "12345678-9abc-4def-8123-456789abcdef";
+    const LEGACY_ID: &str = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const LEGACY_JSON: &str =
+        r#"{"id":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","hostname":"old-host","name":"old-name"}"#;
 
     fn dir(tag: &str) -> PathBuf {
         crate::util::scratch_dir(tag)
+    }
+
+    fn table() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        conn
+    }
+
+    fn legacy_file(dir: &Path, text: &str) -> PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        let path = dir.join(LEGACY_FILE_NAME);
+        std::fs::write(&path, text).unwrap();
+        path
     }
 
     fn never() -> IdBytes {
@@ -192,32 +229,39 @@ mod tests {
     #[test]
     fn two_reads_give_the_same_id() {
         // Arrange
-        let d = dir("machine-twice");
+        let (conn, d) = (table(), dir("machine-twice"));
         // Act
-        let first = load_or_create(&d, || FIXED, "host-a").unwrap();
-        let second = load_or_create(&d, never, "host-a").unwrap();
+        let first = load_or_create(&conn, &d, || FIXED).unwrap();
+        let second = load_or_create(&conn, &d, never).unwrap();
         // Assert
         assert_eq!(first, second);
     }
 
     #[test]
-    fn a_fixed_generator_gives_a_v4_shaped_id_named_after_the_host() {
+    fn a_missing_file_and_an_empty_table_make_an_id_with_no_name() {
         // Arrange
-        let d = dir("machine-shape");
+        let (conn, d) = (table(), dir("machine-shape"));
         // Act
-        let machine = load_or_create(&d, || FIXED, "host-a").unwrap();
+        let machine = load_or_create(&conn, &d, || FIXED).unwrap();
         // Assert
         assert_eq!(machine.id, FIXED_TEXT);
-        assert_eq!(machine.name(), "host-a");
-        assert_eq!(machine.text(), format!("id: {FIXED_TEXT}\nname: host-a"));
+        assert_eq!(machine.name, None);
+        assert_eq!(
+            machine.text("host-a"),
+            format!("id: {FIXED_TEXT}\nname: host-a")
+        );
+        assert!(
+            !d.join(LEGACY_FILE_NAME).exists(),
+            "no legacy file is written"
+        );
     }
 
     #[test]
     fn the_real_generator_makes_a_random_v4_id() {
         // Arrange
-        let d = dir("machine-random");
+        let (conn, d) = (table(), dir("machine-random"));
         // Act
-        let machine = load_or_create(&d, random_bytes, "host-a").unwrap();
+        let machine = load_or_create(&conn, &d, random_bytes).unwrap();
         // Assert
         assert!(is_id_text(&machine.id), "{}", machine.id);
         assert_eq!(machine.id.as_bytes()[14], b'4');
@@ -238,90 +282,122 @@ mod tests {
     }
 
     #[test]
-    fn a_corrupt_file_is_an_error_and_is_left_alone() {
+    fn a_legacy_file_is_copied_into_the_table_and_left_byte_identical() {
         // Arrange
-        let d = dir("machine-corrupt");
-        std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(file_path(&d), "{not json").unwrap();
+        let (conn, d) = (table(), dir("machine-legacy"));
+        let path = legacy_file(&d, LEGACY_JSON);
         // Act
-        let err = load_or_create(&d, || FIXED, "host-a").unwrap_err();
+        let machine = load_or_create(&conn, &d, never).unwrap();
         // Assert
-        assert!(err.contains("not a valid machine file"), "{err}");
-        assert_eq!(std::fs::read_to_string(file_path(&d)).unwrap(), "{not json");
+        assert_eq!(machine.id, LEGACY_ID);
+        assert_eq!(machine.name.as_deref(), Some("old-name"));
+        assert_eq!(stored(&conn).unwrap(), Some(machine));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), LEGACY_JSON);
     }
 
     #[test]
-    fn a_file_with_a_bad_id_is_an_error() {
+    fn a_legacy_name_equal_to_its_hostname_is_not_a_set_name() {
         // Arrange
-        let d = dir("machine-bad-id");
-        std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(file_path(&d), r#"{"id":"abc","hostname":"h","name":null}"#).unwrap();
+        let (conn, d) = (table(), dir("machine-legacy-unnamed"));
+        legacy_file(
+            &d,
+            r#"{"id":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","hostname":"old-host","name":"old-host"}"#,
+        );
         // Act
-        let err = load_or_create(&d, || FIXED, "host-a").unwrap_err();
+        let machine = load_or_create(&conn, &d, never).unwrap();
         // Assert
-        assert!(err.contains("bad id"), "{err}");
+        assert_eq!(machine.name, None);
     }
 
     #[test]
-    fn a_new_name_persists_and_the_id_stays() {
+    fn the_table_wins_over_a_legacy_file_that_differs() {
         // Arrange
-        let d = dir("machine-rename");
-        let before = load_or_create(&d, || FIXED, "host-a").unwrap();
+        let (conn, d) = (table(), dir("machine-table-wins"));
+        let before = load_or_create(&conn, &d, || FIXED).unwrap();
+        let path = legacy_file(&d, LEGACY_JSON);
         // Act
-        rename(&d, " laptop ", never, "host-a").unwrap();
-        let after = load_or_create(&d, never, "host-a").unwrap();
+        let after = load_or_create(&conn, &d, never).unwrap();
         // Assert
-        assert_eq!(after.name(), "laptop");
+        assert_eq!(after, before);
+        assert_eq!(std::fs::read_to_string(path).unwrap(), LEGACY_JSON);
+    }
+
+    #[test]
+    fn a_corrupt_file_and_an_empty_table_make_a_new_id_and_leave_the_file() {
+        // Arrange
+        let (conn, d) = (table(), dir("machine-corrupt"));
+        let path = legacy_file(&d, "{not json");
+        // Act
+        let machine = load_or_create(&conn, &d, || FIXED).unwrap();
+        // Assert
+        assert_eq!(machine.id, FIXED_TEXT);
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "{not json");
+    }
+
+    #[test]
+    fn a_corrupt_file_is_ignored_when_the_table_has_its_row() {
+        // Arrange
+        let (conn, d) = (table(), dir("machine-corrupt-row"));
+        let before = load_or_create(&conn, &d, || FIXED).unwrap();
+        legacy_file(&d, "{not json");
+        // Act
+        let after = load_or_create(&conn, &d, never).unwrap();
+        // Assert
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn a_file_with_a_bad_id_is_ignored() {
+        // Arrange
+        let (conn, d) = (table(), dir("machine-bad-id"));
+        legacy_file(&d, r#"{"id":"abc","hostname":"h","name":null}"#);
+        // Act
+        let machine = load_or_create(&conn, &d, || FIXED).unwrap();
+        // Assert
+        assert_eq!(machine.id, FIXED_TEXT);
+    }
+
+    #[test]
+    fn a_new_name_persists_in_the_table_and_the_id_stays() {
+        // Arrange
+        let (conn, d) = (table(), dir("machine-rename"));
+        let before = load_or_create(&conn, &d, || FIXED).unwrap();
+        // Act
+        rename(&conn, &d, " laptop ", never).unwrap();
+        let after = load_or_create(&conn, &d, never).unwrap();
+        // Assert
+        assert_eq!(after.name.as_deref(), Some("laptop"));
         assert_eq!(after.id, before.id);
+        assert!(
+            !d.join(LEGACY_FILE_NAME).exists(),
+            "no legacy file is written"
+        );
     }
 
     #[test]
-    fn an_empty_name_restores_the_hostname() {
+    fn an_empty_name_clears_the_name() {
         // Arrange
-        let d = dir("machine-clear");
-        rename(&d, "laptop", || FIXED, "host-a").unwrap();
+        let (conn, d) = (table(), dir("machine-clear"));
+        rename(&conn, &d, "laptop", || FIXED).unwrap();
         // Act
-        let machine = rename(&d, "", never, "host-a").unwrap();
+        let machine = rename(&conn, &d, "", never).unwrap();
         // Assert
-        assert_eq!(machine.name(), "host-a");
+        assert_eq!(machine.name, None);
+        assert_eq!(stored(&conn).unwrap().unwrap().name, None);
     }
 
     #[test]
     fn the_id_ignores_the_hostname_and_the_folder() {
         // Arrange
-        let (a, b) = (dir("machine-path-a"), dir("machine-path-b"));
+        let (a, b) = (table(), table());
+        let d = dir("machine-path");
         // Act
-        let first = load_or_create(&a, random_bytes, "host-a").unwrap();
-        let second = load_or_create(&b, random_bytes, "host-a").unwrap();
-        let moved = load_or_create(&a, never, "host-b").unwrap();
+        let first = load_or_create(&a, &d, random_bytes).unwrap();
+        let second = load_or_create(&b, &d, random_bytes).unwrap();
+        let moved = load_or_create(&a, &d, never).unwrap();
         // Assert
         assert_ne!(first.id, second.id);
         assert_eq!(moved.id, first.id);
-    }
-
-    #[test]
-    fn a_different_current_hostname_is_reported() {
-        // Arrange
-        let machine = load_or_create(&dir("machine-host"), || FIXED, "host-a").unwrap();
-        // Act and Assert
-        assert_eq!(changed_hostname(&machine, "host-a"), None);
-        assert_eq!(changed_hostname(&machine, "host-b"), Some("host-a"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn the_file_is_owner_only() {
-        use std::os::unix::fs::PermissionsExt;
-        // Arrange
-        let d = dir("machine-mode");
-        // Act
-        load_or_create(&d, || FIXED, "host-a").unwrap();
-        // Assert
-        let mode = std::fs::metadata(file_path(&d))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[test]
@@ -332,9 +408,24 @@ mod tests {
         // Act
         let shown = run(&paths, None).unwrap();
         let renamed = run(&paths, Some("laptop")).unwrap();
+        let again = run(&paths, None).unwrap();
         // Assert
         let id_line = shown.lines().next().unwrap();
         assert!(renamed.starts_with(id_line), "{renamed}");
         assert!(renamed.ends_with("name: laptop"), "{renamed}");
+        assert_eq!(again, renamed);
+    }
+
+    #[test]
+    fn the_command_succeeds_beside_a_corrupt_legacy_file() {
+        // Arrange
+        let d = dir("machine-cmd-corrupt");
+        legacy_file(&d, "{not json");
+        let mut paths = Paths::from_home(&dir("machine-cmd-corrupt-home"));
+        paths.db = d.join("usage.db");
+        // Act
+        let shown = run(&paths, None).unwrap();
+        // Assert
+        assert!(shown.starts_with("id: "), "{shown}");
     }
 }
