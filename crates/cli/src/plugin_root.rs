@@ -380,16 +380,16 @@ fn install_paths(claude_home: &Path, cwd: &Path) -> Vec<PathBuf> {
     ranked.into_iter().map(|(_, p)| p).collect()
 }
 
-/// The highest usable version directory directly under `cache`. Names that do
-/// not parse as `major.minor.patch` (with an optional pre-release suffix) are
-/// skipped, and a pre-release sorts below its release.
+/// The newest usable version directory across every cache folder in `CACHE_DIRS`.
 fn newest_in_any_cache(claude_home: &Path) -> Option<PathBuf> {
     CACHE_DIRS
         .iter()
         .filter_map(|d| newest_cached(&claude_home.join(d)))
         .max_by_key(|p| p.file_name().and_then(|n| n.to_str()).and_then(version_key))
 }
-
+/// The highest usable version directory directly under `cache`. Names that do
+/// not parse as `major.minor.patch` (with an optional pre-release suffix) are
+/// skipped, and a pre-release sorts below its release.
 fn newest_cached(cache: &Path) -> Option<PathBuf> {
     std::fs::read_dir(cache)
         .ok()?
