@@ -1990,8 +1990,10 @@ mod tests {
         // Assert
         assert_eq!(rows.len(), 1, "{rows:?}");
         assert_eq!(rows[0].level, Level::Pass);
-        assert!(rows[0].message.contains("usage.db 1"), "{rows:?}");
-        assert!(rows[0].message.contains("config.db 1"), "{rows:?}");
+        let usage = format!("usage.db {}", playbook_telemetry::db::SCHEMA_VERSION);
+        let config = format!("config.db {}", crate::config::store::SCHEMA_VERSION);
+        assert!(rows[0].message.contains(&usage), "{rows:?}");
+        assert!(rows[0].message.contains(&config), "{rows:?}");
     }
 
     #[test]
