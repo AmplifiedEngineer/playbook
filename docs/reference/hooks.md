@@ -9,7 +9,7 @@ Paths below use `~/.config/playbook/` as the playbook home. The session director
 Five ways, from narrowest to widest.
 
 - A per-hook switch, where the last column names one. Environment switches (`POLICY_GUARD=0`; `POLICY_GUARD=1` turns the optional policy guard on) go in the `env` block of `settings.json` or your shell.
-- Disable the plugin in Claude Code. That sets `enabledPlugins["playbook@pragmatic-engineer"]` to `false`. Every hook then exits with no output and no side effects, and the status line prints nothing, while the entries stay in `settings.json`. The two worktree hooks keep running, because they replace Claude Code's own worktree creation. Enable the plugin again to resume.
+- Disable the plugin in Claude Code. That sets `enabledPlugins["playbook@amplifiedengineer"]` to `false`. The old key `playbook@pragmatic-engineer` counts too. Playbook is paused when at least one key is `false` and none is `true`. Every hook then exits with no output and no side effects, and the status line prints nothing, while the entries stay in `settings.json`. The two worktree hooks keep running, because they replace Claude Code's own worktree creation. Enable the plugin again to resume.
 - Delete the hook's entry from `~/.claude/settings.json`. Setup puts it back on the next run unless you pass `--no-hooks`.
 - `playbook setup --no-hooks` never adds playbook hook entries. It does not remove ones that are already there.
 - `playbook uninstall` removes every entry setup wired. Add `--dry-run` to see the list first.

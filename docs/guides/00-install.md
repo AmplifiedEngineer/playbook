@@ -1,6 +1,6 @@
 # Install
 
-> **Renamed.** The GitHub organization was `pragmatic-engineer` (and for a while `amplified-engineer`). It is now `amplifiedengineer`. If you installed before the rename, remove the old install and install again. Homebrew users: see [Moving from the old tap name](#moving-from-the-old-tap-name). The other routes are in the [README](../../README.md). Your data stays in `~/.config/playbook`.
+> **Renamed.** The GitHub organization was `pragmatic-engineer` (and for a while `amplified-engineer`). It is now `amplifiedengineer`. The marketplace was renamed too: the plugin id `playbook@pragmatic-engineer` is now `playbook@amplifiedengineer`. An install on the old id keeps working and keeps updating until you move. New installs use the new id. Update the binary first, because releases after v0.41.0 know both ids. Homebrew users: see [Moving from the old tap name](#moving-from-the-old-tap-name). The plugin steps are in [Moving to the new marketplace name](#moving-to-the-new-marketplace-name). The other routes are in the [README](../../README.md). Your data stays in `~/.config/playbook`.
 
 To see every change `playbook setup` makes before you agree to it, read [What setup installs](05-what-setup-installs.md) and the [hook reference](../reference/hooks.md).
 
@@ -20,13 +20,13 @@ Install order:
 
 | Mode | Commands, in order | You get | You lack |
 |---|---|---|---|
-| Skills only | `claude plugin marketplace add amplifiedengineer/marketplace`, then `claude plugin install playbook@pragmatic-engineer` | Skills, commands and subagents. No hooks, no binary, no change to `settings.json` | Safety guards, status line, hooks, usage, and every step that needs the `playbook` binary |
+| Skills only | `claude plugin marketplace add amplifiedengineer/marketplace`, then `claude plugin install playbook@amplifiedengineer` | Skills, commands and subagents. No hooks, no binary, no change to `settings.json` | Safety guards, status line, hooks, usage, and every step that needs the `playbook` binary |
 | Binary only | Homebrew: `brew install amplifiedengineer/tap/playbook`, then `playbook setup`. Or, with no Homebrew, the install script: `curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh \| bash` | The `playbook` command, hooks, guards, status line, memory and usage | The skills and slash commands |
 | Both (recommended) | The binary first, then the two skills commands | Everything | Nothing |
 
 The skills are a Claude Code plugin and work on their own. The binary is optional. Installing one never installs the other, and playbook never installs or removes a plugin for you.
 
-When the binary is installed, `playbook setup` adds its hook entries to `~/.claude/settings.json`. In a terminal it asks first. With no terminal and no `--yes`, it leaves your Claude Code settings alone and prints the command to run. `--hooks` or `--yes` is the explicit yes. It merges with the entries you already have. An entry counts as playbook's when its command is exactly one of the `playbook hook <name>` commands `setup` writes, and `playbook uninstall` removes only those. The old `playbook-hooks` plugin is retired. If it is still installed, remove it with `claude plugin uninstall playbook-hooks@pragmatic-engineer`, because its hooks would run next to the ones in `settings.json`.
+When the binary is installed, `playbook setup` adds its hook entries to `~/.claude/settings.json`. In a terminal it asks first. With no terminal and no `--yes`, it leaves your Claude Code settings alone and prints the command to run. `--hooks` or `--yes` is the explicit yes. It merges with the entries you already have. An entry counts as playbook's when its command is exactly one of the `playbook hook <name>` commands `setup` writes, and `playbook uninstall` removes only those. The old `playbook-hooks` plugin is retired. If it is still installed, remove it with `claude plugin uninstall playbook-hooks@pragmatic-engineer` (or `playbook-hooks@amplifiedengineer` if your marketplace has the new name), because its hooks would run next to the ones in `settings.json`.
 
 Which one? Choose skills only if you want to read the skills and nothing else runs on your machine. Choose both for everything else. The binary is a hard dependency of the hooks, guards, status line and usage. Only the skill text works without it. See [Skills without the binary](#skills-without-the-binary).
 
@@ -98,7 +98,20 @@ brew install amplifiedengineer/tap/playbook
 
 The full name in the last command trusts only that formula, as in [Homebrew tap trust](#homebrew-tap-trust). `brew tap --repair` does not do this move. It repairs symlinks and a renamed default branch, not a renamed tap. Check the result with `brew tap-info amplifiedengineer/tap`.
 
-The Claude Code marketplace keeps its name `pragmatic-engineer`, so the plugin id `playbook@pragmatic-engineer` does not change. New installs add the marketplace with `claude plugin marketplace add amplifiedengineer/marketplace`. An existing marketplace entry keeps working.
+### Moving to the new marketplace name
+
+The Claude Code marketplace was renamed from `pragmatic-engineer` to `amplifiedengineer`. The plugin id changed from `playbook@pragmatic-engineer` to `playbook@amplifiedengineer`. An existing registration keeps its old name, and `claude plugin update playbook@pragmatic-engineer` keeps working. A new `claude plugin marketplace add amplifiedengineer/marketplace` gets the new name. The binary prefers the new id and accepts the old one with no end date.
+
+To move, update the binary first. The release after v0.41.0 is the first that knows both ids, and older binaries know only the old one. Then run:
+
+```bash
+claude plugin uninstall playbook@pragmatic-engineer
+claude plugin marketplace remove pragmatic-engineer
+claude plugin marketplace add amplifiedengineer/marketplace
+claude plugin install playbook@amplifiedengineer
+```
+
+`claude plugin marketplace remove` also uninstalls the plugins from that marketplace and deletes their cache and plugin data. To keep the plugin data folder, add `--keep-data` to the `uninstall` command. If the retired `playbook-hooks` plugin is still there, run `claude plugin uninstall playbook-hooks@pragmatic-engineer` as well.
 
 ### Install script
 
@@ -225,7 +238,7 @@ The binary has no Authenticode signature. The attestation and `SHA256SUMS` are t
 | Install script | `playbook update`, or run the installer again (`--check` to look, `--list` for releases, `--pre` for pre-releases, `--yes` in auto mode) |
 | Nix | `nix profile upgrade playbook` for a profile install, or `nix flake update` where the flake is an input |
 
-`playbook update` verifies SHA256SUMS and the attestation, keeps the old binary as `playbook.<version>.bak` (the newest three are kept), refuses a Homebrew install, and warns when another `playbook` earlier on `PATH` hides the new one. The binary and the plugin share one version line ([ADR 0038](../adr/0038-one-release-line.md)), and they work together while they are on the same MAJOR.MINOR. The plugin follows the binary on its own. After the binary, `playbook update` updates the plugin with `claude plugin update playbook@pragmatic-engineer` and says to restart Claude Code, and `playbook migrate` does the same. After a `brew upgrade` or an automatic update, the first playbook command you run at a terminal does it, and so does the next Claude Code session, which starts it in the background and never waits for it. Each binary version is updated once. A failed attempt, or one that leaves the plugin on the old version, is tried again after 24 hours. Without the `claude` command, or when the update fails, playbook prints that command for you to run, and `playbook doctor` warns until the plugin is on the binary's minor line. The automatic step after an upgrade is skipped in CI, in headless runs, when stderr is not a terminal (the session hook is not affected by that rule), when the plugin is turned off in Claude Code, and when `PLAYBOOK_SKIP_PLUGIN_UPDATE=1` is set. `playbook update` and `playbook migrate` still update in those runs unless `update.plugin` is `off`. `--no-plugin` skips the update for one run of either command. `playbook config set update.plugin ask` makes the first command at a terminal ask before it updates, and `playbook config set update.plugin off` turns it off, so you run `claude plugin update playbook@pragmatic-engineer` yourself. When something needs you after an upgrade, the next session lists it, one bullet per item with why it matters and the command that fixes it. It shows each item once, then at most once a day. A list that `playbook migrate` printed in your terminal counts as shown: a setup item comes back after a day and a report does not come back. `playbook migrate --status` shows the list again. See [What needs you](../internals/07-migrations.md#what-needs-you). A binary pinned with `PLAYBOOK_REF` gets the same warning once the plugin moves to a newer minor line. To roll back, move a backup over the binary:
+`playbook update` verifies SHA256SUMS and the attestation, keeps the old binary as `playbook.<version>.bak` (the newest three are kept), refuses a Homebrew install, and warns when another `playbook` earlier on `PATH` hides the new one. The binary and the plugin share one version line ([ADR 0038](../adr/0038-one-release-line.md)), and they work together while they are on the same MAJOR.MINOR. The plugin follows the binary on its own. After the binary, `playbook update` updates the plugin with `claude plugin update playbook@amplifiedengineer` (or `playbook@pragmatic-engineer` on an install that has not moved) and says to restart Claude Code, and `playbook migrate` does the same. After a `brew upgrade` or an automatic update, the first playbook command you run at a terminal does it, and so does the next Claude Code session, which starts it in the background and never waits for it. Each binary version is updated once. A failed attempt, or one that leaves the plugin on the old version, is tried again after 24 hours. Without the `claude` command, or when the update fails, playbook prints that command for you to run, and `playbook doctor` warns until the plugin is on the binary's minor line. The automatic step after an upgrade is skipped in CI, in headless runs, when stderr is not a terminal (the session hook is not affected by that rule), when the plugin is turned off in Claude Code, and when `PLAYBOOK_SKIP_PLUGIN_UPDATE=1` is set. `playbook update` and `playbook migrate` still update in those runs unless `update.plugin` is `off`. `--no-plugin` skips the update for one run of either command. `playbook config set update.plugin ask` makes the first command at a terminal ask before it updates, and `playbook config set update.plugin off` turns it off, so you run `claude plugin update playbook@amplifiedengineer` yourself (`playbook@pragmatic-engineer` on an install that has not moved). When something needs you after an upgrade, the next session lists it, one bullet per item with why it matters and the command that fixes it. It shows each item once, then at most once a day. A list that `playbook migrate` printed in your terminal counts as shown: a setup item comes back after a day and a report does not come back. `playbook migrate --status` shows the list again. See [What needs you](../internals/07-migrations.md#what-needs-you). A binary pinned with `PLAYBOOK_REF` gets the same warning once the plugin moves to a newer minor line. To roll back, move a backup over the binary:
 
 ```bash
 mv -f ~/.local/bin/playbook.0.19.0.bak ~/.local/bin/playbook
@@ -258,7 +271,7 @@ How the check works:
 
 ### Coming from the playbook-hooks plugin
 
-Older releases delivered the hooks in a second plugin, `playbook-hooks`. The hooks now live in `~/.claude/settings.json`. After you upgrade the binary, run these two commands once:
+Older releases delivered the hooks in a second plugin, `playbook-hooks`. It came from the old marketplace, so its id keeps the old name. The hooks now live in `~/.claude/settings.json`. After you upgrade the binary, run these two commands once:
 
 ```bash
 claude plugin uninstall playbook-hooks@pragmatic-engineer
@@ -338,7 +351,7 @@ If a run is interrupted between writing `settings.json` and the baseline, delete
 
 ## Disabling the plugin
 
-Disabling `playbook@pragmatic-engineer` in Claude Code pauses playbook. Every hook, including the safety guards, exits as a silent success and the status line prints nothing, while the entries `playbook setup` wrote stay in `settings.json`. Enable the plugin again to resume. Only an explicit `false` pauses: with no entry (a binary-only install), `true`, or a `settings.json` that cannot be read, playbook runs as usual. To run hooks anyway, set `PLAYBOOK_IGNORE_PLUGIN_DISABLED=1` in the environment Claude Code starts in. See [Launcher and hooks](../internals/01-launcher-and-hooks.md#pausing-when-the-plugin-is-disabled).
+Disabling `playbook@amplifiedengineer` (or `playbook@pragmatic-engineer` on an install that has not moved) in Claude Code pauses playbook. Every hook, including the safety guards, exits as a silent success and the status line prints nothing, while the entries `playbook setup` wrote stay in `settings.json`. Enable the plugin again to resume. Playbook is paused when at least one of the two keys is `false` and none is `true`. With no entry (a binary-only install), a `true` key, or a `settings.json` that cannot be read, playbook runs as usual. To run hooks anyway, set `PLAYBOOK_IGNORE_PLUGIN_DISABLED=1` in the environment Claude Code starts in. See [Launcher and hooks](../internals/01-launcher-and-hooks.md#pausing-when-the-plugin-is-disabled).
 
 ## Uninstall
 
@@ -351,7 +364,7 @@ It removes only what playbook placed: the hook entries whose command is exactly 
 
 Everything else stays: the rest of `settings.json` and your rc files, `.settings.base.json`, `backups/`, memory, the [data folder](../internals/11-data-folder.md) with every database, and all runtime state. Each changed file is backed up first (`settings.json.bak.<epoch>`). A status line script or system prompt you edited by hand is kept. If `settings.json` cannot be edited, such as invalid JSON, the placed files and the binary stay too.
 
-At the end it lists the manual steps that still apply, because playbook does not remove Claude Code's plugins: `claude plugin uninstall playbook@pragmatic-engineer` while it is installed, `claude plugin uninstall playbook-hooks@pragmatic-engineer` if the retired hooks plugin is still there, and `claude plugin marketplace remove pragmatic-engineer` while the marketplace is listed.
+At the end it lists the manual steps that still apply, because playbook does not remove Claude Code's plugins: `claude plugin uninstall playbook@amplifiedengineer` (or `playbook@pragmatic-engineer`, whichever is installed) while it is installed, `claude plugin uninstall playbook-hooks@pragmatic-engineer` if the retired hooks plugin is still there, and `claude plugin marketplace remove amplifiedengineer` (or `pragmatic-engineer`, whichever is listed) while the marketplace is listed.
 
 `--remove-binary` also removes the binary, its `.bak` backups and the `PATH` block the installer added.
 

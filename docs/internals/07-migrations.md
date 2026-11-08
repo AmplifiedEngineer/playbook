@@ -34,12 +34,13 @@ playbook 0.37.0: 2 items need you:
     Fix: playbook setup --statusline
   - The playbook plugin 0.36.0 is older than the 0.37 line of this binary (0.37.0).
     Why: skills and commands may call binary features that work differently in this version.
-    Fix: claude plugin update playbook@pragmatic-engineer
+    Fix: claude plugin update playbook@amplifiedengineer
 To go through every setup change at once, run: playbook setup
 ```
 
 The session shows a new item in full once. After that it shows it at most once a day, in one line: `playbook: 2 items still need you (statusline-rust-command, plugin-version-range). To see the list, run: playbook migrate --status`.
 
+- The plugin fix hint names the id that is installed. It reads `playbook@pragmatic-engineer` on an install that has not moved to the new marketplace name.
 - A list that `playbook migrate` or `doctor --fix` printed in a terminal counts as shown. A setup item then waits a day, and a report item does not come back in the session.
 - Captured or `--json` output does not count, and a headless session marks nothing.
 - An item disappears as soon as it is fixed.
