@@ -1,5 +1,14 @@
 # Playbook
 
+> **Renamed.** The GitHub organization was `pragmatic-engineer` (and for a while `amplified-engineer`). It is now `amplifiedengineer`. GitHub redirects the old addresses, but do not rely on that. The Claude Code marketplace keeps the name `pragmatic-engineer`. The plugin id `playbook@pragmatic-engineer` does not change.
+>
+> If you installed before the rename, remove the old install and install again. Your data stays in `~/.config/playbook`.
+>
+> - **Homebrew:** `brew uninstall playbook` (add `pbtop` if installed), `brew untap pragmatic-engineer/tap`, then `brew install amplifiedengineer/tap/playbook`. To keep the installed formula, follow [Moving from the old tap name](docs/guides/00-install.md#moving-from-the-old-tap-name).
+> - **Nix:** `nix profile remove playbook`, then `nix profile install github:amplifiedengineer/nix#playbook`. If the name does not match, find it with `nix profile list`.
+> - **Plugin:** `claude plugin marketplace remove pragmatic-engineer`, `claude plugin marketplace add amplifiedengineer/marketplace`, then `claude plugin install playbook@pragmatic-engineer`. If the retired hooks plugin is still there, run `claude plugin uninstall playbook-hooks@pragmatic-engineer`.
+> - **Install script:** run it again from the new address.
+
 An opinionated toolkit for Claude Code. It gives you slash commands, skills and subagents for planning, building, reviewing and remembering, plus a small Rust binary that runs the safety guards, hooks, launcher and status line.
 
 The skills ship as a Claude Code plugin and work on their own. The binary, which adds the guards, hooks, status line and launcher, is optional. Only want the Agent Budget Dashboard? See [pbtop](docs/guides/11-pbtop.md).
@@ -54,8 +63,6 @@ brew trust --formula amplifiedengineer/tap/playbook
 ```
 
 `pbtop` is a separate formula: `brew trust --formula amplifiedengineer/tap/pbtop`. To trust every current and future formula in the tap, run `brew trust amplifiedengineer/tap`. This is broader, so prefer per-formula trust. Run `brew trust` to list trusted entries, and `brew untrust <target>` to remove one. If Homebrew says a formula is not trusted, run the trust command it names. More in the [install guide](docs/guides/00-install.md#homebrew-tap-trust).
-
-Moving from the old tap `pragmatic-engineer/tap`: run `brew uninstall playbook`, `brew untap pragmatic-engineer/tap`, then `brew install amplifiedengineer/tap/playbook`. To keep the installed formula, run `git -C "$(brew --repository pragmatic-engineer/tap)" remote set-url origin https://github.com/amplifiedengineer/homebrew-tap.git` and then `brew update`. Details are in the [install guide](docs/guides/00-install.md#moving-from-the-old-tap-name).
 
 ## A first session
 

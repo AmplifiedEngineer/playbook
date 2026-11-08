@@ -68,7 +68,7 @@ The default session starts blank, so you would repeat your preferences every tim
 
 ## Costs and limits
 
-A system prompt is instructions, not enforcement. The model will still drift mid-session, especially on long threads. Hooks (in `hooks/`) are the enforced layer: PreToolUse and PostToolUse callbacks run outside the model's control and do not bend to conversational pressure. The prompt and the hooks are complementary. Neither is sufficient alone.
+A system prompt is instructions, not enforcement. The model will still drift mid-session, especially on long threads. Hooks (the `playbook hook <name>` commands that `playbook setup` wires into `settings.json`) are the enforced layer: PreToolUse and PostToolUse callbacks run outside the model's control and do not bend to conversational pressure. The prompt and the hooks are complementary. Neither is sufficient alone.
 
 ## See also
 
