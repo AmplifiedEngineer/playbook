@@ -106,15 +106,22 @@ These rules apply to every igorjs project. Language-specific patterns (TypeScrip
 
 ### License Header
 
-Every source file must start with an SPDX license header identifying the project's license. The header syntax varies by language:
+Every source file must start with an SPDX license header of two lines: the copyright holder and the project's license. The comment marker varies by language:
 
 ```
-// Copyright 2026 igorjs. SPDX-License-Identifier: <PROJECT_LICENSE>          (TypeScript, JavaScript, Rust, C, C++, Go, Java)
-# Copyright 2026 igorjs. SPDX-License-Identifier: <PROJECT_LICENSE>           (bash, Python, Ruby, YAML, Dockerfile)
-<!-- Copyright 2026 igorjs. SPDX-License-Identifier: <PROJECT_LICENSE> -->    (HTML, Markdown, XML)
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: <PROJECT_LICENSE>          (TypeScript, JavaScript, Rust, C, C++, Go, Java)
+
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: <PROJECT_LICENSE>           (bash, Python, Ruby, YAML, Dockerfile)
+
+<!-- SPDX-FileCopyrightText: 2026 Igor Santos -->
+<!-- SPDX-License-Identifier: <PROJECT_LICENSE> -->    (HTML, Markdown, XML)
 ```
 
-Replace `<PROJECT_LICENSE>` with the SPDX identifier from the project's [LICENSE](../LICENSE) file (e.g. `Apache-2.0`, `AGPL-3.0`). The pre-commit hook in each project adds missing headers to new source files automatically.
+In a script, the header goes after the shebang line.
+
+Replace `<PROJECT_LICENSE>` with the SPDX identifier from the project's [LICENSE](../LICENSE) file (e.g. `Apache-2.0`, `AGPL-3.0`). Nothing adds the header for you. The `license` workflow (`.github/workflows/license.yml`) fails a pull request when a source file has no `SPDX-License-Identifier:` line in its first 5 lines.
 
 ### Dependency Policy
 

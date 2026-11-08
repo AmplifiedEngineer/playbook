@@ -38,6 +38,7 @@ Pages to look things up in.
 - [Codex support](reference/codex-support.md): what works in Codex, what does not and why.
 - [Slash commands](reference/commands.md): every `/playbook:*` command in one table.
 - [Layers](reference/layers.md): the seven layers `/playbook:doctor` reports.
+- [CLI help text style](reference/cli-help-style.md): how to write help text for a command and its flags.
 - [Repository layout](reference/repository-layout.md): the crates and the plugin folder.
 
 ## Authoring
@@ -130,5 +131,13 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0049](adr/0049-spend-limit-credential-access.md) | Read the Claude Code login token to fetch the server spend limit | Superseded by 0050 | 2026-10-20 |
 | [0050](adr/0050-limits-from-claude-data-not-the-login-token.md) | Derive usage limits from Claude Code's own data, not the login token | Accepted | 2026-10-20 |
 | [0051](adr/0051-bundle-anydoc-as-pbdoc-helper.md) | Bundle the anydoc converter as the pbdoc helper | Accepted | 2026-10-21 |
+| [0052](adr/0052-signed-apt-and-dnf-repository.md) | Signed apt and dnf Package Repository | Superseded | 2026-10-22 |
+| [0053](adr/0053-windows-experimental-cli.md) | Windows Is an Experimental CLI | Accepted | 2026-10-22 |
+| [0054](adr/0054-completion-wiring-in-shell-files.md) | Setup Wires Shell Completion Into Shell Files | Accepted | 2026-10-23 |
 | [0055](adr/0055-watch-mode-for-github-events.md) | A polling watch mode for GitHub events, with rules, autonomy levels and a durable queue | Proposed | 2026-10-25 |
+| [0056](adr/0056-share-one-code-index-across-worktrees.md) | Share One Code Index Across the Worktrees of a Repository | Accepted | 2026-10-27 |
+| [0057](adr/0057-index-memory-fact-bodies-with-fts5.md) | Index Memory Fact Bodies with SQLite FTS5 | Accepted | 2026-11-04 |
+| [0058](adr/0058-answer-symbol-questions-with-language-servers.md) | Answer Symbol Questions With Language Servers, One Per Call, Behind a Trust Gate | Superseded by 0060 | 2026-10-21 |
 | [0059](adr/0059-tombstone-format.md) | Tombstone format for on disk state | Accepted | 2026-11-05 |
+| [0060](adr/0060-use-tree-sitter-only-for-the-code-index.md) | Answer Code Questions From the Tree-sitter Index Only, With a Precision and Recall Gate | Accepted | 2026-11-06 |
+| [0061](adr/0061-opt-in-usage-sync.md) | Sync Usage Between One User's Computers Only When the User Turns It On | Proposed | 2026-11-07 |

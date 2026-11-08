@@ -81,7 +81,7 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 Evidence for the rows marked "See below":
 
 - **`agents/git`.** The Haiku evaluation found the conventional commit type right 42% of the time at `low` and 100% at `xhigh`. At about $0.0006 a call the extra effort costs less than a cent. It is the one Haiku role allowed above `medium` (see the effort cap below), and `playbook commit run` also refuses a type that contradicts the files.
-- **`commands/quick-review`.** One pass over a diff the user chose not to deep review; `/playbook:deep-review` is the thorough path. The reviewer's base is now `medium` too. It is spawned through `playbook effort resolve agents reviewer --cap medium`, which returns the base reviewer (already at medium), or `reviewer-low` when the user's ceiling is lower. See [ADR-0021](../adr/0021-reviewer-at-opus-medium.md).
+- **`commands/quick-review`.** One pass over a diff the user chose not to deep review; `/playbook:deep-review` is the thorough path. The reviewer's base is now `medium` too. It is spawned through `playbook effort resolve agents reviewer --cap medium`, which returns the effort to pass on the `Agent` call: `medium`, or lower when the user's ceiling is lower. See [ADR-0021](../adr/0021-reviewer-at-opus-medium.md).
 - **`agents/reviewer`.** Benched on 10 real diffs (7 with a seeded real finding, 3 clean), 20 runs per cell (200 calls):
   - Opus high 200/200. Opus medium 199/200 (the one miss was `rd-lower`, a seeded finding, 139/140 recall). Sonnet medium and high 200/200. Opus low 49/50 in a 5 run round.
   - Cost per call: Opus high $0.0155 to $0.0168, Opus medium $0.0125 to $0.0136 (19% less), Sonnet high $0.0066 to $0.0072, Sonnet medium $0.0050 to $0.0054.

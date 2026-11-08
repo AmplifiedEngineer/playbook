@@ -89,13 +89,13 @@ When an older database exists, the first run brings it in, and the view never pr
 - If an older playbook keeps writing to the old path, its new rows are merged quietly on later refreshes, and one line at exit asks you to upgrade it (`brew upgrade playbook` or `playbook update`).
 - A file that cannot be read is skipped with a warning and left untouched.
 
-Settings are playbook's own, from the global tier of its config store (`~/.config/playbook/playbook.db`), and from the nested `usage` object of `~/.config/playbook/config.json` when that store does not exist. It reads them, and writes only `usage.ui.layout` and `usage.ui.state` to its own app tier of `~/.config/playbook/data/config.db`, and only when that store exists. Set them with `playbook config set usage.<key> <value>`. An invalid value is ignored with a warning, and a missing one means the default. An old `~/.config/playbook-telemetry/config.json` is no longer read; the tool names it on stderr if it exists.
+Settings are playbook's own, from the global tier of its config store (`~/.config/playbook/data/config.db`), and from the nested `usage` object of `~/.config/playbook/config.json` when that store does not exist. It reads them, and writes only `usage.ui.layout` and `usage.ui.state` to its own app tier of `~/.config/playbook/data/config.db`, and only when that store exists. Set them with `playbook config set usage.<key> <value>`. An invalid value is ignored with a warning, and a missing one means the default. An old `~/.config/playbook-telemetry/config.json` is no longer read; the tool names it on stderr if it exists.
 
 | Key | Default | Values |
 | --- | --- | --- |
 | `usage.theme` | `default` | `default`, `spectrum`, `dark`, `light`, `mono` |
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
-| `usage.timeZone` | `local` | `local`, `utc` |
+| `usage.timeZone` | `local` | `local`, `utc`. Not a `playbook config` key: `playbook config get` and `set` reject it. Pbtop reads it only from the `usage` object of `config.json`, and only when no config store exists |
 | `usage.refreshSeconds` | `5` | number |
 | `usage.telemetry` | `auto` | `auto`, `off` |
 | `usage.telemetryRetentionDays` | `90` | number, 0 keeps all |
