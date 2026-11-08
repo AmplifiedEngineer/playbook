@@ -392,7 +392,7 @@ fn skills_only_is_refused_with_the_plugin_commands() {
         "{log}"
     );
     assert!(
-        log.contains("claude plugin install playbook@pragmatic-engineer"),
+        log.contains("claude plugin install playbook@amplifiedengineer"),
         "{log}"
     );
 }

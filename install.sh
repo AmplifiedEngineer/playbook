@@ -43,7 +43,7 @@ LEGACY_RELEASE_REPOS="amplified-engineer/playbook pragmatic-engineer/playbook"
 # of this script reads such an override. The Claude Code folder is fixed too,
 # because `playbook setup` always uses ~/.claude.
 SKILLS_INSTALL_CMD="claude plugin marketplace add amplifiedengineer/marketplace"
-SKILLS_INSTALL_CMD="$SKILLS_INSTALL_CMD && claude plugin install playbook@pragmatic-engineer"
+SKILLS_INSTALL_CMD="$SKILLS_INSTALL_CMD && claude plugin install playbook@amplifiedengineer"
 PLAYBOOK_CONFIG_DIR="$HOME/.config/playbook"
 PLAYBOOK_BIN_DIR="${PLAYBOOK_BIN_DIR:-$HOME/.local/bin}"
 REF="${PLAYBOOK_REF:-}"
@@ -152,7 +152,7 @@ What it does:
 It does not install the skills. They are a separate Claude Code plugin that works
 without the binary:
   claude plugin marketplace add amplifiedengineer/marketplace
-  claude plugin install playbook@pragmatic-engineer
+  claude plugin install playbook@amplifiedengineer
 
 Env:
   PLAYBOOK_REF=<tag>             release to install, such as v1.2.3 (default: latest)

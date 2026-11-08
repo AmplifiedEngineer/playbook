@@ -1,12 +1,14 @@
 # Playbook
 
-> **Renamed.** The GitHub organization was `pragmatic-engineer` (and for a while `amplified-engineer`). It is now `amplifiedengineer`. GitHub redirects the old addresses, but do not rely on that. The Claude Code marketplace keeps the name `pragmatic-engineer`. The plugin id `playbook@pragmatic-engineer` does not change.
+> **Renamed.** The GitHub organization was `pragmatic-engineer` (and for a while `amplified-engineer`). It is now `amplifiedengineer`. GitHub redirects the old addresses, but do not rely on that.
 >
-> If you installed before the rename, remove the old install and install again. Your data stays in `~/.config/playbook`.
+> The Claude Code marketplace was renamed too. The plugin id `playbook@pragmatic-engineer` is now `playbook@amplifiedengineer`. An install on the old id keeps working and keeps updating until you move. New installs use the new id. Your data stays in `~/.config/playbook`.
+>
+> To move, update the binary first. Releases after v0.41.0 know both ids. Then pick your route:
 >
 > - **Homebrew:** `brew uninstall playbook` (add `pbtop` if installed), `brew untap pragmatic-engineer/tap`, then `brew install amplifiedengineer/tap/playbook`. To keep the installed formula, follow [Moving from the old tap name](docs/guides/00-install.md#moving-from-the-old-tap-name).
 > - **Nix:** `nix profile remove playbook`, then `nix profile install github:amplifiedengineer/nix#playbook`. If the name does not match, find it with `nix profile list`.
-> - **Plugin:** `claude plugin marketplace remove pragmatic-engineer`, `claude plugin marketplace add amplifiedengineer/marketplace`, then `claude plugin install playbook@pragmatic-engineer`. If the retired hooks plugin is still there, run `claude plugin uninstall playbook-hooks@pragmatic-engineer`.
+> - **Plugin:** `claude plugin uninstall playbook@pragmatic-engineer`, `claude plugin marketplace remove pragmatic-engineer`, `claude plugin marketplace add amplifiedengineer/marketplace`, then `claude plugin install playbook@amplifiedengineer`. If the retired hooks plugin is still there, run `claude plugin uninstall playbook-hooks@pragmatic-engineer`.
 > - **Install script:** run it again from the new address.
 
 An opinionated toolkit for Claude Code. It gives you slash commands, skills and subagents for planning, building, reviewing and remembering, plus a small Rust binary that runs the safety guards, hooks, launcher and status line.
@@ -40,7 +42,7 @@ Pick the first route that fits. Each one installs the `playbook` binary. Then ru
 
    ```bash
    claude plugin marketplace add amplifiedengineer/marketplace
-   claude plugin install playbook@pragmatic-engineer
+   claude plugin install playbook@amplifiedengineer
    ```
 
 For the best result, install the binary first and the plugin after it. Nix, Windows (experimental, with the raw `.exe`), a pinned version and a route with no `curl | bash` are in the [install guide](docs/guides/00-install.md). To see what `playbook setup` changes before you agree, read [What setup installs](docs/guides/05-what-setup-installs.md).

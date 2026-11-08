@@ -57,9 +57,9 @@ Every hook is a module under `crates/cli/src/hooks/`, run as `playbook hook <nam
 
 ### Pausing when the plugin is disabled
 
-`playbook setup` writes the hook entries and `statusLine` into your user `settings.json`. Disabling the plugin in Claude Code sets `enabledPlugins["playbook@pragmatic-engineer"]` to `false` and leaves those entries, so playbook checks the key itself. `common::plugin_state::paused()` reads `~/.claude/settings.json` once per call, from the one place every hook (`run_hook` in `crates/cli/src/main.rs`) and `playbook statusline` go through. When the key is explicitly `false`, a hook exits 0 with no output and no side effects, and the status line prints nothing.
+`playbook setup` writes the hook entries and `statusLine` into your user `settings.json`. Disabling the plugin in Claude Code sets `enabledPlugins["playbook@amplifiedengineer"]` to `false` and leaves those entries, so playbook checks the key itself. `common::plugin_state::paused()` reads `~/.claude/settings.json` once per call, from the one place every hook (`run_hook` in `crates/cli/src/main.rs`) and `playbook statusline` go through. The old key `playbook@pragmatic-engineer` counts too, for installs that have not moved. When at least one key is `false` and none is `true`, a hook exits 0 with no output and no side effects, and the status line prints nothing.
 
-- Only an explicit `false` pauses. A missing key, `true`, a missing file and an unreadable or unparsable file count as enabled, so Homebrew-only users and broken settings keep their guards.
+- Only an explicit `false` pauses, and only when no key is `true`. A missing key, a `true` key, a missing file and an unreadable or unparsable file count as enabled, so Homebrew-only users and broken settings keep their guards.
 - The safety guards pause too, which is intended: a disabled plugin means no playbook behaviour. The two worktree hooks always run. They stand in for Claude Code's own worktree handling, and a skipped `WorktreeCreate` hook would print no path.
 - `PLAYBOOK_IGNORE_PLUGIN_DISABLED=1` runs hooks and the status line anyway. The check skips the JSON parse unless the settings text mentions the plugin key, and measured about 40 microseconds on a 7 KB `settings.json`.
 
