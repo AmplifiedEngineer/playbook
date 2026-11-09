@@ -5,7 +5,8 @@
 //! table says which binary last ran the `Owned` migrations cleanly. The
 //! first-run step, the session hook, `migrate` and `init` compare it with the
 //! running binary, run what is safe, and report what needs the user. Nothing
-//! here writes a Claude Code settings file.
+//! here writes a Claude Code settings file. Plugin changes happen only in
+//! `plugin_update`, after an upgrade or an explicit `playbook setup` choice.
 
 use crate::init::migrate::{self, Ctx, OpenItem};
 use crate::init::run::{StepReport, StepStatus};

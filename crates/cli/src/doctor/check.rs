@@ -249,7 +249,7 @@ fn output_of(mut cmd: Command) -> Option<String> {
 
 fn layer1(env: &Env) -> Row {
     let miss = format!(
-        "run: claude plugin marketplace add amplifiedengineer/marketplace && claude plugin install {}",
+        "run: playbook setup --only plugin, or: claude plugin marketplace add amplifiedengineer/marketplace && claude plugin install {}",
         crate::common::plugin_state::PLUGIN_KEY
     );
     let Some(claude) = on_path(env, "claude") else {
@@ -492,17 +492,11 @@ fn version_row(env: &Env, bin: &Path, bin_ver: &str) -> Row {
     // A Homebrew binary is often reached through a symlink in /usr/local/bin.
     let homebrew =
         crate::update::is_homebrew(&fs::canonicalize(bin).unwrap_or_else(|_| bin.to_path_buf()));
-    plugin
+    let key = crate::common::plugin_state::installed_key(&env.claude_home);
+    let row = plugin
         .as_deref()
         .and_then(|root| binary_too_old(root, bin_ver, homebrew))
-        .or_else(|| {
-            plugin_out_of_range(
-                &version,
-                bin_ver,
-                &crate::common::plugin_state::installed_key(&env.claude_home),
-                homebrew,
-            )
-        })
+        .or_else(|| plugin_out_of_range(&version, bin_ver, &key, homebrew))
         .map_or_else(
             || {
                 Row::new(
@@ -518,8 +512,39 @@ fn version_row(env: &Env, bin: &Path, bin_ver: &str) -> Row {
                     },
                 )
             },
-            |line| Row::new("6", Level::Warn, line),
-        )
+            |line| {
+                let row = Row::new("6", Level::Warn, line);
+                // `playbook setup` brings an older plugin up to the binary.
+                if line_is_behind(&row.message) {
+                    row.hint(PLUGIN_SETUP_HINT)
+                } else {
+                    row
+                }
+            },
+        );
+    if is_old_marketplace_key(&key) {
+        return Row {
+            message: format!("{} ({OLD_MARKETPLACE_NOTE})", row.message),
+            ..row
+        };
+    }
+    row
+}
+
+const PLUGIN_SETUP_HINT: &str = "run: playbook setup --only plugin";
+
+const OLD_MARKETPLACE_NOTE: &str = "the plugin is on an old marketplace name and keeps updating; see docs/guides/00-install.md, \"Moving to the new marketplace name\"";
+
+/// Whether the installed plugin id belongs to a renamed marketplace.
+fn is_old_marketplace_key(key: &str) -> bool {
+    crate::common::plugin_state::ALT_MARKETPLACES
+        .iter()
+        .any(|name| key.ends_with(&format!("@{name}")))
+}
+
+/// Whether a range message says the plugin is older than the binary's line.
+fn line_is_behind(message: &str) -> bool {
+    message.contains("is older than the ")
 }
 
 /// The version record (ADR 0034): whether the last heal ran clean and what
