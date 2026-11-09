@@ -1127,7 +1127,7 @@ These are the mechanical steps behind `/playbook:create-pull-request`.
 
 Example: `playbook pr prepare --base main`
 
-Subcommands: `ci-wait`, `comments`, `create`, `finish-context`, `land-wait`, `merge`, `prepare`, `reply`, `review-triage`, `rules`, `stack`
+Subcommands: `ci-wait`, `comments`, `create`, `finish-context`, `land`, `land-wait`, `merge`, `prepare`, `reply`, `review-triage`, `rules`, `stack`
 
 ### `playbook pr ci-wait`
 
@@ -1177,6 +1177,20 @@ Example: `playbook pr finish-context 12 --json`
 - `<PR>`: PR number
 - `--json`: Print the JSON envelope and exit 0
 - `--flag <FLAG>`: Treat the run mode as this one, as `mode status --flag` does (one of `ask`, `auto`)
+- `--dir <DIR>`: Work in this directory instead of the current one
+
+### `playbook pr land`
+
+Wait for checks, arm auto-merge, and wait for the merge
+
+Prints `LAND=<verdict>` and a JSON report. Exit codes: 0 merged, 3 a gate (draft, waiting on a base PR, head moved, review required, changes requested, needs a rebase), 6 a check failed or the PR closed, 7 still waiting (call again with `--settle 0`), 8 auto-merge did not queue. Never uses `--admin` and never deletes the branch.
+
+Example: `playbook pr land 12`
+
+- `<PR>`: PR number
+- `--timeout <TIMEOUT>`: Give up after this many seconds in total
+- `--interval <INTERVAL>`: Seconds between reads
+- `--settle <SETTLE>`: Seconds to wait for the first checks to appear (use 0 on a repeat call)
 - `--dir <DIR>`: Work in this directory instead of the current one
 
 ### `playbook pr land-wait`

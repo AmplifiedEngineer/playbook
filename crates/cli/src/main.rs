@@ -1300,6 +1300,33 @@ fn real_main() {
                         }
                     }
                 }
+                PrCommand::Land {
+                    pr,
+                    timeout,
+                    interval,
+                    settle,
+                    dir,
+                } => {
+                    let opts = pr::land::Opts {
+                        timeout: std::time::Duration::from_secs(timeout),
+                        interval: std::time::Duration::from_secs(interval),
+                        settle: std::time::Duration::from_secs(settle),
+                        // Test only: end the wait after this many polls.
+                        max_polls: std::env::var("PB_LAND_MAX_POLLS")
+                            .ok()
+                            .and_then(|v| v.parse().ok()),
+                    };
+                    let gh = pr::land::RealGh {
+                        dir: dir.map(std::path::PathBuf::from),
+                    };
+                    let start = std::time::Instant::now();
+                    let report =
+                        pr::land::land(&gh, &pr, &opts, &mut || start.elapsed(), &mut |d| {
+                            std::thread::sleep(d)
+                        });
+                    println!("{}", pr::land::render(&report));
+                    std::process::exit(report.exit_code);
+                }
                 PrCommand::Create {
                     title,
                     body_file,
