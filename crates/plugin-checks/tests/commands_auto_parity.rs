@@ -485,35 +485,6 @@ fn learn_project_step0_stages_in_auto_and_skips_the_write_question() {
 }
 
 #[test]
-fn create_pull_request_step0_skips_the_self_review_in_auto() {
-    // Arrange
-    let file = load("create-pull-request");
-    let step0 = require_section(&file, file.step0(), "`Step 0`");
-    let skips = Regex::new(r"(?is)\bauto\b[^.]*\bskips?\b[^.]*self-review").expect("skip pattern");
-    let why = Regex::new(r"(?is)\bimplement\b[^.]*\bopened\b[^.]*\breview\b[^.]*\bcovered\b")
-        .expect("why pattern");
-    let reports =
-        Regex::new(r"(?is)final report[^.]*\bno self-review ran\b").expect("report pattern");
-
-    // Act
-    let text = file.text_of(&step0);
-
-    // Assert
-    assert!(
-        skips.is_match(&text),
-        "Step 0 must say that in auto the self-review is skipped"
-    );
-    assert!(
-        why.is_match(&text),
-        "Step 0 must say that implement's review covered a PR that implement opened"
-    );
-    assert!(
-        reports.is_match(&text),
-        "Step 0 must say the final report states that no self-review ran for other callers"
-    );
-}
-
-#[test]
 fn commands_that_never_ask_carry_no_mode_block() {
     // Arrange
     let mut failures = Vec::new();

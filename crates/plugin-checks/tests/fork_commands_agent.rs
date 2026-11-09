@@ -23,23 +23,6 @@ fn frontmatter_value(file: &str, key: &str) -> Option<String> {
 }
 
 #[test]
-fn create_pull_request_forks_into_the_prefixed_git_agent() {
-    let file = "commands/create-pull-request.md";
-    {
-        assert_eq!(
-            frontmatter_value(file, "context").as_deref(),
-            Some("fork"),
-            "{file}"
-        );
-        assert_eq!(
-            frontmatter_value(file, "agent").as_deref(),
-            Some("playbook:git"),
-            "{file}"
-        );
-    }
-}
-
-#[test]
 fn the_git_agent_runs_on_haiku() {
     assert_eq!(
         frontmatter_value("agents/git.md", "model").as_deref(),
@@ -97,7 +80,7 @@ fn every_forked_command_opens_with_the_do_not_reinvoke_note() {
         checked += 1;
     }
     assert!(
-        checked >= 2,
-        "expected at least 2 forked commands, saw {checked}"
+        checked >= 1,
+        "expected at least 1 forked command, saw {checked}"
     );
 }

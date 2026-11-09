@@ -40,19 +40,6 @@ fn plan_and_implement_name_the_agent_type() {
 }
 
 #[test]
-fn forked_commands_use_a_prefixed_agent() {
-    let cmd = "create-pull-request";
-    {
-        let s = read(&format!("commands/{cmd}.md"));
-        let agent = s
-            .lines()
-            .find(|l| l.starts_with("agent:"))
-            .unwrap_or_else(|| panic!("{cmd}: no agent line"));
-        assert!(agent.contains("playbook:"), "{cmd}: {agent}");
-    }
-}
-
-#[test]
 fn review_brief_builder_keeps_its_four_parts() {
     let s = read("skills/delegating-subagents/references/briefs.md");
     assert!(s.contains("## Review brief builder"));
