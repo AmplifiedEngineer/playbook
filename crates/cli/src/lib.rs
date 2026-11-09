@@ -1624,7 +1624,7 @@ pub enum PrCommand {
     },
     /// Merge a PR with auto-merge, or as an admin squash
     ///
-    /// Prints `merge_rc=<code> (or `admin_rc=`) and then what `gh` said.
+    /// Prints `merge_rc=<code>` (or `admin_rc=`) and then what `gh` said.
     /// Always exits 0, so the caller reads the code.
     ///
     /// Example: `playbook pr merge 12 --admin`
