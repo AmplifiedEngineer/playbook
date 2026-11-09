@@ -2946,11 +2946,6 @@ fn absolute_from_cwd(path: &str) -> String {
 fn run_finish_context(pr: u64, json: bool, flag: Option<ModeArg>, dir: Option<&str>) -> i32 {
     use pr::finish_context as fc;
     let home = common::home_dir();
-    let slug = common::repo_slug();
-    let reader = fc::ConfigReader {
-        home: home.clone(),
-        repo_slug: Some(slug).filter(|s| !s.is_empty()),
-    };
     let mode_flag = flag.map(|arg| match arg {
         ModeArg::Ask => common::mode::Mode::Ask,
         ModeArg::Auto => common::mode::Mode::Auto,
@@ -2958,6 +2953,12 @@ fn run_finish_context(pr: u64, json: bool, flag: Option<ModeArg>, dir: Option<&s
     let entered = match dir {
         Some(dir) => pr::shared::enter_dir(dir).map_err(fc::Failure::bad_input),
         None => Ok(()),
+    };
+    // The repo slug depends on the directory, so read it after entering --dir.
+    let slug = common::repo_slug();
+    let reader = fc::ConfigReader {
+        home: home.clone(),
+        repo_slug: Some(slug).filter(|s| !s.is_empty()),
     };
     let result = entered.and_then(|()| {
         fc::collect(

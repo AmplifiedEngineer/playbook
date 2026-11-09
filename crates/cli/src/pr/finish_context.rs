@@ -297,10 +297,22 @@ impl FinishGh for RealGh {
 
     fn open_pr_numbers_for_head(&self, branch: &str) -> Result<Vec<u64>, String> {
         let raw = crate::pr::shared::gh(&[
-            "pr", "list", "--state", "open", "--head", branch, "--json", "number",
+            "pr",
+            "list",
+            "--state",
+            "open",
+            "--head",
+            branch,
+            "--json",
+            "number,isCrossRepository",
         ])?;
         let list: Vec<Value> = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-        Ok(list.iter().filter_map(|v| v["number"].as_u64()).collect())
+        // A fork's branch can share the base's name; it is not a base PR.
+        Ok(list
+            .iter()
+            .filter(|v| v["isCrossRepository"].as_bool() != Some(true))
+            .filter_map(|v| v["number"].as_u64())
+            .collect())
     }
 }
 
