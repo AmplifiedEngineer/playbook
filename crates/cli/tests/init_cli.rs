@@ -42,6 +42,7 @@ impl Sandbox {
             .arg("setup")
             .args(flags)
             .env("HOME", &self.home)
+            .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1")
             .env("SHELL", shell)
             .env("CLAUDE_PLUGIN_ROOT", env!("PLAYBOOK_REPO_ROOT"))
             .current_dir(&self.home)
@@ -246,6 +247,7 @@ fn yes_turns_every_part_on_in_a_scratch_home() {
     // Act
     let out = Command::new(&exe)
         .args(["setup", "--yes"])
+        .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1")
         .env("HOME", &sb.home)
         .env("SHELL", "/bin/zsh")
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))

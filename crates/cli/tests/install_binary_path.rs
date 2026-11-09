@@ -162,6 +162,7 @@ fn local_install(
         .arg(repo_root().join("install.sh"))
         .args(flags)
         .env("PLAYBOOK_SKIP_DOWNLOAD", "1")
+        .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1")
         .env("CLAUDE_HOME", home.join(".claude"))
         .env("HOME", &home)
         .env("PLAYBOOK_BIN_DIR", stub_dir)
@@ -421,6 +422,7 @@ fn installer(work: &Work, stub: &Path, flags: &[&str], tag: &str) -> Command {
     cmd.arg(repo_root().join("install.sh"))
         .args(flags)
         .env("PLAYBOOK_SKIP_DOWNLOAD", "1")
+        .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1")
         .env("HOME", &home)
         .env("PLAYBOOK_BIN_DIR", stub)
         .env("SHELL", "/bin/bash");

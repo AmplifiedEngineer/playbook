@@ -38,6 +38,10 @@ fn hook_summary() -> String {
 /// Exact text the part adds, beyond its description.
 fn extra_lines(id: &str) -> Vec<String> {
     match id {
+        "plugin" => vec![
+            "Runs `claude plugin` commands, so it needs the `claude` command on PATH and a network connection."
+                .to_string(),
+        ],
         "hooks" => vec![format!(
             "Hooks added: {}. Run `playbook hooks list` to read each one.",
             hook_summary()
@@ -80,6 +84,7 @@ fn extra_lines(id: &str) -> Vec<String> {
 /// line, and a test keeps the two in step.
 pub fn decline_line(id: &str) -> &'static str {
     match id {
+        "plugin" => "The plugin is left as it is. Install or update it later with `playbook setup --only plugin`.",
         "hooks" => "No hooks are added. The safety guards, session helpers and usage warm-up do not run.",
         "statusline" => "Your status line stays as it is.",
         "path" => "Your shell files are not touched. Hooks may not find playbook unless it is already on PATH.",
@@ -253,6 +258,7 @@ mod tests {
         }
         // Each asked part reacts to its own on flag.
         let on = Flags {
+            plugin: true,
             hooks: true,
             statusline: true,
             path: true,

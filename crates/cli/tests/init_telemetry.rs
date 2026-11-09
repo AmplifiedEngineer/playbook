@@ -49,6 +49,7 @@ impl Sandbox {
             .env("HOME", &self.home)
             .env("SHELL", "/bin/zsh")
             .env("CLAUDE_PLUGIN_ROOT", env!("PLAYBOOK_REPO_ROOT"))
+            .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1")
             .envs(extra_env.iter().copied())
             .current_dir(&self.home)
             .output()

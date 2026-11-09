@@ -66,6 +66,7 @@ impl Sandbox {
             .env("HTTPS_PROXY", OFFLINE_PROXY)
             .env("HTTP_PROXY", OFFLINE_PROXY)
             .env("CLAUDE_PLUGIN_ROOT", env!("PLAYBOOK_REPO_ROOT"))
+            .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1")
             .current_dir(&self.home)
             .stdin(Stdio::null());
         if let Some(shell) = shell {

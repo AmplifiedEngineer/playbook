@@ -35,6 +35,16 @@ const SETTINGS_UNDO: &str =
 /// Every part, in the order `init` shows and runs them.
 pub const PARTS: &[Part] = &[
     Part {
+        id: "plugin",
+        asked: true,
+        default_on: true,
+        flags: "--plugin, --no-plugin",
+        question: "Install or update the playbook plugin in Claude Code with the `claude` command? Claude Code keeps its plugins in ~/.claude/plugins.",
+        does: "Keeps the playbook plugin in step with this binary. It refreshes the amplifiedengineer marketplace and updates the plugin, or adds the marketplace and installs the plugin when none is installed, by running `claude plugin` commands. It also turns on auto-update for the amplifiedengineer marketplace in ~/.claude/settings.json when that key is missing, and keeps an explicit false. It stays off without a terminal and without `--yes`, and with `--yes` when `update.plugin` is off, `PLAYBOOK_SKIP_PLUGIN_UPDATE` is set or a CI environment is detected. `--plugin` or `--only plugin` runs it anyway. A plugin you turned off in Claude Code stays off. A failure is reported and setup still succeeds.",
+        changes: "Claude Code's plugins (~/.claude/plugins, written by claude itself) and ~/.claude/settings.json (extraKnownMarketplaces.amplifiedengineer.autoUpdate)",
+        undo: "Run `claude plugin uninstall playbook@amplifiedengineer` and `claude plugin marketplace remove amplifiedengineer`, and set extraKnownMarketplaces.amplifiedengineer.autoUpdate to false in ~/.claude/settings.json.",
+    },
+    Part {
         id: "hooks",
         asked: true,
         default_on: true,

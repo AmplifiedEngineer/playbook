@@ -36,6 +36,7 @@ impl Home {
             .env("HOME", &self.dir)
             .env("SHELL", "/bin/zsh")
             .env_remove("CLAUDE_PLUGIN_ROOT")
+            .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1")
             .current_dir(&self.dir)
             .output()
             .expect("playbook should spawn");

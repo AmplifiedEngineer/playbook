@@ -614,6 +614,7 @@ fn self_referential_symlink_does_not_hang_the_migration() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .arg("setup")
         .env("HOME", &home)
+        .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

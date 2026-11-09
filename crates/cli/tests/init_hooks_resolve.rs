@@ -174,6 +174,7 @@ fn every_wired_command_after_a_real_init_resolves_to_something_that_actually_run
         .env_remove("CI")
         .env_remove("PLAYBOOK_HEADLESS")
         .args(["setup", "--yes"])
+        .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1")
         .env("HOME", &home)
         .env("CLAUDE_PLUGIN_ROOT", checkout_root())
         .env("SHELL", "/bin/bash")
