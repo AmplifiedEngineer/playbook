@@ -520,7 +520,7 @@ jobs:
       # takes the docs-checks lane instead, which runs the same line.
       - name: Check the budgeted pages
         if: env.LANE == 'true' && runner.os == 'Linux'
-        run: ./target/debug/playbook prose check --strict README.md docs/README.md docs/get-started.md docs/concepts.md docs/recipes/*.md
+        run: ./target/debug/playbook prose check --strict README.md docs/README.md docs/get-started.md docs/concepts.md docs/code-search.md docs/recipes/*.md
 
       # cargo-audit's own `cargo install --locked` compiles it from source
       # every run, ~2 minutes on ubuntu-latest, the single most expensive
@@ -731,7 +731,7 @@ jobs:
       # Strict: a hard finding fails the job. Only the pages with a size
       # budget are listed. Add each new budgeted page here and in the justfile.
       - name: Check the budgeted pages
-        run: cargo run -q -p playbook -- prose check --strict README.md docs/README.md docs/get-started.md docs/concepts.md docs/recipes/*.md
+        run: cargo run -q -p playbook -- prose check --strict README.md docs/README.md docs/get-started.md docs/concepts.md docs/code-search.md docs/recipes/*.md
 
       # Warn-only, like the same check in the build lane: an ADR-only change
       # takes this lane, so it needs the check too.
