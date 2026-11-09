@@ -28,6 +28,34 @@ const TEST_PATH_PATTERN: &str =
 /// A Rust inline test: a new `mod tests` block or just a new `#[test]` fn.
 const INLINE_TEST_PATTERN: &str = r"^\+.*#\[(cfg\(test\)|test)\]";
 
+/// What a prepare found, before it is rendered as text or JSON.
+pub enum Outcome {
+    /// An open PR already exists for the branch.
+    Exists {
+        url: String,
+    },
+    Ready(Box<Ready>),
+}
+
+/// A branch that is ready to be drafted into a PR.
+pub struct Ready {
+    pub branch: String,
+    pub state_dir: std::path::PathBuf,
+    pub base: String,
+    /// `--base flag`, `repo default`, `git symbolic-ref`, `fallback` or `stack`.
+    pub source: String,
+    pub stacked: bool,
+    pub ahead: u64,
+    pub changed: u64,
+    pub dirty: usize,
+    pub tests: usize,
+    pub fetch_warning: Option<String>,
+    pub stat: String,
+    pub log: String,
+    pub diff_file: std::path::PathBuf,
+    pub ticket: String,
+}
+
 /// `Ok` carries both a normal prepare and the "a PR already exists" redirect
 /// (both exit 0); `Err` is reserved for the hard stops.
 pub fn run(
@@ -49,20 +77,50 @@ pub fn prepare(
     base_arg: Option<&str>,
     ticket_arg: Option<&str>,
 ) -> Result<String, String> {
+    Ok(render_text(&gather(
+        state_dir, branch, gh, base_arg, ticket_arg, false,
+    )?))
+}
+
+/// Every judgment-free fact about the branch, or the hard stop.
+pub fn gather(
+    state_dir: &Path,
+    branch: &str,
+    gh: &dyn GhClient,
+    base_arg: Option<&str>,
+    ticket_arg: Option<&str>,
+    detect_stack: bool,
+) -> Result<Outcome, String> {
     reject_option_like("branch", branch)?;
     fs::create_dir_all(state_dir)
         .map_err(|e| format!("could not create {}: {e}", state_dir.display()))?;
 
     if let Some(pr) = gh.pr_view(branch)? {
         if pr.state == "OPEN" {
-            return Ok(format!(
-                "A PR already exists: {}\nUse /playbook:address-pr-comments or /playbook:quick-review instead.",
-                pr.url
-            ));
+            return Ok(Outcome::Exists { url: pr.url });
         }
     }
 
-    let (base, source) = resolve_base(gh, base_arg)?;
+    let (mut base, mut source) = resolve_base(gh, base_arg)?;
+    let mut stacked = false;
+    if detect_stack && base_arg.is_none_or(str::is_empty) {
+        let heads = gh.open_pr_heads();
+        let parent = crate::pr::shared::nearest_parent(
+            &heads,
+            branch,
+            &|remote| git(&["merge-base", "--is-ancestor", remote, "HEAD"]).is_ok(),
+            &|range| {
+                git(&["rev-list", "--count", range])
+                    .ok()
+                    .and_then(|n| n.parse().ok())
+            },
+        );
+        if let Some(parent) = parent {
+            base = parent;
+            source = "stack";
+            stacked = true;
+        }
+    }
     if branch == base {
         return Err(format!(
             "on the base branch ({base}); create a feature branch first"
@@ -110,25 +168,208 @@ pub fn prepare(
     let stat = git(&["diff", "--stat", &range]).unwrap_or_default();
     let log = git(&["log", &format!("{remote_base}..HEAD"), "--format=%h %s"]).unwrap_or_default();
 
+    Ok(Outcome::Ready(Box::new(Ready {
+        branch: branch.to_string(),
+        state_dir: state_dir.to_path_buf(),
+        base,
+        source: source.to_string(),
+        stacked,
+        ahead,
+        changed,
+        dirty,
+        tests,
+        fetch_warning,
+        stat,
+        log,
+        diff_file,
+        ticket: ticket(branch, ticket_arg),
+    })))
+}
+
+/// The labeled lines the calling command copies verbatim.
+pub fn render_text(outcome: &Outcome) -> String {
+    let r = match outcome {
+        Outcome::Exists { url } => {
+            return format!(
+                "A PR already exists: {url}\nUse /playbook:address-pr-comments or /playbook:quick-review instead."
+            )
+        }
+        Outcome::Ready(r) => r,
+    };
     let mut out = vec![
-        format!("branch={branch}"),
-        format!("state_dir={}", state_dir.display()),
-        format!("base={base} (source: {source})"),
-        format!("commits_ahead={ahead} changed_lines={changed} dirty_files={dirty} test_files_touched={tests}"),
-        dirty_verdict(dirty),
-        size_verdict(changed),
-        tests_verdict(tests),
+        format!("branch={}", r.branch),
+        format!("state_dir={}", r.state_dir.display()),
+        format!("base={} (source: {})", r.base, r.source),
+        format!(
+            "commits_ahead={} changed_lines={} dirty_files={} test_files_touched={}",
+            r.ahead, r.changed, r.dirty, r.tests
+        ),
+        dirty_verdict(r.dirty),
+        size_verdict(r.changed),
+        tests_verdict(r.tests),
     ];
-    out.extend(fetch_warning);
+    out.extend(r.fetch_warning.clone());
     out.extend([
         "=== diff stat ===".to_string(),
-        stat,
+        r.stat.clone(),
         "=== commit log ===".to_string(),
-        log,
-        format!("diff_file={}", diff_file.display()),
-        format!("ticket={}", ticket(branch, ticket_arg)),
+        r.log.clone(),
+        format!("diff_file={}", r.diff_file.display()),
+        format!("ticket={}", r.ticket),
     ]);
-    Ok(out.join("\n"))
+    out.join("\n")
+}
+
+fn size_label(changed: u64) -> &'static str {
+    if changed > ENFORCED_LIMIT {
+        "OVER"
+    } else if changed > SOFT_LIMIT {
+        "SOFT"
+    } else {
+        "OK"
+    }
+}
+
+/// Inputs of the JSON form beyond the git facts.
+pub struct JsonInput<'a> {
+    pub root: &'a str,
+    pub mode: &'a str,
+    pub ready_flag: bool,
+    pub draft_default: bool,
+    pub issue: Option<&'a str>,
+    pub rules: Option<&'a crate::pr::rules::RulesText>,
+    /// Why the rule text is missing, when it is.
+    pub rules_error: Option<&'a str>,
+    pub max_body_chars: usize,
+}
+
+/// The JSON report of an outcome. `verdict` is `READY` or `PR_EXISTS`.
+pub fn render_json(outcome: &Outcome, input: &JsonInput<'_>) -> serde_json::Value {
+    use serde_json::json;
+    match outcome {
+        Outcome::Exists { url } => json!({
+            "verdict": "PR_EXISTS", "reason": "an open PR already exists for the branch",
+            "root": input.root, "existing_pr": url, "mode": input.mode,
+        }),
+        Outcome::Ready(r) => {
+            let mut rules = serde_json::to_value(input.rules).unwrap_or_default();
+            if !rules.is_object() {
+                rules = json!({});
+            }
+            rules["max_body_chars"] = json!(input.max_body_chars);
+            rules["error"] = json!(input.rules_error);
+            let commits: Vec<&str> = r.log.lines().filter(|l| !l.is_empty()).collect();
+            json!({
+                "verdict": "READY", "reason": "",
+                "root": input.root, "branch": r.branch, "base": r.base,
+                "base_source": match r.source.as_str() {
+                    "stack" => "stack",
+                    "--base flag" => "flag",
+                    _ => "default",
+                },
+                "stacked": r.stacked, "commits_ahead": r.ahead,
+                "changed_lines": r.changed, "dirty_files": r.dirty, "tests_touched": r.tests,
+                "checks": {
+                    "dirty": if r.dirty > 0 { "WARN" } else { "OK" },
+                    "size": size_label(r.changed),
+                    "tests": if r.tests == 0 { "NONE" } else { "OK" },
+                },
+                "ticket": r.ticket, "issue": input.issue, "existing_pr": null,
+                "fetch_warning": r.fetch_warning,
+                "diff_stat": r.stat, "commit_log": commits,
+                "diff_file": r.diff_file.display().to_string(),
+                "state_dir": r.state_dir.display().to_string(),
+                "draft_default": input.draft_default, "ready_flag": input.ready_flag,
+                "rules": rules,
+                "mode": input.mode,
+            })
+        }
+    }
+}
+
+/// A refusal in JSON: `REFUSED` or `WRONG_DIRECTORY`.
+pub fn refusal_json(verdict: &str, reason: &str, mode: &str) -> serde_json::Value {
+    serde_json::json!({ "verdict": verdict, "reason": reason, "mode": mode })
+}
+
+/// The whole `--json` run: parse the inline text, check the worktree, move
+/// into it, gather the facts and render them. Returns the report and the exit
+/// code plain mode would use (0 for READY and PR_EXISTS, 1 for a refusal).
+pub fn run_json(
+    gh: &dyn GhClient,
+    args_text: Option<&str>,
+    base: Option<String>,
+    ticket: Option<String>,
+    dir: Option<String>,
+) -> (serde_json::Value, i32) {
+    use crate::common::inline_args;
+    let home = crate::common::home_dir();
+    let parsed = match inline_args::parse(args_text.unwrap_or("")) {
+        Ok(p) => p,
+        Err(e) => {
+            return (
+                refusal_json("REFUSED", &format!("{}: {}", e.code, e.message), "ask"),
+                1,
+            )
+        }
+    };
+    let slug = crate::common::repo_slug();
+    let mode = parsed
+        .mode_at(
+            std::env::var("PLAYBOOK_MODE").ok().as_deref(),
+            &home,
+            (!slug.is_empty()).then_some(slug.as_str()),
+        )
+        .mode;
+    let mode = if mode == crate::common::mode::Mode::Auto {
+        "auto"
+    } else {
+        "ask"
+    };
+    let target = parsed.root.clone().or(parsed.dir.clone()).or(dir);
+    if let (Some(root), Some(branch)) = (&parsed.root, &parsed.branch) {
+        if let Err(reason) = inline_args::guard(Path::new(root), branch) {
+            return (refusal_json("WRONG_DIRECTORY", &reason, mode), 1);
+        }
+    }
+    if let Some(target) = &target {
+        if let Err(reason) = crate::pr::shared::enter_dir(target) {
+            return (refusal_json("REFUSED", &reason, mode), 1);
+        }
+    }
+    let base = parsed.base.clone().or(base);
+    let ticket = parsed.ticket.clone().or(ticket);
+    let run = || -> Result<serde_json::Value, String> {
+        let branch = current_branch()?;
+        let state_dir = pr_state_dir(&branch)?;
+        let outcome = gather(
+            &state_dir,
+            &branch,
+            gh,
+            base.as_deref(),
+            ticket.as_deref(),
+            true,
+        )?;
+        let top = git(&["rev-parse", "--show-toplevel"])?;
+        let repo = (!slug.is_empty()).then_some(slug.as_str());
+        let rules = crate::pr::body_rules::Rules::load(&home, repo);
+        let texts = crate::pr::rules::extract_texts(&crate::pr::rules::plugin_root_quiet());
+        let input = JsonInput {
+            root: &top,
+            mode,
+            ready_flag: parsed.ready,
+            draft_default: crate::pr::create::draft_setting(&home, repo),
+            issue: parsed.issue.as_deref(),
+            rules: texts.as_ref().ok(),
+            rules_error: texts.as_ref().err().map(String::as_str),
+            max_body_chars: rules.max_chars,
+        };
+        Ok(render_json(&outcome, &input))
+    };
+    match run() {
+        Ok(report) => (report, 0),
+        Err(reason) => (refusal_json("REFUSED", &reason, mode), 1),
+    }
 }
 
 /// Insertions plus deletions from a `git diff --shortstat` line, or 0.

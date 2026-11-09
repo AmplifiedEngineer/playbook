@@ -471,3 +471,181 @@ fn a_branch_starting_with_a_dash_is_refused() {
     assert!(err.contains("starts with '-'"), "got {err}");
     assert_eq!(gh.count("pr_view"), 0, "nothing runs after the refusal");
 }
+
+// ---- JSON form ----
+
+use playbook::pr::prepare::{gather, render_json, render_text, JsonInput};
+use playbook::pr::rules::RulesText;
+
+fn texts() -> RulesText {
+    RulesText {
+        writing: "## Loading the references".into(),
+        prs: "IRON RULE Commit messages MUST".into(),
+        github: "# Prohibited GitHub".into(),
+        readiness: "Automated Testing".into(),
+    }
+}
+
+fn json_of(fx: &Fixture, gh: &FakeGh, base: Option<&str>) -> Result<serde_json::Value, String> {
+    let branch = fx.branch();
+    in_dir(&fx.work, || {
+        let outcome = gather(&fx.state(), &branch, gh, base, None, true)?;
+        let root = fx.work.display().to_string();
+        let t = texts();
+        Ok(render_json(
+            &outcome,
+            &JsonInput {
+                root: &root,
+                mode: "ask",
+                ready_flag: false,
+                draft_default: true,
+                issue: None,
+                rules: Some(&t),
+                rules_error: None,
+                max_body_chars: 1200,
+            },
+        ))
+    })
+}
+
+#[test]
+fn json_a_clean_branch_is_ready_with_its_facts_and_rules() {
+    let fx = Fixture::new("json-ready", "feat/x");
+    fx.commit_lines("a.txt", 3);
+    fx.commit_lines("b.txt", 3);
+    fx.commit_lines("c.txt", 3);
+
+    let got = json_of(&fx, &FakeGh::default(), Some("main")).expect("ready");
+
+    assert_eq!(got["verdict"], "READY");
+    assert_eq!(got["branch"], "feat/x");
+    assert_eq!(got["base"], "main");
+    assert_eq!(got["base_source"], "flag");
+    assert_eq!(got["commits_ahead"], 3);
+    assert_eq!(got["root"], fx.work.display().to_string());
+    assert_eq!(got["rules"]["max_body_chars"], 1200);
+    assert!(got["rules"]["prs"].as_str().unwrap().contains("IRON RULE"));
+    assert_eq!(got["commit_log"].as_array().unwrap().len(), 3);
+}
+
+#[test]
+fn json_an_open_pr_is_pr_exists() {
+    let fx = Fixture::new("json-exists", "feat/x");
+    fx.commit_lines("a.txt", 3);
+    let gh = FakeGh {
+        existing: Some(ExistingPr {
+            url: "https://example.test/pr/9".into(),
+            state: "OPEN".into(),
+        }),
+        ..FakeGh::default()
+    };
+
+    let got = json_of(&fx, &gh, None).expect("success path");
+
+    assert_eq!(got["verdict"], "PR_EXISTS");
+    assert_eq!(got["existing_pr"], "https://example.test/pr/9");
+}
+
+#[test]
+fn parity_size_limits_pin_the_json_edges() {
+    for (lines, size, refused) in [
+        (500, "OK", false),
+        (501, "SOFT", false),
+        (1000, "SOFT", false),
+        (1001, "OVER", false),
+        (1500, "OVER", false),
+        (1501, "", true),
+    ] {
+        let fx = Fixture::new(&format!("json-size-{lines}"), "feat/x");
+        fx.commit_lines("a.txt", lines);
+
+        let got = json_of(&fx, &FakeGh::default(), Some("main"));
+
+        match (refused, got) {
+            (true, Err(e)) => assert!(e.contains("hard size limit"), "{e}"),
+            (false, Ok(v)) => assert_eq!(v["checks"]["size"], size, "{lines} lines"),
+            (r, g) => panic!("{lines}: refused={r} got {g:?}"),
+        }
+    }
+}
+
+#[test]
+fn parity_stacked_base_a_branch_on_another_open_pr_head_is_stacked() {
+    let fx = Fixture::new("json-stack", "feat/parent");
+    fx.commit_lines("a.txt", 3);
+    git(&fx.work, &["push", "--quiet", "origin", "feat/parent"]);
+    git(&fx.work, &["checkout", "--quiet", "-b", "feat/child"]);
+    fx.commit_lines("b.txt", 3);
+    let gh = FakeGh {
+        heads: vec!["feat/parent".into()],
+        ..FakeGh::default()
+    };
+
+    let got = json_of(&fx, &gh, None).expect("ready");
+
+    assert_eq!(got["stacked"], true);
+    assert_eq!(got["base_source"], "stack");
+    assert_eq!(got["base"], "feat/parent");
+    assert_eq!(got["commits_ahead"], 1);
+}
+
+#[test]
+fn text_mode_matches_the_golden_output() {
+    let fx = Fixture::new("golden", "feat/x");
+    fx.commit_lines("a.txt", 3);
+    let branch = fx.branch();
+    let state = fx.state();
+    let text = in_dir(&fx.work, || {
+        render_text(
+            &gather(
+                &state,
+                &branch,
+                &FakeGh::default(),
+                Some("main"),
+                None,
+                false,
+            )
+            .unwrap(),
+        )
+    });
+
+    let normalised: String = text
+        .lines()
+        .map(|l| {
+            if l.starts_with("state_dir=") {
+                "state_dir=<STATE>".to_string()
+            } else if l.starts_with("diff_file=") {
+                "diff_file=<STATE>/pr-diff.txt".to_string()
+            } else if let Some((sha, rest)) = l.split_once(' ') {
+                if sha.len() >= 7 && sha.chars().all(|c| c.is_ascii_hexdigit()) {
+                    format!("<sha> {rest}")
+                } else {
+                    l.to_string()
+                }
+            } else {
+                l.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let golden = include_str!("golden/pr_prepare_text.txt");
+    assert_eq!(normalised.trim_end(), golden.trim_end());
+}
+
+#[test]
+fn run_json_refuses_conflicting_flags_and_a_wrong_worktree() {
+    let fx = Fixture::new("run-json", "feat/x");
+    fx.commit_lines("a.txt", 3);
+    let gh = FakeGh::default();
+
+    let (conflict, code) =
+        playbook::pr::prepare::run_json(&gh, Some("--auto --ask"), None, None, None);
+    assert_eq!(conflict["verdict"], "REFUSED");
+    assert_eq!(code, 1);
+
+    let phrase = format!("Worktree root: {}, branch: other", fx.work.display());
+    let (wrong, code) = playbook::pr::prepare::run_json(&gh, Some(&phrase), None, None, None);
+    assert_eq!(wrong["verdict"], "WRONG_DIRECTORY");
+    assert_eq!(code, 1);
+}

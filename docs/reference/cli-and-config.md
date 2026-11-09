@@ -1210,6 +1210,8 @@ Example: `playbook pr prepare --base main`
 - `--base <BASE>`: Base branch for the PR (default: the repo's default branch)
 - `--ticket <TICKET>`: Ticket id to cite (default: one found in the branch name)
 - `--dir <DIR>`: Work in this directory instead of the current one
+- `--json`: Print one JSON report instead of labeled lines
+- `--args-stdin`: Read the command's flags and the worktree phrase from stdin
 
 ### `playbook pr reply`
 
