@@ -43,6 +43,7 @@ fn land(dir: &Path) -> (i32, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(["pr", "land", "7", "--settle", "0", "--interval", "0"])
         .env("PATH", path)
+        .env("HOME", dir)
         .env("PB_LAND_MAX_POLLS", "3")
         .output()
         .unwrap();
