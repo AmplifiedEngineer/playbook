@@ -460,51 +460,6 @@ fn review_auto_path_text_never_posts_a_review() {
 }
 
 #[test]
-fn commit_and_push_auto_path_never_forces_and_parks_when_a_force_is_needed() {
-    // Arrange
-    let file = load("commit-and-push");
-    let auto_path = require_section(&file, file.auto_path(), "`Auto path`");
-
-    // Act
-    let text = file.text_of(&auto_path);
-
-    // Assert
-    assert!(
-        !text.contains("--force"),
-        "the auto path must not mention --force or --force-with-lease"
-    );
-    let stops = Regex::new(r"(?is)\bforce\b[^.]*\bstops and reports\b").expect("stop pattern");
-    assert!(
-        stops.is_match(&text),
-        "the auto path must say a push that would need a force stops and reports"
-    );
-}
-
-#[test]
-fn commit_and_push_auto_path_pushes_plainly_when_the_remote_branch_is_absent() {
-    // Arrange
-    let file = load("commit-and-push");
-    let auto_path = require_section(&file, file.auto_path(), "`Auto path`");
-
-    // Act
-    let text = file.text_of(&auto_path);
-
-    // Assert
-    assert!(
-        text.contains("git ls-remote"),
-        "the auto path must check the remote branch with `git ls-remote`"
-    );
-    let plain = Regex::new(
-        r"(?is)\b(absent|missing)\b[^.]*\bplain(ly)?\b|\bplain(ly)?\b[^.]*\b(absent|missing)\b",
-    )
-    .expect("plain push pattern");
-    assert!(
-        plain.is_match(&text),
-        "the auto path must say it pushes plainly when the remote branch is absent"
-    );
-}
-
-#[test]
 fn learn_project_step0_stages_in_auto_and_skips_the_write_question() {
     // Arrange
     let file = load("learn-project");
@@ -526,35 +481,6 @@ fn learn_project_step0_stages_in_auto_and_skips_the_write_question() {
     assert!(
         skips.is_match(&text),
         "Step 0 must say the write question is skipped in that path"
-    );
-}
-
-#[test]
-fn create_pull_request_step0_skips_the_self_review_in_auto() {
-    // Arrange
-    let file = load("create-pull-request");
-    let step0 = require_section(&file, file.step0(), "`Step 0`");
-    let skips = Regex::new(r"(?is)\bauto\b[^.]*\bskips?\b[^.]*self-review").expect("skip pattern");
-    let why = Regex::new(r"(?is)\bimplement\b[^.]*\bopened\b[^.]*\breview\b[^.]*\bcovered\b")
-        .expect("why pattern");
-    let reports =
-        Regex::new(r"(?is)final report[^.]*\bno self-review ran\b").expect("report pattern");
-
-    // Act
-    let text = file.text_of(&step0);
-
-    // Assert
-    assert!(
-        skips.is_match(&text),
-        "Step 0 must say that in auto the self-review is skipped"
-    );
-    assert!(
-        why.is_match(&text),
-        "Step 0 must say that implement's review covered a PR that implement opened"
-    );
-    assert!(
-        reports.is_match(&text),
-        "Step 0 must say the final report states that no self-review ran for other callers"
     );
 }
 

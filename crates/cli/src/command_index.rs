@@ -300,6 +300,7 @@ pub(crate) const META: &[Meta] = &[
     ro("pr comments"),
     free("pr create"),
     ro("pr finish-context"),
+    free("pr land"),
     ro("pr land-wait"),
     free("pr merge"),
     free("pr prepare"),
