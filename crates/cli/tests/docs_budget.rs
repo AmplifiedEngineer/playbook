@@ -23,14 +23,40 @@ struct Limits {
     max_badges: Option<usize>,
 }
 
-const LIMITS: &[Limits] = &[Limits {
-    path: "README.md",
-    max_lines: Some(70),
-    max_words: 450,
-    max_h2: Some(6),
-    max_pictures: Some(1),
-    max_badges: Some(5),
-}];
+const LIMITS: &[Limits] = &[
+    Limits {
+        path: "README.md",
+        max_lines: Some(70),
+        max_words: 450,
+        max_h2: Some(6),
+        max_pictures: Some(1),
+        max_badges: Some(5),
+    },
+    Limits {
+        path: "docs/README.md",
+        max_lines: Some(90),
+        max_words: 450,
+        max_h2: None,
+        max_pictures: None,
+        max_badges: None,
+    },
+    Limits {
+        path: "docs/get-started.md",
+        max_lines: None,
+        max_words: 700,
+        max_h2: None,
+        max_pictures: None,
+        max_badges: None,
+    },
+    Limits {
+        path: "docs/concepts.md",
+        max_lines: None,
+        max_words: 800,
+        max_h2: None,
+        max_pictures: None,
+        max_badges: None,
+    },
+];
 
 fn root() -> PathBuf {
     PathBuf::from(env!("PLAYBOOK_REPO_ROOT"))

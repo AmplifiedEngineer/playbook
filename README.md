@@ -59,4 +59,4 @@ Setup shows each change and asks first. [What setup installs](docs/guides/05-wha
 
 ## Docs
 
-Start at the [docs map](docs/README.md). Look things up in the [CLI and config reference](docs/reference/cli-and-config.md), the [hook reference](docs/reference/hooks.md) and [What setup installs](docs/guides/05-what-setup-installs.md).
+New here? Start with [Get started](docs/get-started.md). The [docs map](docs/README.md) links every page. Look things up in the [CLI and config reference](docs/reference/cli-and-config.md), the [hook reference](docs/reference/hooks.md) and [What setup installs](docs/guides/05-what-setup-installs.md).

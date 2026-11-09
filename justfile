@@ -71,7 +71,7 @@ check: build
     {{ bin }} ci --dir . --strict
     bash scripts/check-links.sh
     scripts/check-identifiers.sh
-    {{ bin }} prose check --strict README.md
+    {{ bin }} prose check --strict README.md docs/README.md docs/get-started.md docs/concepts.md
     scripts/check-plugin.sh payload
     scripts/check-plugin.sh version
     INTENTS_STRICT=1 scripts/check-intents.sh {{ bin }}
