@@ -217,6 +217,7 @@ pub fn render_text(outcome: &Outcome) -> String {
         format!("diff_file={}", r.diff_file.display()),
         format!("ticket={}", r.ticket),
     ]);
+<<<<<<< HEAD
     out.join("\n")
 }
 
@@ -376,6 +377,163 @@ pub fn run_json(
         Ok(report) => (crate::json::envelope::wrap(0, "", report), 0),
         Err(reason) => (refusal_json("REFUSED", &reason, mode), 1),
     }
+||||||| bb932593
+    Ok(out.join("\n"))
+=======
+    out.join("\n")
+}
+
+fn size_label(changed: u64) -> &'static str {
+    if changed > ENFORCED_LIMIT {
+        "OVER"
+    } else if changed > SOFT_LIMIT {
+        "SOFT"
+    } else {
+        "OK"
+    }
+}
+
+/// Inputs of the JSON form beyond the git facts.
+pub struct JsonInput<'a> {
+    pub root: &'a str,
+    pub mode: &'a str,
+    pub ready_flag: bool,
+    pub draft_default: bool,
+    pub issue: Option<&'a str>,
+    pub rules: Option<&'a crate::pr::rules::RulesText>,
+    /// Why the rule text is missing, when it is.
+    pub rules_error: Option<&'a str>,
+    pub max_body_chars: usize,
+}
+
+/// The JSON report of an outcome. `verdict` is `READY` or `PR_EXISTS`.
+pub fn render_json(outcome: &Outcome, input: &JsonInput<'_>) -> serde_json::Value {
+    use serde_json::json;
+    match outcome {
+        Outcome::Exists { url } => json!({
+            "verdict": "PR_EXISTS", "reason": "an open PR already exists for the branch",
+            "root": input.root, "existing_pr": url, "mode": input.mode,
+        }),
+        Outcome::Ready(r) => {
+            let mut rules = serde_json::to_value(input.rules).unwrap_or_default();
+            if !rules.is_object() {
+                rules = json!({});
+            }
+            rules["max_body_chars"] = json!(input.max_body_chars);
+            rules["error"] = json!(input.rules_error);
+            let commits: Vec<&str> = r.log.lines().filter(|l| !l.is_empty()).collect();
+            json!({
+                "verdict": "READY", "reason": "",
+                "root": input.root, "branch": r.branch, "base": r.base,
+                "base_source": match r.source.as_str() {
+                    "stack" => "stack",
+                    "--base flag" => "flag",
+                    _ => "default",
+                },
+                "stacked": r.stacked, "commits_ahead": r.ahead,
+                "changed_lines": r.changed, "dirty_files": r.dirty, "tests_touched": r.tests,
+                "checks": {
+                    "dirty": if r.dirty > 0 { "WARN" } else { "OK" },
+                    "size": size_label(r.changed),
+                    "tests": if r.tests == 0 { "NONE" } else { "OK" },
+                },
+                "ticket": r.ticket, "issue": input.issue, "existing_pr": null,
+                "fetch_warning": r.fetch_warning,
+                "diff_stat": r.stat, "commit_log": commits,
+                "diff_file": r.diff_file.display().to_string(),
+                "state_dir": r.state_dir.display().to_string(),
+                "draft_default": input.draft_default, "ready_flag": input.ready_flag,
+                "rules": rules,
+                "mode": input.mode,
+            })
+        }
+    }
+}
+
+/// A refusal in JSON: `REFUSED` or `WRONG_DIRECTORY`.
+pub fn refusal_json(verdict: &str, reason: &str, mode: &str) -> serde_json::Value {
+    serde_json::json!({ "verdict": verdict, "reason": reason, "mode": mode })
+}
+
+/// The whole `--json` run: parse the inline text, check the worktree, move
+/// into it, gather the facts and render them. Returns the report and the exit
+/// code plain mode would use (0 for READY and PR_EXISTS, 1 for a refusal).
+pub fn run_json(
+    gh: &dyn GhClient,
+    args_text: Option<&str>,
+    base: Option<String>,
+    ticket: Option<String>,
+    dir: Option<String>,
+) -> (serde_json::Value, i32) {
+    use crate::common::inline_args;
+    let home = crate::common::home_dir();
+    let parsed = match inline_args::parse(args_text.unwrap_or("")) {
+        Ok(p) => p,
+        Err(e) => {
+            return (
+                refusal_json("REFUSED", &format!("{}: {}", e.code, e.message), "ask"),
+                1,
+            )
+        }
+    };
+    let slug = crate::common::repo_slug();
+    let mode = parsed
+        .mode_at(
+            std::env::var("PLAYBOOK_MODE").ok().as_deref(),
+            &home,
+            (!slug.is_empty()).then_some(slug.as_str()),
+        )
+        .mode;
+    let mode = if mode == crate::common::mode::Mode::Auto {
+        "auto"
+    } else {
+        "ask"
+    };
+    let target = parsed.root.clone().or(parsed.dir.clone()).or(dir);
+    if let (Some(root), Some(branch)) = (&parsed.root, &parsed.branch) {
+        if let Err(reason) = inline_args::guard(Path::new(root), branch) {
+            return (refusal_json("WRONG_DIRECTORY", &reason, mode), 1);
+        }
+    }
+    if let Some(target) = &target {
+        if let Err(reason) = crate::pr::shared::enter_dir(target) {
+            return (refusal_json("REFUSED", &reason, mode), 1);
+        }
+    }
+    let base = parsed.base.clone().or(base);
+    let ticket = parsed.ticket.clone().or(ticket);
+    let run = || -> Result<serde_json::Value, String> {
+        let branch = current_branch()?;
+        let state_dir = pr_state_dir(&branch)?;
+        let outcome = gather(
+            &state_dir,
+            &branch,
+            gh,
+            base.as_deref(),
+            ticket.as_deref(),
+            true,
+        )?;
+        let top = git(&["rev-parse", "--show-toplevel"])?;
+        let repo = (!slug.is_empty()).then_some(slug.as_str());
+        let rules = crate::pr::body_rules::Rules::load(&home, repo);
+        let texts = crate::pr::rules::extract_texts(&crate::pr::rules::plugin_root_quiet());
+        let input = JsonInput {
+            root: &top,
+            mode,
+            ready_flag: parsed.ready,
+            draft_default: crate::pr::create::draft_setting(&home, repo),
+            issue: parsed.issue.as_deref(),
+            rules: texts.as_ref().ok(),
+            rules_error: texts.as_ref().err().map(String::as_str),
+            max_body_chars: rules.max_chars,
+        };
+        Ok(render_json(&outcome, &input))
+    };
+    match run() {
+        Ok(report) => (report, 0),
+        Err(reason) => (refusal_json("REFUSED", &reason, mode), 1),
+    }
+>>>>>>> origin/main
 }
 
 /// Insertions plus deletions from a `git diff --shortstat` line, or 0.

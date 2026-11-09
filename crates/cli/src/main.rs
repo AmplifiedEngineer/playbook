@@ -1276,6 +1276,7 @@ fn real_main() {
         Command::Pr { sub } => {
             let gh = pr::shared::RealGhClient;
             match sub {
+<<<<<<< HEAD
                 PrCommand::Prepare {
                     base,
                     ticket,
@@ -1291,6 +1292,24 @@ fn real_main() {
                         println!("{report}");
                         return;
                     }
+||||||| bb932593
+                PrCommand::Prepare { base, ticket, dir } => {
+=======
+                PrCommand::Prepare {
+                    base,
+                    ticket,
+                    dir,
+                    json,
+                    args_stdin,
+                } => {
+                    if json {
+                        let text = args_stdin.then(read_stdin_to_string);
+                        let (report, code) =
+                            pr::prepare::run_json(&gh, text.as_deref(), base, ticket, dir);
+                        println!("{report}");
+                        std::process::exit(code);
+                    }
+>>>>>>> origin/main
                     enter_dir("pr prepare", dir.as_deref());
                     match pr::prepare::run(&gh, base.as_deref(), ticket.as_deref()) {
                         Ok(output) => println!("{output}"),
