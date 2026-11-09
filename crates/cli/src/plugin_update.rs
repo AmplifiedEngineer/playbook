@@ -2971,10 +2971,7 @@ mod tests {
         let home = scratch_dir("plugin-update-timeout");
         let bin = home.join("bin/claude");
         fs::create_dir_all(bin.parent().unwrap()).unwrap();
-        write_script(
-            &bin,
-            "#!/bin/sh\necho \"$*\" >> \"$HOME/claude-calls.log\"\nsleep 5\n",
-        );
+        write_script(&bin, "#!/bin/sh\nsleep 5\n");
         let probe = Probe {
             home: home.clone(),
             claude: Some(bin.clone()),
@@ -2983,8 +2980,10 @@ mod tests {
         // Act
         let result = run_claude(&probe, &bin, &["plugin", "update"], Duration::from_secs(1));
 
-        // Assert
-        assert_eq!(calls(&home), "plugin update\n", "the fake claude never ran");
+        // Assert: a start failure reads "could not be started", so this error
+        // alone proves the call began and then outlived the limit. The script
+        // logs nothing because a loaded machine can spend the whole second
+        // before `sh` runs its first line.
         assert_eq!(result, Err("it did not finish within 1 s".to_string()));
     }
 
