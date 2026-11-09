@@ -1285,10 +1285,11 @@ fn real_main() {
                 } => {
                     if json {
                         let text = args_stdin.then(read_stdin_to_string);
-                        let (report, code) =
+                        let (report, _) =
                             pr::prepare::run_json(&gh, text.as_deref(), base, ticket, dir);
+                        // --json always exits 0; the report carries the code.
                         println!("{report}");
-                        std::process::exit(code);
+                        return;
                     }
                     enter_dir("pr prepare", dir.as_deref());
                     match pr::prepare::run(&gh, base.as_deref(), ticket.as_deref()) {
@@ -2077,11 +2078,35 @@ fn real_main() {
                     message,
                     auto,
                     no_signoff,
+                    json,
+                    args_stdin,
                 } => {
+                    if json {
+                        let text = if args_stdin {
+                            read_stdin_to_string()
+                        } else {
+                            let mut words = String::new();
+                            if auto {
+                                words.push_str(" --auto");
+                            }
+                            if no_signoff {
+                                words.push_str(" --no-signoff");
+                            }
+                            words.push_str(" -A");
+                            words
+                        };
+                        println!(
+                            "{}",
+                            commit::all::run_inline(&text, message, commit_signoff_on())
+                        );
+                        return;
+                    }
                     let opts = commit::all::Options {
                         message,
                         auto,
                         no_signoff,
+                        stage_all: true,
+                        ..Default::default()
                     };
                     match commit::all::run(&dir, opts, commit_signoff_on()) {
                         Ok(text) => println!("{text}"),
