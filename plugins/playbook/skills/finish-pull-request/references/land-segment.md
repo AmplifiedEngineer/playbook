@@ -2,6 +2,7 @@
 
 Read by `/playbook:implement` Step 10, only when the run uses `--boundary=land`. The step headings and decision rows below keep the names `commands/implement.md` refers to.
 
+Landing now runs through `playbook pr land <n>`: it waits for checks, arms auto-merge pinned to the head and confirms the result. Use it in place of the manual gate, merge and confirm steps below when it is in the tool map, and keep the `--delete-branch` and `--admin` rules.
 ## Contents
 
 - Step 10: Land the Segment (promote, gate on CI, merge, confirm, fix tiers, park)
