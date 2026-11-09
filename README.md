@@ -21,7 +21,7 @@ The skills ship as a Claude Code plugin and work on their own. The binary, which
 
 ## Install
 
-Pick the first route that fits. Each one installs the `playbook` binary. Then run `playbook setup`.
+Pick the first route that fits. Each one installs the `playbook` binary. Then run `playbook setup`. When the `claude` command is found, setup asks whether to install or update the playbook plugin to match the binary, and installs it only if you say yes.
 
 1. **Homebrew** (macOS and Linux):
 
@@ -38,14 +38,14 @@ Pick the first route that fits. Each one installs the `playbook` binary. Then ru
    curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh | bash
    ```
 
-3. **Marketplace plugin**, for the skills only. It adds no binary, hooks or guards:
+3. **Marketplace plugin by hand**, for the skills only, or when `claude` is not on `PATH` while you run setup. It adds no binary, hooks or guards:
 
    ```bash
    claude plugin marketplace add amplifiedengineer/marketplace
    claude plugin install playbook@amplifiedengineer
    ```
 
-For the best result, install the binary first and the plugin after it. Nix, Windows (experimental, with the raw `.exe`), a pinned version and a route with no `curl | bash` are in the [install guide](docs/guides/00-install.md). To see what `playbook setup` changes before you agree, read [What setup installs](docs/guides/05-what-setup-installs.md).
+For the best result, install the binary first. `playbook setup` then installs the plugin for you. Nix, Windows (experimental, with the raw `.exe`), a pinned version and a route with no `curl | bash` are in the [install guide](docs/guides/00-install.md). To see what `playbook setup` changes before you agree, read [What setup installs](docs/guides/05-what-setup-installs.md).
 
 Pin a version of the install script with `PLAYBOOK_REF=v0.41.0`. Update with `brew upgrade playbook` on Homebrew, or `playbook update` on the other routes. On a brew install, `playbook update` stops and tells you to run `brew upgrade playbook`. Run `playbook doctor check` to see what is in place, or `/playbook:doctor` in a Claude Code session.
 

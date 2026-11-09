@@ -59,7 +59,7 @@ Before this wizard, the command (then called `init`) printed a flat plan and one
 - Playbook sends nothing anywhere unless you turn on [usage sync](17-sync.md), which is off by default and needs `pbsync enable` and a yes. No hook, and no part of `setup`, makes a network call itself, but the `session-init` hook can start the background `claude plugin update` described below. The commands that reach the network are `playbook update` (it downloads a release from GitHub), `claude plugin update`, which Claude Code runs against the plugin marketplace when `playbook update`, `playbook migrate`, the first playbook command at a terminal after an upgrade or the next session start brings the plugin up to the binary's version (`playbook config set update.plugin off` turns it off), the background release check that `update.mode` controls (one unauthenticated request to the GitHub releases API every `update.checkIntervalHours`, 24 by default, whose only identifying header is the `playbook/<version>` user agent; with `update.mode` set to `auto` the same background process also downloads a newer release from GitHub and checks its attestation through the `gh` tool you are logged into; `playbook config set --global update.mode off` turns it off), and the status line, which calls the `gh` tool you already have to show PR and CI state.
 - No hook reads a secret value. `precommit-check` looks at file names only, to flag names that look like credentials.
 - `playbook usage` reads local Claude Code history. With `usage.telemetry` on `auto`, `playbook cc` points a session at a receiver on your own machine, and `setup --telemetry` can do the same for plain `claude`, the IDE and the desktop app. See [usage telemetry privacy](../internals/04-usage-dashboard.md#telemetry-privacy).
-- Claude Code's own settings are yours. Playbook edits `~/.claude/settings.json` only when you agree to it in `setup`, and takes a timestamped backup first.
+- Claude Code's own settings are yours. Playbook edits `~/.claude/settings.json` only when you agree to it in `setup` (and the plugin part's auto-update key is among those edits), and takes a timestamped backup first.
 
 ## The parts
 
@@ -67,6 +67,7 @@ Each part has a flag pair. With no flag, `setup` asks in a terminal and uses the
 
 | Part | Default | Flags | Files it edits |
 | :- | :- | :- | :- |
+| Plugin | on, asked | `--plugin`, `--no-plugin` | Claude Code's plugin folders (written by `claude`), and `~/.claude/settings.json` (the `extraKnownMarketplaces.amplifiedengineer.autoUpdate` key) |
 | Hooks | on | `--hooks`, `--no-hooks` | `~/.claude/settings.json`, `~/.claude/.settings.base.json` |
 | Status line | on | `--statusline`, `--no-statusline` | `~/.claude/settings.json` |
 | Security defaults | off | `--security`, `--no-security` | `~/.claude/settings.json` |
@@ -82,6 +83,10 @@ Each part has a flag pair. With no flag, `setup` asks in a terminal and uses the
 `--settings` and `--no-settings` no longer exist. Each option that part used to carry now sits behind the hooks, status line or security part, or is not shipped.
 
 Three steps run every time and have no flag: the memory migration, the trust step and the retired config-hash cleanup. They are described below.
+
+### Plugin
+
+When the `claude` command is found, setup keeps the playbook plugin in step with the binary. It runs `claude plugin marketplace update`, then updates the plugin, or adds the marketplace and installs the plugin when none is installed. It also sets `extraKnownMarketplaces.amplifiedengineer.autoUpdate` to `true` in `~/.claude/settings.json` when the key is missing, and keeps an explicit `false`. It asks in a terminal and does nothing without a terminal unless you pass `--yes`, `--plugin` or `--only plugin`. A failure is reported and setup still succeeds. To undo it, run `claude plugin uninstall playbook@amplifiedengineer` and `claude plugin marketplace remove amplifiedengineer`, and set the auto-update key to `false`. Claude Code might ask you to trust a marketplace added at user level; that has not been verified. This is the only part of setup that changes Claude Code's plugins, and `playbook uninstall` never removes them.
 
 ### Hooks
 
