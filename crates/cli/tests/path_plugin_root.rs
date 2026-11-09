@@ -21,12 +21,12 @@ fn scratch(tag: &str) -> PathBuf {
 fn the_installed_plugin_is_the_only_stdout_line_and_a_stale_override_is_noted() {
     // Arrange
     let home = scratch("found");
-    let plugin = home.join(".claude/plugins/cache/pragmatic-engineer/playbook/0.31.0");
+    let plugin = home.join(".claude/plugins/cache/amplifiedengineer/playbook/0.31.0");
     fs::create_dir_all(plugin.join("skills")).unwrap();
     fs::write(
         home.join(".claude/plugins/installed_plugins.json"),
         format!(
-            r#"{{"version":2,"plugins":{{"playbook@pragmatic-engineer":[{{"scope":"user","installPath":"{}"}}]}}}}"#,
+            r#"{{"version":2,"plugins":{{"playbook@amplifiedengineer":[{{"scope":"user","installPath":"{}"}}]}}}}"#,
             plugin.display()
         ),
     )

@@ -2466,7 +2466,7 @@ fn session_init_injects_the_tool_map_before_a_handoff() {
 fn session_init_names_the_upgrade_when_the_plugin_needs_a_newer_binary() {
     // Arrange: the installed plugin asks for a binary far newer than this one.
     let home = scratch_dir("min-binary");
-    let plugin = home.join(".claude/plugins/cache/pragmatic-engineer/playbook/0.31.0");
+    let plugin = home.join(".claude/plugins/cache/amplifiedengineer/playbook/0.31.0");
     fs::create_dir_all(plugin.join("skills")).unwrap();
     fs::create_dir_all(plugin.join(".claude-plugin")).unwrap();
     fs::write(
@@ -2477,7 +2477,7 @@ fn session_init_names_the_upgrade_when_the_plugin_needs_a_newer_binary() {
     fs::write(
         home.join(".claude/plugins/installed_plugins.json"),
         format!(
-            r#"{{"version":2,"plugins":{{"playbook@pragmatic-engineer":[{{"scope":"user","installPath":"{}"}}]}}}}"#,
+            r#"{{"version":2,"plugins":{{"playbook@amplifiedengineer":[{{"scope":"user","installPath":"{}"}}]}}}}"#,
             plugin.display()
         ),
     )

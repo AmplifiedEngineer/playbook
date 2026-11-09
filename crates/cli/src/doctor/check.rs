@@ -173,7 +173,7 @@ pub fn run(env: &Env) -> Vec<Row> {
     .flatten()
     .collect();
     if is_paused(env) {
-        mark_paused(rows)
+        mark_paused(rows, &env.claude_home)
     } else {
         rows
     }
@@ -189,19 +189,22 @@ fn is_paused(env: &Env) -> bool {
 
 /// Rows that claim hooks or the status line work cannot say PASS while the
 /// plugin is paused. The plugin row says why.
-fn mark_paused(mut rows: Vec<Row>) -> Vec<Row> {
-    let hint = "run: claude plugin enable playbook@pragmatic-engineer";
+fn mark_paused(mut rows: Vec<Row>, claude_home: &Path) -> Vec<Row> {
+    let hint = format!(
+        "run: claude plugin enable {}",
+        crate::common::plugin_state::installed_key(claude_home)
+    );
     let message =
         "plugin paused (enabledPlugins sets it to false), so hooks and the status line do nothing";
     match rows.iter().position(|r| r.layer == "1") {
         Some(at) if rows[at].level == Level::Fail => {}
         Some(at) if rows[at].level == Level::Pass => {
-            rows[at] = Row::new("1", Level::Warn, message).hint(hint);
+            rows[at] = Row::new("1", Level::Warn, message).hint(hint.clone());
         }
         // An INFO or WARN row states another fact (not installed, claude
         // missing); keep it and add the paused row in front.
-        Some(at) => rows.insert(at, Row::new("1", Level::Warn, message).hint(hint)),
-        None => rows.insert(0, Row::new("1", Level::Warn, message).hint(hint)),
+        Some(at) => rows.insert(at, Row::new("1", Level::Warn, message).hint(hint.clone())),
+        None => rows.insert(0, Row::new("1", Level::Warn, message).hint(hint.clone())),
     }
     for row in rows.iter_mut().filter(|r| {
         matches!(r.layer, "2" | "5")
@@ -216,7 +219,7 @@ fn mark_paused(mut rows: Vec<Row>) -> Vec<Row> {
                 "so they do not run"
             };
             row.message = format!("{}, but the plugin is paused {tail}", row.message);
-            row.hint = Some(hint.to_string());
+            row.hint = Some(hint.clone());
         }
     }
     rows
@@ -245,7 +248,10 @@ fn output_of(mut cmd: Command) -> Option<String> {
 }
 
 fn layer1(env: &Env) -> Row {
-    let miss = "run: claude plugin marketplace add amplifiedengineer/marketplace && claude plugin install playbook@pragmatic-engineer";
+    let miss = format!(
+        "run: claude plugin marketplace add amplifiedengineer/marketplace && claude plugin install {}",
+        crate::common::plugin_state::PLUGIN_KEY
+    );
     let Some(claude) = on_path(env, "claude") else {
         return Row::new(
             "1",
@@ -266,8 +272,12 @@ fn layer1(env: &Env) -> Row {
     };
     let block_end = lower[at..].find("\n\n").map_or(lower.len(), |n| at + n);
     if lower[at..block_end].contains("disabled") {
+        let id = lower[at..block_end]
+            .split_whitespace()
+            .next()
+            .unwrap_or(crate::common::plugin_state::PLUGIN_KEY);
         return Row::new("1", Level::Fail, "plugin installed but disabled")
-            .hint("run: claude plugin enable playbook@pragmatic-engineer");
+            .hint(format!("run: claude plugin enable {id}"));
     }
     Row::new("1", Level::Pass, "plugin enabled")
 }
@@ -485,7 +495,14 @@ fn version_row(env: &Env, bin: &Path, bin_ver: &str) -> Row {
     plugin
         .as_deref()
         .and_then(|root| binary_too_old(root, bin_ver, homebrew))
-        .or_else(|| plugin_out_of_range(&version, bin_ver, homebrew))
+        .or_else(|| {
+            plugin_out_of_range(
+                &version,
+                bin_ver,
+                &crate::common::plugin_state::installed_key(&env.claude_home),
+                homebrew,
+            )
+        })
         .map_or_else(
             || {
                 Row::new(
@@ -1628,7 +1645,7 @@ const LOGIN_SHELL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// how hook commands get their PATH. None of these rows fails: the binary and
 /// its hooks are optional.
 fn hooks_rows(env: &Env) -> Vec<Row> {
-    use crate::common::plugin_state::{other_playbook_plugins, HOOKS_PLUGIN_KEY, PLUGIN_KEY};
+    use crate::common::plugin_state::{hooks_plugin_keys, installed_key, other_playbook_plugins};
     use crate::init::wire::{audit, wired_hooks};
     let total = wired_hooks().count();
     let found = audit(&env.settings());
@@ -1679,10 +1696,13 @@ fn hooks_rows(env: &Env) -> Vec<Row> {
     }
     let cwd = env.repo_root.clone().unwrap_or_else(|| env.home.clone());
     for key in other_playbook_plugins(&env.claude_home, &cwd) {
-        let what = if key == HOOKS_PLUGIN_KEY {
+        let what = if hooks_plugin_keys().contains(&key) {
             "the playbook-hooks plugin is still installed, so its hooks run next to the ones in settings.json".to_string()
         } else {
-            format!("{key} is installed next to {PLUGIN_KEY}, so its skills and hooks run twice")
+            format!(
+                "{key} is installed next to {}, so its skills and hooks run twice",
+                installed_key(&env.claude_home)
+            )
         };
         rows.push(
             Row::new("-", Level::Warn, what).hint(format!("run: claude plugin uninstall {key}")),
@@ -1797,7 +1817,7 @@ pub fn closing(rows: &[Row]) -> Vec<&'static str> {
         .iter()
         .any(|r| r.layer == "1" && r.message.starts_with("plugin paused"));
     if paused {
-        out.push("The plugin is paused, so hooks and the status line do nothing. Run: claude plugin enable playbook@pragmatic-engineer");
+        out.push("The plugin is paused, so hooks and the status line do nothing. Run the enable command in the layer 1 hint.");
     }
     if failed.is_empty() && !paused {
         out.push("All required layers pass.");
@@ -2061,7 +2081,7 @@ mod tests {
             Row::new("-", Level::Pass, "acli found"),
         ];
 
-        let marked = mark_paused(rows);
+        let marked = mark_paused(rows, Path::new("/none"));
 
         assert_eq!(marked[0].level, Level::Warn);
         assert!(marked[0].message.contains("paused"));
@@ -2077,11 +2097,14 @@ mod tests {
 
     #[test]
     fn an_info_plugin_row_survives_with_the_paused_warning_in_front() {
-        let marked = mark_paused(vec![Row::new(
-            "1",
-            Level::Info,
-            "skills plugin not installed (optional)",
-        )]);
+        let marked = mark_paused(
+            vec![Row::new(
+                "1",
+                Level::Info,
+                "skills plugin not installed (optional)",
+            )],
+            Path::new("/none"),
+        );
 
         assert_eq!(marked.len(), 2);
         assert_eq!(marked[0].level, Level::Warn);
@@ -2090,12 +2113,14 @@ mod tests {
 
     #[test]
     fn a_missing_plugin_row_is_added_and_a_failing_one_is_kept() {
-        let without = mark_paused(vec![Row::new("2", Level::Fail, "not wired")]);
-        let failing = mark_paused(vec![Row::new(
-            "1",
-            Level::Fail,
-            "plugin installed but disabled",
-        )]);
+        let without = mark_paused(
+            vec![Row::new("2", Level::Fail, "not wired")],
+            Path::new("/none"),
+        );
+        let failing = mark_paused(
+            vec![Row::new("1", Level::Fail, "plugin installed but disabled")],
+            Path::new("/none"),
+        );
 
         assert_eq!((without[0].layer, without[0].level), ("1", Level::Warn));
         assert_eq!(without[1].level, Level::Fail);

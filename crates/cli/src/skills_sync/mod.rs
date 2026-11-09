@@ -370,7 +370,7 @@ mod tests {
     /// record written for 1.0.0, so a refresh is due until a claim says not.
     fn refresh_fixture(tag: &str) -> (std::path::PathBuf, std::path::PathBuf) {
         let home = empty_home(tag);
-        let dir = home.join(".claude/plugins/cache/pragmatic-engineer/playbook/2.0.0");
+        let dir = home.join(".claude/plugins/cache/amplifiedengineer/playbook/2.0.0");
         fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
         fs::create_dir_all(dir.join("skills")).unwrap();
         fs::write(
@@ -381,7 +381,7 @@ mod tests {
         fs::write(
             home.join(".claude/plugins/installed_plugins.json"),
             format!(
-                r#"{{"plugins":{{"playbook@pragmatic-engineer":[{{"scope":"user","installPath":"{}"}}]}}}}"#,
+                r#"{{"plugins":{{"playbook@amplifiedengineer":[{{"scope":"user","installPath":"{}"}}]}}}}"#,
                 dir.display()
             ),
         )

@@ -188,9 +188,13 @@ pub fn plugin_items(probe: &PluginProbe) -> Vec<Item> {
         .iter()
         .map(|r| binary_too_old(r, &probe.binary, probe.homebrew))
         .collect();
+    let plugin_key = crate::common::plugin_state::installed_key(&probe.claude_home);
     let range: Vec<Option<String>> = roots
         .iter()
-        .map(|r| version(r).and_then(|v| plugin_out_of_range(&v, &probe.binary, probe.homebrew)))
+        .map(|r| {
+            version(r)
+                .and_then(|v| plugin_out_of_range(&v, &probe.binary, &plugin_key, probe.homebrew))
+        })
         .collect();
     let mut items = Vec::new();
     if let Some(message) = on_every_root(&too_old) {
@@ -630,7 +634,7 @@ mod tests {
 
     fn plugin(home: &Path, version: &str, min: &str) -> PathBuf {
         let dir = home.join(format!(
-            ".claude/plugins/cache/pragmatic-engineer/playbook/{version}"
+            ".claude/plugins/cache/amplifiedengineer/playbook/{version}"
         ));
         fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
         fs::create_dir_all(dir.join("skills")).unwrap();
@@ -646,7 +650,7 @@ mod tests {
         fs::write(
             home.join(".claude/plugins/installed_plugins.json"),
             format!(
-                r#"{{"version":2,"plugins":{{"playbook@pragmatic-engineer":[{{"scope":"user","installPath":"{}","version":"{version}"}}]}}}}"#,
+                r#"{{"version":2,"plugins":{{"playbook@amplifiedengineer":[{{"scope":"user","installPath":"{}","version":"{version}"}}]}}}}"#,
                 dir.display()
             ),
         )
@@ -673,7 +677,7 @@ mod tests {
             },
             OpenItem {
                 id: "other-playbook-plugins",
-                message: "installed next to playbook@pragmatic-engineer, so hooks or skills run twice: playbook-hooks@pragmatic-engineer. Run: claude plugin uninstall playbook-hooks@pragmatic-engineer".into(),
+                message: "installed next to playbook@amplifiedengineer, so hooks or skills run twice: playbook-hooks@pragmatic-engineer. Run: claude plugin uninstall playbook-hooks@pragmatic-engineer".into(),
                 command: None,
             },
         ];
@@ -688,7 +692,7 @@ mod tests {
              \x20 - statusLine.command in settings.json still runs the old script.\n\
              \x20   Why: the status line still runs a script that newer playbook no longer ships.\n\
              \x20   Fix: playbook setup --statusline\n\
-             \x20 - Installed next to playbook@pragmatic-engineer: playbook-hooks@pragmatic-engineer.\n\
+             \x20 - Installed next to playbook@amplifiedengineer: playbook-hooks@pragmatic-engineer.\n\
              \x20   Why: hooks and skills run twice in every session.\n\
              \x20   Fix: claude plugin uninstall playbook-hooks@pragmatic-engineer\n\
              To go through every setup change at once, run: playbook setup\n"
@@ -704,7 +708,7 @@ mod tests {
         );
         assert!(final_line(&[report.clone(), consent]).ends_with("run: playbook setup"));
         let mut plugin = report;
-        plugin.fix = "claude plugin update playbook@pragmatic-engineer".into();
+        plugin.fix = "claude plugin update playbook@amplifiedengineer".into();
         assert!(final_line(&[plugin]).ends_with("run: playbook migrate"));
     }
 
@@ -876,7 +880,7 @@ mod tests {
         assert_eq!(before[0].slug, PLUGIN_RANGE);
         assert_eq!(
             before[0].fix,
-            "claude plugin update playbook@pragmatic-engineer"
+            "claude plugin update playbook@amplifiedengineer"
         );
         assert!(after.is_empty(), "{after:?}");
     }

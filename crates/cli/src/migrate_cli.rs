@@ -359,7 +359,7 @@ mod tests {
     fn a_run_a_person_reads_counts_its_report_items_as_seen() {
         // Arrange: a plugin one line behind, so one report item is open.
         let home = crate::common::test_support::scratch_dir("migrate-seen");
-        let dir = home.join(".claude/plugins/cache/pragmatic-engineer/playbook/0.0.1");
+        let dir = home.join(".claude/plugins/cache/amplifiedengineer/playbook/0.0.1");
         std::fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
         std::fs::create_dir_all(dir.join("skills")).unwrap();
         std::fs::write(
@@ -370,7 +370,7 @@ mod tests {
         std::fs::write(
             home.join(".claude/plugins/installed_plugins.json"),
             format!(
-                r#"{{"plugins":{{"playbook@pragmatic-engineer":[{{"scope":"user","installPath":"{}"}}]}}}}"#,
+                r#"{{"plugins":{{"playbook@amplifiedengineer":[{{"scope":"user","installPath":"{}"}}]}}}}"#,
                 dir.display()
             ),
         )

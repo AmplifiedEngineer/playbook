@@ -953,7 +953,7 @@ fn other_playbook_plugins(ctx: &Ctx) -> Outcome {
         .collect();
     Outcome::Warn(format!(
         "installed next to {}, so hooks or skills run twice: {}. Run: {}",
-        crate::common::plugin_state::PLUGIN_KEY,
+        crate::common::plugin_state::installed_key(&ctx.claude_home),
         keys.join(", "),
         commands.join("; ")
     ))
@@ -968,7 +968,12 @@ fn plugin_version_range(ctx: &Ctx) -> Outcome {
     crate::plugin_root::find(None, &ctx.claude_home)
         .and_then(|root| crate::plugin_root::plugin_version(&root))
         .and_then(|v| {
-            crate::plugin_root::plugin_out_of_range(&v, env!("CARGO_PKG_VERSION"), homebrew)
+            crate::plugin_root::plugin_out_of_range(
+                &v,
+                env!("CARGO_PKG_VERSION"),
+                &crate::common::plugin_state::installed_key(&ctx.claude_home),
+                homebrew,
+            )
         })
         .map_or(Outcome::Quiet, Outcome::Warn)
 }
@@ -2446,7 +2451,7 @@ mod tests {
             ),
         )
         .unwrap();
-        let cache = h.join(".claude/plugins/cache/pragmatic-engineer/playbook");
+        let cache = h.join(".claude/plugins/cache/amplifiedengineer/playbook");
         fs::create_dir_all(cache.join("0.24.0")).unwrap();
         fs::write(cache.join("0.24.0/.orphaned_at"), "1").unwrap();
         fs::write(

@@ -174,7 +174,7 @@ mod tests {
     fn an_old_plugin_cache_with_seed_files_is_never_a_seed_source() {
         // Arrange: a 0.25 era plugin cache dir shipped the seed files.
         let home = scratch("old-cache-seed");
-        seeded(&home.join(".claude/plugins/cache/pragmatic-engineer/playbook/0.25.0"));
+        seeded(&home.join(".claude/plugins/cache/amplifiedengineer/playbook/0.25.0"));
 
         // Act
         let dry = seed_root(None);
