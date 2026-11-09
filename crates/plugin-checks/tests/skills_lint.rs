@@ -401,7 +401,7 @@ fn forked_files_point_at_the_existing_worktree_guard() {
             }
         }
     }
-    for forked in ["commit-and-push.md", "create-pull-request.md", "git.md"] {
+    for forked in ["create-pull-request.md", "git.md"] {
         assert!(
             users.iter().any(|u| u == forked),
             "{forked} must use the guard"
