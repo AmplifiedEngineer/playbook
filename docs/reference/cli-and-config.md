@@ -57,6 +57,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `security.defaults` | `false` | `true`, `false` |
 | `usage.theme` | `default` | `default`, `spectrum`, `dark`, `light`, `mono` |
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
+| `usage.timeZone` | `local` | `local`, `utc` |
 | `usage.refreshSeconds` | `5` | a number, see the config keys page for the range |
 | `usage.telemetry` | `auto` | `auto`, `off` |
 | `usage.telemetryRetentionDays` | `90` | a number, see the config keys page for the range |
