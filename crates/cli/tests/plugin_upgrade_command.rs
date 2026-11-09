@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook plugin update` runs against a fake `claude` on PATH that logs its
+//! `playbook plugin upgrade` runs against a fake `claude` on PATH that logs its
 //! calls and, like the real one, moves the installed version. The isolated
 //! home sets `PLAYBOOK_SKIP_PLUGIN_UPDATE`, so every test here also proves the
 //! command ignores that opt-out.
@@ -98,7 +98,7 @@ esac
         } else {
             "/usr/bin:/bin".to_string()
         };
-        cmd.args(["plugin", "update"])
+        cmd.args(["plugin", "upgrade"])
             .args(args)
             .current_dir(&self.home)
             .env("PATH", path)

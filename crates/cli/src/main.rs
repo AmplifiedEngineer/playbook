@@ -2831,10 +2831,13 @@ fn real_main() {
             }
         }
         Command::Plugin { sub } => match sub {
-            PluginCommand::Update { json } => {
-                let home = common::home_dir();
-                let probe = playbook::plugin_update::Probe::for_home(&home);
-                std::process::exit(playbook::plugin_update::print_update_command(&probe, json));
+            PluginCommand::Install { json } => {
+                let probe = playbook::plugin_update::Probe::for_home(&common::home_dir());
+                std::process::exit(playbook::plugin_update::print_install_command(&probe, json));
+            }
+            PluginCommand::Upgrade { json } => {
+                let probe = playbook::plugin_update::Probe::for_home(&common::home_dir());
+                std::process::exit(playbook::plugin_update::print_upgrade_command(&probe, json));
             }
         },
         Command::Mode { sub } => {
