@@ -268,14 +268,14 @@ fn is_off_in_claude_code(claude_home: &Path, id: &str) -> bool {
         == Some(serde_json::Value::Bool(false))
 }
 
-/// The folder Claude Code lists for plugin `id`.
+/// The folder Claude Code loads for plugin `id` here: the entry for this
+/// project first, then the user entry, the same pick `pending` checks.
 fn installed_path(claude_home: &Path, id: &str) -> Option<PathBuf> {
-    let entry = crate::common::plugin_state::installed_entry_at(claude_home, id)?;
-    let first = match entry {
-        serde_json::Value::Array(list) => list.into_iter().next()?,
-        other => other,
-    };
-    Some(PathBuf::from(first.get("installPath")?.as_str()?))
+    let entry = crate::common::plugin_state::installed_entry_at(claude_home, id);
+    let cwd = std::env::current_dir().unwrap_or_default();
+    crate::plugin_root::ranked_install_paths(entry, &cwd)
+        .into_iter()
+        .next()
 }
 
 /// The version Claude Code lists for plugin `id`, from its `installPath`.
@@ -322,7 +322,7 @@ pub fn run(probe: &Probe) -> Outcome {
 
 /// [`run`] for a binary at version `running`: an update that leaves the
 /// plugin older than the binary comes back as [`Outcome::Behind`].
-fn run_for_binary(probe: &Probe, running: &str) -> Outcome {
+pub(crate) fn run_for_binary(probe: &Probe, running: &str) -> Outcome {
     let (outcome, marketplace) = run_with_marketplace(probe);
     let (Outcome::Current { id, version: v } | Outcome::Updated { id, to: v, .. }) = &outcome
     else {
@@ -968,6 +968,72 @@ mod tests {
 
     fn calls(home: &Path) -> String {
         fs::read_to_string(home.join("claude-calls.log")).unwrap_or_default()
+    }
+
+    fn probe_items(home: &Path) -> Vec<crate::pending::Item> {
+        crate::pending::plugin_items(&crate::pending::PluginProbe {
+            claude_home: home.join(".claude"),
+            session_root: None,
+            binary: env!("CARGO_PKG_VERSION").to_string(),
+            homebrew: false,
+        })
+    }
+
+    #[test]
+    fn an_update_to_the_current_plugin_leaves_no_old_version_item() {
+        // Arrange
+        let home = scratch_dir("plugin-update-moves-forward");
+        let old = plugin(&home, "0.0.1");
+        let current = plugin(&home, env!("CARGO_PKG_VERSION"));
+        install(&home, "playbook@amplifiedengineer", &old);
+        let probe = Probe {
+            home: home.clone(),
+            claude: Some(fake_claude(&home, Some(&current), 0)),
+        };
+        let before = probe_items(&home);
+
+        // Act
+        let outcome = run_for_binary(&probe, env!("CARGO_PKG_VERSION"));
+        let after = probe_items(&home);
+
+        // Assert
+        assert_eq!(before.len(), 1, "{before:?}");
+        assert!(matches!(outcome, Outcome::Updated { .. }), "{outcome:?}");
+        assert!(after.is_empty(), "{after:?}");
+    }
+
+    #[test]
+    fn an_old_install_for_this_project_is_not_reported_up_to_date() {
+        // Arrange: the user install is current, the install for this
+        // project is old, and Claude Code loads the project one here.
+        let home = scratch_dir("plugin-update-project-install");
+        let old = plugin(&home, "0.0.1");
+        let current = plugin(&home, env!("CARGO_PKG_VERSION"));
+        let cwd = std::env::current_dir().unwrap();
+        fs::write(
+            home.join(".claude/plugins/installed_plugins.json"),
+            format!(
+                r#"{{"version":2,"plugins":{{"playbook@amplifiedengineer":[{{"scope":"user","installPath":"{}"}},{{"scope":"project","projectPath":"{}","installPath":"{}"}}]}}}}"#,
+                current.display(),
+                cwd.display(),
+                old.display()
+            ),
+        )
+        .unwrap();
+        let probe = Probe {
+            home: home.clone(),
+            claude: Some(fake_claude(&home, None, 0)),
+        };
+
+        // Act
+        let outcome = run_for_binary(&probe, env!("CARGO_PKG_VERSION"));
+
+        // Assert
+        let Outcome::Behind { version, .. } = &outcome else {
+            panic!("{outcome:?}");
+        };
+        assert_eq!(version.as_deref(), Some("0.0.1"));
+        assert_eq!(probe_items(&home).len(), 1);
     }
 
     #[test]
