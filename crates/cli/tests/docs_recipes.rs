@@ -570,17 +570,25 @@ fn the_parent_environment_does_not_reach_the_child() {
 
 #[test]
 fn the_sandbox_links_the_binaries_it_is_given() {
-    let target = Path::new("/bin/echo");
+    // A script, not /bin/echo: on some systems echo is a multicall binary
+    // that refuses to run under another name.
+    let target = std::env::temp_dir().join(format!("docs-recipes-tool-{}", std::process::id()));
+    fs::write(&target, "#!/bin/sh\necho linked\n").expect("script");
+    fs::set_permissions(&target, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+        .expect("chmod");
     let parent = parent_env();
     let page =
         format!("# How to test\n\n{MARKER_RUN}\n\n```bash\ntool linked\n# expect: linked\n```\n");
     let setup = Setup {
-        links: &[("tool", target)],
-        timeout: SHORT,
+        links: &[("tool", &target)],
+        // The first run of a new file can be slow while the OS scans it.
+        timeout: Duration::from_secs(20),
         parent_env: &parent,
         template: None,
     };
-    assert_eq!(run_page("links", "links.md", &page, &setup), Ok(()));
+    let result = run_page("links", "links.md", &page, &setup);
+    let _ = fs::remove_file(&target);
+    assert_eq!(result, Ok(()));
 }
 
 #[test]
