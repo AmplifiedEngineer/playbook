@@ -140,6 +140,27 @@ fn stop(child: &mut Child) {
 /// and macOS use.
 const PIPE_CAPACITY: usize = 64 * 1024;
 
+/// How often and how long a spawn waits out a busy executable.
+const BUSY_TRIES: u32 = 20;
+const BUSY_PAUSE: Duration = Duration::from_millis(50);
+
+/// Spawns `command`, trying again while the OS reports the executable busy.
+/// A script written a moment ago stays busy while a sibling thread's fork
+/// still holds its write descriptor, and the busy error clears once that
+/// child runs its own exec.
+fn spawn_retrying_busy(command: &mut Command) -> std::io::Result<Child> {
+    let mut tries = 1;
+    loop {
+        match command.spawn() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < BUSY_TRIES => {
+                tries += 1;
+                std::thread::sleep(BUSY_PAUSE);
+            }
+            result => return result,
+        }
+    }
+}
+
 fn run_bounded(
     command: &mut Command,
     input: Option<Vec<u8>>,
@@ -170,10 +191,7 @@ fn run_bounded(
             plain = Some(bytes);
         }
     }
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+    let mut child = spawn_retrying_busy(command.stdout(Stdio::piped()).stderr(Stdio::piped()))
         .map_err(RunFailure::Spawn)?;
     // Drop the command's own copy of the child's read end.
     command.stdin(Stdio::null());

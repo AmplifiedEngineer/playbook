@@ -65,7 +65,7 @@ mod tests {
             Status::Unchanged
         );
         assert_eq!(
-            status_of("update available: 1 -> 2 (run `playbook update`)"),
+            status_of("update available: 1 -> 2 (run `playbook upgrade`)"),
             Status::Warn
         );
     }

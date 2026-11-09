@@ -1,13 +1,50 @@
 # Reading documents
 
-`playbook doc read <file>` turns a PDF or an Office file into Markdown, on your machine, so a session reads text instead of a binary file. The converter is bundled: `pbdoc` is installed next to `playbook` on macOS and Linux, so there is nothing to install. Windows has no conversion, the command and the hint are off there.
+`playbook doc read <file>` reads a PDF or an Office file as Markdown text, on your machine and offline, so a session spends fewer tokens than it does on the raw file. On text PDFs the benchmark below measured 41 percent fewer tokens with every answer still correct. The converter comes with Playbook: `pbdoc` sits next to `playbook` on macOS and Linux, so there is nothing to install. Windows has no conversion, and the command and the hint are off there.
+
+## What it reads
+
+- PDF
+- EPUB and RTF
+- Word: docx and doc
+- PowerPoint: pptx and ppt
+- Excel: xlsx
+- OpenDocument: odt and odp
+- OpenDocument spreadsheets: ods
+- CSV
+
+It does not convert images, so use Read for those. A scanned PDF with no text layer needs OCR, and Playbook does not run OCR.
+
+## How much it saves
+
+Averages of 3 runs on synthetic documents, with a small model:
+
+| Document | Tokens without `playbook doc read` | Tokens with it | Change |
+| :- | -: | -: | -: |
+| text PDF, 20 pages | 67,918 | 36,865 | -46% |
+| text PDF, 2 pages | 15,084 | 12,216 | -19% |
+| xlsx, 2 sheets | 18,072 | 12,175 | -33% |
+| docx, tracked deletion | 17,778 | 12,215 | -31% |
+
+Savings grow with document size. Across both PDFs the total was 41 percent lower, 49,081 tokens against 83,002, and all 18 answers were correct. A CSV costs slightly more as Markdown, so the hint skips CSV.
+
+Read the caveat before you rely on these numbers. The benchmark used the npm `anydoc` package, the engine `pbdoc` builds on, not `pbdoc` itself. The documents were synthetic, 3 runs back each cell, and cost follows cache behavior, so treat the ratios as indicative. The docx run lost a tracked deletion, because the conversion drops deleted text. Read the original when that matters. Full tables and method are in the [benchmark](../internals/10-document-conversion-benchmark.md).
+
+## Try it
+
+```bash
+playbook doc status
+playbook doc read report.pdf
+```
+
+The first line says which converter is in use and its version. The second prints the document as Markdown inside a frame that marks it as untrusted data. The [read a document recipe](../recipes/read-a-document.md) shows the output on a small file.
 
 ## Turn it on
 
 1. Check it: `playbook doc status`. It names the converter in use and its version.
 2. Nothing more to do: `docs.convert` defaults to `auto`. A Read of a whole PDF, or of a Word, PowerPoint, Excel, EPUB, RTF or OpenDocument file, gets one line that suggests `playbook doc read <file>`. The hook only suggests. It never changes the call and never blocks. Set `docs.convert` to `off` to stop the hint. See the [benchmark](../internals/10-document-conversion-benchmark.md).
 
-If `pbdoc` is missing, `playbook doc status` says so. Reinstall with `install.sh` or `brew reinstall playbook`, or run `playbook update`.
+If `pbdoc` is missing, `playbook doc status` says so. Reinstall with `install.sh` or `brew reinstall playbook`, or run `playbook upgrade`.
 
 The converter was once an npm package. If you installed it earlier, `npm uninstall --global @firecrawl/anydoc` removes it, because playbook now uses the bundled one first. To run a different `anydoc` anyway, set `docs.anydocPath`. That program wins over the bundled one, and playbook does not check that it works offline.
 
@@ -20,10 +57,6 @@ A document longer than `docs.displayChars` (24000 characters) is not printed who
 - `--json` adds `total_chars`, `offset` and `next_offset`.
 
 A section number that does not exist exits with code 2 and says which numbers are valid.
-
-## What it reads
-
-pdf, docx, doc, odt, rtf, epub, pptx, ppt, odp, xlsx, ods and csv. Images are not converted, use Read for those.
 
 ## Exit codes
 

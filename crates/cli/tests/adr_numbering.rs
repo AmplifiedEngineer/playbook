@@ -17,16 +17,44 @@ fn root() -> PathBuf {
     PathBuf::from(env!("PLAYBOOK_REPO_ROOT"))
 }
 
-/// The file names under `docs/adr`.
+/// Whether a Markdown file name in `docs/adr` is a decision record or one of
+/// its companions. The index, `README.md`, is neither.
+fn is_adr_file(name: &str) -> bool {
+    name.ends_with(".md") && name != "README.md"
+}
+
+/// The ADR file names under `docs/adr`, without the index.
 fn adr_files() -> Vec<String> {
     let mut names: Vec<String> = fs::read_dir(root().join("docs/adr"))
         .expect("docs/adr exists")
         .flatten()
         .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.ends_with(".md"))
+        .filter(|n| is_adr_file(n))
         .collect();
     names.sort();
     names
+}
+
+#[test]
+fn the_adr_index_is_not_an_adr_file() {
+    assert!(!is_adr_file("README.md"));
+    assert!(is_adr_file("0001-package-toolkit-as-plugin.md"));
+    assert!(is_adr_file("0003-purpose-built-subagents-quality.md"));
+    assert!(!is_adr_file("notes.txt"));
+}
+
+#[test]
+fn every_decision_record_has_a_row_in_the_adr_index() {
+    let index = fs::read_to_string(root().join("docs/adr/README.md")).expect("docs/adr/README.md");
+    let missing: Vec<String> = adr_files()
+        .into_iter()
+        .filter(|n| !is_companion(n))
+        .filter(|n| !index.contains(&format!("]({n})")))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "docs/adr/README.md has no row for: {missing:?}"
+    );
 }
 
 /// Whether `name` starts with four digits and a dash.

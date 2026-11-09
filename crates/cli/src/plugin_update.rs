@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Updates the installed playbook plugin through the `claude` CLI after
-//! `playbook update` and `playbook migrate` (ADR 0034, 2026-10-19
+//! `playbook upgrade` and `playbook migrate` (ADR 0034, 2026-10-19
 //! amendment). It runs `claude plugin update <id>` for the playbook plugin
 //! only, never for another plugin. A missing CLI, a failed update, a plugin
 //! that is off in Claude Code or `update.plugin` set to off never fails
@@ -22,7 +22,7 @@ use std::time::Duration;
 /// The config key that turns the plugin update off.
 pub const CONFIG_KEY: &str = "update.plugin";
 
-/// Set by `playbook update` for the new binary's `migrate`, which then
+/// Set by `playbook upgrade` for the new binary's `migrate`, which then
 /// leaves the plugin to the update itself, so it runs once.
 pub const SKIP_ENV: &str = "PLAYBOOK_SKIP_PLUGIN_UPDATE";
 
@@ -73,6 +73,9 @@ pub enum Outcome {
     },
     /// `claude plugin install` ran and the plugin is now installed.
     Installed { id: String, version: Option<String> },
+    /// `playbook plugin install` found the plugin installed already and ran
+    /// nothing.
+    Present { id: String, version: Option<String> },
     /// The update ran and the installed plugin is still older than the
     /// binary. With `marketplace` unset, the marketplace was refreshed and
     /// has not published the binary's version yet. With it set, the refresh
@@ -114,6 +117,13 @@ impl Outcome {
                 version
                     .as_deref()
                     .map(|v| format!(" {v}"))
+                    .unwrap_or_default(),
+            ),
+            Outcome::Present { id, version } => format!(
+                "plugin: {id} is already installed{}",
+                version
+                    .as_deref()
+                    .map(|v| format!(" ({v})"))
                     .unwrap_or_default(),
             ),
             Outcome::NoCli { id, install: true } => format!(
@@ -583,6 +593,18 @@ pub enum AutoUpdate {
 }
 
 impl AutoUpdate {
+    /// A stable word for `--json`.
+    pub fn status(&self) -> &'static str {
+        match self {
+            AutoUpdate::Set => "set",
+            AutoUpdate::AlreadyOn => "already-on",
+            AutoUpdate::UserOff => "user-off",
+            AutoUpdate::NotRegistered => "not-registered",
+            AutoUpdate::NotBoolean => "not-boolean",
+            AutoUpdate::Failed(_) => "failed",
+        }
+    }
+
     /// One line for the setup report. `None` when there is nothing to say.
     pub fn line(&self) -> Option<String> {
         let name = MARKETPLACE;
@@ -651,6 +673,7 @@ pub fn mark_auto_update(home: &Path, marketplace: &str) -> AutoUpdate {
 pub fn auto_update_after(outcome: &Outcome, home: &Path) -> Option<AutoUpdate> {
     match outcome {
         Outcome::Installed { id, .. }
+        | Outcome::Present { id, .. }
         | Outcome::Updated { id, .. }
         | Outcome::Current { id, .. }
         | Outcome::Behind { id, .. }
@@ -660,6 +683,232 @@ pub fn auto_update_after(outcome: &Outcome, home: &Path) -> Option<AutoUpdate> {
         }
         _ => None,
     }
+}
+
+/// What [`ensure`] does for a plugin that is already installed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wanted {
+    /// Install a missing plugin; leave an installed one as it is
+    /// (`playbook plugin install`).
+    InstallOnly,
+    /// Install a missing plugin and update an installed one (`playbook
+    /// setup` and `playbook upgrade`).
+    InstallOrUpdate,
+}
+
+/// What happened to the marketplace on the way to the plugin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketplaceStep {
+    /// Claude Code already lists the `amplifiedengineer` marketplace.
+    Present,
+    /// Claude Code lists only this older name, which stays as it is.
+    OldName(&'static str),
+    /// `claude plugin marketplace add` ran.
+    Added,
+}
+
+impl MarketplaceStep {
+    /// A stable word for `--json`.
+    pub fn status(&self) -> &'static str {
+        match self {
+            MarketplaceStep::Present => "present",
+            MarketplaceStep::OldName(_) => "old-name",
+            MarketplaceStep::Added => "added",
+        }
+    }
+
+    /// One line for the report.
+    pub fn line(&self) -> String {
+        match self {
+            MarketplaceStep::Present => {
+                format!("plugin: the {MARKETPLACE} marketplace is already registered")
+            }
+            MarketplaceStep::OldName(name) => format!(
+                "plugin: the marketplace is registered under its old name {name}; left alone"
+            ),
+            MarketplaceStep::Added => {
+                format!("plugin: added the {MARKETPLACE} marketplace ({MARKETPLACE_SOURCE})")
+            }
+        }
+    }
+}
+
+/// What [`ensure`] did, one field per step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ensured {
+    /// `None` when no step touched the marketplace, such as a plugin that was
+    /// already installed or a failed install.
+    pub marketplace: Option<MarketplaceStep>,
+    pub outcome: Outcome,
+    /// `None` when the outcome left no `playbook@amplifiedengineer` plugin.
+    pub auto: Option<AutoUpdate>,
+}
+
+/// The one plugin step `playbook setup`, `playbook plugin install` and
+/// `playbook upgrade` share: registers the marketplace and installs the
+/// plugin when it is missing (with `wanted` set to
+/// [`Wanted::InstallOrUpdate`], updates it otherwise), then turns on
+/// auto-update for the marketplace. Claude Code updates a plugin with its
+/// marketplace, so that one flag covers the plugin; there is no per-plugin
+/// key. `running` is the binary version that judges a plugin as behind.
+pub fn ensure(probe: &Probe, opts: SyncOpts, wanted: Wanted, running: &str) -> Ensured {
+    let known = known_marketplaces(&probe.home);
+    let installed = plugin_id(&probe.home.join(".claude"));
+    let outcome = match (wanted, installed, &probe.claude) {
+        (Wanted::InstallOnly, _, None) => Outcome::NoCli {
+            id: PLUGIN_KEY.to_string(),
+            install: true,
+        },
+        (Wanted::InstallOnly, Some(id), Some(_)) => Outcome::Present {
+            version: installed_version(&probe.home.join(".claude"), &id),
+            id,
+        },
+        _ => sync_at(probe, opts, running, &|name| std::env::var(name).ok()),
+    };
+    let marketplace = match (&outcome, known.first()) {
+        (Outcome::Installed { .. }, None) => Some(MarketplaceStep::Added),
+        (_, Some(&MARKETPLACE)) => Some(MarketplaceStep::Present),
+        (_, Some(&name)) => Some(MarketplaceStep::OldName(name)),
+        _ => None,
+    };
+    let auto = auto_update_after(&outcome, &probe.home);
+    Ensured {
+        marketplace,
+        outcome,
+        auto,
+    }
+}
+
+/// The reminder that one flag covers marketplace and plugin.
+pub const AUTO_UPDATE_NOTE: &str = "plugin: Claude Code updates a plugin with its marketplace, so auto-update for the marketplace covers the plugin";
+
+impl Ensured {
+    /// Whether the plugin is now installed.
+    fn installed(&self) -> bool {
+        matches!(
+            self.outcome,
+            Outcome::Installed { .. }
+                | Outcome::Present { .. }
+                | Outcome::Updated { .. }
+                | Outcome::Current { .. }
+                | Outcome::Behind { .. }
+        )
+    }
+
+    fn auto_unset_line(&self) -> String {
+        format!(
+            "plugin: auto-update not set; {MARKETPLACE} is not listed in ~/.claude/settings.json"
+        )
+    }
+
+    /// Whether `claude` is missing or an install step failed.
+    pub fn failed(&self) -> bool {
+        matches!(self.outcome, Outcome::Failed { .. } | Outcome::NoCli { .. })
+    }
+
+    /// Whether the user must restart Claude Code or reload plugins.
+    pub fn needs_reload(&self) -> bool {
+        matches!(
+            self.outcome,
+            Outcome::Installed { .. } | Outcome::Updated { .. }
+        )
+    }
+
+    /// One line per step, then the auto-update note and the reload hint.
+    pub fn lines(&self) -> Vec<String> {
+        let mut lines: Vec<String> = Vec::new();
+        lines.extend(self.marketplace.map(|m| m.line()));
+        lines.extend(match &self.outcome {
+            // The reload hint closes the report once, so the line stops short of it.
+            Outcome::Installed { id, version } => Some(format!(
+                "plugin: installed {id}{}",
+                version
+                    .as_deref()
+                    .map(|v| format!(" {v}"))
+                    .unwrap_or_default()
+            )),
+            other => other.line(),
+        });
+        if let Outcome::NoCli { .. } = self.outcome {
+            lines.push(format!(
+                "plugin: install Claude Code or add it to PATH, then run: {}",
+                install_commands(PLUGIN_KEY)
+            ));
+        }
+        if self.installed() {
+            lines.push(match (&self.auto, self.marketplace) {
+                (Some(auto), _) => auto.line().unwrap_or_else(|| self.auto_unset_line()),
+                (None, Some(MarketplaceStep::OldName(name))) => format!(
+                    "plugin: auto-update left as it is; the marketplace is registered as {name}, not {MARKETPLACE}"
+                ),
+                (None, _) => self.auto_unset_line(),
+            });
+            lines.push(AUTO_UPDATE_NOTE.to_string());
+        }
+        if self.needs_reload() {
+            lines.push(format!("plugin: {RELOAD_HINT}"));
+        }
+        lines
+    }
+
+    /// The `--json` fields beside the envelope: one entry per step.
+    pub fn json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "steps": [
+                {
+                    "step": "marketplace",
+                    "status": self.marketplace.map_or("skipped", |m| m.status()),
+                    "line": self.marketplace.map(|m| m.line()),
+                },
+                {
+                    "step": "plugin",
+                    "status": status_of(&self.outcome),
+                    "line": self.outcome.line(),
+                },
+                {
+                    "step": "auto-update",
+                    "status": self.auto.as_ref().map_or("skipped", AutoUpdate::status),
+                    "line": self.auto.as_ref().and_then(AutoUpdate::line),
+                },
+            ],
+            "reload": self.needs_reload(),
+            "lines": self.lines(),
+        })
+    }
+}
+
+/// `playbook plugin install`: runs [`ensure`] as an explicit request, so
+/// `update.plugin` set to off, the skip variable and a CI environment do not
+/// stop it, and prints the result. Returns the exit code: 1 on a missing
+/// `claude` or a failed step, else 0. With `json` it prints the shared
+/// envelope and returns 0.
+pub fn print_install_command(probe: &Probe, json: bool) -> i32 {
+    let opts = SyncOpts {
+        allow_install: true,
+        force: true,
+        progress: false,
+    };
+    let report = ensure(probe, opts, Wanted::InstallOnly, env!("CARGO_PKG_VERSION"));
+    if matches!(report.outcome, Outcome::Installed { .. }) {
+        record_setup_run(&probe.home, &report.outcome);
+    }
+    let code = i32::from(report.failed());
+    if json {
+        let error = if code == 0 {
+            String::new()
+        } else {
+            report.lines().join("; ")
+        };
+        println!(
+            "{}",
+            crate::json::envelope::wrap(code, &error, report.json())
+        );
+        return 0;
+    }
+    for line in report.lines() {
+        println!("{line}");
+    }
+    code
 }
 
 /// The commands a setup run would start for this home, for a dry run.
@@ -719,7 +968,7 @@ fn run_with_marketplace(probe: &Probe, opts: SyncOpts) -> (Outcome, Option<Strin
 
 /// Updates the installed plugin `id`: refreshes its marketplace, runs
 /// `claude plugin update` and reads the version before and after. The one
-/// path [`sync`] and [`update_command`] share.
+/// path [`sync`] and [`upgrade_command`] share.
 fn update_installed(probe: &Probe, id: String, opts: SyncOpts) -> (Outcome, Option<String>) {
     let claude_home = probe.home.join(".claude");
     if is_off_in_claude_code(&claude_home, &id) {
@@ -785,7 +1034,7 @@ pub fn installed_ids(claude_home: &Path) -> Vec<String> {
         .collect()
 }
 
-/// What `playbook update --plugin` did, one [`Outcome`] per installed id.
+/// What `playbook plugin upgrade` did, one [`Outcome`] per installed id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandReport {
     pub outcomes: Vec<Outcome>,
@@ -837,7 +1086,7 @@ impl CommandReport {
     }
 }
 
-/// The line `playbook update --plugin` shows for `outcome`. It differs from
+/// The line `playbook plugin upgrade` shows for `outcome`. It differs from
 /// [`Outcome::line`] where an explicit command has no 24 hour retry to
 /// mention.
 fn command_line(outcome: &Outcome) -> Option<String> {
@@ -864,15 +1113,15 @@ fn command_line(outcome: &Outcome) -> Option<String> {
     }
 }
 
-/// `playbook update --plugin`: refreshes the marketplace and runs
+/// `playbook plugin upgrade`: refreshes the marketplace and runs
 /// `claude plugin update` for every installed playbook plugin id. It is an
 /// explicit request, so `update.plugin` set to off, the skip variable and a
 /// CI environment do not stop it.
-pub fn update_command(probe: &Probe) -> CommandReport {
-    update_command_at(probe, env!("CARGO_PKG_VERSION"))
+pub fn upgrade_command(probe: &Probe) -> CommandReport {
+    upgrade_command_at(probe, env!("CARGO_PKG_VERSION"))
 }
 
-fn update_command_at(probe: &Probe, running: &str) -> CommandReport {
+fn upgrade_command_at(probe: &Probe, running: &str) -> CommandReport {
     let opts = SyncOpts {
         progress: true,
         ..SyncOpts::default()
@@ -908,6 +1157,8 @@ fn report_json(report: &CommandReport) -> serde_json::Value {
 fn status_of(outcome: &Outcome) -> &'static str {
     match outcome {
         Outcome::Updated { .. } => "updated",
+        Outcome::Installed { .. } => "installed",
+        Outcome::Present { .. } => "present",
         Outcome::Current { .. } => "current",
         Outcome::Behind { .. } => "behind",
         Outcome::NoCli { .. } => "no-claude",
@@ -916,11 +1167,11 @@ fn status_of(outcome: &Outcome) -> &'static str {
     }
 }
 
-/// Runs [`update_command`], prints its result and returns the exit code: 1
+/// Runs [`upgrade_command`], prints its result and returns the exit code: 1
 /// on a real failure, else 0. With `json` it prints the shared envelope and
 /// returns 0.
-pub fn print_update_command(probe: &Probe, json: bool) -> i32 {
-    let report = update_command(probe);
+pub fn print_upgrade_command(probe: &Probe, json: bool) -> i32 {
+    let report = upgrade_command(probe);
     let code = i32::from(report.failed());
     if json {
         let error = if code == 0 {
@@ -938,23 +1189,68 @@ pub fn print_update_command(probe: &Probe, json: bool) -> i32 {
     code
 }
 
-/// [`run`] for a command, unless `--no-plugin` was passed or the caller set
-/// [`SKIP_ENV`]. `None` when it was not asked to run.
-pub fn run_for_command(home: &Path, no_plugin: bool) -> Option<Outcome> {
-    let skip = no_plugin || std::env::var_os(SKIP_ENV).is_some_and(|v| v == SKIP_VALUE);
-    if skip {
-        return None;
+/// Why a command that runs the plugin step may not.
+enum Guard {
+    /// `--no-plugin` or [`SKIP_ENV`]: say nothing.
+    Skip,
+    /// Another playbook process holds the plugin claim.
+    Busy,
+    Go,
+}
+
+fn guard(home: &Path, no_plugin: bool) -> Guard {
+    if no_plugin || std::env::var_os(SKIP_ENV).is_some_and(|v| v == SKIP_VALUE) {
+        return Guard::Skip;
     }
     let root = crate::common::paths::playbook_root_from(home);
     if in_flight(&root, env!("CARGO_PKG_VERSION"), now()) {
-        return Some(Outcome::Skipped(
-            "another playbook process is already updating it".to_string(),
-        ));
+        return Guard::Busy;
     }
-    Some(run_for_binary(
-        &Probe::for_home(home),
-        env!("CARGO_PKG_VERSION"),
-    ))
+    Guard::Go
+}
+
+/// The outcome for a plugin step that another process already runs.
+fn busy() -> Outcome {
+    Outcome::Skipped("another playbook process is already updating it".to_string())
+}
+
+/// [`run`] for a command, unless `--no-plugin` was passed or the caller set
+/// [`SKIP_ENV`]. `None` when it was not asked to run.
+pub fn run_for_command(home: &Path, no_plugin: bool) -> Option<Outcome> {
+    match guard(home, no_plugin) {
+        Guard::Skip => None,
+        Guard::Busy => Some(busy()),
+        Guard::Go => Some(run_for_binary(
+            &Probe::for_home(home),
+            env!("CARGO_PKG_VERSION"),
+        )),
+    }
+}
+
+/// The plugin step of `playbook upgrade`: [`ensure`] with an install or an
+/// update, judged against `running`, the version the upgrade installed. It
+/// follows `update.plugin`, `--no-plugin` and [`SKIP_ENV`], so it is the same
+/// step `playbook plugin install` and `playbook plugin upgrade` run, minus
+/// their force. `None` when it was not asked to run.
+pub fn run_for_upgrade(home: &Path, no_plugin: bool, running: &str) -> Option<Ensured> {
+    let held = |outcome| Ensured {
+        marketplace: None,
+        outcome,
+        auto: None,
+    };
+    match guard(home, no_plugin) {
+        Guard::Skip => None,
+        Guard::Busy => Some(held(busy())),
+        Guard::Go => Some(ensure(
+            &Probe::for_home(home),
+            SyncOpts {
+                allow_install: true,
+                ..SyncOpts::default()
+            },
+            Wanted::InstallOrUpdate,
+            running,
+        )),
+    }
 }
 
 /// The state key of the once-per-binary-version marker.
@@ -1167,6 +1463,7 @@ fn end_state(outcome: &Outcome, running: &str, installed_after: Option<&str>) ->
         Outcome::Current { .. }
         | Outcome::Updated { .. }
         | Outcome::Installed { .. }
+        | Outcome::Present { .. }
         | Outcome::Skipped(_)
         | Outcome::LeftAlone(_)
         | Outcome::NotInstalled => State::Done,
@@ -1272,7 +1569,7 @@ const NO_SPAWN_VALUE: &str = "1";
 /// the child is not mistaken for a nested run. Returns whether the child
 /// started; the no-spawn seam counts as started, since nothing failed.
 pub(crate) fn spawn_refresh_plugin() -> bool {
-    spawn_detached(&["update", "--refresh-plugin"])
+    spawn_detached(&["upgrade", "--refresh-plugin"])
 }
 
 /// Starts `<exe> skills sync --refresh` detached, the same way.
@@ -2674,10 +2971,7 @@ mod tests {
         let home = scratch_dir("plugin-update-timeout");
         let bin = home.join("bin/claude");
         fs::create_dir_all(bin.parent().unwrap()).unwrap();
-        write_script(
-            &bin,
-            "#!/bin/sh\necho \"$*\" >> \"$HOME/claude-calls.log\"\nsleep 5\n",
-        );
+        write_script(&bin, "#!/bin/sh\nsleep 5\n");
         let probe = Probe {
             home: home.clone(),
             claude: Some(bin.clone()),
@@ -2686,8 +2980,10 @@ mod tests {
         // Act
         let result = run_claude(&probe, &bin, &["plugin", "update"], Duration::from_secs(1));
 
-        // Assert
-        assert_eq!(calls(&home), "plugin update\n", "the fake claude never ran");
+        // Assert: a start failure reads "could not be started", so this error
+        // alone proves the call began and then outlived the limit. The script
+        // logs nothing because a loaded machine can spend the whole second
+        // before `sh` runs its first line.
         assert_eq!(result, Err("it did not finish within 1 s".to_string()));
     }
 

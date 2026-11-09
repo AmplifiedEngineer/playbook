@@ -100,7 +100,7 @@ fn a_newer_remote_is_refused_with_no_writes() {
     );
     assert!(error.to_string().contains("version 2"));
     assert!(error.to_string().contains("version 1"));
-    assert!(error.to_string().contains("playbook update"));
+    assert!(error.to_string().contains("playbook upgrade"));
     assert!(
         !fake.log().iter().any(|sql| is_write(sql)),
         "{:?}",

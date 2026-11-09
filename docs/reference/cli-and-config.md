@@ -123,7 +123,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows the Agent Budget Dashboard, and helps with PRs, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `completions`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `gc`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `plugin`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `watch`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `completions`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `gc`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `plugin`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `upgrade`, `usage`, `version`, `watch`, `worktree`
 
 ### `playbook adr`
 
@@ -1123,21 +1123,35 @@ Prints `path<TAB>[status]<TAB>title` per file, or `NO_PLANS`.
 
 Manage the playbook plugin in Claude Code, apart from the binary
 
-`update` refreshes the marketplace and runs `claude plugin update` for each installed playbook plugin id. It downloads no binary. Run `playbook update` to update the binary.
+`install` adds the marketplace and the plugin, for a playbook that did not come from Homebrew. `upgrade` refreshes the marketplace and runs `claude plugin update` for each installed playbook plugin id. Neither downloads a binary. Run `playbook upgrade` to update the binary.
 
-Example: `playbook plugin update`
+Example: `playbook plugin install`
 
-Subcommands: `update`
+Subcommands: `install`, `upgrade`
 
-### `playbook plugin update`
+### `playbook plugin install`
 
-Update only the playbook plugin and its marketplace
+Install the playbook plugin and its marketplace into Claude Code
 
-Refreshes the marketplace, then runs `claude plugin update` for every installed playbook plugin id, `playbook@amplifiedengineer` and the old `playbook@pragmatic-engineer`. You asked for it, so `update.plugin` set to `off`, `PLAYBOOK_SKIP_PLUGIN_UPDATE` and a CI environment do not stop it. Prints one line per plugin. Exits 1 when an update fails, `claude` is not on PATH, or the marketplace refresh failed while the plugin lags; an up to date plugin, one the marketplace has not published yet and a missing plugin exit 0.
+For a playbook that did not come from Homebrew, such as one from the install script, a container, a home server platform like Umbrel or a nix profile. Needs `claude` on PATH. Adds the `amplifiedengineer/marketplace` marketplace unless Claude Code lists it already, and leaves one listed under the old `pragmatic-engineer` name as it is. Turns on `autoUpdate` for the marketplace in `~/.claude/settings.json`, and keeps an explicit `false`. Then installs `playbook@amplifiedengineer`. Claude Code updates a plugin with its marketplace, so that one flag also keeps the plugin up to date; there is no per-plugin key.
 
-Restart Claude Code or run /reload-plugins after an update.
+You asked for it, so `update.plugin` set to `off`, `PLAYBOOK_SKIP_PLUGIN_UPDATE` and a CI environment do not stop it. Prints one line per step. A second run reports every step as done and changes nothing. Exits 1 when `claude` is not on PATH or a step fails.
 
-Example: `playbook plugin update`
+Restart Claude Code or run /reload-plugins after an install.
+
+Example: `playbook plugin install`
+
+- `--json`: Print one JSON object in the shared envelope, and exit 0 whatever the result
+
+### `playbook plugin upgrade`
+
+Upgrade only the playbook plugin and its marketplace
+
+Refreshes the marketplace, then runs `claude plugin update` for every installed playbook plugin id, `playbook@amplifiedengineer` and the old `playbook@pragmatic-engineer`. You asked for it, so `update.plugin` set to `off`, `PLAYBOOK_SKIP_PLUGIN_UPDATE` and a CI environment do not stop it. Prints one line per plugin. Exits 1 when an upgrade fails, `claude` is not on PATH, or the marketplace refresh failed while the plugin lags; an up to date plugin, one the marketplace has not published yet and a missing plugin exit 0.
+
+Restart Claude Code or run /reload-plugins after an upgrade.
+
+Example: `playbook plugin upgrade`
 
 - `--json`: Print one JSON object in the shared envelope, and exit 0 whatever the result
 
@@ -1662,19 +1676,26 @@ Example: `playbook uninstall --dry-run`
 - `--dry-run`: List what would be removed and change nothing
 - `--remove-binary`: Also remove the `playbook` binary, its backups and the PATH line the installer added
 
-### `playbook update`
+### `playbook upgrade`
 
-Update playbook to a published release
+Upgrade playbook to a published release, and its plugin with it
 
-Downloads the release, checks its SHA256 sum and, when `gh` is installed, its build attestation, then swaps the binary and keeps the old one as a backup. In auto mode it refuses unless you pass `--yes`. Then it updates the playbook plugin through `claude plugin update`, unless you pass `--no-plugin` or `update.plugin` is `off`. To update only the plugin, run `playbook plugin update`. `--check` and `--list` change nothing. `--check` exits 0 whether or not an update exists, and 1 on an error such as an unreachable release list or an unknown version.
+Looks up the latest release and compares it with this binary. When it is newer, shows both versions and asks you to confirm in a terminal; `--yes` skips the question. With no terminal and no `--yes`, it prints the hint and changes nothing. After you confirm, it downloads the release, checks its SHA256 sum and, when `gh` is installed, its build attestation, then swaps the binary and keeps the old one as a backup. In auto mode it refuses unless you pass `--yes`.
 
-Example: `playbook update --check`
+Then it runs the plugin step of `playbook plugin install` and `playbook plugin upgrade` so the plugin matches the new binary: it adds the marketplace when it is missing, turns on `autoUpdate` for it, and installs or updates the plugin. Pass `--no-plugin` or set `update.plugin` to `off` to skip that step. To change only the plugin, run `playbook plugin upgrade`.
+
+A Homebrew install is never replaced: `upgrade` checks for a newer release, says Homebrew owns the binary, and tells you to run `brew upgrade playbook`. It exits 0.
+
+`--check` and `--list` change nothing. `--check` exits 0 whether or not a newer release exists, and 1 on an error such as an unreachable release list or an unknown version. `--json` prints one object in the shared envelope and exits 0 whatever the result.
+
+Example: `playbook upgrade --check`
 
 - `--check`: Only report whether an update is available
 - `--list`: List published releases
 - `--pre`: Consider pre-releases when picking the latest
-- `--yes`: Confirm the update when auto mode is on
-- `--no-plugin`: Leave the playbook plugin in Claude Code as it is. By default `update` runs `claude plugin update` for it, unless the config key `update.plugin` is `off`
+- `--yes`: Skip the confirmation question, and confirm the upgrade when auto mode is on
+- `--json`: Print one JSON object in the shared envelope, and exit 0 whatever the result
+- `--no-plugin`: Leave the playbook plugin in Claude Code as it is. By default `upgrade` installs or updates it, unless the config key `update.plugin` is `off`
 
 ### `playbook usage`
 

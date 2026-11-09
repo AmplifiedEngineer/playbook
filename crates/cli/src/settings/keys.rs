@@ -14,7 +14,7 @@ pub const SHIPPABLE_KEYS: &[&str] = &["permissions", "hooks", "statusLine"];
 /// The security section of the template: the whole `permissions` key. A fresh
 /// `playbook setup` leaves it out unless the user opts in, see
 /// `init::run::neutralise_security`. Update control (the autoupdater) is left
-/// to the user, `playbook update` and Homebrew.
+/// to the user, `playbook upgrade` and Homebrew.
 pub const SECURITY_KEYS: &[&str] = &["permissions"];
 
 /// The `permissions` block of a seed when it is an object with a non-empty

@@ -77,7 +77,7 @@ pub fn select(releases: &[Release], requested: Option<&str>, pre: bool) -> Resul
             .iter()
             .find(|r| r.version() == want)
             .cloned()
-            .ok_or_else(|| format!("no release v{want}; run `playbook update --list`"));
+            .ok_or_else(|| format!("no release v{want}; run `playbook upgrade --list`"));
     }
     releases
         .iter()

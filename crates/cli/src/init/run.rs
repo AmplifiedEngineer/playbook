@@ -196,10 +196,14 @@ fn plugin_step(paths: &InitPaths) -> Option<StepReport> {
         force,
         progress: true,
     };
-    let outcome = pu::sync(&pu::Probe::for_home(&paths.home), opts);
-    pu::record_setup_run(&paths.home, &outcome);
-    let auto_update = pu::auto_update_after(&outcome, &paths.home);
-    Some(plugin_report(&outcome, auto_update.as_ref()))
+    let ensured = pu::ensure(
+        &pu::Probe::for_home(&paths.home),
+        opts,
+        pu::Wanted::InstallOrUpdate,
+        env!("CARGO_PKG_VERSION"),
+    );
+    pu::record_setup_run(&paths.home, &ensured.outcome);
+    Some(plugin_report(&ensured.outcome, ensured.auto.as_ref()))
 }
 
 /// One report line for the outcome. A plugin that could not be installed or

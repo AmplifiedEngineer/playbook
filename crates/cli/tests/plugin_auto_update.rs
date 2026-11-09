@@ -575,7 +575,7 @@ fn the_detached_refresh_stores_the_updated_line_and_prints_nothing() {
     f.set_marker(&format!("{VERSION} running {}", now()));
 
     // Act
-    let out = f.run(&["update", "--refresh-plugin"], false, "", &[]);
+    let out = f.run(&["upgrade", "--refresh-plugin"], false, "", &[]);
 
     // Assert
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
@@ -601,7 +601,7 @@ fn the_detached_refresh_stores_the_updated_line_and_prints_nothing() {
 fn a_refresh_started_by_hand_without_a_claim_runs_nothing() {
     let f = Fixture::new(true, 0);
 
-    let out = f.run(&["update", "--refresh-plugin"], false, "", &[]);
+    let out = f.run(&["upgrade", "--refresh-plugin"], false, "", &[]);
 
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     assert_eq!(f.calls(), "");
@@ -616,7 +616,7 @@ fn a_failed_detached_refresh_stores_the_failure_line_and_marks_failed() {
     f.set_marker(&format!("{VERSION} running {}", now()));
 
     // Act
-    let out = f.run(&["update", "--refresh-plugin"], false, "", &[]);
+    let out = f.run(&["upgrade", "--refresh-plugin"], false, "", &[]);
 
     // Assert
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
@@ -657,7 +657,7 @@ fn a_refresh_that_leaves_the_plugin_older_stores_the_still_older_notice() {
     f.set_marker(&format!("{VERSION} running {}", now()));
 
     // Act
-    f.run(&["update", "--refresh-plugin"], false, "", &[]);
+    f.run(&["upgrade", "--refresh-plugin"], false, "", &[]);
 
     // Assert
     let notice = playbook::state::get(&f.root(), NOTICE_KEY)
@@ -827,7 +827,7 @@ fn the_upgrade_path_never_writes_auto_update() {
     let command = f.config_list(true, &[]);
     let after_command = fs::read_to_string(&settings).unwrap();
     f.set_marker(&format!("{VERSION} running {}", now()));
-    let refresh = f.run(&["update", "--refresh-plugin"], false, "", &[]);
+    let refresh = f.run(&["upgrade", "--refresh-plugin"], false, "", &[]);
 
     // Assert
     assert_eq!(command.status.code(), Some(0), "{}", stderr(&command));

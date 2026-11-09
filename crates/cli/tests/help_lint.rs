@@ -103,7 +103,7 @@ const AREAS: &[(&str, &[&str])] = &[
         "user-core.txt",
         &[
             "doctor",
-            "update",
+            "upgrade",
             "uninstall",
             "migrate",
             "hooks",
@@ -730,7 +730,7 @@ fn walker_visits_every_argument() {
     let mut owned = 0;
     collect(&root, &mut BTreeSet::new(), &mut owned);
     assert_eq!(nodes.iter().map(|n| n.args.len()).sum::<usize>(), owned);
-    let update = nodes.iter().find(|n| n.path == "update").unwrap();
+    let update = nodes.iter().find(|n| n.path == "upgrade").unwrap();
     assert!(update.args.iter().any(|a| a.label == "--check"));
 }
 

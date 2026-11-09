@@ -3,7 +3,7 @@
 
 //! Release notes (ADR 0037). Every release carries `release-notes.json`,
 //! built from the Conventional Commits by `scripts/release-notes.sh` and
-//! listed in its SHA256SUMS. `playbook update`, the automatic update and the
+//! listed in its SHA256SUMS. `playbook upgrade`, the automatic update and the
 //! install script read it to show the breaking changes of a release. The
 //! first run after an upgrade shows only a link, since it stays offline.
 
@@ -201,7 +201,7 @@ pub fn fetch(
     Ok(Some(notes))
 }
 
-/// `playbook update --print-notes <file>`, which the install script runs on
+/// `playbook upgrade --print-notes <file>`, which the install script runs on
 /// the binary it just installed: prints the notes of this binary's release
 /// from a file the script checked, and records them as shown so the first
 /// run step does not print its line too. A file that cannot be read, or

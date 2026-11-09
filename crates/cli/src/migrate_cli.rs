@@ -27,7 +27,7 @@ pub enum Mode {
 pub fn run(home: &Path, mode: Mode, json: bool, plugin: bool) -> i32 {
     use std::io::IsTerminal;
     // The list counts as seen only when a person reads it: not when a
-    // caller such as `playbook update` or the automatic update captures it.
+    // caller such as `playbook upgrade` or the automatic update captures it.
     let seen = std::io::stdout().is_terminal() && !crate::common::headless::is_headless();
     run_with(home, mode, json, seen, plugin)
 }

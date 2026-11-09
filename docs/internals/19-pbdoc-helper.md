@@ -70,4 +70,4 @@ A helper that dies on a crash signal is reported as a safety limit hit, because 
 
 ## Where it is found and shipped
 
-The lookup order is `docs.anydocPath`, then the `pbdoc` next to the `playbook` binary, then `anydoc` on `PATH`. The release builds `pbdoc` for macOS and Linux and publishes it as its own archive with `NOTICE-pbdoc`. The build fails when the binary passes 8 MiB (8,388,608 bytes) or the archive passes 4.5 MiB (4,718,592 bytes). `playbook update` replaces the helper, `playbook uninstall` removes it and `playbook doc status` shows which converter is in use. There is no helper on Windows.
+The lookup order is `docs.anydocPath`, then the `pbdoc` next to the `playbook` binary, then `anydoc` on `PATH`. The release builds `pbdoc` for macOS and Linux and publishes it as its own archive with `NOTICE-pbdoc`. The build fails when the binary passes 8 MiB (8,388,608 bytes) or the archive passes 4.5 MiB (4,718,592 bytes). `playbook upgrade` replaces the helper, `playbook uninstall` removes it and `playbook doc status` shows which converter is in use. There is no helper on Windows.

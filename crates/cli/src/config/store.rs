@@ -1389,7 +1389,7 @@ mod tests {
             err.contains(&format!("understands {SCHEMA_VERSION}")),
             "{err}"
         );
-        assert!(err.contains("playbook update"), "{err}");
+        assert!(err.contains("playbook upgrade"), "{err}");
         assert_eq!(stored_schema_version(&r), Some(newer));
     }
 

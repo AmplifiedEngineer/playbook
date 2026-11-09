@@ -8,7 +8,7 @@ The page is kept by hand. It lists every threshold of the lint, so a change that
 
 1. **Summary.** The first sentence of the doc comment. `playbook commands` and the root help show it too. Start with a verb: `Print`, `List`, `Check`, `Create`, `Remove`, `Run`. Name the result or the effect, not the mechanism. No final period on a one-line summary.
 2. **Details.** After a blank doc-comment line. Full sentences with periods. Say what the command changes, what it reads, when to use it and the exit codes that matter. Name no source files and no Rust paths.
-3. **Example.** A command with three or more visible arguments, or any required one, ends with an `Example:` line, such as `Example: playbook update --check`. The line must parse with the real CLI.
+3. **Example.** A command with three or more visible arguments, or any required one, ends with an `Example:` line, such as `Example: playbook upgrade --check`. The line must parse with the real CLI.
 4. **Flags.** A value flag is a noun phrase that names the thing and, for a number, its unit: `Seconds between reads`. A boolean flag is an imperative: `Print JSON instead of text`. Do not repeat a default that clap prints as `[default: x]`.
 5. **Positionals.** Say what is expected and its form: `Absolute path of the repo to trust`. Not only the name.
 6. **Plain English.** Follow the writing style of the repo. No filler, and no en or em dashes.

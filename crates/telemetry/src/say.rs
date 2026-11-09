@@ -63,7 +63,7 @@ pub fn release() {
     }
     if let Some(dir) = lock(&OLD_WRITER).take() {
         eprintln!(
-            "an older playbook is still writing to {dir}; upgrade it (`brew upgrade playbook` or `playbook update`)"
+            "an older playbook is still writing to {dir}; upgrade it (`brew upgrade playbook` or `playbook upgrade`)"
         );
     }
 }
