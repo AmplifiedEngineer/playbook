@@ -100,9 +100,11 @@ arg playbook update id=refresh_plugin long=refresh-plugin short=- value_names=RE
 arg playbook update id=print_notes long=print-notes short=- value_names=FILE possible=- defaults=- aliases=- required=false hidden=true global=false action=Set num_args=- parser=std::path::PathBuf conflicts=-
 arg playbook update id=from long=from short=- value_names=VERSION possible=- defaults=- aliases=- required=false hidden=true global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 arg playbook update id=no_plugin long=no-plugin short=- value_names=NO_PLUGIN possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
-command playbook plugin subcommands=update aliases=- groups=Plugin[-]
-command playbook plugin update subcommands=- aliases=- groups=Update[json]
-arg playbook plugin update id=json long=json short=- value_names=JSON possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
+command playbook plugin subcommands=install,upgrade aliases=- groups=Plugin[-]
+command playbook plugin install subcommands=- aliases=- groups=Install[json]
+arg playbook plugin install id=json long=json short=- value_names=JSON possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
+command playbook plugin upgrade subcommands=- aliases=- groups=Upgrade[json]
+arg playbook plugin upgrade id=json long=json short=- value_names=JSON possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
 command playbook version subcommands=- aliases=- groups=-
 command playbook completions subcommands=- aliases=- groups=Completions[shell]
 arg playbook completions id=shell long=- short=- value_names=SHELL possible=bash,zsh,fish defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=playbook::completions::CompletionShell conflicts=-

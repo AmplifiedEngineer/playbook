@@ -420,7 +420,7 @@ pub enum Command {
     /// old one as a backup. In auto mode it refuses unless you pass `--yes`.
     /// Then it updates the playbook plugin through `claude plugin update`,
     /// unless you pass `--no-plugin` or `update.plugin` is `off`. To update
-    /// only the plugin, run `playbook plugin update`.
+    /// only the plugin, run `playbook plugin upgrade`.
     /// `--check` and `--list` change nothing. `--check` exits 0 whether or not
     /// an update exists, and 1 on an error such as an unreachable release list
     /// or an unknown version.
@@ -464,11 +464,13 @@ pub enum Command {
     },
     /// Manage the playbook plugin in Claude Code, apart from the binary
     ///
-    /// `update` refreshes the marketplace and runs `claude plugin update` for
-    /// each installed playbook plugin id. It downloads no binary. Run
-    /// `playbook update` to update the binary.
+    /// `install` adds the marketplace and the plugin, for a playbook that
+    /// did not come from Homebrew. `upgrade` refreshes the marketplace and
+    /// runs `claude plugin update` for each installed playbook plugin id.
+    /// Neither downloads a binary. Run `playbook update` to update the
+    /// binary.
     ///
-    /// Example: `playbook plugin update`
+    /// Example: `playbook plugin install`
     Plugin {
         #[command(subcommand)]
         sub: PluginCommand,
@@ -1204,21 +1206,47 @@ pub enum EvalCommand {
 /// `playbook plugin` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum PluginCommand {
-    /// Update only the playbook plugin and its marketplace
+    /// Install the playbook plugin and its marketplace into Claude Code
+    ///
+    /// For a playbook that did not come from Homebrew, such as one from the
+    /// install script, a container, a home server platform like Umbrel or a
+    /// nix profile. Needs `claude` on PATH. Adds the `amplifiedengineer/marketplace`
+    /// marketplace unless Claude Code lists it already, and leaves one listed
+    /// under the old `pragmatic-engineer` name as it is. Turns on
+    /// `autoUpdate` for the marketplace in `~/.claude/settings.json`, and
+    /// keeps an explicit `false`. Then installs `playbook@amplifiedengineer`.
+    /// Claude Code updates a plugin with its marketplace, so that one flag
+    /// also keeps the plugin up to date; there is no per-plugin key.
+    ///
+    /// You asked for it, so `update.plugin` set to `off`,
+    /// `PLAYBOOK_SKIP_PLUGIN_UPDATE` and a CI environment do not stop it.
+    /// Prints one line per step. A second run reports every step as done and
+    /// changes nothing. Exits 1 when `claude` is not on PATH or a step fails.
+    ///
+    /// Restart Claude Code or run /reload-plugins after an install.
+    ///
+    /// Example: `playbook plugin install`
+    Install {
+        /// Print one JSON object in the shared envelope, and exit 0 whatever
+        /// the result
+        #[arg(long)]
+        json: bool,
+    },
+    /// Upgrade only the playbook plugin and its marketplace
     ///
     /// Refreshes the marketplace, then runs `claude plugin update` for every
     /// installed playbook plugin id, `playbook@amplifiedengineer` and the old
     /// `playbook@pragmatic-engineer`. You asked for it, so `update.plugin` set
     /// to `off`, `PLAYBOOK_SKIP_PLUGIN_UPDATE` and a CI environment do not
-    /// stop it. Prints one line per plugin. Exits 1 when an update fails,
+    /// stop it. Prints one line per plugin. Exits 1 when an upgrade fails,
     /// `claude` is not on PATH, or the marketplace refresh failed while the
     /// plugin lags; an up to date plugin, one the marketplace has not
     /// published yet and a missing plugin exit 0.
     ///
-    /// Restart Claude Code or run /reload-plugins after an update.
+    /// Restart Claude Code or run /reload-plugins after an upgrade.
     ///
-    /// Example: `playbook plugin update`
-    Update {
+    /// Example: `playbook plugin upgrade`
+    Upgrade {
         /// Print one JSON object in the shared envelope, and exit 0 whatever
         /// the result
         #[arg(long)]
