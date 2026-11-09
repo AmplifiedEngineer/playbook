@@ -30,6 +30,9 @@ const WHY_MAX_CHARS: usize = 200;
 /// How long `claude plugin update` may take.
 const TIMEOUT: Duration = Duration::from_secs(120);
 
+/// How long `claude plugin marketplace update` may take.
+const MARKETPLACE_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// What a plugin update did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
@@ -49,6 +52,16 @@ pub enum Outcome {
     NoCli { id: String },
     /// `claude plugin update` failed or timed out.
     Failed { id: String, why: String },
+    /// The update ran and the installed plugin is still older than the
+    /// binary. With `marketplace` unset, the marketplace was refreshed and
+    /// has not published the binary's version yet. With it set, the refresh
+    /// failed for that reason, so the marketplace may hold a newer plugin.
+    Behind {
+        id: String,
+        version: Option<String>,
+        running: String,
+        marketplace: Option<String>,
+    },
 }
 
 impl Outcome {
@@ -81,7 +94,40 @@ impl Outcome {
             Outcome::Failed { id, why } => {
                 format!("plugin: the update failed ({why}); run: {}", command(id))
             }
+            Outcome::Behind {
+                id,
+                version,
+                running,
+                marketplace,
+            } => {
+                let installed = version.as_deref().unwrap_or(UNKNOWN_VERSION);
+                match marketplace {
+                    None => format!(
+                        "plugin: {id} {installed} is older than this binary ({running}), and the marketplace has not published a newer plugin yet; update again after the next plugin release"
+                    ),
+                    Some(why) => format!(
+                        "plugin: {id} {installed} is older than this binary ({running}); the marketplace refresh failed ({why}); run: {} && {}",
+                        marketplace_command(id),
+                        command(id)
+                    ),
+                }
+            }
         })
+    }
+}
+
+impl Outcome {
+    /// Whether the update ran against a refreshed marketplace that has not
+    /// published the binary's plugin version, so `claude plugin update`
+    /// would change nothing.
+    pub fn awaits_release(&self) -> bool {
+        matches!(
+            self,
+            Outcome::Behind {
+                marketplace: None,
+                ..
+            }
+        )
     }
 }
 
@@ -91,6 +137,57 @@ pub const COMMAND_PREFIX: &str = "claude plugin update ";
 /// The command that updates plugin `id`.
 pub fn command(id: &str) -> String {
     format!("{COMMAND_PREFIX}{id}")
+}
+
+/// Shown where the installed plugin version cannot be read.
+const UNKNOWN_VERSION: &str = "unknown version";
+
+/// The marketplace name in plugin id `id`: the text after the last `@`.
+fn marketplace_of(id: &str) -> Option<&str> {
+    id.rsplit_once('@')
+        .map(|(_, name)| name)
+        .filter(|name| !name.is_empty())
+}
+
+/// The command that refreshes the marketplace clone of plugin `id`.
+fn marketplace_command(id: &str) -> String {
+    format!(
+        "claude plugin marketplace update {}",
+        marketplace_of(id).unwrap_or_default()
+    )
+}
+
+/// Runs `claude` with `args` under the probe's home, the skip variable, no
+/// stdin and `timeout`. `Err` carries why it failed.
+fn run_claude(
+    probe: &Probe,
+    claude: &Path,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<(), String> {
+    let mut cmd = std::process::Command::new(claude);
+    cmd.args(args)
+        .env("HOME", &probe.home)
+        .env(SKIP_ENV, SKIP_VALUE)
+        .stdin(std::process::Stdio::null());
+    let Some(out) = crate::common::proc::run_with_timeout(&mut cmd, timeout) else {
+        return Err(format!("it did not finish within {} s", timeout.as_secs()));
+    };
+    if out.status.success() {
+        return Ok(());
+    }
+    let text = String::from_utf8_lossy(&out.stderr);
+    let last = text
+        .lines()
+        .map(str::trim)
+        .rfind(|l| !l.is_empty())
+        .map(|l| crate::ui::render::sanitize(&l.chars().take(WHY_MAX_CHARS).collect::<String>()))
+        .unwrap_or_default();
+    Err(if last.is_empty() {
+        format!("exit {}", out.status.code().unwrap_or(-1))
+    } else {
+        last
+    })
 }
 
 /// What `update.plugin` asks for.
@@ -220,58 +317,77 @@ impl Probe {
 /// Updates the playbook plugin, unless `update.plugin` is off, the plugin
 /// is not installed, or it is off in Claude Code.
 pub fn run(probe: &Probe) -> Outcome {
+    run_with_marketplace(probe).0
+}
+
+/// [`run`] for a binary at version `running`: an update that leaves the
+/// plugin older than the binary comes back as [`Outcome::Behind`].
+fn run_for_binary(probe: &Probe, running: &str) -> Outcome {
+    let (outcome, marketplace) = run_with_marketplace(probe);
+    let (Outcome::Current { id, version: v } | Outcome::Updated { id, to: v, .. }) = &outcome
+    else {
+        return outcome;
+    };
+    let older = v
+        .as_deref()
+        .is_none_or(|v| crate::update::resolve::compare(v, running).is_lt());
+    if !older {
+        return outcome;
+    }
+    Outcome::Behind {
+        id: id.clone(),
+        version: v.clone(),
+        running: running.to_string(),
+        marketplace,
+    }
+}
+
+/// [`run`], also giving why the marketplace refresh failed, if it did.
+fn run_with_marketplace(probe: &Probe) -> (Outcome, Option<String>) {
     let claude_home = probe.home.join(".claude");
     if mode(&probe.home) == Mode::Off {
-        return Outcome::Skipped(format!(
-            "{CONFIG_KEY} is off; to turn it on, run: playbook config set {CONFIG_KEY} {MODE_AUTO}"
-        ));
+        return (
+            Outcome::Skipped(format!(
+                "{CONFIG_KEY} is off; to turn it on, run: playbook config set {CONFIG_KEY} {MODE_AUTO}"
+            )),
+            None,
+        );
     }
     let Some(id) = plugin_id(&claude_home) else {
-        return Outcome::NotInstalled;
+        return (Outcome::NotInstalled, None);
     };
     if is_off_in_claude_code(&claude_home, &id) {
-        return Outcome::Skipped(format!(
-            "{id} is turned off in Claude Code; turn it on there, then run: {}",
-            command(&id)
-        ));
+        return (
+            Outcome::Skipped(format!(
+                "{id} is turned off in Claude Code; turn it on there, then run: {}",
+                command(&id)
+            )),
+            None,
+        );
     }
     let Some(claude) = &probe.claude else {
-        return Outcome::NoCli { id };
+        return (Outcome::NoCli { id }, None);
     };
     let before = installed_version(&claude_home, &id);
-    let mut cmd = std::process::Command::new(claude);
-    cmd.args(["plugin", "update", &id])
-        .env("HOME", &probe.home)
-        .env(SKIP_ENV, SKIP_VALUE)
-        .stdin(std::process::Stdio::null());
-    let Some(out) = crate::common::proc::run_with_timeout(&mut cmd, TIMEOUT) else {
-        return Outcome::Failed {
-            id,
-            why: format!("it did not finish within {} s", TIMEOUT.as_secs()),
-        };
-    };
-    if !out.status.success() {
-        let text = String::from_utf8_lossy(&out.stderr);
-        let last = text
-            .lines()
-            .map(str::trim)
-            .rfind(|l| !l.is_empty())
-            .map(|l| {
-                crate::ui::render::sanitize(&l.chars().take(WHY_MAX_CHARS).collect::<String>())
-            })
-            .unwrap_or_default();
-        let why = if last.is_empty() {
-            format!("exit {}", out.status.code().unwrap_or(-1))
-        } else {
-            last
-        };
-        return Outcome::Failed { id, why };
+    // A failed refresh never stops the plugin update; it is named later only
+    // when the plugin ends older than the binary.
+    let marketplace = marketplace_of(&id).and_then(|name| {
+        run_claude(
+            probe,
+            claude,
+            &["plugin", "marketplace", "update", name],
+            MARKETPLACE_TIMEOUT,
+        )
+        .err()
+    });
+    if let Err(why) = run_claude(probe, claude, &["plugin", "update", &id], TIMEOUT) {
+        return (Outcome::Failed { id, why }, marketplace);
     }
     if let Some(dir) = installed_path(&claude_home, &id) {
         refresh_system_prompt(&probe.home, &dir);
     }
     let after = installed_version(&claude_home, &id);
-    if after.is_some() && after != before {
+    let outcome = if after.is_some() && after != before {
         Outcome::Updated {
             id,
             from: before,
@@ -282,7 +398,8 @@ pub fn run(probe: &Probe) -> Outcome {
             id,
             version: after.or(before),
         }
-    }
+    };
+    (outcome, marketplace)
 }
 
 /// [`run`] for a command, unless `--no-plugin` was passed or the caller set
@@ -298,7 +415,10 @@ pub fn run_for_command(home: &Path, no_plugin: bool) -> Option<Outcome> {
             "another playbook process is already updating it".to_string(),
         ));
     }
-    Some(run(&Probe::for_home(home)))
+    Some(run_for_binary(
+        &Probe::for_home(home),
+        env!("CARGO_PKG_VERSION"),
+    ))
 }
 
 /// The state key of the once-per-binary-version marker.
@@ -496,7 +616,7 @@ fn end_state(outcome: &Outcome, running: &str, installed_after: Option<&str>) ->
     let still_older =
         installed_after.is_none_or(|v| crate::update::resolve::compare(v, running).is_lt());
     match outcome {
-        Outcome::Failed { .. } | Outcome::NoCli { .. } => State::Failed,
+        Outcome::Failed { .. } | Outcome::NoCli { .. } | Outcome::Behind { .. } => State::Failed,
         Outcome::Current { .. } | Outcome::Updated { .. } if still_older => State::Failed,
         _ => State::Done,
     }
@@ -780,7 +900,7 @@ fn update_and_report(home: &Path, root: &Path) {
 /// Runs the update, records how it ended and returns both.
 fn attempt(home: &Path, root: &Path) -> (Outcome, State) {
     let claude_home = home.join(".claude");
-    let outcome = run(&Probe::for_home(home));
+    let outcome = run_for_binary(&Probe::for_home(home), env!("CARGO_PKG_VERSION"));
     let after = plugin_id(&claude_home).and_then(|id| installed_version(&claude_home, &id));
     let state = finish(
         root,
@@ -953,7 +1073,10 @@ mod tests {
         });
 
         // Assert
-        assert_eq!(calls(&home), "plugin update playbook@amplifiedengineer\n");
+        assert_eq!(
+            calls(&home),
+            "plugin marketplace update amplifiedengineer\nplugin update playbook@amplifiedengineer\n"
+        );
         assert_eq!(
             out.line().unwrap(),
             "plugin: updated playbook@amplifiedengineer from 0.36.0 to 0.37.0. Restart Claude Code to load it"
@@ -973,7 +1096,10 @@ mod tests {
             claude: Some(claude),
         });
 
-        assert_eq!(calls(&home), "plugin update playbook@pragmatic-engineer\n");
+        assert_eq!(
+            calls(&home),
+            "plugin marketplace update pragmatic-engineer\nplugin update playbook@pragmatic-engineer\n"
+        );
     }
 
     #[test]
@@ -1065,6 +1191,119 @@ mod tests {
             failed.line().unwrap(),
             "plugin: the update failed (update failed: network); run: claude plugin update playbook@amplifiedengineer"
         );
+    }
+
+    /// A fake `claude` that logs its arguments, fails `plugin marketplace
+    /// update` with `market_error`, and succeeds for everything else.
+    fn fake_claude_failing_marketplace(home: &Path, market_error: &str) -> PathBuf {
+        let bin = home.join("bin/claude");
+        fs::create_dir_all(bin.parent().unwrap()).unwrap();
+        fs::write(
+            &bin,
+            format!(
+                "#!/bin/sh\necho \"$*\" >> \"$HOME/claude-calls.log\"\ncase \"$*\" in\n*marketplace*) echo '{market_error}' >&2; exit 1;;\nesac\nexit 0\n"
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        bin
+    }
+
+    #[test]
+    fn a_failed_marketplace_refresh_does_not_stop_the_plugin_update() {
+        // Arrange
+        let home = scratch_dir("plugin-update-market-fail");
+        let dir = plugin(&home, "0.36.0");
+        install(&home, "playbook@amplifiedengineer", &dir);
+        let claude = fake_claude_failing_marketplace(&home, "git pull failed");
+        let probe = Probe {
+            home: home.clone(),
+            claude: Some(claude),
+        };
+
+        // Act
+        let (outcome, marketplace) = run_with_marketplace(&probe);
+
+        // Assert
+        assert!(matches!(outcome, Outcome::Current { .. }), "{outcome:?}");
+        assert_eq!(marketplace.as_deref(), Some("git pull failed"));
+        assert_eq!(
+            calls(&home),
+            "plugin marketplace update amplifiedengineer\nplugin update playbook@amplifiedengineer\n"
+        );
+    }
+
+    #[test]
+    fn a_plugin_older_than_the_binary_after_a_good_refresh_says_the_marketplace_lags() {
+        // Arrange
+        let home = scratch_dir("plugin-update-lag");
+        let dir = plugin(&home, "0.36.0");
+        install(&home, "playbook@amplifiedengineer", &dir);
+        let probe = Probe {
+            home: home.clone(),
+            claude: Some(fake_claude_failing_marketplace(&home, "unused")),
+        };
+        fs::write(home.join("bin/claude"), "#!/bin/sh\nexit 0\n").unwrap();
+
+        // Act
+        let outcome = run_for_binary(&probe, "0.37.0");
+
+        // Assert
+        let line = outcome.line().unwrap();
+        assert!(outcome.awaits_release(), "{outcome:?}");
+        assert!(line.contains("marketplace has not published"), "{line}");
+        assert!(!line.contains(COMMAND_PREFIX), "{line}");
+    }
+
+    #[test]
+    fn a_plugin_older_than_the_binary_after_a_failed_refresh_names_it_and_keeps_the_fix() {
+        // Arrange
+        let home = scratch_dir("plugin-update-lag-fail");
+        let dir = plugin(&home, "0.36.0");
+        install(&home, "playbook@amplifiedengineer", &dir);
+        let probe = Probe {
+            home: home.clone(),
+            claude: Some(fake_claude_failing_marketplace(&home, "git pull failed")),
+        };
+
+        // Act
+        let outcome = run_for_binary(&probe, "0.37.0");
+
+        // Assert
+        assert!(!outcome.awaits_release(), "{outcome:?}");
+        assert_eq!(
+            outcome.line().unwrap(),
+            "plugin: playbook@amplifiedengineer 0.36.0 is older than this binary (0.37.0); the marketplace refresh failed (git pull failed); run: claude plugin marketplace update amplifiedengineer && claude plugin update playbook@amplifiedengineer"
+        );
+    }
+
+    #[test]
+    fn a_plugin_at_the_binary_version_stays_current() {
+        // Arrange
+        let home = scratch_dir("plugin-update-at-binary");
+        let dir = plugin(&home, "0.37.0");
+        install(&home, "playbook@amplifiedengineer", &dir);
+        let probe = Probe {
+            home: home.clone(),
+            claude: Some(fake_claude(&home, None, 0)),
+        };
+
+        // Act
+        let outcome = run_for_binary(&probe, "0.37.0");
+
+        // Assert
+        assert!(matches!(outcome, Outcome::Current { .. }), "{outcome:?}");
+    }
+
+    #[test]
+    fn the_marketplace_is_the_id_suffix() {
+        assert_eq!(
+            marketplace_of("playbook@amplifiedengineer"),
+            Some("amplifiedengineer")
+        );
+        assert_eq!(marketplace_of("playbook"), None);
+        assert_eq!(marketplace_of("playbook@"), None);
     }
 
     #[test]
@@ -1206,7 +1445,10 @@ mod tests {
         });
 
         // Assert
-        assert_eq!(calls(&home), "plugin update playbook@amplifiedengineer\n");
+        assert_eq!(
+            calls(&home),
+            "plugin marketplace update amplifiedengineer\nplugin update playbook@amplifiedengineer\n"
+        );
         assert!(!matches!(out, Outcome::Skipped(_)), "{out:?}");
     }
 
@@ -1606,6 +1848,15 @@ mod tests {
         }
     }
 
+    fn behind(marketplace: Option<&str>) -> Outcome {
+        Outcome::Behind {
+            id: "playbook@amplifiedengineer".into(),
+            version: Some("0.36.0".into()),
+            running: "0.37.0".into(),
+            marketplace: marketplace.map(String::from),
+        }
+    }
+
     fn updated() -> Outcome {
         Outcome::Updated {
             id: "p@x".into(),
@@ -1640,6 +1891,12 @@ mod tests {
             (
                 "updated but still older",
                 updated(),
+                Some("1.1.0"),
+                State::Failed,
+            ),
+            (
+                "behind the binary",
+                behind(None),
                 Some("1.1.0"),
                 State::Failed,
             ),

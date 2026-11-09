@@ -42,16 +42,24 @@ pub fn run_with(home: &Path, mode: Mode, json: bool, seen: bool, plugin: bool) -
             let out = heal::run(&ctx, Trigger::Fix, now);
             eprint!("{}", out.notices.render());
             // Before the list, so an updated plugin drops off it.
-            let plugin_line = plugin
+            let plugin_outcome = plugin
                 .then(|| crate::plugin_update::run_for_command(home, false))
-                .flatten()
-                .and_then(|o| o.line());
+                .flatten();
+            let plugin_line = plugin_outcome.as_ref().and_then(|o| o.line());
             let skills_lines = if plugin {
                 crate::skills_sync::refresh(home, false)
             } else {
                 Vec::new()
             };
-            let items = out.items(home);
+            let mut items = out.items(home);
+            // A refreshed marketplace without a newer plugin leaves the manual
+            // fix with nothing to do, and the plugin line already says why.
+            if plugin_outcome
+                .as_ref()
+                .is_some_and(crate::plugin_update::Outcome::awaits_release)
+            {
+                items.retain(|i| !i.fix.starts_with(crate::plugin_update::COMMAND_PREFIX));
+            }
             if json {
                 for line in plugin_line.iter().chain(&skills_lines) {
                     eprintln!("{line}");
