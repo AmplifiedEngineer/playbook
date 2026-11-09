@@ -13,7 +13,7 @@
 #[path = "support/isolated.rs"]
 mod isolated;
 
-use playbook::plugin_update::{sync, Outcome, Probe, SyncOpts};
+use playbook::plugin_update::{behind, sync, Outcome, Probe, SyncOpts};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -36,13 +36,19 @@ impl Fixture {
     /// An empty home and a `claude` whose `install` exits `install_exit`
     /// and, on success, installs the plugin at the binary's version.
     fn new(install_exit: i32) -> Fixture {
+        Fixture::listing(install_exit, VERSION)
+    }
+
+    /// Like [`Fixture::new`], for a marketplace whose newest plugin is
+    /// `listed`.
+    fn listing(install_exit: i32, listed: &str) -> Fixture {
         let home = isolated::fresh_home();
         let bin_dir = home.join("fake-bin");
         fs::create_dir_all(&bin_dir).unwrap();
         let claude = bin_dir.join("claude");
         let plugin_dir = home
             .join(".claude/plugins/cache/amplifiedengineer/playbook")
-            .join(VERSION);
+            .join(listed);
         let script = format!(
             r#"#!/bin/sh
 echo "$*" >> "$HOME/claude-calls.log"
@@ -55,7 +61,7 @@ case "$*" in
 "plugin install"*)
   if [ {install_exit} -ne 0 ]; then echo 'install failed: network' >&2; exit {install_exit}; fi
   mkdir -p "{dir}/.claude-plugin" "{dir}/skills"
-  printf '{{"name":"playbook","version":"{VERSION}"}}' > "{dir}/.claude-plugin/plugin.json"
+  printf '{{"name":"playbook","version":"{listed}"}}' > "{dir}/.claude-plugin/plugin.json"
   printf '{{"version":2,"plugins":{{"{PLUGIN_ID}":[{{"scope":"user","installPath":"{dir}"}}]}}}}' > "$HOME/.claude/plugins/installed_plugins.json"
   ;;
 esac
@@ -79,6 +85,30 @@ esac
             home: self.home.clone(),
             claude: None,
         }
+    }
+
+    /// Claude Code already lists the plugin at `version`, as an earlier
+    /// install left it.
+    fn installed_at(&self, version: &str) {
+        let dir = self
+            .home
+            .join(".claude/plugins/cache/amplifiedengineer/playbook")
+            .join(version);
+        fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
+        fs::create_dir_all(dir.join("skills")).unwrap();
+        fs::write(
+            dir.join(".claude-plugin/plugin.json"),
+            format!(r#"{{"name":"playbook","version":"{version}"}}"#),
+        )
+        .unwrap();
+        fs::write(
+            self.home.join(".claude/plugins/installed_plugins.json"),
+            format!(
+                r#"{{"version":2,"plugins":{{"{PLUGIN_ID}":[{{"scope":"user","installPath":"{}"}}]}}}}"#,
+                dir.display()
+            ),
+        )
+        .unwrap();
     }
 
     fn known_marketplace(&self) {
@@ -207,4 +237,95 @@ fn a_second_run_updates_instead_of_installing() {
         format!("{MARKETPLACE_ADD}{INSTALL}{MARKETPLACE_UPDATE}{UPDATE}")
     );
     assert!(matches!(outcome, Outcome::Current { .. }), "{outcome:?}");
+}
+
+/// The binary's line one minor behind, so it is on an older MAJOR.MINOR.
+fn older_minor() -> String {
+    let mut parts = VERSION.split('.').map(|p| p.parse::<u64>().unwrap());
+    let (major, minor) = (parts.next().unwrap(), parts.next().unwrap());
+    match minor.checked_sub(1) {
+        Some(previous) => format!("{major}.{previous}.0"),
+        None => format!("{}.999.0", major - 1),
+    }
+}
+
+#[test]
+fn a_plugin_on_an_older_minor_is_reported_behind() {
+    // Arrange
+    let older = older_minor();
+    let f = Fixture::listing(0, &older);
+    f.installed_at(&older);
+
+    // Act
+    let outcome = sync(&f.probe(), SyncOpts::default());
+
+    // Assert
+    assert_eq!(f.calls(), format!("{MARKETPLACE_UPDATE}{UPDATE}"));
+    assert_eq!(
+        outcome,
+        Outcome::Behind {
+            id: PLUGIN_ID.to_string(),
+            version: Some(older),
+            running: VERSION.to_string(),
+            marketplace: None,
+        }
+    );
+}
+
+#[test]
+fn an_install_that_lands_on_an_older_minor_is_reported_behind() {
+    // Arrange
+    let older = older_minor();
+    let f = Fixture::listing(0, &older);
+
+    // Act
+    let outcome = sync(&f.probe(), install_allowed());
+
+    // Assert
+    assert_eq!(f.calls(), format!("{MARKETPLACE_ADD}{INSTALL}"));
+    assert_eq!(
+        outcome,
+        Outcome::Behind {
+            id: PLUGIN_ID.to_string(),
+            version: Some(older),
+            running: VERSION.to_string(),
+            marketplace: None,
+        }
+    );
+}
+
+#[test]
+fn a_plugin_on_the_binary_line_is_not_behind() {
+    // Arrange
+    let f = Fixture::listing(0, VERSION);
+    f.installed_at(VERSION);
+
+    // Act
+    let outcome = sync(&f.probe(), SyncOpts::default());
+
+    // Assert
+    assert_eq!(f.calls(), format!("{MARKETPLACE_UPDATE}{UPDATE}"));
+    assert!(matches!(outcome, Outcome::Current { .. }), "{outcome:?}");
+}
+
+#[test]
+fn behind_compares_the_major_and_minor_line_only() {
+    let cases = [
+        ("0.40.2", "0.41.0", true),
+        ("0.9.0", "0.10.0", true),
+        ("0.41.0", "0.41.3", false),
+        ("0.42.0", "0.41.0", false),
+        ("1.0.0", "0.41.0", false),
+        ("0.41.0", "0.41.0", false),
+        ("not a version", "0.41.0", false),
+        ("0.41.0", "not a version", false),
+        ("", "0.41.0", false),
+    ];
+    for (installed, running, expected) in cases {
+        // Act
+        let got = behind(installed, running);
+
+        // Assert
+        assert_eq!(got, expected, "{installed} vs {running}");
+    }
 }

@@ -9,7 +9,8 @@
 //! the command: the result names the command to run by hand.
 //!
 //! [`sync`] adds an install of a missing plugin for a caller that allows it,
-//! guarded by [`setup_blocked`].
+//! guarded by [`setup_blocked`]. Whichever path ran, a plugin on an older
+//! MAJOR.MINOR line than the binary comes back as [`Outcome::Behind`].
 
 use crate::common::plugin_state::{known_marketplaces, MARKETPLACE, PLUGIN_KEY};
 use std::path::{Path, PathBuf};
@@ -139,7 +140,7 @@ impl Outcome {
                 let installed = version.as_deref().unwrap_or(UNKNOWN_VERSION);
                 match marketplace {
                     None => format!(
-                        "plugin: {id} {installed} is older than this binary ({running}), and the marketplace has not published a newer plugin yet; update again after the next plugin release"
+                        "plugin: {id} {installed} is older than this binary ({running}), and the marketplace has not published a newer plugin yet; playbook tries again after 24 hours"
                     ),
                     Some(why) => format!(
                         "plugin: {id} {installed} is older than this binary ({running}); the marketplace refresh failed ({why}); run: {} && {}",
@@ -390,6 +391,32 @@ fn blocked_by(home: &Path, env: &dyn Fn(&str) -> Option<String>) -> Option<&'sta
         .then_some("a CI environment was detected")
 }
 
+/// The `(major, minor)` line of `version`, or `None` when it has no numeric
+/// MAJOR.MINOR start.
+fn minor_line(version: &str) -> Option<(u64, u64)> {
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
+}
+
+/// Whether plugin version `installed` is on an older MAJOR.MINOR line than
+/// binary version `running`. A newer patch is not behind, because a plugin
+/// ships only with a minor release and the binary's patch releases carry no
+/// new plugin. A version that does not parse is not behind.
+pub fn behind(installed: &str, running: &str) -> bool {
+    matches!(
+        (minor_line(installed), minor_line(running)),
+        (Some(have), Some(want)) if have < want
+    )
+}
+
+/// [`behind`] for a version that may be unreadable, which counts as behind
+/// because nothing shows the plugin caught up.
+fn lags(version: Option<&str>, running: &str) -> bool {
+    version.is_none_or(|v| behind(v, running))
+}
+
 /// Updates the playbook plugin, unless `update.plugin` is off, the plugin
 /// is not installed, or it is off in Claude Code.
 pub fn run(probe: &Probe) -> Outcome {
@@ -403,12 +430,43 @@ pub fn sync(probe: &Probe, opts: SyncOpts) -> Outcome {
 }
 
 fn sync_with_env(probe: &Probe, opts: SyncOpts, env: &dyn Fn(&str) -> Option<String>) -> Outcome {
+    sync_at(probe, opts, env!("CARGO_PKG_VERSION"), env)
+}
+
+/// [`sync`] for a binary at version `running`: an install, an update or an
+/// unchanged plugin that is older than the binary comes back as
+/// [`Outcome::Behind`].
+fn sync_at(
+    probe: &Probe,
+    opts: SyncOpts,
+    running: &str,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Outcome {
     if opts.allow_install && !opts.force {
         if let Some(why) = blocked_by(&probe.home, env) {
             return Outcome::Skipped(why.to_string());
         }
     }
-    run_with_marketplace(probe, opts).0
+    let (outcome, marketplace) = run_with_marketplace(probe, opts);
+    // An unreadable version after an update counts as behind; after an
+    // install it does not, since nothing yet says the install lags.
+    let (id, v, unreadable_lags) = match &outcome {
+        Outcome::Current { id, version }
+        | Outcome::Updated {
+            id, to: version, ..
+        } => (id, version, true),
+        Outcome::Installed { id, version } => (id, version, false),
+        _ => return outcome,
+    };
+    if !v.as_deref().map_or(unreadable_lags, |v| behind(v, running)) {
+        return outcome;
+    }
+    Outcome::Behind {
+        id: id.clone(),
+        version: v.clone(),
+        running: running.to_string(),
+        marketplace,
+    }
 }
 
 /// Adds the marketplace when it is not known, then installs the plugin.
@@ -440,26 +498,11 @@ fn install(probe: &Probe) -> Outcome {
     Outcome::Installed { id, version }
 }
 
-/// [`run`] for a binary at version `running`: an update that leaves the
-/// plugin older than the binary comes back as [`Outcome::Behind`].
+/// [`run`] for a binary at version `running`.
 pub(crate) fn run_for_binary(probe: &Probe, running: &str) -> Outcome {
-    let (outcome, marketplace) = run_with_marketplace(probe, SyncOpts::default());
-    let (Outcome::Current { id, version: v } | Outcome::Updated { id, to: v, .. }) = &outcome
-    else {
-        return outcome;
-    };
-    let older = v
-        .as_deref()
-        .is_none_or(|v| crate::update::resolve::compare(v, running).is_lt());
-    if !older {
-        return outcome;
-    }
-    Outcome::Behind {
-        id: id.clone(),
-        version: v.clone(),
-        running: running.to_string(),
-        marketplace,
-    }
+    sync_at(probe, SyncOpts::default(), running, &|name| {
+        std::env::var(name).ok()
+    })
 }
 
 /// [`sync`], also giving why the marketplace refresh failed, if it did.
@@ -554,7 +597,8 @@ pub fn run_for_command(home: &Path, no_plugin: bool) -> Option<Outcome> {
 /// The state key of the once-per-binary-version marker.
 const MARKER_KEY: &str = "versions/plugin-update";
 
-/// A failed or unchanged update is tried again after this long.
+/// A failed update, or a plugin still behind the binary, is tried again after
+/// this long.
 pub(crate) const FAILED_RETRY: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// A `running` marker older than this belongs to a run that never finished
@@ -566,6 +610,9 @@ pub enum State {
     Running,
     Done,
     Failed,
+    /// The update ran and the plugin is still on an older minor line, so the
+    /// marketplace has not caught up. Not a failure, but retried like one.
+    Behind,
 }
 
 impl State {
@@ -574,6 +621,7 @@ impl State {
             State::Running => "running",
             State::Done => "done",
             State::Failed => "failed",
+            State::Behind => "behind",
         }
     }
 }
@@ -596,6 +644,7 @@ impl Marker {
             "running" => State::Running,
             "done" => State::Done,
             "failed" => State::Failed,
+            "behind" => State::Behind,
             _ => return None,
         };
         let at = parts.next()?.parse().ok()?;
@@ -672,8 +721,9 @@ pub fn due_from(i: &DueInputs<'_>, now: u64) -> Due {
         None => Due::Run(i.mode),
         Some(m) => match m.state {
             State::Done => Due::NotDue("already done for this version"),
-            State::Failed if age(m) > FAILED_RETRY => Due::Run(i.mode),
+            State::Failed | State::Behind if age(m) > FAILED_RETRY => Due::Run(i.mode),
             State::Failed => Due::NotDue("failed recently"),
+            State::Behind => Due::NotDue("behind, tried recently"),
             State::Running if age(m) > RUNNING_STALE => Due::Run(i.mode),
             State::Running => Due::NotDue("another process is running it"),
         },
@@ -739,16 +789,18 @@ pub fn claim(root: &Path, seen: Option<&str>, running: &str, now: u64) -> bool {
     .unwrap_or(false)
 }
 
-/// The state an attempt ends in. A fresh install ends `done`: the marketplace
-/// holds what it holds, and a retry cannot change that. An update that left the plugin older than
-/// the binary, changed or not, counts as failed, so it retries after
-/// [`FAILED_RETRY`].
+/// The state an attempt ends in. A fresh install at the binary's line ends
+/// `done`: the marketplace holds what it holds, and a retry cannot change
+/// that. A plugin left on an older minor line than the binary, changed or
+/// not, ends `behind`, so it retries after [`FAILED_RETRY`]. A failed update
+/// or a missing CLI ends `failed`.
 fn end_state(outcome: &Outcome, running: &str, installed_after: Option<&str>) -> State {
-    let still_older =
-        installed_after.is_none_or(|v| crate::update::resolve::compare(v, running).is_lt());
     match outcome {
-        Outcome::Failed { .. } | Outcome::NoCli { .. } | Outcome::Behind { .. } => State::Failed,
-        Outcome::Current { .. } | Outcome::Updated { .. } if still_older => State::Failed,
+        Outcome::Failed { .. } | Outcome::NoCli { .. } => State::Failed,
+        Outcome::Behind { .. } => State::Behind,
+        Outcome::Current { .. } | Outcome::Updated { .. } if lags(installed_after, running) => {
+            State::Behind
+        }
         _ => State::Done,
     }
 }
@@ -768,11 +820,11 @@ pub fn finish(
     state
 }
 
-/// The line to keep for the next session. A run that ended `failed` with the
+/// The line to keep for the next session. A run that ended `behind` with the
 /// plugin changed or unchanged but still older must not say "up to date".
 fn notice_line(outcome: &Outcome, state: State) -> Option<String> {
     match outcome {
-        Outcome::Current { id, .. } | Outcome::Updated { id, .. } if state == State::Failed => {
+        Outcome::Current { id, .. } | Outcome::Updated { id, .. } if state == State::Behind => {
             Some(format!(
                 "plugin: the playbook plugin is still older than this playbook binary; run: {}",
                 command(id)
@@ -1211,8 +1263,8 @@ mod tests {
 
         // Act
         let lines = [
-            notice_line(&current, State::Failed),
-            notice_line(&updated, State::Failed),
+            notice_line(&current, State::Behind),
+            notice_line(&updated, State::Behind),
         ];
 
         // Assert
@@ -1264,10 +1316,13 @@ mod tests {
         let claude = fake_claude(&home, Some(&new), 0);
 
         // Act
-        let out = run(&Probe {
-            home: home.clone(),
-            claude: Some(claude),
-        });
+        let out = run_for_binary(
+            &Probe {
+                home: home.clone(),
+                claude: Some(claude),
+            },
+            "0.37.0",
+        );
 
         // Assert
         assert_eq!(
@@ -1789,6 +1844,33 @@ mod tests {
                 not_due("failed recently"),
             ),
             (
+                "behind at 24h plus 1m",
+                DueInputs {
+                    marker: marker(RUN, State::Behind, T0),
+                    ..base()
+                },
+                T0 + H24 + 60,
+                Due::Run(Mode::Auto),
+            ),
+            (
+                "behind at 24h minus 1m",
+                DueInputs {
+                    marker: marker(RUN, State::Behind, T0),
+                    ..base()
+                },
+                T0 + H24 - 60,
+                not_due("behind, tried recently"),
+            ),
+            (
+                "behind at exactly 24h",
+                DueInputs {
+                    marker: marker(RUN, State::Behind, T0),
+                    ..base()
+                },
+                T0 + H24,
+                not_due("behind, tried recently"),
+            ),
+            (
                 "running at 10min plus 1s",
                 DueInputs {
                     marker: marker(RUN, State::Running, T0),
@@ -1980,6 +2062,23 @@ mod tests {
     }
 
     #[test]
+    fn a_behind_marker_round_trips_under_its_own_word() {
+        // Arrange
+        let m = Marker {
+            version: "1.2.0".into(),
+            state: State::Behind,
+            at: 42,
+        };
+
+        // Act
+        let text = m.format();
+
+        // Assert
+        assert_eq!(text, "1.2.0 behind 42");
+        assert_eq!(Marker::parse(&text), Some(m));
+    }
+
+    #[test]
     fn an_unparsable_marker_counts_as_another_version() {
         // Arrange
         let inputs = DueInputs {
@@ -2046,7 +2145,7 @@ mod tests {
         }
     }
 
-    fn behind(marketplace: Option<&str>) -> Outcome {
+    fn behind_outcome(marketplace: Option<&str>) -> Outcome {
         Outcome::Behind {
             id: "playbook@amplifiedengineer".into(),
             version: Some("0.36.0".into()),
@@ -2071,13 +2170,13 @@ mod tests {
                 "current but still older",
                 current(),
                 Some("1.1.0"),
-                State::Failed,
+                State::Behind,
             ),
             (
                 "current, version unreadable",
                 current(),
                 None,
-                State::Failed,
+                State::Behind,
             ),
             (
                 "current and at the running version",
@@ -2090,13 +2189,19 @@ mod tests {
                 "updated but still older",
                 updated(),
                 Some("1.1.0"),
-                State::Failed,
+                State::Behind,
             ),
             (
                 "behind the binary",
-                behind(None),
+                behind_outcome(None),
                 Some("1.1.0"),
-                State::Failed,
+                State::Behind,
+            ),
+            (
+                "behind after a failed refresh",
+                behind_outcome(Some("git pull failed")),
+                Some("1.1.0"),
+                State::Behind,
             ),
             ("not installed", Outcome::NotInstalled, None, State::Done),
             (
@@ -2128,6 +2233,108 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn a_plugin_on_the_binary_line_ends_done_whatever_its_patch() {
+        // Arrange
+        let cases = [
+            ("current", current(), "1.2.0"),
+            ("updated", updated(), "1.2.0"),
+        ];
+        for (name, outcome, installed) in cases {
+            // Act
+            let state = end_state(&outcome, "1.2.3", Some(installed));
+
+            // Assert
+            assert_eq!(state, State::Done, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_behind_notice_waits_for_the_marketplace_and_names_no_failure() {
+        // Arrange
+        let waiting = behind_outcome(None);
+        let refresh_failed = behind_outcome(Some("git pull failed"));
+
+        // Act
+        let waiting_line = notice_line(&waiting, State::Behind).unwrap();
+        let failed_line = notice_line(&refresh_failed, State::Behind).unwrap();
+
+        // Assert
+        assert!(
+            waiting_line.contains("the marketplace has not published a newer plugin yet"),
+            "{waiting_line}"
+        );
+        assert!(
+            waiting_line.contains("tries again after 24 hours"),
+            "{waiting_line}"
+        );
+        assert!(!waiting_line.contains("failed"), "{waiting_line}");
+        assert!(!waiting_line.contains(COMMAND_PREFIX), "{waiting_line}");
+        assert!(failed_line.contains(COMMAND_PREFIX), "{failed_line}");
+    }
+
+    #[test]
+    fn behind_compares_only_the_major_and_minor_line() {
+        let cases = [
+            ("0.40.2", "0.41.0", true),
+            ("0.9.0", "0.10.0", true),
+            ("0.41.0", "0.41.3", false),
+            ("0.42.0", "0.41.0", false),
+            ("1.0.0", "0.41.0", false),
+            ("0.41.0-rc.1", "0.41.0", false),
+            ("garbage", "0.41.0", false),
+            ("0.41.0", "garbage", false),
+            ("0.41", "0.42.0", true),
+            ("", "", false),
+        ];
+        for (installed, running, expected) in cases {
+            // Act
+            let got = behind(installed, running);
+
+            // Assert
+            assert_eq!(got, expected, "{installed} vs {running}");
+        }
+    }
+
+    #[test]
+    fn a_plugin_one_patch_behind_the_binary_stays_current() {
+        // Arrange
+        let home = scratch_dir("plugin-update-patch-lag");
+        let dir = plugin(&home, "0.37.0");
+        install(&home, "playbook@amplifiedengineer", &dir);
+        let probe = Probe {
+            home: home.clone(),
+            claude: Some(fake_claude(&home, None, 0)),
+        };
+
+        // Act
+        let outcome = run_for_binary(&probe, "0.37.3");
+
+        // Assert
+        assert!(matches!(outcome, Outcome::Current { .. }), "{outcome:?}");
+    }
+
+    #[test]
+    fn a_claude_call_that_outlives_its_timeout_fails_with_the_limit_named() {
+        // Arrange
+        let home = scratch_dir("plugin-update-timeout");
+        let bin = home.join("bin/claude");
+        fs::create_dir_all(bin.parent().unwrap()).unwrap();
+        fs::write(&bin, "#!/bin/sh\nsleep 5\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        let probe = Probe {
+            home,
+            claude: Some(bin.clone()),
+        };
+
+        // Act
+        let result = run_claude(&probe, &bin, &["plugin", "update"], Duration::from_secs(1));
+
+        // Assert
+        assert_eq!(result, Err("it did not finish within 1 s".to_string()));
     }
 
     #[test]
