@@ -14,6 +14,16 @@ Four commands take a ready branch to a merged PR: `/playbook:commit-and-push`, `
 /playbook:commit-and-push --no-signoff  # no Signed-off-by on this commit
 ```
 
+With `-A` and no message, the command is one call to `playbook commit all`. It stages everything, drafts a conventional message from the staged files with no model, commits, rebases if you are behind and pushes. The type comes from the files: only docs gives `docs`, only tests `test`, only workflow files `ci`, only lock files `chore(deps)`, a new source file `feat`, and any other change `fix`. The scope is the shared top level area, and it is left out when the files span areas. The message is a guide. The PR title and body carry the meaning. Run it yourself too:
+
+```bash
+playbook commit all                 # stage everything, draft the message, commit, push
+playbook commit all -m "fix: x"     # use your own message
+playbook commit all --no-signoff    # no Signed-off-by on this commit
+```
+
+It prints `NO_STAGED_CHANGES` and stops when there is nothing to commit. It refuses the default branch and never forces a push.
+
 Flags combine (`-Au`). After a rebase or amend it pushes with `--force-with-lease`. Hooks run normally: if one fails, fix the issue and commit again.
 
 ## Create a pull request

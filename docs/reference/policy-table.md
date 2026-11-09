@@ -16,7 +16,7 @@ and ADR 0021, 0022 and 0023).
 | agent | `collector` | `haiku` | `low` | Gathers and compacts raw history. The analyst does the thinking. |
 | agent | `critic` | `sonnet` | `medium` | Adversarial review of plans and ADRs. Round 2 bench: medium 89/90, high 71/90 (false blocks on clean plans), so medium finds the seeded flaws at 39% lower cost. |
 | agent | `fact-checker` | `haiku` | `medium` | Three bench rounds: Haiku medium 134/138, high 137/138, at about a tenth of Sonnet's cost. The Haiku effort cap already held it at medium. |
-| agent | `git` | `haiku` | `xhigh` | Drafts commit and PR text. The commit type was right 42% of the time at low and 100% at xhigh. The one Haiku role allowed above medium (OPT_INS). |
+| agent | `git` | `haiku` | `medium` | Drafts commit and PR text. The binary now refuses a commit type that contradicts the files, so a weaker draft cannot land a wrong type. `playbook commit all` drafts the common commit with no model. The role may still go up to xhigh (OPT_INS). |
 | agent | `implementer` | `sonnet` | `medium` | Writes and commits production logic. Round 2 bench on 20 repo tasks: Sonnet medium 200/200, high 198/200; Haiku stays under 92%. |
 | agent | `review-triage` | `haiku` | `low` | A three-way classifier. A bad or missing answer falls back to a full lens. |
 | agent | `reviewer` | `opus` | `medium` | Opus medium 199/200 against high 200/200 on the reviewer bench, 19% cheaper. The orchestrator passes a higher or lower `effort` on the spawn for a risky or small diff (ADR-0021). |

@@ -371,7 +371,19 @@ Example: `playbook commands pr`
 
 Run the git steps of `/playbook:commit-and-push`
 
-Subcommands: `prepare`, `run`
+Subcommands: `all`, `prepare`, `run`
+
+### `playbook commit all`
+
+Stage everything, commit with a drafted message, and push
+
+Refuses the default branch. Stages with `git add -A`, prints `NO_STAGED_CHANGES` when there is nothing to commit, drafts a conventional message from the staged files with no model unless `-m` is given, then commits, rebases when behind and pushes like `run`. A rejected push is never forced. Exits 1 on any failure.
+
+Example: `playbook commit all`
+
+- `-m, --message <MESSAGE>`: Commit message (default: drafted from the staged files)
+- `--auto`: Auto mode: never force a push
+- `--no-signoff`: Leave the sign-off trailer off
 
 ### `playbook commit prepare`
 

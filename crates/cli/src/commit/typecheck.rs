@@ -19,7 +19,7 @@ static HEADER: LazyLock<Regex> =
 
 /// What every changed file is, when they all are the same kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub(super) enum Kind {
     Docs,
     Tests,
     Ci,
@@ -77,7 +77,7 @@ fn is_deps(files: &[&str]) -> bool {
         })
 }
 
-fn kind_of(files: &[&str]) -> Option<Kind> {
+pub(super) fn kind_of(files: &[&str]) -> Option<Kind> {
     if files.is_empty() {
         return None;
     }

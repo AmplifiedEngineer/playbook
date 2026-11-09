@@ -203,6 +203,7 @@ pub(crate) const META: &[Meta] = &[
     free("commit")
         .purpose("Prepare and run the signed commit of `/playbook:commit-and-push`")
         .for_agents(),
+    free("commit all"),
     free("commit prepare"),
     free("commit run"),
     ro("completions").for_users(),

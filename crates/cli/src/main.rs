@@ -2026,6 +2026,24 @@ fn real_main() {
                         }
                     }
                 }
+                CommitCommand::All {
+                    message,
+                    auto,
+                    no_signoff,
+                } => {
+                    let opts = commit::all::Options {
+                        message,
+                        auto,
+                        no_signoff,
+                    };
+                    match commit::all::run(&dir, opts, commit_signoff_on()) {
+                        Ok(text) => println!("{text}"),
+                        Err(err) => {
+                            eprintln!("{err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
                 CommitCommand::Run {
                     message_file,
                     amend,
@@ -2046,14 +2064,7 @@ fn real_main() {
                             (p, true)
                         }
                     };
-                    let slug = common::repo_slug();
-                    let signoff_on = config::resolve_valid(
-                        "commit.signOff",
-                        &common::home_dir(),
-                        (!slug.is_empty()).then_some(slug.as_str()),
-                    )
-                    .map(|(v, _, _)| v != serde_json::Value::Bool(false))
-                    .unwrap_or(true);
+                    let signoff_on = commit_signoff_on();
                     let opts = commit::run::Options {
                         amend,
                         auto,
@@ -2990,4 +3001,16 @@ fn effort_diff_shape(base: &str) -> Result<effort::auto::Shape, String> {
     }
     let text = String::from_utf8_lossy(&out.stdout);
     effort::auto::Shape::from_numstat(&text)
+}
+
+/// Whether `commit.signOff` is on (the default).
+fn commit_signoff_on() -> bool {
+    let slug = common::repo_slug();
+    config::resolve_valid(
+        "commit.signOff",
+        &common::home_dir(),
+        (!slug.is_empty()).then_some(slug.as_str()),
+    )
+    .map(|(v, _, _)| v != serde_json::Value::Bool(false))
+    .unwrap_or(true)
 }
