@@ -681,7 +681,7 @@ fn a_bundled_converter_that_exits_2_says_to_run_playbook_update() {
     // Assert
     assert_eq!(out.status.code(), Some(1));
     assert!(text(&out).contains(OUT_OF_DATE_MESSAGE), "{}", text(&out));
-    assert!(text(&out).contains("playbook update"));
+    assert!(text(&out).contains("playbook upgrade"));
 }
 
 #[test]

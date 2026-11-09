@@ -636,7 +636,7 @@ fn l6_a_plugin_on_a_newer_minor_line_warns_with_the_upgrade_command() {
     assert!(
         t.starts_with("WARN")
             && t.contains("newer than the 0.31 line of this binary (0.31.0)")
-            && t.ends_with("Run: playbook update"),
+            && t.ends_with("Run: playbook upgrade"),
         "{t}"
     );
 }
@@ -1088,7 +1088,7 @@ fn a_binary_that_does_not_know_a_wired_hook_is_reported() {
         row.starts_with("WARN") && row.contains("worktree-create"),
         "{row}"
     );
-    assert!(row.ends_with("run: playbook update"), "{row}");
+    assert!(row.ends_with("run: playbook upgrade"), "{row}");
 }
 
 #[test]

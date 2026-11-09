@@ -16,7 +16,7 @@ const KEY_CREATED_AT: &str = "created_at";
 pub(crate) const KEY_SALT: &str = "salt";
 const COLUMN_MACHINE: &str = "machine";
 const COLUMN_PUSHED_AT: &str = "pushed_at";
-const UPDATE_HINT: &str = "run `playbook update`";
+const UPDATE_HINT: &str = "run `playbook upgrade`";
 
 const META_EXISTS_SQL: &str =
     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'shared_meta'";

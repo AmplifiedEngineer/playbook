@@ -2497,7 +2497,7 @@ fn session_init_names_the_upgrade_when_the_plugin_needs_a_newer_binary() {
         )),
         "{message}"
     );
-    assert!(message.contains("    Fix: playbook update\n"), "{message}");
+    assert!(message.contains("    Fix: playbook upgrade\n"), "{message}");
 }
 
 #[test]

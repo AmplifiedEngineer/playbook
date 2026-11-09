@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `update.mode = auto`: the detached `update --refresh-check` installs a
-//! newer release through the same verified path as `playbook update`, then
+//! newer release through the same verified path as `playbook upgrade`, then
 //! leaves a report in the cache for the next command to print. The command
 //! that started it keeps running on the old binary. Any reason not to update
 //! falls back to the notice.
@@ -15,7 +15,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// The lock both `playbook update` and the auto update hold while they run.
+/// The lock both `playbook upgrade` and the auto update hold while they run.
 pub const LOCK_DIR: &str = "update.lock";
 
 /// A lock this old belongs to a holder that died. A download, the checks
@@ -39,7 +39,7 @@ pub struct Install {
     pub homebrew: bool,
     pub dev_build: bool,
     pub dir_writable: bool,
-    /// `playbook update` can replace a binary on this platform.
+    /// `playbook upgrade` can replace a binary on this platform.
     pub supported: bool,
 }
 
@@ -69,7 +69,7 @@ pub fn install_reason(install: &Install) -> Option<&'static str> {
     if install.homebrew {
         Some("Homebrew manages this install")
     } else if !install.supported {
-        Some("playbook update does not support this platform")
+        Some("playbook upgrade does not support this platform")
     } else if install.dev_build {
         Some("this is a development or pre-release build")
     } else if !install.dir_writable {
@@ -201,7 +201,7 @@ pub fn apply(root: &Path, settings: Settings, deps: &Deps) {
     let _lock = match try_lock(root) {
         Ok(lock) => lock,
         // An auto update already working on this version holds the lock;
-        // only a manual `playbook update` is worth a hold.
+        // only a manual `playbook upgrade` is worth a hold.
         Err(LockError::Busy) if cache.tried_recently(&latest, deps.now) => return,
         Err(LockError::Busy) => {
             hold(
@@ -238,14 +238,14 @@ pub fn apply(root: &Path, settings: Settings, deps: &Deps) {
     if let Some(notes) = &notes {
         if notes.breaking().next().is_some() {
             hold(
-                "this release has breaking changes; run playbook update to see them",
+                "this release has breaking changes; run playbook upgrade to see them",
                 u64::MAX,
             );
             return;
         }
         if notes.skips_releases_after(current) {
             hold(
-                "it crosses releases whose notes were not checked; run playbook update",
+                "it crosses releases whose notes were not checked; run playbook upgrade",
                 u64::MAX,
             );
             return;
@@ -322,7 +322,7 @@ fn failure_prefix(version: &str) -> String {
 /// The one warning a failed auto update leaves, with the fix.
 pub fn failure_line(version: &str, err: &str) -> String {
     format!(
-        "{} {}. Run: playbook update, or set update.mode to notify",
+        "{} {}. Run: playbook upgrade, or set update.mode to notify",
         failure_prefix(version),
         err.trim_end_matches('.')
     )
@@ -389,6 +389,7 @@ mod tests {
             download_base: DL.into(),
             root: dir.join("root"),
             announce: |_| {},
+            confirm: |_| crate::update::Reply::Yes,
         };
         let bin = script("0.17.0");
         let mut f = FakeFetcher::default();
@@ -712,7 +713,7 @@ mod tests {
         let report = Cache::read(&root).unwrap().report;
         assert_eq!(report.len(), 1, "{report:?}");
         assert!(report[0].starts_with("warning: playbook could not update itself to 0.17.0"));
-        assert!(report[0].contains("Run: playbook update"));
+        assert!(report[0].contains("Run: playbook upgrade"));
         assert_eq!(installed(&env), "playbook 0.16.0");
     }
 

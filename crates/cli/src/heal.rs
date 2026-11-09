@@ -200,7 +200,7 @@ impl Outcome {
     }
 
     /// The `doctor --fix` exit code: 1 when a migration failed, could not
-    /// run, or the record was not written, so `playbook update` reports it.
+    /// run, or the record was not written, so `playbook upgrade` reports it.
     /// A downgrade is not a failure.
     pub fn exit_code(&self) -> i32 {
         let blocked = matches!(
@@ -545,7 +545,7 @@ pub fn runs_on_start(command: &crate::Command) -> bool {
             command,
             C::Usage { .. }
                 | C::Migrate { .. }
-                | C::Update { .. }
+                | C::Upgrade { .. }
                 | C::Uninstall { .. }
                 | C::Doctor { .. }
                 | C::State { .. }

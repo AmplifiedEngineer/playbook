@@ -261,7 +261,7 @@ fn skips_start(command: &crate::Command) -> bool {
             command,
             C::Version
                 | C::Doctor { .. }
-                | C::Update { .. }
+                | C::Upgrade { .. }
                 | C::Uninstall { .. }
                 | C::Migrate { .. }
                 | C::Setup { .. }
