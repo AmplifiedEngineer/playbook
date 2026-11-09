@@ -50,6 +50,7 @@ where
 
 /// [`map`] for an `f` that can fail. A panic in `f` becomes that item's `Err`
 /// instead of reaching the caller, so one broken call never hides the others.
+/// The default panic hook still prints the panic message to standard error.
 pub fn try_map<I, T, F>(items: &[I], cap: usize, f: F) -> Vec<Result<T, String>>
 where
     I: Sync,
@@ -172,7 +173,7 @@ mod tests {
         };
 
         let parallel = try_map(&items, 4, call);
-        let sequential = try_map(&items, 1, call);
+        let sequential: Vec<_> = items.iter().map(call).collect();
 
         assert_eq!(parallel, sequential);
         assert_eq!(parallel[3], Err("odd 3".to_string()));

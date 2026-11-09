@@ -99,10 +99,10 @@ pub fn run(args: &str) -> Result<String, String> {
 }
 
 /// [`run`] with the `gh` runner, the output folder and the worker cap given.
-/// Five calls are needed. The repo name, the head commit and the user do not
-/// depend on each other, and the threads and the issue comments need only the
-/// repo name, so they make two waves instead of five calls in a row. Errors
-/// are reported in the order the calls used to run.
+/// It makes up to six calls. The repo name, the head commit and the login do
+/// not depend on each other, and the threads and the issue comments need only
+/// the repo name, so they make two waves. It reports the first error in call
+/// order, as a run of one call after another does.
 fn run_with(run: Gh, out_dir: &Path, cap: usize, args: &str) -> Result<String, String> {
     let parsed = parse(args);
     for w in &parsed.warnings {
@@ -151,7 +151,7 @@ fn run_with(run: Gh, out_dir: &Path, cap: usize, args: &str) -> Result<String, S
         format!("name={name}"),
         format!("pr={pr}"),
     );
-    let issues_path = format!("/repos/{owner}/{name}/issues/{pr}/comments");
+    let issues_endpoint = format!("/repos/{owner}/{name}/issues/{pr}/comments");
     let [threads, issues] = wave(
         run,
         cap,
@@ -159,7 +159,7 @@ fn run_with(run: Gh, out_dir: &Path, cap: usize, args: &str) -> Result<String, S
             vec![
                 "api", "graphql", "-f", &query, "-F", &owner_arg, "-F", &name_arg, "-F", &pr_arg,
             ],
-            vec!["api", &issues_path, "--paginate"],
+            vec!["api", &issues_endpoint, "--paginate"],
         ],
     )?;
     let (threads, issues) = (threads?, issues?);
@@ -241,8 +241,8 @@ mod tests {
         }
     }
 
-    /// A scripted `gh`. Every call is recorded; `answers` keys are the first
-    /// words of the arguments, joined by a space.
+    /// A scripted `gh` that records every call. The `answers` keys are the
+    /// first words of the arguments, joined by a space.
     struct Fake {
         answers: HashMap<&'static str, Result<String, String>>,
         calls: Mutex<Vec<String>>,
@@ -250,7 +250,8 @@ mod tests {
         /// order differs from the call order, and a run that makes the calls
         /// one at a time never gets the repo answer.
         user_done: Latch,
-        panic_on_user: bool,
+        /// The call with this key panics.
+        panic_on: Option<&'static str>,
     }
 
     impl Fake {
@@ -266,7 +267,7 @@ mod tests {
                 ]),
                 calls: Mutex::new(Vec::new()),
                 user_done: Latch::default(),
-                panic_on_user: false,
+                panic_on: None,
             }
         }
 
@@ -282,8 +283,8 @@ mod tests {
                 format!("{} {}", args[0], args[1])
             };
             self.calls.lock().unwrap().push(key.clone());
+            assert!(self.panic_on != Some(key.as_str()), "{key} exploded");
             if key == "api /user" {
-                assert!(!self.panic_on_user, "user call exploded");
                 self.user_done.raise();
             }
             if key == "repo view" && !self.user_done.wait() {
@@ -308,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    fn the_report_and_files_are_the_same_in_one_thread_and_in_four() {
+    fn the_report_and_files_are_the_same_one_call_at_a_time_and_in_parallel() {
         // Arrange
         let (one, four) = (scratch("comments-one"), scratch("comments-four"));
         let sequential = Fake::healthy();
@@ -397,14 +398,29 @@ mod tests {
     fn a_panicking_call_is_that_calls_error_and_the_others_still_run() {
         let dir = scratch("comments-panic");
         let mut fake = Fake::healthy();
-        fake.panic_on_user = true;
-        // The user call panics before it can release the repo call.
-        fake.user_done.raise();
+        fake.panic_on = Some("repo view");
 
         let result = report(&fake, &dir, par::MAX_CONCURRENT);
 
         let error = result.unwrap_err();
-        assert!(error.contains("user call exploded"), "{error}");
-        assert!(fake.called("repo view") && fake.called("pr view"));
+        assert!(error.contains("repo view exploded"), "{error}");
+        assert!(fake.called("pr view") && fake.called("api /user"));
+        assert!(!fake.called("api graphql"));
+    }
+
+    #[test]
+    fn when_both_second_wave_calls_fail_the_threads_error_comes_first() {
+        let dir = scratch("comments-both-fail");
+        let fake = Fake::healthy()
+            .with("api graphql", Err("threads failed".to_string()))
+            .with(
+                "api /repos/acme/widgets/issues/7/comments",
+                Err("issues failed".to_string()),
+            );
+
+        let result = report(&fake, &dir, par::MAX_CONCURRENT);
+
+        assert_eq!(result, Err("threads failed".to_string()));
+        assert!(fake.called("api /repos/acme/widgets/issues/7/comments"));
     }
 }
