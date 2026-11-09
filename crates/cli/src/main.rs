@@ -12,8 +12,8 @@ use playbook::{
     AtlassianCommand, CcCommand, Cli, Command, CommitCommand, ConfigCommand, DepsCommand,
     DocCommand, DoctorCommand, EvalCommand, GateCommand, GlossaryCommand, HandoffCommand,
     JsonCommand, LearnCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PlanCommand,
-    PrCommand, ProseCommand, ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SegmentCommand,
-    SegmentTopology, SessionsCommand, SettingsCommand, SkillsCommand, ToolsCommand,
+    PluginCommand, PrCommand, ProseCommand, ReviewCommand, ReviewWorktreeCommand, SanitizeCommand,
+    SegmentCommand, SegmentTopology, SessionsCommand, SettingsCommand, SkillsCommand, ToolsCommand,
     WorktreeCommand,
 };
 use std::io::{IsTerminal, Read, Write};
@@ -2830,6 +2830,13 @@ fn real_main() {
                 }
             }
         }
+        Command::Plugin { sub } => match sub {
+            PluginCommand::Update { json } => {
+                let home = common::home_dir();
+                let probe = playbook::plugin_update::Probe::for_home(&home);
+                std::process::exit(playbook::plugin_update::print_update_command(&probe, json));
+            }
+        },
         Command::Mode { sub } => {
             let to_mode = |arg: ModeArg| match arg {
                 ModeArg::Ask => common::mode::Mode::Ask,

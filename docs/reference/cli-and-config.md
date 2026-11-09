@@ -123,7 +123,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows the Agent Budget Dashboard, and helps with PRs, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `completions`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `gc`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `watch`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `completions`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `gc`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `plugin`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `watch`, `worktree`
 
 ### `playbook adr`
 
@@ -1119,6 +1119,28 @@ Prints `path<TAB>[status]<TAB>title` per file, or `NO_PLANS`.
 
 - `--json`: Print JSON instead of text
 
+### `playbook plugin`
+
+Manage the playbook plugin in Claude Code, apart from the binary
+
+`update` refreshes the marketplace and runs `claude plugin update` for each installed playbook plugin id. It downloads no binary. Run `playbook update` to update the binary.
+
+Example: `playbook plugin update`
+
+Subcommands: `update`
+
+### `playbook plugin update`
+
+Update only the playbook plugin and its marketplace
+
+Refreshes the marketplace, then runs `claude plugin update` for every installed playbook plugin id, `playbook@amplifiedengineer` and the old `playbook@pragmatic-engineer`. You asked for it, so `update.plugin` set to `off`, `PLAYBOOK_SKIP_PLUGIN_UPDATE` and a CI environment do not stop it. Prints one line per plugin. Exits 1 when an update fails, `claude` is not on PATH, or the marketplace refresh failed while the plugin lags; an up to date plugin, one the marketplace has not published yet and a missing plugin exit 0.
+
+Restart Claude Code or run /reload-plugins after an update.
+
+Example: `playbook plugin update`
+
+- `--json`: Print one JSON object in the shared envelope, and exit 0 whatever the result
+
 ### `playbook pr`
 
 Prepare and open PRs, and pick a review depth
@@ -1644,7 +1666,7 @@ Example: `playbook uninstall --dry-run`
 
 Update playbook to a published release
 
-Downloads the release, checks its SHA256 sum and, when `gh` is installed, its build attestation, then swaps the binary and keeps the old one as a backup. In auto mode it refuses unless you pass `--yes`. Then it updates the playbook plugin through `claude plugin update`, unless you pass `--no-plugin` or `update.plugin` is `off`. `--check` and `--list` change nothing. `--check` exits 0 whether or not an update exists, and 1 on an error such as an unreachable release list or an unknown version.
+Downloads the release, checks its SHA256 sum and, when `gh` is installed, its build attestation, then swaps the binary and keeps the old one as a backup. In auto mode it refuses unless you pass `--yes`. Then it updates the playbook plugin through `claude plugin update`, unless you pass `--no-plugin` or `update.plugin` is `off`. To update only the plugin, run `playbook plugin update`. `--check` and `--list` change nothing. `--check` exits 0 whether or not an update exists, and 1 on an error such as an unreachable release list or an unknown version.
 
 Example: `playbook update --check`
 

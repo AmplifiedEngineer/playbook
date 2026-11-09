@@ -419,7 +419,8 @@ pub enum Command {
     /// installed, its build attestation, then swaps the binary and keeps the
     /// old one as a backup. In auto mode it refuses unless you pass `--yes`.
     /// Then it updates the playbook plugin through `claude plugin update`,
-    /// unless you pass `--no-plugin` or `update.plugin` is `off`.
+    /// unless you pass `--no-plugin` or `update.plugin` is `off`. To update
+    /// only the plugin, run `playbook plugin update`.
     /// `--check` and `--list` change nothing. `--check` exits 0 whether or not
     /// an update exists, and 1 on an error such as an unreachable release list
     /// or an unknown version.
@@ -460,6 +461,17 @@ pub enum Command {
         /// `update.plugin` is `off`
         #[arg(long)]
         no_plugin: bool,
+    },
+    /// Manage the playbook plugin in Claude Code, apart from the binary
+    ///
+    /// `update` refreshes the marketplace and runs `claude plugin update` for
+    /// each installed playbook plugin id. It downloads no binary. Run
+    /// `playbook update` to update the binary.
+    ///
+    /// Example: `playbook plugin update`
+    Plugin {
+        #[command(subcommand)]
+        sub: PluginCommand,
     },
     /// Print the installed version, same as `--version`
     Version,
@@ -1186,6 +1198,31 @@ pub enum EvalCommand {
         /// Use one dispatch per TDD step (`per-step`) or one per Work Unit (`per-wu`)
         #[arg(long, value_delimiter = ',')]
         strategy: Vec<String>,
+    },
+}
+
+/// `playbook plugin` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum PluginCommand {
+    /// Update only the playbook plugin and its marketplace
+    ///
+    /// Refreshes the marketplace, then runs `claude plugin update` for every
+    /// installed playbook plugin id, `playbook@amplifiedengineer` and the old
+    /// `playbook@pragmatic-engineer`. You asked for it, so `update.plugin` set
+    /// to `off`, `PLAYBOOK_SKIP_PLUGIN_UPDATE` and a CI environment do not
+    /// stop it. Prints one line per plugin. Exits 1 when an update fails,
+    /// `claude` is not on PATH, or the marketplace refresh failed while the
+    /// plugin lags; an up to date plugin, one the marketplace has not
+    /// published yet and a missing plugin exit 0.
+    ///
+    /// Restart Claude Code or run /reload-plugins after an update.
+    ///
+    /// Example: `playbook plugin update`
+    Update {
+        /// Print one JSON object in the shared envelope, and exit 0 whatever
+        /// the result
+        #[arg(long)]
+        json: bool,
     },
 }
 
