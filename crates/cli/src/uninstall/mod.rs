@@ -151,8 +151,9 @@ fn synced_skills_step(opts: &Options, report: &mut Report) {
     report.errors.extend(removed.errors);
 }
 
-/// The steps playbook never runs for the user, because they change Claude
-/// Code's own plugin state. Only the ones that still apply are listed.
+/// The steps uninstall never runs for the user: it never removes a plugin or
+/// a marketplace, even though `playbook setup` may have installed one with
+/// the user's consent. Only the ones that still apply are listed.
 fn manual_steps(home: &Path, report: &mut Report) {
     use crate::common::plugin_state::{
         hooks_plugin_keys, known_marketplaces, listed_in, plugin_keys,

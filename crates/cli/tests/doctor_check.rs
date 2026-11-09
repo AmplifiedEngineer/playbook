@@ -584,6 +584,49 @@ fn l6_a_plugin_on_an_older_minor_line_warns_with_the_update_command() {
 }
 
 #[test]
+fn doctor_names_setup_only_plugin_when_behind() {
+    // Arrange
+    let b = Box::new("l6h");
+    let bin = b.stub("bin1", "0.31.0", true);
+    let root = b.root.join("plugin");
+    manifest(&root, "0.30.9");
+
+    // Act
+    let rows = b.run(&[&bin], "/bin/zsh", Some(&root));
+
+    // Assert
+    let hint = hints(&layer(&rows, "6")[..1]);
+    assert!(hint.contains("playbook setup --only plugin"), "{hint}");
+}
+
+#[test]
+fn l6_a_plugin_on_the_old_marketplace_name_points_to_the_moving_guide() {
+    // Arrange
+    let b = Box::new("l6old");
+    let bin = b.stub("bin1", "0.31.0", true);
+    let root = b.root.join("plugin");
+    manifest(&root, "0.31.1");
+    let dir = b.home().join(".claude/plugins");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("installed_plugins.json"),
+        r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{"scope":"user"}]}}"#,
+    )
+    .unwrap();
+
+    // Act
+    let t = version_row(&b.run(&[&bin], "/bin/zsh", Some(&root)));
+
+    // Assert
+    assert!(
+        t.starts_with("PASS")
+            && t.contains("docs/guides/00-install.md")
+            && t.contains("Moving to the new marketplace name"),
+        "{t}"
+    );
+}
+
+#[test]
 fn l6_a_plugin_on_a_newer_minor_line_warns_with_the_upgrade_command() {
     let b = Box::new("l6p");
     let bin = b.stub("bin1", "0.31.0", true);
@@ -1167,6 +1210,7 @@ fn layer_one_hints_the_new_id_for_a_disabled_plugin_and_for_a_missing_one() {
         ),
         "{absent}"
     );
+    assert!(absent.contains("playbook setup --only plugin"), "{absent}");
 }
 
 #[test]
