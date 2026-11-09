@@ -1447,6 +1447,12 @@ pub enum PrCommand {
         /// Work in this directory instead of the current one
         #[arg(long)]
         dir: Option<String>,
+        /// Print one JSON report instead of labeled lines
+        #[arg(long)]
+        json: bool,
+        /// Read the command's flags and the worktree phrase from stdin
+        #[arg(long, requires = "json")]
+        args_stdin: bool,
     },
     /// Push the branch and open a PR from a drafted title and body
     ///
