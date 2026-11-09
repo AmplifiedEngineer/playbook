@@ -20,6 +20,22 @@ The flow is one pass: stage (per flags), draft the commit message, commit, rebas
 
 This command is built to run in an isolated subagent (`context: fork`) so the diff and drafting stay out of the main context. When it forks, your final message is the only thing the main conversation sees, so end with a concise outcome summary (commit SHA, branch, and the generated message). If you are instead reading this in the main conversation, run it here exactly the same way; do not wait for a fork and do not defer to the user.
 
+## Fast path: stage everything with no message
+
+When `$ARGUMENTS` holds `--all` or `-A` and no message, and holds none of `--update`, `-u`, `--amend`, `-a` or `--ask`, your whole job is one command. Do not read other files, do not run the steps below, and do not verify afterwards.
+
+1. Take the worktree root from "Worktree root: <path>" in the prompt. Run this one `Bash` call, with that root as the working directory (`cd "<root>" &&`, or the current directory when the prompt names none). Add `--auto` when the arguments hold it and `--no-signoff` when they hold it:
+
+```bash
+cd "<root>" && playbook commit all
+```
+
+2. Print its output as your final message and stop. It prints the branch, the new short SHA and the message, or `NO_STAGED_CHANGES`, or the error. It refuses the default branch, never forces a push and exits 1 on any failure.
+
+If `playbook commit all` is not found, run `playbook --version`, tell the user to run `brew upgrade playbook` (Homebrew) or `playbook update`, and stop.
+
+With a message, or with any other flag, follow the steps below.
+
 ## Argument flags
 
 Parse these from `$ARGUMENTS`. Each bash block below runs in its **own shell**, so a variable set in one step is NOT visible in a later one. Apply each flag by setting its variable to `true`/`false` at the top of the block that reads it (do not rely on an env var carried over from an earlier step):

@@ -572,3 +572,173 @@ fn the_scope_rule_set_to_block_refuses_a_branch_that_is_not_stacked() {
     assert!(!o.status.success());
     assert!(err(&o).contains("`feat(PROJ-9): add c`"), "{}", err(&o));
 }
+
+// commit all
+
+/// Writes `file` under the work tree, creating its folders.
+fn put(r: &Repo, file: &str, body: &str) {
+    let path = r.work.join(file);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, body).unwrap();
+}
+
+fn last_subject(r: &Repo) -> String {
+    git(&r.work, &["log", "-1", "--format=%s"])
+}
+
+#[test]
+fn all_drafts_a_docs_message_for_a_docs_only_change() {
+    let r = Repo::new("all-docs");
+    put(&r, "docs/guide.md", "g\n");
+    let o = r.pb(&["commit", "all"], "");
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert_eq!(last_subject(&r), "docs: add guide.md");
+    assert_eq!(r.remote_head("feat"), git(&r.work, &["rev-parse", "HEAD"]));
+    assert!(out(&o).contains("docs: add guide.md"), "{}", out(&o));
+}
+
+#[test]
+fn all_drafts_a_test_message_for_test_files_only() {
+    let r = Repo::new("all-test");
+    put(&r, "crates/cli/tests/a.rs", "t\n");
+    assert!(r.pb(&["commit", "all"], "").status.success());
+    assert_eq!(last_subject(&r), "test(cli): add a.rs");
+}
+
+#[test]
+fn all_drafts_a_fix_when_every_file_is_modified() {
+    let r = Repo::new("all-fix");
+    put(&r, "src/x.rs", "x\n");
+    git(&r.work, &["add", "."]);
+    git(&r.work, &["commit", "-q", "-m", "add x"]);
+    put(&r, "src/x.rs", "y\n");
+    assert!(r.pb(&["commit", "all"], "").status.success());
+    assert_eq!(last_subject(&r), "fix(src): update src");
+}
+
+#[test]
+fn all_drafts_a_feat_when_a_source_file_is_added() {
+    let r = Repo::new("all-feat");
+    put(&r, "crates/cli/src/new.rs", "n\n");
+    assert!(r.pb(&["commit", "all"], "").status.success());
+    assert_eq!(last_subject(&r), "feat(cli): add new.rs");
+}
+
+#[test]
+fn all_drafts_a_dependency_message_for_a_lock_file() {
+    let r = Repo::new("all-deps");
+    put(&r, "Cargo.lock", "l\n");
+    assert!(r.pb(&["commit", "all"], "").status.success());
+    assert_eq!(last_subject(&r), "chore(deps): update dependencies");
+}
+
+#[test]
+fn all_omits_the_scope_when_the_files_span_areas() {
+    let r = Repo::new("all-mixed");
+    put(&r, "crates/cli/src/a.rs", "a\n");
+    put(&r, "plugins/p/b.md", "b\n");
+    assert!(r.pb(&["commit", "all"], "").status.success());
+    assert_eq!(last_subject(&r), "feat: update files");
+}
+
+#[test]
+fn all_uses_the_given_message() {
+    let r = Repo::new("all-msg");
+    put(&r, "docs/guide.md", "g\n");
+    let o = r.pb(&["commit", "all", "-m", "docs: my own words"], "");
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert_eq!(last_subject(&r), "docs: my own words");
+}
+
+#[test]
+fn all_with_nothing_to_stage_says_so_and_exits_zero() {
+    let r = Repo::new("all-none");
+    let o = r.pb(&["commit", "all"], "");
+    assert!(o.status.success());
+    assert!(out(&o).contains("NO_STAGED_CHANGES"), "{}", out(&o));
+}
+
+#[test]
+fn all_refuses_the_default_branch() {
+    let r = Repo::new("all-prot");
+    git(&r.work, &["checkout", "-q", "main"]);
+    put(&r, "b.txt", "b\n");
+    let o = r.pb(&["commit", "all"], "");
+    assert!(!o.status.success());
+    assert!(err(&o).contains("HEAD is on 'main'"), "{}", err(&o));
+}
+
+#[test]
+fn all_rebases_when_behind_and_pushes() {
+    let r = Repo::new("all-rebase");
+    put(&r, "b.txt", "b\n");
+    assert!(r.pb(&["commit", "all"], "").status.success());
+    let other = r.root.join("other");
+    git(
+        &r.root,
+        &["clone", "-q", r.origin.to_str().unwrap(), "other"],
+    );
+    fs::write(other.join("m.txt"), "m\n").unwrap();
+    git(&other, &["add", "."]);
+    git(&other, &["commit", "-q", "-m", "main moves"]);
+    git(&other, &["push", "-q", "origin", "main"]);
+    put(&r, "c.txt", "c\n");
+    let o = r.pb(&["commit", "all"], "");
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert!(out(&o).contains("Rebasing"), "{}", out(&o));
+    assert_eq!(r.remote_head("feat"), git(&r.work, &["rev-parse", "HEAD"]));
+}
+
+#[test]
+fn all_never_forces_a_rejected_push() {
+    let r = Repo::new("all-reject");
+    put(&r, "b.txt", "b\n");
+    assert!(r.pb(&["commit", "all"], "").status.success());
+    let other = r.root.join("other");
+    git(
+        &r.root,
+        &[
+            "clone",
+            "-q",
+            "-b",
+            "feat",
+            r.origin.to_str().unwrap(),
+            "other",
+        ],
+    );
+    fs::write(other.join("o.txt"), "o\n").unwrap();
+    git(&other, &["add", "."]);
+    git(&other, &["commit", "-q", "-m", "other work"]);
+    git(&other, &["push", "-q", "origin", "feat"]);
+    let theirs = r.remote_head("feat");
+    put(&r, "c.txt", "c\n");
+    let o = r.pb(&["commit", "all"], "");
+    assert!(!o.status.success());
+    assert_eq!(r.remote_head("feat"), theirs);
+}
+
+#[test]
+fn all_follows_the_signoff_setting() {
+    let r = Repo::new("all-sign");
+    put(&r, "b.txt", "b\n");
+    assert!(r.pb(&["commit", "all"], "").status.success());
+    assert!(git(&r.work, &["log", "-1", "--format=%B"]).contains("Signed-off-by"));
+
+    put(&r, "c.txt", "c\n");
+    assert!(r
+        .pb(&["commit", "all", "--no-signoff"], "")
+        .status
+        .success());
+    assert!(!git(&r.work, &["log", "-1", "--format=%B"]).contains("Signed-off-by"));
+
+    assert!(r
+        .pb(
+            &["config", "set", "--global", "commit.signOff", "false"],
+            ""
+        )
+        .status
+        .success());
+    put(&r, "d.txt", "d\n");
+    assert!(r.pb(&["commit", "all"], "").status.success());
+    assert!(!git(&r.work, &["log", "-1", "--format=%B"]).contains("Signed-off-by"));
+}

@@ -677,6 +677,7 @@ fn table() -> Vec<Case> {
         case("learn collect git", &["learn", "collect", "git"]).out("{"),
         case( "learn collect structure", &["learn", "collect", "structure"], ).out("{"),
         // commit, deliver, review, segment
+        case("commit all", &["commit", "all"]).out("NO_STAGED_CHANGES"),
         case("commit prepare", &["commit", "prepare"]).out("NO_STAGED_CHANGES"),
         case("commit run", &["commit", "run"]).code(1).err("nothing to commit"),
         case("deliver", &["deliver"]).code(3).err("feature branch"),

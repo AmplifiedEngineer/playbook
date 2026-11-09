@@ -4,8 +4,10 @@
 //! `playbook commit`: the git work of `/playbook:commit-and-push`. `prepare`
 //! stages, formats and prints what the message drafter needs. `run` commits
 //! with a sign-off and signing decision, rebases when behind, and pushes
-//! without ever escalating a rejected push to a force.
+//! without ever escalating a rejected push to a force. `all` does the three in
+//! one call with a message drafted from the files.
 
+pub mod all;
 pub mod prepare;
 pub mod run;
 pub mod typecheck;

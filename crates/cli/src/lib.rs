@@ -1798,6 +1798,26 @@ pub enum CommitCommand {
         #[arg(short = 'a')]
         amend: bool,
     },
+    /// Stage everything, commit with a drafted message, and push
+    ///
+    /// Refuses the default branch. Stages with `git add -A`, prints
+    /// `NO_STAGED_CHANGES` when there is nothing to commit, drafts a
+    /// conventional message from the staged files with no model unless `-m`
+    /// is given, then commits, rebases when behind and pushes like `run`.
+    /// A rejected push is never forced. Exits 1 on any failure.
+    ///
+    /// Example: `playbook commit all`
+    All {
+        /// Commit message (default: drafted from the staged files)
+        #[arg(short = 'm', long)]
+        message: Option<String>,
+        /// Auto mode: never force a push
+        #[arg(long)]
+        auto: bool,
+        /// Leave the sign-off trailer off
+        #[arg(long)]
+        no_signoff: bool,
+    },
     /// Commit, rebase when behind, and push
     ///
     /// Reads the message from stdin, or from `--message-file`. Adds a
