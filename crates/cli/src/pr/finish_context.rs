@@ -29,9 +29,10 @@ pub const CODE_PR_VIEW: i32 = 5;
 /// The code a bad `--dir` reports, as plain mode's exit 1.
 pub const CODE_BAD_INPUT: i32 = 1;
 
-const MEANING_OK: &str = "finish context read";
-const MEANING_PR_VIEW: &str = "gh could not read the pull request";
-const MEANING_BAD_INPUT: &str = "the directory is not usable";
+/// The code of a successful read, as plain mode exits.
+const CODE_OK: i32 = 0;
+/// What `--json` exits with, whatever the outcome.
+pub const JSON_EXIT: i32 = 0;
 
 /// One setting as the report shows it.
 #[derive(Debug, Clone, PartialEq)]
@@ -96,7 +97,6 @@ impl Choice {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Failure {
     pub code: i32,
-    pub meaning: &'static str,
     pub error: String,
 }
 
@@ -104,7 +104,6 @@ impl Failure {
     pub fn bad_input(error: String) -> Failure {
         Failure {
             code: CODE_BAD_INPUT,
-            meaning: MEANING_BAD_INPUT,
             error,
         }
     }
@@ -212,7 +211,6 @@ pub fn collect(
 ) -> Result<Value, Failure> {
     let raw = gh.pr_view(pr).map_err(|error| Failure {
         code: CODE_PR_VIEW,
-        meaning: MEANING_PR_VIEW,
         error,
     })?;
     let base = serde_json::from_str::<Value>(&raw)
@@ -228,7 +226,6 @@ pub fn collect(
     };
     let pr_json = pr_object(&raw, stacked_on).map_err(|error| Failure {
         code: CODE_PR_VIEW,
-        meaning: MEANING_PR_VIEW,
         error,
     })?;
     let enabled = bool_setting(reader, AUTO_REVIEW_ENABLED);
@@ -252,10 +249,12 @@ pub fn collect(
 
 /// Prints the `--json` envelope for `result` and returns the exit code (0).
 pub fn emit(result: Result<Value, Failure>) -> i32 {
-    match result {
-        Ok(report) => envelope::emit(envelope::CODE_OK, MEANING_OK, "", report),
-        Err(f) => envelope::emit(f.code, f.meaning, &f.error, Value::Null),
-    }
+    let value = match result {
+        Ok(report) => envelope::wrap(CODE_OK, "", report),
+        Err(f) => envelope::wrap(f.code, &f.error, Value::Null),
+    };
+    println!("{value}");
+    JSON_EXIT
 }
 
 /// The settings reader behind `config get`.

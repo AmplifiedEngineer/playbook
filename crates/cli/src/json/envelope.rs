@@ -1,36 +1,53 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The shared `--json` envelope: `ok`, `code`, `meaning` and `error` around a
-//! command's own report fields. With `--json` the process exits 0 and the
-//! caller reads `ok` and `code`; plain mode keeps its exit codes.
+//! The one `--json` shape of the subcommands a plugin command runs inline.
+//!
+//! Claude Code aborts a whole inline invocation when a command exits non
+//! zero, and the model never runs. So `--json` always exits 0 and carries the
+//! outcome here: `ok`, `code` (the exit code plain mode would use), `meaning`
+//! (what that code means) and `error` (text, empty when `ok`). The report
+//! fields of the subcommand sit beside them. Plain mode keeps its exit codes.
 
 use serde_json::{json, Map, Value};
 
-/// The exit code of a `--json` run, whatever the outcome.
-pub const JSON_EXIT: i32 = 0;
-
-/// The code plain mode uses for success.
-pub const CODE_OK: i32 = 0;
-
-/// The envelope around `report`. A non object `report` adds no fields. The
-/// envelope keys win over a report field of the same name.
-pub fn build(code: i32, meaning: &str, error: &str, report: Value) -> Value {
-    let mut fields = match report {
-        Value::Object(map) => map,
-        _ => Map::new(),
-    };
-    fields.insert("ok".to_string(), json!(code == CODE_OK));
-    fields.insert("code".to_string(), json!(code));
-    fields.insert("meaning".to_string(), json!(meaning));
-    fields.insert("error".to_string(), json!(error));
-    Value::Object(fields)
+/// What a plain-mode exit code means for the commit and PR subcommands.
+pub fn meaning(code: i32) -> &'static str {
+    match code {
+        0 => "ok",
+        1 => "failed or refused",
+        2 => "usage error",
+        3 => "refused by a rule",
+        4 => "rebase conflict",
+        5 => "a git or gh call failed",
+        6 => "the PR closed or a check failed",
+        7 => "timed out while waiting",
+        8 => "auto-merge did not queue",
+        9 => "nothing to do",
+        _ => "unknown",
+    }
 }
 
-/// Prints the envelope as one line and returns the exit code, which is 0.
-pub fn emit(code: i32, meaning: &str, error: &str, report: Value) -> i32 {
-    println!("{}", build(code, meaning, error, report));
-    JSON_EXIT
+/// Wraps `fields` (an object, or anything else as `report`) in the envelope.
+/// `error` is the text for a failure, empty for success.
+pub fn wrap(code: i32, error: &str, fields: Value) -> Value {
+    let mut out = Map::new();
+    out.insert("ok".into(), json!(code == 0));
+    out.insert("code".into(), json!(code));
+    out.insert("meaning".into(), json!(meaning(code)));
+    out.insert("error".into(), json!(error));
+    match fields {
+        Value::Object(map) => {
+            for (k, v) in map {
+                out.entry(k).or_insert(v);
+            }
+        }
+        Value::Null => {}
+        other => {
+            out.insert("report".into(), other);
+        }
+    }
+    Value::Object(out)
 }
 
 #[cfg(test)]
@@ -38,32 +55,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn success_carries_ok_true_and_the_report_fields() {
-        let value = build(0, "done", "", json!({"pr": 7}));
-        assert_eq!(value["ok"], true);
-        assert_eq!(value["code"], 0);
-        assert_eq!(value["pr"], 7);
-        assert_eq!(value["error"], "");
+    fn a_success_is_ok_with_code_zero_and_its_fields() {
+        let v = wrap(0, "", json!({"verdict": "READY"}));
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["code"], 0);
+        assert_eq!(v["meaning"], "ok");
+        assert_eq!(v["error"], "");
+        assert_eq!(v["verdict"], "READY");
     }
 
     #[test]
-    fn failure_carries_ok_false_and_the_error() {
-        let value = build(5, "gh failed", "no such pr", Value::Null);
-        assert_eq!(value["ok"], false);
-        assert_eq!(value["code"], 5);
-        assert_eq!(value["meaning"], "gh failed");
-        assert_eq!(value["error"], "no such pr");
+    fn a_failure_keeps_the_plain_mode_code_and_the_error_text() {
+        let v = wrap(3, "refused: x", json!({"verdict": "REFUSED"}));
+        assert_eq!(v["ok"], false);
+        assert_eq!(v["code"], 3);
+        assert_eq!(v["meaning"], "refused by a rule");
+        assert_eq!(v["error"], "refused: x");
     }
 
     #[test]
-    fn envelope_keys_win_over_report_fields() {
-        let value = build(0, "m", "", json!({"ok": false, "code": 9}));
-        assert_eq!(value["ok"], true);
-        assert_eq!(value["code"], 0);
+    fn a_report_field_never_overrides_an_envelope_field() {
+        let v = wrap(0, "", json!({"ok": false, "code": 9}));
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["code"], 0);
     }
 
     #[test]
-    fn emit_exits_zero_on_failure() {
-        assert_eq!(emit(5, "m", "e", Value::Null), JSON_EXIT);
+    fn a_non_object_report_sits_under_report() {
+        assert_eq!(wrap(0, "", json!([1]))["report"], json!([1]));
     }
 }
