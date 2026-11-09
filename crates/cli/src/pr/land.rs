@@ -38,8 +38,9 @@ pub struct Methods {
 pub trait LandGh {
     /// `gh pr view --json state,isDraft,headRefOid,baseRefName,mergeStateStatus,reviewDecision,autoMergeRequest`.
     fn pr_view(&self, pr: &str) -> Option<Value>;
-    /// All checks with `name,bucket,startedAt,workflow`, `[]` when unreadable.
-    fn pr_checks(&self, pr: &str) -> String;
+    /// The required checks with `name,bucket,startedAt,workflow`; `None` when
+    /// the read failed, which is not the same as having no checks.
+    fn pr_checks(&self, pr: &str) -> Option<String>;
     /// `gh pr merge <pr> <args>`: the exit code and the combined output.
     fn pr_merge(&self, pr: &str, args: &[&str]) -> (i32, String);
     /// What the repo allows, `None` when unreadable.
@@ -230,8 +231,16 @@ fn run(
     // registered its runs yet: wait once for them, on the first call only.
     let mut settled = opts.settle.is_zero();
     loop {
-        let (summary, done) = summarize(&gh.pr_checks(pr));
         polls += 1;
+        let Some(checks) = gh.pr_checks(pr) else {
+            // A failed read is not "no checks": try again until the time is up.
+            if out_of_time(polls, now) {
+                return "STILL_WAITING";
+            }
+            sleep(opts.interval);
+            continue;
+        };
+        let (summary, done) = summarize(&checks);
         let empty = summary.total == 0;
         r.checks = summary;
         if empty && !settled {
@@ -253,7 +262,7 @@ fn run(
 
     // The head must be the one that was checked.
     let Some(view) = gh.pr_view(pr) else {
-        return "FAIL";
+        return "STILL_WAITING";
     };
     record(r, &view);
     if text(&view, "headRefOid") != head {
@@ -301,7 +310,13 @@ fn run(
     // Wait for the merge.
     loop {
         let Some(view) = gh.pr_view(pr) else {
-            return "FAIL";
+            // One failed read while armed is not a failed PR: read again.
+            polls += 1;
+            if out_of_time(polls, now) {
+                return "STILL_WAITING";
+            }
+            sleep(opts.interval);
+            continue;
         };
         record(r, &view);
         match r.state.as_str() {
@@ -358,16 +373,18 @@ impl LandGh for RealGh {
         serde_json::from_str(&t).ok()
     }
 
-    fn pr_checks(&self, pr: &str) -> String {
+    fn pr_checks(&self, pr: &str) -> Option<String> {
+        // `gh pr checks` exits non-zero while a check fails or is pending but
+        // still prints the JSON. Only the required ones count, as in `ci-wait`.
         self.stdout(&[
             "pr",
             "checks",
             pr,
+            "--required",
             "--json",
             "name,bucket,startedAt,workflow",
         ])
         .filter(|t| serde_json::from_str::<Value>(t).is_ok())
-        .unwrap_or_else(|| "[]".into())
     }
 
     fn pr_merge(&self, pr: &str, args: &[&str]) -> (i32, String) {
@@ -406,16 +423,18 @@ impl LandGh for RealGh {
             "--state",
             "open",
             "--json",
-            "headRefName",
+            "headRefName,isCrossRepository",
             "--limit",
             "100",
         ]) else {
             return Vec::new();
         };
         let v: Value = serde_json::from_str(&t).unwrap_or_default();
+        // A fork's branch can share the base's name; it is not a base PR.
         v.as_array()
             .into_iter()
             .flatten()
+            .filter(|e| e.get("isCrossRepository").and_then(Value::as_bool) != Some(true))
             .filter_map(|e| e.get("headRefName")?.as_str().map(String::from))
             .collect()
     }
@@ -438,8 +457,8 @@ mod tests {
 
     /// A scripted `gh`: views and checks come from queues, the last entry repeats.
     struct Fake {
-        views: RefCell<Vec<Value>>,
-        checks: RefCell<Vec<String>>,
+        views: RefCell<Vec<Option<Value>>>,
+        checks: RefCell<Vec<Option<String>>>,
         merges: RefCell<Vec<(i32, String)>>,
         merge_log: RefCell<Vec<String>>,
         methods: Option<Methods>,
@@ -459,8 +478,8 @@ mod tests {
     impl Fake {
         fn new(views: Vec<Value>) -> Fake {
             Fake {
-                views: RefCell::new(views),
-                checks: RefCell::new(vec![pass()]),
+                views: RefCell::new(views.into_iter().map(Some).collect()),
+                checks: RefCell::new(vec![Some(pass())]),
                 merges: RefCell::new(vec![(0, "ok".into())]),
                 merge_log: RefCell::new(Vec::new()),
                 methods: None,
@@ -480,9 +499,9 @@ mod tests {
 
     impl LandGh for Fake {
         fn pr_view(&self, _: &str) -> Option<Value> {
-            Some(next(&self.views))
+            next(&self.views)
         }
-        fn pr_checks(&self, _: &str) -> String {
+        fn pr_checks(&self, _: &str) -> Option<String> {
             next(&self.checks)
         }
         fn pr_merge(&self, _: &str, args: &[&str]) -> (i32, String) {
@@ -544,10 +563,7 @@ mod tests {
     #[test]
     fn a_failing_check_is_fail_and_names_it() {
         let f = Fake::new(vec![view("OPEN", "a")]);
-        *f.checks.borrow_mut() = vec![
-            r#"[{"name":"lint","workflow":"ci","bucket":"fail","startedAt":"2026-01-01T00:00:01Z"}]"#
-                .into(),
-        ];
+        *f.checks.borrow_mut() = vec![Some(r#"[{"name":"lint","workflow":"ci","bucket":"fail","startedAt":"2026-01-01T00:00:01Z"}]"#.into())];
         let r = go(&f, quick());
         assert_eq!((r.verdict.as_str(), r.exit_code), ("FAIL", 6));
         assert_eq!(r.checks.failing, vec!["lint"]);
@@ -561,7 +577,7 @@ mod tests {
             view("OPEN", "a"),
             view("MERGED", "a"),
         ]);
-        *f.checks.borrow_mut() = vec![r#"[{"name":"t","workflow":"ci","bucket":"cancel","startedAt":"2026-01-01T00:00:01Z"},{"name":"t","workflow":"ci","bucket":"pass","startedAt":"2026-01-01T00:00:09Z"}]"#.into()];
+        *f.checks.borrow_mut() = vec![Some(r#"[{"name":"t","workflow":"ci","bucket":"cancel","startedAt":"2026-01-01T00:00:01Z"},{"name":"t","workflow":"ci","bucket":"pass","startedAt":"2026-01-01T00:00:09Z"}]"#.into())];
         let r = go(&f, quick());
         assert_eq!(r.verdict, "MERGED");
         assert_eq!(r.checks.superseded_cancels, 1);
@@ -669,10 +685,63 @@ mod tests {
             view("OPEN", "a"),
             view("MERGED", "a"),
         ]);
-        *f.checks.borrow_mut() = vec!["[]".into()];
+        *f.checks.borrow_mut() = vec![Some("[]".into())];
         let r = go(&f, quick());
         assert_eq!(r.verdict, "MERGED");
         assert_eq!(r.checks.seen, "none");
+    }
+
+    #[test]
+    fn the_first_empty_read_waits_once_for_checks_to_appear() {
+        let f = Fake::new(vec![
+            view("OPEN", "a"),
+            view("OPEN", "a"),
+            view("MERGED", "a"),
+        ]);
+        *f.checks.borrow_mut() = vec![Some("[]".into()), Some(pass())];
+        let slept = RefCell::new(Vec::new());
+        let clock = RefCell::new(Duration::ZERO);
+        let opts = Opts {
+            settle: Duration::from_secs(120),
+            ..quick()
+        };
+        let r = land(&f, "7", &opts, &mut || *clock.borrow(), &mut |d| {
+            slept.borrow_mut().push(d);
+            *clock.borrow_mut() += d.max(Duration::from_secs(1));
+        });
+        assert_eq!(r.verdict, "MERGED");
+        assert_eq!(r.checks.seen, "read");
+        assert_eq!(slept.borrow()[0], Duration::from_secs(120));
+    }
+
+    #[test]
+    fn a_failed_checks_read_is_retried_not_treated_as_no_checks() {
+        let f = Fake::new(vec![
+            view("OPEN", "a"),
+            view("OPEN", "a"),
+            view("MERGED", "a"),
+        ]);
+        *f.checks.borrow_mut() = vec![None, Some(pass())];
+        let r = go(&f, quick());
+        assert_eq!(r.verdict, "MERGED");
+        assert_eq!(r.checks.total, 1);
+    }
+
+    #[test]
+    fn a_failed_view_while_armed_is_read_again() {
+        let f = Fake::new(vec![view("OPEN", "a"), view("OPEN", "a")]);
+        f.views
+            .borrow_mut()
+            .extend([None, Some(view("MERGED", "a"))]);
+        let r = go(&f, quick());
+        assert_eq!(r.verdict, "MERGED");
+    }
+
+    #[test]
+    fn a_first_view_that_fails_is_fail() {
+        let f = Fake::new(vec![view("OPEN", "a")]);
+        *f.views.borrow_mut() = vec![None];
+        assert_eq!(go(&f, quick()).verdict, "FAIL");
     }
 
     #[test]

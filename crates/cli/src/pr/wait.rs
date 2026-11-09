@@ -39,7 +39,16 @@ pub fn latest_checks(json: &str) -> (Vec<Value>, usize) {
         let f = |k: &str| c.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         (f("workflow"), f("name"))
     };
-    let started = |c: &Value| c.get("startedAt").and_then(Value::as_str).map(String::from);
+    // A queued re-run can print the zero time; it is the newest run, not the oldest.
+    let started = |c: &Value| {
+        c.get("startedAt").and_then(Value::as_str).map(|t| {
+            if t.starts_with("0001-") {
+                "9999".to_string()
+            } else {
+                t.to_string()
+            }
+        })
+    };
     let mut groups: Vec<((String, String), Vec<Value>)> = Vec::new();
     for check in all {
         let k = key(&check);
@@ -303,6 +312,16 @@ mod tests {
         ]);
         assert_eq!((c.total, c.cancel, c.superseded), (1, 0, 1));
         assert_eq!(ci_verdict(c), Some("PASS"));
+    }
+
+    #[test]
+    fn a_queued_rerun_with_the_zero_time_beats_an_older_cancel() {
+        let c = counts_of(vec![
+            run("ci", "cancel", Some("2026-01-01T00:00:01Z")),
+            run("ci", "pending", Some("0001-01-01T00:00:00Z")),
+        ]);
+        assert_eq!((c.total, c.pending, c.cancel, c.superseded), (1, 1, 0, 1));
+        assert_eq!(ci_verdict(c), None);
     }
 
     #[test]
