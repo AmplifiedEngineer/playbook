@@ -62,6 +62,7 @@ fn dest_path(home: &Path) -> PathBuf {
 
 fn base_paths(home: &Path, system_prompt: bool) -> InitPaths {
     InitPaths {
+        plugin: playbook::init::run::PluginRun::Skip,
         plugin_root: None,
         self_root: Some(self_root()),
         claude_home: claude_home_of(home),

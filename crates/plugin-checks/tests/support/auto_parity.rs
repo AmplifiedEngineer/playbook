@@ -12,8 +12,8 @@
 //!
 //! The file table is `COMMANDS`. A row is covered by the Step 0 and ordering
 //! checks, and by the per-row checks for its `Auto` kind where one exists. The
-//! checks for the `Dedicated`, `ParksInsteadOfForcing`, `Stages` and
-//! `SkipsSelfReview` kinds name their files, so a new command of those kinds
+//! checks for the `Dedicated`, `Stages` and
+//! kinds name their files, so a new command of those kinds
 //! needs its own test. Model behaviour is not testable here: these checks
 //! cover prose structure only.
 //!
@@ -38,11 +38,6 @@ pub(super) enum Auto {
     ReportsOnly,
     /// Behaves as `--stage`: collects candidates and skips the write prompt.
     Stages,
-    /// Never force-pushes; parks the work when a plain push cannot succeed.
-    ParksInsteadOfForcing,
-    /// Skips the `/clear` self-review and says in the final report that no
-    /// self-review ran when the caller was not `implement`.
-    SkipsSelfReview,
     /// Asks nothing and behaves the same in both modes, so it has no Step 0.
     Unchanged,
     /// Asks only inside an explicit `if mode is ask` branch, so an
@@ -81,12 +76,15 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "commit-and-push",
         asks: false,
-        auto: Auto::ParksInsteadOfForcing,
+        // The binary decides the mode and never forces; see the
+        // parity_no_force tests in crates/cli/tests/commit_cli.rs.
+        auto: Auto::Unchanged,
     },
     CommandSpec {
         name: "create-pull-request",
         asks: false,
-        auto: Auto::SkipsSelfReview,
+        // The binary reports the mode; the finish skill skips the review.
+        auto: Auto::Unchanged,
     },
     CommandSpec {
         name: "setup",

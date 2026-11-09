@@ -188,6 +188,7 @@ fn find_step<'a>(outcome: &'a InitOutcome, name: &str) -> &'a StepReport {
 
 fn base_paths(home: &Path) -> InitPaths {
     InitPaths {
+        plugin: playbook::init::run::PluginRun::Skip,
         plugin_root: None,
         self_root: Some(self_root()),
         claude_home: claude_home_of(home),
@@ -950,6 +951,7 @@ fn missing_self_root_skips_template_dependent_steps() {
     // Arrange: `CLAUDE_PLUGIN_ROOT` unresolved, modelled as `self_root: None`.
     let home = scratch_home("no-root");
     let paths = InitPaths {
+        plugin: playbook::init::run::PluginRun::Skip,
         plugin_root: None,
         self_root: None,
         claude_home: claude_home_of(&home),
@@ -1006,6 +1008,7 @@ fn binary_malformed_settings_json_exits_non_zero() {
     // Act
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(["setup", "--yes"])
+        .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1")
         .env("HOME", &home)
         .env("CLAUDE_PLUGIN_ROOT", checkout_root())
         .env("SHELL", "/bin/bash")
@@ -1036,6 +1039,7 @@ fn binary_clean_init_exits_zero_and_is_idempotent() {
     let run_init = || {
         Command::new(env!("CARGO_BIN_EXE_playbook"))
             .args(["setup", "--yes"])
+            .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1")
             .env("HOME", &home)
             .env("CLAUDE_PLUGIN_ROOT", checkout_root())
             .env("SHELL", "/bin/bash")

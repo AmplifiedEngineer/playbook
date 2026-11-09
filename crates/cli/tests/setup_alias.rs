@@ -66,6 +66,7 @@ fn run_with(name: &str, args: &[&str], terminal_stderr: bool) -> Run {
         .env("SHELL", "/bin/zsh")
         .env("TMPDIR", &home)
         .env("CLAUDE_PLUGIN_ROOT", env!("PLAYBOOK_REPO_ROOT"))
+        .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1")
         .current_dir(&home);
     let out = if terminal_stderr {
         // A terminal on stderr turns on the release check, which would call
@@ -206,7 +207,7 @@ fn assert_same(args: &[&str]) -> Run {
 
 #[test]
 fn a_full_run_writes_the_same_files_under_both_names() {
-    let setup = assert_same(&["--yes", "--no-telemetry"]);
+    let setup = assert_same(&["--yes", "--no-telemetry", "--no-plugin"]);
     assert!(setup.code == Some(0) && setup.files.contains_key(".claude/settings.json"));
 }
 

@@ -11,6 +11,12 @@ use std::io::{self, IsTerminal};
 /// The flags, each part as a `--x` and `--no-x` pair. The last one given wins.
 #[derive(Args, Debug, Default, Clone, PartialEq, Eq)]
 pub struct Flags {
+    /// Install or update the playbook plugin in Claude Code with the `claude` command. Given by name it runs even without a terminal, with `update.plugin` off or in CI
+    #[arg(long, overrides_with = "no_plugin")]
+    pub plugin: bool,
+    /// Leave the playbook plugin as it is
+    #[arg(long, overrides_with = "plugin")]
+    pub no_plugin: bool,
     /// Wire every playbook hook into settings.json (guards, session and worktree hooks)
     #[arg(long, overrides_with = "no_hooks")]
     pub hooks: bool,
@@ -118,7 +124,7 @@ pub struct Flags {
         value_name = "PART",
         value_delimiter = ',',
         num_args = 1..,
-        help = "Run only these parts and ask nothing. Parts, comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution, codex-hooks. Everything else stays untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
+        help = "Run only these parts and ask nothing. Parts, comma separated: plugin, hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution, codex-hooks. Everything else stays untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
     )]
     pub only: Vec<String>,
     /// Never ask: use the default for every part you did not answer with a flag
@@ -135,6 +141,8 @@ pub struct Flags {
 /// What `init` will do for each optional part.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Choices {
+    /// Whether to install or update the plugin through `claude`.
+    pub plugin: bool,
     pub hooks: bool,
     pub statusline: bool,
     pub security: bool,
@@ -163,6 +171,7 @@ fn pick(on: bool, off: bool) -> Option<bool> {
 
 pub(crate) fn part_pair(flags: &Flags, id: &str) -> Option<(bool, bool)> {
     Some(match id {
+        "plugin" => (flags.plugin, flags.no_plugin),
         "hooks" => (flags.hooks, flags.no_hooks),
         "statusline" => (flags.statusline, flags.no_statusline),
         "security" => (flags.security, flags.no_security),
@@ -340,6 +349,7 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
     }
     let has = |id: &str| named.iter().any(|n| n == id);
     Ok(Some(Choices {
+        plugin: has("plugin"),
         hooks: has("hooks"),
         statusline: has("statusline"),
         security: has("security"),
@@ -422,6 +432,9 @@ pub fn unattended_lines(flags: &Flags, choices: &Choices, left: &LeftOff) -> Vec
     let only = |what: &str, part: &str| {
         format!("setup: no terminal and no --yes, so {what}. To add it, run: playbook setup --only {part}")
     };
+    if undecided(choices.plugin, flags.plugin, flags.no_plugin) {
+        lines.push(only("the plugin was not installed or updated", "plugin"));
+    }
     if undecided(choices.telemetry, flags.telemetry, flags.no_telemetry) && !left.telemetry_skipped
     {
         lines.push(only("telemetry was not turned on", "telemetry"));
@@ -486,22 +499,33 @@ pub fn resolve(
     security_config: bool,
     ask: &mut dyn FnMut(&str, bool) -> bool,
 ) -> Choices {
+    let settings_default = !unattended(flags, interactive);
     resolve_with(
         flags,
         interactive,
-        !unattended(flags, interactive),
+        settings_default,
+        settings_default,
         security_config,
         ask,
     )
 }
 
+/// The default answer for the plugin part: the settings default, and off
+/// while [`crate::plugin_update::setup_blocked`] names a reason. The same
+/// guard `sync` applies, so the part is never offered on what `sync` refuses.
+pub fn plugin_default(settings_default: bool, blocked: Option<&str>) -> bool {
+    settings_default && blocked.is_none()
+}
+
 /// Like `resolve`, with the default for the parts that change Claude Code's
-/// settings given by the caller. A dry run in a terminal does not ask but
-/// still previews the answers a real run would give.
+/// settings given by the caller, and `plugin_default` for the plugin part. A
+/// dry run in a terminal does not ask but still previews the answers a real
+/// run would give.
 pub fn resolve_with(
     flags: &Flags,
     interactive: bool,
     settings_default: bool,
+    plugin_default: bool,
     security_config: bool,
     ask: &mut dyn FnMut(&str, bool) -> bool,
 ) -> Choices {
@@ -517,6 +541,12 @@ pub fn resolve_with(
     // Hooks and the status line are entries in Claude Code's settings. With
     // nobody to ask and no --yes, they stay off unless a flag turns them on.
     let choices = Choices {
+        plugin: decide(
+            flags.plugin,
+            flags.no_plugin,
+            catalog::question("plugin"),
+            plugin_default,
+        ),
         hooks: decide(
             flags.hooks,
             flags.no_hooks,
@@ -595,7 +625,8 @@ pub fn resolve_with(
 
 /// Whether both ends are a terminal, so a question can be shown and answered.
 pub fn stdio_is_interactive() -> bool {
-    io::stdin().is_terminal() && io::stdout().is_terminal()
+    crate::plugin_update::assumed_tty(true)
+        || (io::stdin().is_terminal() && io::stdout().is_terminal())
 }
 
 /// A line for stderr when a person at a terminal is not asked because output
@@ -603,6 +634,7 @@ pub fn stdio_is_interactive() -> bool {
 /// when the run is interactive, scripted with `--yes`, or a dry run.
 pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Option<&'static str> {
     let undecided = [
+        (flags.plugin, flags.no_plugin),
         (flags.hooks, flags.no_hooks),
         (flags.statusline, flags.no_statusline),
         (flags.path, flags.no_path),
@@ -616,7 +648,7 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
     .iter()
     .any(|&(on, off)| pick(on, off).is_none());
     (undecided && stdin_tty && !stdout_tty && !flags.yes && !flags.dry_run).then_some(
-        "setup: output is not a terminal, so no questions were asked; the hooks, status line, \
+        "setup: output is not a terminal, so no questions were asked; the plugin, hooks, status line, \
          system-prompt, telemetry, short-name, completions and policy-guard parts stay off, attribution is left as it is and the other defaults apply; pass --yes to accept all defaults or the \
          --x/--no-x flags (see --explain) to choose",
     )
@@ -637,6 +669,7 @@ mod tests {
         };
         assert!(defaults_notice(true, false, &yes).is_none());
         let all_set = Flags {
+            no_plugin: true,
             hooks: true,
             no_statusline: true,
             path: true,
@@ -688,6 +721,7 @@ mod tests {
         assert_eq!(
             c,
             Choices {
+                plugin: false,
                 hooks: false,
                 statusline: false,
                 security: false,
@@ -718,7 +752,7 @@ mod tests {
         });
         assert!(!c.hooks);
         assert!(c.path);
-        assert_eq!(asked.len(), 8, "{asked:?}");
+        assert_eq!(asked.len(), 9, "{asked:?}");
         assert!(asked
             .iter()
             .all(|q| q != catalog::question("hooks") && q != catalog::question("path")));
@@ -936,6 +970,7 @@ mod tests {
         assert_eq!(
             c,
             Choices {
+                plugin: true,
                 hooks: true,
                 statusline: true,
                 security: false,
@@ -1032,6 +1067,7 @@ mod tests {
         assert_eq!(
             c,
             Choices {
+                plugin: false,
                 hooks: true,
                 statusline: false,
                 security: false,
@@ -1228,6 +1264,7 @@ mod tests {
 
     fn all_off() -> Choices {
         Choices {
+            plugin: false,
             hooks: false,
             statusline: false,
             security: false,
@@ -1279,12 +1316,13 @@ mod tests {
 
         let lines = unattended_lines(&Flags::default(), &all_off(), &left);
 
-        assert_eq!(lines.len(), 4, "{lines:?}");
-        assert!(lines[0].contains("--only telemetry"), "{lines:?}");
-        assert!(lines[1].contains("--only system-prompt"), "{lines:?}");
-        assert!(lines[2].contains("--only short-name"), "{lines:?}");
+        assert_eq!(lines.len(), 5, "{lines:?}");
+        assert!(lines[0].contains("--only plugin"), "{lines:?}");
+        assert!(lines[1].contains("--only telemetry"), "{lines:?}");
+        assert!(lines[2].contains("--only system-prompt"), "{lines:?}");
+        assert!(lines[3].contains("--only short-name"), "{lines:?}");
         assert!(
-            lines[3].contains("hooks, status line and attribution off"),
+            lines[4].contains("hooks, status line and attribution off"),
             "{lines:?}"
         );
     }
@@ -1292,6 +1330,7 @@ mod tests {
     #[test]
     fn an_unattended_run_stays_quiet_about_parts_a_flag_or_the_disk_decided() {
         let flags = Flags {
+            no_plugin: true,
             no_telemetry: true,
             no_hooks: true,
             no_statusline: true,
@@ -1305,5 +1344,121 @@ mod tests {
         };
 
         assert!(unattended_lines(&flags, &all_off(), &left).is_empty());
+    }
+
+    #[test]
+    fn plugin_part_truth_table() {
+        struct Row {
+            name: &'static str,
+            flags: Flags,
+            terminal: bool,
+            blocked: Option<&'static str>,
+            expected: bool,
+        }
+        let yes = Flags {
+            yes: true,
+            ..Flags::default()
+        };
+        let rows = [
+            Row {
+                name: "terminal default is yes",
+                flags: Flags::default(),
+                terminal: true,
+                blocked: None,
+                expected: true,
+            },
+            Row {
+                name: "--yes is yes",
+                flags: yes.clone(),
+                terminal: false,
+                blocked: None,
+                expected: true,
+            },
+            Row {
+                name: "no terminal is no",
+                flags: Flags::default(),
+                terminal: false,
+                blocked: None,
+                expected: false,
+            },
+            Row {
+                name: "--no-plugin is no",
+                flags: Flags {
+                    no_plugin: true,
+                    yes: true,
+                    ..Flags::default()
+                },
+                terminal: true,
+                blocked: None,
+                expected: false,
+            },
+            Row {
+                name: "--plugin without a terminal is yes",
+                flags: Flags {
+                    plugin: true,
+                    ..Flags::default()
+                },
+                terminal: false,
+                blocked: None,
+                expected: true,
+            },
+            Row {
+                name: "update.plugin off defaults to no",
+                flags: Flags::default(),
+                terminal: true,
+                blocked: Some("update.plugin is off"),
+                expected: false,
+            },
+            Row {
+                name: "a CI environment defaults to no even with --yes",
+                flags: yes,
+                terminal: true,
+                blocked: Some("a CI environment was detected"),
+                expected: false,
+            },
+            Row {
+                name: "--plugin overrides a block",
+                flags: Flags {
+                    plugin: true,
+                    ..Flags::default()
+                },
+                terminal: false,
+                blocked: Some("update.plugin is off"),
+                expected: true,
+            },
+        ];
+        for row in rows {
+            // Arrange
+            let settings_default = !unattended(&row.flags, row.terminal);
+            let plugin_default = plugin_default(settings_default, row.blocked);
+
+            // Act
+            let c = resolve_with(
+                &row.flags,
+                false,
+                settings_default,
+                plugin_default,
+                false,
+                &mut never,
+            );
+
+            // Assert
+            assert_eq!(c.plugin, row.expected, "{}", row.name);
+        }
+    }
+
+    #[test]
+    fn only_plugin_selects_just_the_plugin_part() {
+        // Arrange
+        let flags = Flags {
+            only: vec!["plugin".to_string()],
+            ..Flags::default()
+        };
+
+        // Act
+        let c = only_choices(&flags).unwrap().unwrap();
+
+        // Assert
+        assert!(c.plugin && !c.hooks && !c.path);
     }
 }

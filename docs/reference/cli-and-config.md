@@ -1531,6 +1531,8 @@ Before it asks anything, setup prints a plan of each part and the files it edits
 
 Example: `playbook setup --no-hooks --system-prompt`
 
+- `--plugin`: Install or update the playbook plugin in Claude Code with the `claude` command. Given by name it runs even without a terminal, with `update.plugin` off or in CI
+- `--no-plugin`: Leave the playbook plugin as it is
 - `--hooks`: Wire every playbook hook into settings.json (guards, session and worktree hooks)
 - `--no-hooks`: Add no playbook hook entries, including the guards in the shared settings
 - `--statusline`: Use the playbook status line (sets statusLine.command to `playbook statusline`)
@@ -1553,7 +1555,7 @@ Example: `playbook setup --no-hooks --system-prompt`
 - `--no-attribution`: Attribution OFF. Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values. Setup applies this when you choose nothing and have not chosen ON before
 - `--codex-hooks`: Register the playbook Bash guards in the hooks.json of Codex (off unless asked)
 - `--no-codex-hooks`: Do not register guards in Codex
-- `--only <PART>`: Run only these parts and ask nothing. Parts, comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution, codex-hooks. Everything else stays untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON
+- `--only <PART>`: Run only these parts and ask nothing. Parts, comma separated: plugin, hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution, codex-hooks. Everything else stays untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing

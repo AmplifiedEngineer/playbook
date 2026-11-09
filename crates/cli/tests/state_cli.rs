@@ -75,6 +75,7 @@ fn init_imports_the_old_files_once_and_keeps_them_renamed() {
         &[
             "setup",
             "--yes",
+            "--no-plugin",
             "--no-hooks",
             "--no-statusline",
             "--no-path",
