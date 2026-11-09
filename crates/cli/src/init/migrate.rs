@@ -1812,6 +1812,11 @@ mod tests {
         done("b")
     }
 
+    /// Succeeds without touching `CALLS`, for tests that run beside the order test.
+    fn runs_quietly(_: &Ctx) -> Outcome {
+        done("quiet")
+    }
+
     #[test]
     fn runs_in_registry_order_then_never_again() {
         let h = home("order");
@@ -2736,7 +2741,7 @@ mod tests {
             run,
         };
         let list = vec![
-            entry("auto", "0.1.0", Kind::Auto, Scope::Owned, order_a),
+            entry("auto", "0.1.0", Kind::Auto, Scope::Owned, runs_quietly),
             entry("consent", "0.1.0", Kind::Idempotent, consent, repeats),
             entry("auto-next", NEXT, Kind::Auto, Scope::Owned, never),
             entry("idem-next", NEXT, Kind::Idempotent, Scope::Owned, never),
