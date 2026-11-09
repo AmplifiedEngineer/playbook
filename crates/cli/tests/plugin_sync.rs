@@ -440,13 +440,26 @@ fn auto_update_is_written_beside_source() {
     let f = Fixture::new(0);
     f.write_entry(MARKETPLACE, None);
     let before = f.settings();
+    let before_bytes = f.settings_bytes();
 
     // Act
     let marked = mark_auto_update(&f.home, MARKETPLACE);
 
     // Assert
     assert_eq!(marked, AutoUpdate::Set);
+    let backups = f.backups();
+    assert_eq!(backups.len(), 1, "a write keeps one backup: {backups:?}");
+    let backup = fs::read(f.home.join(".claude").join(&backups[0])).unwrap();
+    assert_eq!(backup, before_bytes, "the backup holds the old bytes");
     let after = f.settings();
+    let keys =
+        |v: &serde_json::Value| -> Vec<String> { v.as_object().unwrap().keys().cloned().collect() };
+    assert_eq!(keys(&after), keys(&before), "top level key order is kept");
+    assert_eq!(
+        keys(&after["extraKnownMarketplaces"][MARKETPLACE]),
+        ["source", "autoUpdate"],
+        "autoUpdate follows source"
+    );
     let entry = &after["extraKnownMarketplaces"][MARKETPLACE];
     assert_eq!(entry["source"], source());
     assert_eq!(entry["autoUpdate"], json!(true));
@@ -462,7 +475,15 @@ fn an_auto_update_already_on_is_not_rewritten() {
     let f = Fixture::new(0);
     f.write_entry(MARKETPLACE, Some(json!(true)));
     let bytes = f.settings_bytes();
-    let backdated = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    // Whole seconds, so a file system that rounds stored times still matches.
+    let backdated = std::time::UNIX_EPOCH
+        + std::time::Duration::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                - 3600,
+        );
     fs::File::options()
         .write(true)
         .open(f.settings_path())
