@@ -635,11 +635,11 @@ mod synthetic {
     }
 
     #[test]
-    fn the_real_tree_knows_setup_and_the_update_alias() {
+    fn the_real_tree_knows_setup_and_the_hidden_update_alias() {
         let cli = Cli::command();
         assert!(cli.get_subcommands().any(|s| s.get_name() == "setup"));
-        let update = cli.get_subcommands().find(|s| s.get_name() == "update");
-        assert!(update.is_some_and(|u| u.get_all_aliases().any(|a| a == "upgrade")));
+        let upgrade = cli.get_subcommands().find(|s| s.get_name() == "upgrade");
+        assert!(upgrade.is_some_and(|u| u.get_all_aliases().any(|a| a == "update")));
         assert!(plugin_names().contains("plan"));
     }
 }

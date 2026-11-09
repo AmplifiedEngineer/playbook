@@ -413,21 +413,35 @@ pub enum Command {
         #[arg(long, hide = true)]
         build_output: bool,
     },
-    /// Update playbook to a published release
+    /// Upgrade playbook to a published release, and its plugin with it
     ///
-    /// Downloads the release, checks its SHA256 sum and, when `gh` is
-    /// installed, its build attestation, then swaps the binary and keeps the
-    /// old one as a backup. In auto mode it refuses unless you pass `--yes`.
-    /// Then it updates the playbook plugin through `claude plugin update`,
-    /// unless you pass `--no-plugin` or `update.plugin` is `off`. To update
-    /// only the plugin, run `playbook plugin upgrade`.
+    /// Looks up the latest release and compares it with this binary. When it
+    /// is newer, shows both versions and asks you to confirm in a terminal;
+    /// `--yes` skips the question. With no terminal and no `--yes`, it prints
+    /// the hint and changes nothing. After you confirm, it downloads the
+    /// release, checks its SHA256 sum and, when `gh` is installed, its build
+    /// attestation, then swaps the binary and keeps the old one as a backup.
+    /// In auto mode it refuses unless you pass `--yes`.
+    ///
+    /// Then it runs the plugin step of `playbook plugin install` and
+    /// `playbook plugin upgrade` so the plugin matches the new binary: it adds
+    /// the marketplace when it is missing, turns on `autoUpdate` for it, and
+    /// installs or updates the plugin. Pass `--no-plugin` or set `update.plugin`
+    /// to `off` to skip that step. To change only the plugin, run
+    /// `playbook plugin upgrade`.
+    ///
+    /// A Homebrew install is never replaced: `upgrade` checks for a newer
+    /// release, says Homebrew owns the binary, and tells you to run
+    /// `brew upgrade playbook`. It exits 0.
+    ///
     /// `--check` and `--list` change nothing. `--check` exits 0 whether or not
-    /// an update exists, and 1 on an error such as an unreachable release list
-    /// or an unknown version.
+    /// a newer release exists, and 1 on an error such as an unreachable
+    /// release list or an unknown version. `--json` prints one object in the
+    /// shared envelope and exits 0 whatever the result.
     ///
-    /// Example: `playbook update --check`
-    #[command(alias = "upgrade")]
-    Update {
+    /// Example: `playbook upgrade --check`
+    #[command(alias = "update")]
+    Upgrade {
         /// Version to install (default: the latest stable release)
         version: Option<String>,
         /// Only report whether an update is available
@@ -439,9 +453,14 @@ pub enum Command {
         /// Consider pre-releases when picking the latest
         #[arg(long)]
         pre: bool,
-        /// Confirm the update when auto mode is on
+        /// Skip the confirmation question, and confirm the upgrade when auto
+        /// mode is on
         #[arg(long)]
         yes: bool,
+        /// Print one JSON object in the shared envelope, and exit 0 whatever
+        /// the result
+        #[arg(long)]
+        json: bool,
         /// Refresh the cached release check and exit (started in the background)
         #[arg(long, hide = true)]
         refresh_check: bool,
@@ -457,7 +476,7 @@ pub enum Command {
         #[arg(long, hide = true, value_name = "VERSION", requires = "print_notes")]
         from: Option<String>,
         /// Leave the playbook plugin in Claude Code as it is. By default
-        /// `update` runs `claude plugin update` for it, unless the config key
+        /// `upgrade` installs or updates it, unless the config key
         /// `update.plugin` is `off`
         #[arg(long)]
         no_plugin: bool,
@@ -467,7 +486,7 @@ pub enum Command {
     /// `install` adds the marketplace and the plugin, for a playbook that
     /// did not come from Homebrew. `upgrade` refreshes the marketplace and
     /// runs `claude plugin update` for each installed playbook plugin id.
-    /// Neither downloads a binary. Run `playbook update` to update the
+    /// Neither downloads a binary. Run `playbook upgrade` to update the
     /// binary.
     ///
     /// Example: `playbook plugin install`

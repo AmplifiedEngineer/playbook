@@ -30,7 +30,7 @@ Only you should run these. If auto comes from `PLAYBOOK_MODE`, unset the variabl
 - `/playbook:learn-project` stages its candidates and writes nothing to live memory.
 - Auto never force-pushes.
 - Auto does not run the self-review on a new pull request.
-- `playbook update` refuses unless you pass `--yes`.
+- `playbook upgrade` refuses unless you pass `--yes`.
 
 ## The hooks
 

@@ -5,7 +5,7 @@
 //! picks `notify` (the default), `auto` or `off`. The last result lives in the
 //! `state` table under `update-check/cache`, so a command reads one row and
 //! never waits on the network: a stale row starts a detached
-//! `playbook update --refresh-check`, and the notice shows on a later run.
+//! `playbook upgrade --refresh-check`, and the notice shows on a later run.
 //! In `auto` mode that process also installs the release (see `auto`), and
 //! the next command prints what happened. Every failed check is silent and
 //! runs again after the next interval.
@@ -230,7 +230,7 @@ pub fn applies(command: &Command, args: &[OsString]) -> bool {
     let skipped = command.is_hot_path()
         || matches!(
             command,
-            Command::Update { .. }
+            Command::Upgrade { .. }
                 | Command::Usage {
                     sub: Some(UsageCommand::Warm | UsageCommand::Collect { .. }),
                     ..
@@ -324,7 +324,7 @@ fn update_command(homebrew: bool) -> &'static str {
     if homebrew {
         "brew upgrade playbook"
     } else {
-        "playbook update"
+        "playbook upgrade"
     }
 }
 
@@ -554,7 +554,7 @@ fn spawn_refresh() {
         return;
     };
     let mut cmd = std::process::Command::new(exe);
-    cmd.args(["update", "--refresh-check"])
+    cmd.args(["upgrade", "--refresh-check"])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -615,7 +615,7 @@ pub fn on_start(command: &Command, args: &[OsString]) {
     });
 }
 
-/// The body of the hidden `playbook update --refresh-check`: refresh the
+/// The body of the hidden `playbook upgrade --refresh-check`: refresh the
 /// cache, then run the auto update when `update.mode` is `auto`. A failed
 /// refresh stops there, so an offline machine leaves no warning.
 pub fn run_refresh() {
@@ -714,7 +714,7 @@ mod tests {
 
     fn line(version: &str) -> String {
         format!(
-            "playbook {version} is available (you have 0.26.0). Run: playbook update. \
+            "playbook {version} is available (you have 0.26.0). Run: playbook upgrade. \
              To update on its own: playbook config set --global update.mode auto"
         )
     }
@@ -800,7 +800,8 @@ mod tests {
         Cache::update(&held_root, |c| {
             c.held = Some(Held {
                 version: "0.27.0".into(),
-                reason: "this release has breaking changes; run playbook update to see them".into(),
+                reason: "this release has breaking changes; run playbook upgrade to see them"
+                    .into(),
                 until: u64::MAX,
             })
         })
@@ -825,7 +826,7 @@ mod tests {
         );
         assert!(
             held_lines[0].ends_with(
-                "(auto update skipped: this release has breaking changes; run playbook update to see them)"
+                "(auto update skipped: this release has breaking changes; run playbook upgrade to see them)"
             ),
             "{held_lines:?}"
         );
@@ -841,7 +842,7 @@ mod tests {
         let (printed, _) = start(&root, notify(), &dev);
         assert_eq!(
             printed,
-            vec!["playbook 0.27.0 is available (you have 0.26.0). Run: playbook update"]
+            vec!["playbook 0.27.0 is available (you have 0.26.0). Run: playbook upgrade"]
         );
     }
 
@@ -1061,7 +1062,9 @@ mod tests {
         assert_eq!(
             later,
             (
-                vec!["playbook 0.27.0 is available (you have 0.26.0). Run: playbook update".into()],
+                vec![
+                    "playbook 0.27.0 is available (you have 0.26.0). Run: playbook upgrade".into()
+                ],
                 0
             )
         );

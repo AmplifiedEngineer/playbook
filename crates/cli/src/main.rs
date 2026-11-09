@@ -2733,12 +2733,13 @@ fn real_main() {
                 }
             }
         }
-        Command::Update {
+        Command::Upgrade {
             version,
             check,
             list,
             pre,
             yes,
+            json,
             refresh_check,
             refresh_plugin,
             print_notes,
@@ -2769,6 +2770,7 @@ fn real_main() {
                 pre,
                 yes,
             };
+            let mut plugin: Option<playbook::plugin_update::Ensured> = None;
             let result = update::Env::real().and_then(|env| {
                 let root = common::paths::playbook_root_from(&common::home_dir());
                 let _lock = if opts.check || opts.list {
@@ -2788,13 +2790,27 @@ fn real_main() {
                 )?;
                 update::finish_with_heal(&mut outcome, &env);
                 // After the binary and its heal, also when the binary was
-                // already current (ADR 0034, 2026-10-19 amendment).
-                if !opts.check && !opts.list {
-                    let home = common::home_dir();
-                    if let Some(line) = playbook::plugin_update::run_for_command(&home, no_plugin)
-                        .and_then(|o| o.line())
-                    {
-                        outcome.out.push(line);
+                // already current (ADR 0034, 2026-10-19 amendment). A run that
+                // left the binary alone, such as a Homebrew install or a
+                // declined question, leaves the plugin alone too.
+                let step_due = matches!(
+                    outcome.status,
+                    update::Status::Upgraded | update::Status::Current
+                );
+                if step_due && !opts.check {
+                    let running = outcome
+                        .installed
+                        .clone()
+                        .unwrap_or_else(|| env.current_version.clone());
+                    plugin = playbook::plugin_update::run_for_upgrade(
+                        &common::home_dir(),
+                        no_plugin,
+                        &running,
+                    );
+                    if !json {
+                        if let Some(step) = &plugin {
+                            outcome.out.extend(step.lines());
+                        }
                     }
                 }
                 if opts.check {
@@ -2808,6 +2824,10 @@ fn real_main() {
             // failed (ADR 0037).
             if let Ok(outcome) = &result {
                 eprint!("{}", outcome.notes);
+            }
+            if json {
+                println!("{}", update::json_report(&result, plugin.as_ref()));
+                return;
             }
             match result {
                 Ok(outcome) if std::io::stdout().is_terminal() => {
@@ -2825,7 +2845,7 @@ fn real_main() {
                     }
                 }
                 Err(err) => {
-                    eprintln!("update: {err}");
+                    eprintln!("upgrade: {err}");
                     std::process::exit(1);
                 }
             }

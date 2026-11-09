@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Updates the installed playbook plugin through the `claude` CLI after
-//! `playbook update` and `playbook migrate` (ADR 0034, 2026-10-19
+//! `playbook upgrade` and `playbook migrate` (ADR 0034, 2026-10-19
 //! amendment). It runs `claude plugin update <id>` for the playbook plugin
 //! only, never for another plugin. A missing CLI, a failed update, a plugin
 //! that is off in Claude Code or `update.plugin` set to off never fails
@@ -22,7 +22,7 @@ use std::time::Duration;
 /// The config key that turns the plugin update off.
 pub const CONFIG_KEY: &str = "update.plugin";
 
-/// Set by `playbook update` for the new binary's `migrate`, which then
+/// Set by `playbook upgrade` for the new binary's `migrate`, which then
 /// leaves the plugin to the update itself, so it runs once.
 pub const SKIP_ENV: &str = "PLAYBOOK_SKIP_PLUGIN_UPDATE";
 
@@ -1189,23 +1189,68 @@ pub fn print_upgrade_command(probe: &Probe, json: bool) -> i32 {
     code
 }
 
-/// [`run`] for a command, unless `--no-plugin` was passed or the caller set
-/// [`SKIP_ENV`]. `None` when it was not asked to run.
-pub fn run_for_command(home: &Path, no_plugin: bool) -> Option<Outcome> {
-    let skip = no_plugin || std::env::var_os(SKIP_ENV).is_some_and(|v| v == SKIP_VALUE);
-    if skip {
-        return None;
+/// Why a command that runs the plugin step may not.
+enum Guard {
+    /// `--no-plugin` or [`SKIP_ENV`]: say nothing.
+    Skip,
+    /// Another playbook process holds the plugin claim.
+    Busy,
+    Go,
+}
+
+fn guard(home: &Path, no_plugin: bool) -> Guard {
+    if no_plugin || std::env::var_os(SKIP_ENV).is_some_and(|v| v == SKIP_VALUE) {
+        return Guard::Skip;
     }
     let root = crate::common::paths::playbook_root_from(home);
     if in_flight(&root, env!("CARGO_PKG_VERSION"), now()) {
-        return Some(Outcome::Skipped(
-            "another playbook process is already updating it".to_string(),
-        ));
+        return Guard::Busy;
     }
-    Some(run_for_binary(
-        &Probe::for_home(home),
-        env!("CARGO_PKG_VERSION"),
-    ))
+    Guard::Go
+}
+
+/// The outcome for a plugin step that another process already runs.
+fn busy() -> Outcome {
+    Outcome::Skipped("another playbook process is already updating it".to_string())
+}
+
+/// [`run`] for a command, unless `--no-plugin` was passed or the caller set
+/// [`SKIP_ENV`]. `None` when it was not asked to run.
+pub fn run_for_command(home: &Path, no_plugin: bool) -> Option<Outcome> {
+    match guard(home, no_plugin) {
+        Guard::Skip => None,
+        Guard::Busy => Some(busy()),
+        Guard::Go => Some(run_for_binary(
+            &Probe::for_home(home),
+            env!("CARGO_PKG_VERSION"),
+        )),
+    }
+}
+
+/// The plugin step of `playbook upgrade`: [`ensure`] with an install or an
+/// update, judged against `running`, the version the upgrade installed. It
+/// follows `update.plugin`, `--no-plugin` and [`SKIP_ENV`], so it is the same
+/// step `playbook plugin install` and `playbook plugin upgrade` run, minus
+/// their force. `None` when it was not asked to run.
+pub fn run_for_upgrade(home: &Path, no_plugin: bool, running: &str) -> Option<Ensured> {
+    let held = |outcome| Ensured {
+        marketplace: None,
+        outcome,
+        auto: None,
+    };
+    match guard(home, no_plugin) {
+        Guard::Skip => None,
+        Guard::Busy => Some(held(busy())),
+        Guard::Go => Some(ensure(
+            &Probe::for_home(home),
+            SyncOpts {
+                allow_install: true,
+                ..SyncOpts::default()
+            },
+            Wanted::InstallOrUpdate,
+            running,
+        )),
+    }
 }
 
 /// The state key of the once-per-binary-version marker.
@@ -1524,7 +1569,7 @@ const NO_SPAWN_VALUE: &str = "1";
 /// the child is not mistaken for a nested run. Returns whether the child
 /// started; the no-spawn seam counts as started, since nothing failed.
 pub(crate) fn spawn_refresh_plugin() -> bool {
-    spawn_detached(&["update", "--refresh-plugin"])
+    spawn_detached(&["upgrade", "--refresh-plugin"])
 }
 
 /// Starts `<exe> skills sync --refresh` detached, the same way.

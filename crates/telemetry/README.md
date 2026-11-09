@@ -86,7 +86,7 @@ When an older database exists, the first run brings it in, and the view never pr
 - `~/.config/playbook/usage.db` (playbook 0.25, playbook-telemetry 0.1.5) and `~/.config/playbook/usage/usage.db` (older playbook) move into place with their `-wal` and `-shm` files, or merge when the data file already exists.
 - `~/.local/state/playbook-telemetry/usage.db` and `~/.local/state/playbook-usage/usage.db` (older standalone releases, also under `$XDG_STATE_HOME`) are merged in one transaction, keyed on each table's primary key.
 - Merged files are renamed to `*.migrated`. Nothing is deleted. One line on stderr says how many rows were merged, and only when some were.
-- If an older playbook keeps writing to the old path, its new rows are merged quietly on later refreshes, and one line at exit asks you to upgrade it (`brew upgrade playbook` or `playbook update`).
+- If an older playbook keeps writing to the old path, its new rows are merged quietly on later refreshes, and one line at exit asks you to upgrade it (`brew upgrade playbook` or `playbook upgrade`).
 - A file that cannot be read is skipped with a warning and left untouched.
 
 Settings are playbook's own, from the global tier of its config store (`~/.config/playbook/data/config.db`), and from the nested `usage` object of `~/.config/playbook/config.json` when that store does not exist. It reads them, and writes only `usage.ui.layout` and `usage.ui.state` to its own app tier of `~/.config/playbook/data/config.db`, and only when that store exists. Set them with `playbook config set usage.<key> <value>`. An invalid value is ignored with a warning, and a missing one means the default. An old `~/.config/playbook-telemetry/config.json` is no longer read; the tool names it on stderr if it exists.

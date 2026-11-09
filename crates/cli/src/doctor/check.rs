@@ -92,7 +92,7 @@ fn doc_converter_row(health: &crate::doc::converter::Health) -> Row {
     match health {
         Health::Ready => Row::new("-", Level::Pass, health.message()),
         Health::VersionSkew => {
-            Row::new("-", Level::Warn, health.message()).hint("run: playbook update")
+            Row::new("-", Level::Warn, health.message()).hint("run: playbook upgrade")
         }
         Health::External => Row::new("-", Level::Warn, health.message()),
         Health::Missing => Row::new("-", Level::Info, health.message()),
@@ -648,7 +648,7 @@ fn layer6(env: &Env) -> Vec<Row> {
     if !output_of(gate).is_some_and(|t| t.contains("--source")) {
         rows.push(
             Row::new("6", Level::Fail, "gate record has no --source flag, so every quality gate call fails")
-                .hint("run `playbook update`, or re-run install.sh if the binary is too old to have `update`"),
+                .hint("run `playbook upgrade`, or re-run install.sh if the binary is too old to have `upgrade`"),
         );
     }
     if entries.len() > 1 {
@@ -1634,7 +1634,7 @@ fn store_schema_rows(env: &Env) -> Vec<Row> {
     }
     let row = Row::new("-", level, format!("store schema: {}", parts.join(", ")));
     vec![if level == Level::Fail {
-        row.hint("run: playbook update")
+        row.hint("run: playbook upgrade")
     } else {
         row
     }]
@@ -1810,7 +1810,7 @@ fn hook_binary_rows(env: &Env) -> Vec<Row> {
                             unknown.join(", ")
                         ),
                     )
-                    .hint("run: playbook update"),
+                    .hint("run: playbook upgrade"),
                 );
             }
         }
@@ -2055,7 +2055,7 @@ mod tests {
         // Assert
         assert_eq!(rows[0].level, Level::Fail);
         assert!(rows[0].message.contains("usage.db 99"), "{rows:?}");
-        assert_eq!(rows[0].hint.as_deref(), Some("run: playbook update"));
+        assert_eq!(rows[0].hint.as_deref(), Some("run: playbook upgrade"));
     }
 
     #[test]

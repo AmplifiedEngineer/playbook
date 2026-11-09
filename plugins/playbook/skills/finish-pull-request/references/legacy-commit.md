@@ -7,7 +7,7 @@
 - Step 0: the run mode
 - Steps 1 to 4: stage, message, commit and push
 
-These are the steps `/playbook:commit-and-push` followed before it ran one inline `playbook commit all --json` call. The command points here only when shell execution is disabled by policy (the inline block prints `[shell command execution disabled by policy]`). Tell the user once to upgrade (`brew upgrade playbook` or `playbook update`), then follow the steps below with normal `Bash` calls.
+These are the steps `/playbook:commit-and-push` followed before it ran one inline `playbook commit all --json` call. The command points here only when shell execution is disabled by policy (the inline block prints `[shell command execution disabled by policy]`). Tell the user once to upgrade (`brew upgrade playbook` or `playbook upgrade`), then follow the steps below with normal `Bash` calls.
 
 # Commit and Push
 
@@ -35,7 +35,7 @@ cd "<root>" && playbook commit all
 
 2. Print its output as your final message and stop. It prints the branch, the new short SHA and the message, or `NO_STAGED_CHANGES`, or the error. It refuses the default branch, never forces a push and exits 1 on any failure.
 
-If `playbook commit all` is not found, run `playbook --version`, tell the user to run `brew upgrade playbook` (Homebrew) or `playbook update`, and stop.
+If `playbook commit all` is not found, run `playbook --version`, tell the user to run `brew upgrade playbook` (Homebrew) or `playbook upgrade`, and stop.
 
 With a message, or with any other flag, follow the steps below.
 
@@ -91,7 +91,7 @@ If nothing is staged, tell the user "No staged changes. Use `git add` to stage f
 
 ## Step 2: Generate the commit message
 
-Load the commit-only writing rules. Do not read the full `playbook:writing-style` skill for the writing rules, a commit message needs about a tenth of it (invoking it only to find the `conventional-commits.md` reference is fine). Intent: pr-rules. If the session's tool map lists it, use that command with its commit-only option; it prints one path, which you read with the Read tool, and on `ERROR:` you invoke the `playbook:writing-style` skill instead. On any `ERROR:` (an old binary says 'skill reference not found' or 'no plugin root'), run `playbook --version` first; if it is older than 0.26.0, tell the user to run `brew upgrade playbook` (Homebrew) or `playbook update`. If the tool map does not list it, do this: read the dash IRON RULE and the `## Banned Words` section of the writing-style skill's `SKILL.md`, and the "Commit messages MUST" rules in its `references/commits-and-prs.md` (both in the base directory of the `playbook:writing-style` skill, shown when you invoke it). If you cannot find those files, invoke the `playbook:writing-style` skill. Also read the `playbook:writing-style` skill's `references/conventional-commits.md` (invoke the skill and read the file from the skill base directory it shows; if you cannot find it, follow the usual types (`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`)) now, and follow it for the type, scope, breaking-change marker and description. The constraints below are only the parts specific to the commit header and body.
+Load the commit-only writing rules. Do not read the full `playbook:writing-style` skill for the writing rules, a commit message needs about a tenth of it (invoking it only to find the `conventional-commits.md` reference is fine). Intent: pr-rules. If the session's tool map lists it, use that command with its commit-only option; it prints one path, which you read with the Read tool, and on `ERROR:` you invoke the `playbook:writing-style` skill instead. On any `ERROR:` (an old binary says 'skill reference not found' or 'no plugin root'), run `playbook --version` first; if it is older than 0.26.0, tell the user to run `brew upgrade playbook` (Homebrew) or `playbook upgrade`. If the tool map does not list it, do this: read the dash IRON RULE and the `## Banned Words` section of the writing-style skill's `SKILL.md`, and the "Commit messages MUST" rules in its `references/commits-and-prs.md` (both in the base directory of the `playbook:writing-style` skill, shown when you invoke it). If you cannot find those files, invoke the `playbook:writing-style` skill. Also read the `playbook:writing-style` skill's `references/conventional-commits.md` (invoke the skill and read the file from the skill base directory it shows; if you cannot find it, follow the usual types (`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`)) now, and follow it for the type, scope, breaking-change marker and description. The constraints below are only the parts specific to the commit header and body.
 
 Analyse the staged diff from Step 1 and draft a commit message:
 

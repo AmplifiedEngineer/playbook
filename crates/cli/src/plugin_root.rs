@@ -265,7 +265,7 @@ pub fn binary_too_old(root: &Path, binary: &str, homebrew: bool) -> Option<Strin
     let command = if homebrew {
         "brew upgrade playbook"
     } else {
-        "playbook update"
+        "playbook upgrade"
     };
     Some(format!(
         "playbook binary {binary} is older than this plugin needs ({min}). Run: {command}"
@@ -310,7 +310,7 @@ pub fn plugin_out_of_range(
             let command = if homebrew {
                 "brew upgrade playbook"
             } else {
-                "playbook update"
+                "playbook upgrade"
             };
             Some(format!(
                 "the playbook plugin {version} is newer than the {}.{} line of this binary ({binary}). Run: {command}",
@@ -905,7 +905,7 @@ mod tests {
             brew,
             "playbook binary 0.26.0 is older than this plugin needs (0.27.0). Run: brew upgrade playbook"
         );
-        assert!(other.ends_with("Run: playbook update"), "{other}");
+        assert!(other.ends_with("Run: playbook upgrade"), "{other}");
     }
 
     #[test]
@@ -989,7 +989,7 @@ mod tests {
             "the playbook plugin 0.33.0 is newer than the 0.32 line of this binary (0.32.1). Run: brew upgrade playbook"
         );
         assert!(
-            newer_major.ends_with("Run: playbook update"),
+            newer_major.ends_with("Run: playbook upgrade"),
             "{newer_major}"
         );
     }

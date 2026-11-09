@@ -898,7 +898,7 @@ mod tests {
         // Assert
         let slugs: Vec<&str> = items.iter().map(|i| i.slug.as_str()).collect();
         assert_eq!(slugs, [PLUGIN_NEEDS_BINARY]);
-        assert_eq!(items[0].fix, "playbook update");
+        assert_eq!(items[0].fix, "playbook upgrade");
     }
 
     #[test]

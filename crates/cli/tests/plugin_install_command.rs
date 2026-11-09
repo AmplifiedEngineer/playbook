@@ -269,3 +269,42 @@ fn a_plugin_installed_under_the_old_name_keeps_its_marketplace_and_auto_update_c
         "{text}"
     );
 }
+
+mod shared_step {
+    use super::*;
+    use playbook::plugin_update::{
+        ensure, AutoUpdate, MarketplaceStep, Outcome, Probe, SyncOpts, Wanted,
+    };
+
+    fn probe(f: &Fixture) -> Probe {
+        Probe {
+            home: f.home.clone(),
+            claude: Some(f.home.join("bin/claude")),
+        }
+    }
+
+    const OPTS: SyncOpts = SyncOpts {
+        allow_install: true,
+        force: true,
+        progress: false,
+    };
+
+    #[test]
+    fn the_upgrade_and_setup_step_installs_then_updates_what_install_leaves_alone() {
+        let f = Fixture::new(0);
+        let first = ensure(&probe(&f), OPTS, Wanted::InstallOrUpdate, VERSION);
+        assert!(matches!(first.outcome, Outcome::Installed { .. }));
+        assert_eq!(first.marketplace, Some(MarketplaceStep::Added));
+        assert_eq!(first.auto, Some(AutoUpdate::Set));
+
+        let leave = ensure(&probe(&f), OPTS, Wanted::InstallOnly, VERSION);
+        assert!(matches!(leave.outcome, Outcome::Present { .. }));
+        assert!(!f.calls().contains("plugin update"), "{}", f.calls());
+
+        let update = ensure(&probe(&f), OPTS, Wanted::InstallOrUpdate, VERSION);
+        assert!(matches!(update.outcome, Outcome::Current { .. }));
+        assert_eq!(update.marketplace, Some(MarketplaceStep::Present));
+        assert_eq!(update.auto, Some(AutoUpdate::AlreadyOn));
+        assert!(f.calls().contains("plugin update"), "{}", f.calls());
+    }
+}

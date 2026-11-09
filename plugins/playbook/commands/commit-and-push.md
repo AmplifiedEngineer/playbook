@@ -25,7 +25,7 @@ With `--json` the process always exits 0, so read `verdict`, never the exit code
 
 ## If the block did not run
 
-- The output is `[shell command execution disabled by policy]`: tell the user to run `brew upgrade playbook` or `playbook update`, then follow `${CLAUDE_PLUGIN_ROOT}/skills/finish-pull-request/references/legacy-commit.md` with normal `Bash` calls.
+- The output is `[shell command execution disabled by policy]`: tell the user to run `brew upgrade playbook` or `playbook upgrade`, then follow `${CLAUDE_PLUGIN_ROOT}/skills/finish-pull-request/references/legacy-commit.md` with normal `Bash` calls.
 - The caller wants a drafted message in its own words: use `playbook commit prepare` to read the diff, write the message, and pass it with `-m`.
 
 Other flows: `/playbook:create-pull-request` pushes the branch and opens its pull request.

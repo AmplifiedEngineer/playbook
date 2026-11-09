@@ -70,7 +70,7 @@ pub const PARTS: &[Part] = &[
         default_on: false,
         flags: "--security, --no-security",
         question: "",
-        does: "Adds permission rules (allow, ask, deny). Off unless you pass --security or set `security.defaults`. It is never asked about. Update control stays with you, `playbook update` and Homebrew.",
+        does: "Adds permission rules (allow, ask, deny). Off unless you pass --security or set `security.defaults`. It is never asked about. Update control stays with you, `playbook upgrade` and Homebrew.",
         changes: "~/.claude/settings.json (the permissions block)",
         undo: "Run `playbook setup --no-security`, then delete the permissions entries from settings.json by hand. Setup never removes a value you have.",
     },

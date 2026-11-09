@@ -13,7 +13,7 @@ use std::fmt;
 const VERSION_KEY: &str = "schema_version";
 
 /// The command that brings an older build up to date.
-const UPDATE_COMMAND: &str = "playbook update";
+const UPDATE_COMMAND: &str = "playbook upgrade";
 
 #[derive(Debug)]
 pub enum SchemaError {
@@ -157,7 +157,7 @@ mod tests {
             text.contains("version 3") && text.contains("understands 2"),
             "{text}"
         );
-        assert!(text.contains("playbook update"), "{text}");
+        assert!(text.contains("playbook upgrade"), "{text}");
         assert_eq!(conn.total_changes(), before);
         assert_eq!(stored(&conn).as_deref(), Some("3"));
     }
