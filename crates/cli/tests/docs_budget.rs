@@ -63,6 +63,15 @@ const LIMITS: &[Limits] = &[
         max_commands: None,
     },
     Limits {
+        path: "docs/code-search.md",
+        max_lines: None,
+        max_words: 900,
+        max_h2: None,
+        max_pictures: None,
+        max_badges: None,
+        max_commands: None,
+    },
+    Limits {
         path: "docs/recipes/*.md",
         max_lines: None,
         max_words: 250,
