@@ -6,52 +6,44 @@ user-invocable: false
 
 # Finish Pull Request
 
-Run this in the main session or in a delegated or forked agent that holds the `Agent` tool, right after `/playbook:create-pull-request` returns a PR URL. That command forks into the `git` agent, which has no `Agent` tool and cannot spawn review swarms, so the self-review, fix, promote and merge work lives here, in the session that can.
+Run this in the main session or in an agent that holds the `Agent` tool, right after `/playbook:create-pull-request` returns a PR URL. The git agent cannot spawn review swarms, so the review, fix, promote and merge work lives here.
 
-Inputs from the create-pull-request report: the PR number or URL, its branch, and whether `--ready` was passed. If any is missing, read it with `gh pr view`.
+Inputs: the PR number, its branch, whether `--ready` was passed, and an optional worktree path. With a worktree, run git as `git -C <worktree>`, pass the PR number to every tool, and never leave the worktree. If an input is missing, read it with `gh pr view`.
 
-An optional worktree path may also be given, for a caller whose working directory is not the PR's checkout. When it is, run every git command as `git -C <worktree>`, run `gh` and any tool from the tool map with the PR number so they do not depend on the current directory, pass the path on to the review commands, and put it with the branch in the prompt of `/playbook:commit-and-push` as "Worktree root: <path>, branch: <name>", and never change directory or touch files outside the worktree.
+If `playbook pr finish-context` or `playbook pr land` is not in the session tool map, read `references/legacy-land.md` and follow it instead of this file.
 
-## Run mode
+## 1. Read the context
 
-Read the run mode. Intent: mode-status. If the session's tool map (printed at session start) lists it, use that command, with `--json`, adding `--flag auto` or `--flag ask` if the session was started with one; its `mode` key is `ask` or `auto`. Otherwise do this: the mode is `auto` when the caller passed `--auto` or said it runs in auto mode, else `ask`, the default. In auto mode, skip the self-review below when `/playbook:implement` opened this PR, because its review already covered the code. Any other caller gets no review here, and the final report says that no self-review ran. If `--ready` was passed, it still promotes the draft. The `autoReview.fix` and `autoMerge.enabled` settings still apply in auto mode, except that this skill never merges a PR whose code no review covered.
+Run `playbook pr finish-context <n> --json` (add `--flag auto` or `--flag ask` if the session started with one, and `--dir <worktree>` for a worktree). It always exits 0. Read `ok` first: when false, report `error` and stop. Otherwise it gives:
 
-## Reading a setting
+- `mode`: `ask` or `auto`.
+- `settings`: `autoReview.fix` and `autoMerge.enabled`, each with `value` and `error`. An error on either means `false`.
+- `review`: `skip`, `quick` or `deep`, already decided from `autoReview.enabled`, `autoReview.type` and the triage. Never lighten it.
+- `pr`: `number`, `url`, `isDraft`, `head`, `base`.
 
-Intent: config-get. If the session's tool map lists it, use that command; it prints `<key>: <value> (source: <tier>)`. A config read error is a non-zero exit, or a line without the expected value. Never treat an error as `false` for a review setting: use the review fallback in Step 5.1. For the two opt-in settings (`autoReview.fix`, `autoMerge.enabled`) an error means `false`, because a broken config must never turn on an extra action. Name what the command printed to stderr in the final report either way. Otherwise do this: use the defaults, `autoReview.enabled` `true`, `autoReview.type` `auto`, `autoReview.fix` `false` and `autoMerge.enabled` `false`, unless the user told you a different value in this session.
+## 2. Review
 
-## Step 5: Self-review before ready
+- `deep`: run `/playbook:deep-review <n> --self`.
+- `quick`: run `/playbook:quick-review <n> --self`.
+- `skip`: say "auto-review is disabled for this repo, review skipped" in the final report.
 
-Review comments follow Conventional Comments: the review commands read `playbook:grounding-review` `references/conventional-comments.md`, and any finding you fix from the review is read by its label and decorations.
-1. Decide whether a review runs, and which one, before touching the PR further.
-   - Read `autoReview.enabled`. If it is `false`, skip the review and say so in the final report ("auto-review is disabled for this repo, review skipped"). If it is `true`, or the key is unset (it defaults to `true`), read `autoReview.type`, which is `auto` (the default), `deep` or `quick`.
-   - `auto`: pick the depth. Intent: pr-review-triage. If the session's tool map lists it, use that command with the PR number and read its first line, `review=quick` or `review=deep`. It prints `quick` only when three small-model reads agree. If it exits non-zero or prints anything else, use `deep`: a triage failure never skips or lightens the review. Otherwise do this: use `deep`.
-   - `deep`: run `/playbook:deep-review <n> --self` against the PR just created (a draft is a real PR, so this works).
-   - `quick`: run `/playbook:quick-review <n> --self`.
-   - Config read error on either call: do not block and do not skip. Run `/playbook:deep-review <n> --self`.
-   - Never issue `/clear` here: a model cannot, and the reviewers are fresh subagents that never saw the code. A person may clear first; nothing depends on it. If this session has no `Agent` tool, the review command runs its lenses inline and says so in its report; treat that report as the review.
-2. After the review, read `autoReview.fix` and `autoMerge.enabled`. Both default to `false`, apply in ask and auto mode alike, and need no question.
-3. Check the PR text. The body follows the short template (first line the ticket key when one is known, `## Summary`, optional Notes and Related work, under 1200 characters, `Closes #N` or `Refs #N` for a handled issue). The title and every commit carry the key in the scope, for example `feat(PROJ-123): add retry to the sync job`; a stacked PR must have it everywhere. Fix a miss with `gh pr edit <n> --title` or `--body-file`, or, in ask mode only, reword the commit with an interactive rebase and `git push --force-with-lease`. In auto mode never force: report the commit-scope miss instead of fixing it.
-4. Fix the findings. A push updates the draft, no new PR needed.
-   - `autoReview.fix` is `false`: fix any findings the review surfaced, as you judge best.
-   - `autoReview.fix` is `true`: fix every finding that survived the review's sweep. Commit through `/playbook:commit-and-push` (worktree root and branch in its prompt, as above), then re-run the scoped checks for the changed area and fix what they report. If no review ran, there are no findings to fix: say so.
-5. If the PR is already ready (the create report said `draft` was false), skip `gh pr ready`. Otherwise, if `--ready` was passed or `autoMerge.enabled` is `true` (a PR cannot merge while it is a draft), run `gh pr ready <branch>` now, after Step 5.1 decided whether a review runs and after fixing any findings, not before.
-6. If `autoMerge.enabled` is `true`, merge only when the code was reviewed and every check is green. Take these in order and stop at the first that fails:
-   - **Reviewed:** in auto mode, when no review ran (any caller other than `/playbook:implement`), do not merge, even with `autoMerge.enabled` on. The PR is already ready from step 5. Say in the final report that auto-merge was skipped because no review covered the code, and stop.
-   - **Stacked PR:** if the PR's base is another open PR's branch rather than the default branch, do not merge it before that base merges. Check with `gh pr view <n> --json baseRefName` and `gh pr list --state open --head <baseRefName> --json number`. Say it is waiting on its base and stop, leaving the PR ready.
-   - **Wait for green:** record the head with `gh pr view <n> --json headRefOid -q .headRefOid`. Then wait for the checks. Intent: pr-ci-wait. If the session's tool map lists it, use that command with the PR number, `--all --settle 120 --timeout 300 --interval 30`, and the Bash `timeout` set to 600000. `--all` waits on every check, not only the required ones, since a repo may require none. `--settle` lets checks register after `gh pr ready`. On `CI_VERDICT=TIMEOUT` run it again with `--timeout 540` and no `--settle`, up to five more times, about 45 minutes in all. Each run is its own Bash call. Otherwise do this: wait 120 seconds, then read `gh pr checks <n> --json name,bucket` every 30 seconds (ignore its exit code, which is non-zero while checks are pending or failing, and treat a "no checks reported" error as an empty list), each read its own Bash call under 10 minutes, for up to about 45 minutes. The verdict is `NONE` when the list is empty, `FAIL` when any bucket is `fail`, `CANCELLED` when none is `pending` and any is `cancel`, `PASS` when none is `pending`, and otherwise keep waiting; `TIMEOUT` when time runs out. Read the verdict:
-     - `PASS`: go on, once the head still equals the recorded one. A changed head means do not merge: report it and stop.
-     - `NONE`: the PR has no checks. Go on and say so in the final report.
-     - `FAIL` or `CANCELLED`: do not merge. Report the printed counts, name the failing checks with `gh pr checks <n>`, and stop.
-     - `TIMEOUT` after the last run: report that checks were unfinished and stop without merging.
-   - **Merge:** arm auto-merge pinned to the recorded head. Intent: pr-merge. If the session's tool map lists it, use that command with the PR number and the recorded head; it prints `merge_rc=<code>` and what `gh` said. Otherwise do this: run `gh pr merge <n> --auto --match-head-commit <recorded headRefOid>` and read its exit code and output. Either way it arms auto-merge with no method flag, so a merge queue picks how it lands, and `gh` refuses if the head moved. If the text says a merge method is required, read `gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed` and run `gh pr merge <n> --auto --match-head-commit <recorded headRefOid>` with the one allowed method flag (`--squash`, `--merge` or `--rebase`), preferring squash. On any other refusal, report the message and stop. Never `--admin`, never `--delete-branch`, never a method flag to get around any other refusal.
-   - **Confirm:** do not trust the exit code. Wait for the PR to land. Intent: pr-land-wait. If the session's tool map lists it, use that command with the PR number, `--timeout 540 --interval 15`. It prints `<state> <mergeState> <review> <armed>` per read, then `LAND_VERDICT=`. Otherwise do this: every 15 seconds for up to 540 seconds, read `gh pr view <n> --json state,mergeStateStatus,reviewDecision,autoMergeRequest` and form the same line (`armed` when `autoMergeRequest` is not null, else `-`). The verdict is `MERGED` when the state is `MERGED`, `REVIEW_GATE` on `REVIEW_REQUIRED`, `CHANGES_REQUESTED` on that review, `RESTATE` when the merge state is `DIRTY` or `BEHIND`, and `TIMEOUT` when time runs out. Report which case it is, and never call a PR merged unless the verdict is `MERGED`:
-     - `MERGED`: merged.
-     - `TIMEOUT`, last line `OPEN` with `armed`: queued, or auto-merge armed and waiting. Report it as still waiting.
-     - `TIMEOUT`, last line `OPEN` with `-` in the last column: the merge was rejected or auto-merge was cleared. Report it and stop.
-     - `TIMEOUT`, last line `CLOSED`: closed without merging.
-     - `REVIEW_GATE` or `CHANGES_REQUESTED`: a person has to act. Report it and stop.
-     - `RESTATE`: the PR is behind or in conflict. Report it and stop.
-7. If neither `--ready` nor `autoMerge.enabled` applies: stop after step 4. Leave the PR in the state it opened in (a draft by default).
+In auto mode, skip the self-review below when `/playbook:implement` opened this PR, because its review covered the code. Any other caller gets no review here, and the final report says that no self-review ran. This skill never merges a PR whose code no review covered. Never issue `/clear`.
 
-Never skip straight to `gh pr ready` on a fresh draft without running Step 5.1 first, even when it concludes with "review skipped" rather than an actual review.
+## 3. Fix
+
+Check the PR text: the body follows the short template, and the title and commits carry the ticket key in the scope. Fix a title or body miss with `gh pr edit`. A commit miss is reworded only in ask mode with `git push --force-with-lease`; in auto mode report it.
+
+Fix the review findings. With `autoReview.fix` true, fix every finding that survived the sweep and commit through `/playbook:commit-and-push` (worktree root and branch in its prompt). A push updates the draft.
+
+## 4. Promote and land
+
+If the PR is a draft and (`--ready` was passed or `autoMerge.enabled` is true), run `gh pr ready <n>`. If `autoMerge.enabled` is not true, stop here and leave the PR as it is.
+
+If `autoMerge.enabled` is true, merge only when a review covered the code (no review means no merge: say so and stop). Then run `playbook pr land <n>` as its own Bash call with `timeout` 600000. It waits for checks, arms auto-merge pinned to the head, and confirms the result. Read the `LAND=<verdict>` line (exit 0 merged, 3 a gate, 6 failed or closed, 7 still waiting, 8 not queued):
+
+- `MERGED`: merged.
+- `STILL_WAITING`: run it again with `--settle 0`, up to five more times, then report it as still waiting.
+- `WAITING_ON_BASE`: the base PR has not merged. Report it and stop.
+- `FAIL`, `CLOSED`, `DRAFT`, `HEAD_MOVED`, `REVIEW_GATE`, `CHANGES_REQUESTED`, `RESTATE`, `NOT_QUEUED`: report the verdict and what it printed, and stop.
+
+Never call a PR merged unless the verdict is `MERGED`. Never use `--admin` or `--delete-branch`.
