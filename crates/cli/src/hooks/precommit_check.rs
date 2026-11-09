@@ -44,41 +44,9 @@ pub fn run(payload: &Payload) {
     if cmd.is_empty() || !is_commit(&cmd) {
         return;
     }
-    // Outside a repo this exits non-zero, which is the same silent return.
-    let Some(staged) = git(&["diff", "--cached", "--name-only"]) else {
-        return;
-    };
-    let files: Vec<&str> = staged.lines().filter(|l| !l.trim().is_empty()).collect();
-    if files.is_empty() {
-        return;
-    }
-
-    let mut findings = String::new();
-
-    let secrets: Vec<&str> = files.iter().copied().filter(|f| looks_secret(f)).collect();
-    if !secrets.is_empty() {
-        findings.push_str(&format!(
-            "Secret-shaped files are staged: {}. Confirm these belong in the repo. ",
-            secrets.join(" ")
-        ));
-    }
-
-    let debug_lines = count_debug_lines();
-    if debug_lines > 0 {
-        findings.push_str(&format!(
-            "{debug_lines} added line(s) look like debug output (console.log, debugger, dbg!, breakpoint, pdb, pry, println). "
-        ));
-    }
-
-    let changed = changed_line_count();
-    if files.len() > MAX_FILES || changed > MAX_CHANGED_LINES {
-        findings.push_str(&format!(
-            "Large commit: {} file(s), {changed} changed line(s). Consider splitting it into single-concern commits. ",
-            files.len()
-        ));
-    }
-
+    let findings = findings_in(None);
     if !findings.is_empty() {
+        let findings = findings.iter().map(|f| format!("{f} ")).collect::<String>();
         emit_pre_context(
             "PreToolUse",
             &format!(
@@ -88,6 +56,46 @@ pub fn run(payload: &Payload) {
             ),
         );
     }
+}
+
+/// The staged-diff warnings for the repo at `dir` (the process cwd when
+/// `None`), one sentence each. Empty when nothing is staged or git fails.
+/// `commit all` reports these in its `warnings`, because a commit made inside
+/// the binary never fires the hook.
+pub fn findings_in(dir: Option<&std::path::Path>) -> Vec<String> {
+    // Outside a repo this exits non-zero, which is the same silent return.
+    let Some(staged) = git_in(dir, &["diff", "--cached", "--name-only"]) else {
+        return Vec::new();
+    };
+    let files: Vec<&str> = staged.lines().filter(|l| !l.trim().is_empty()).collect();
+    if files.is_empty() {
+        return Vec::new();
+    }
+    let mut findings = Vec::new();
+
+    let secrets: Vec<&str> = files.iter().copied().filter(|f| looks_secret(f)).collect();
+    if !secrets.is_empty() {
+        findings.push(format!(
+            "Secret-shaped files are staged: {}. Confirm these belong in the repo.",
+            secrets.join(" ")
+        ));
+    }
+
+    let debug_lines = count_debug_lines(dir);
+    if debug_lines > 0 {
+        findings.push(format!(
+            "{debug_lines} added line(s) look like debug output (console.log, debugger, dbg!, breakpoint, pdb, pry, println)."
+        ));
+    }
+
+    let changed = changed_line_count(dir);
+    if files.len() > MAX_FILES || changed > MAX_CHANGED_LINES {
+        findings.push(format!(
+            "Large commit: {} file(s), {changed} changed line(s). Consider splitting it into single-concern commits.",
+            files.len()
+        ));
+    }
+    findings
 }
 
 /// True for a real commit. `git commit --amend` counts; `git log` and
@@ -116,8 +124,8 @@ fn looks_secret(path: &str) -> bool {
         || SECRET_SUFFIXES.iter().any(|s| name.ends_with(s))
 }
 
-fn count_debug_lines() -> usize {
-    let Some(diff) = git(&["diff", "--cached", "--unified=0"]) else {
+fn count_debug_lines(dir: Option<&std::path::Path>) -> usize {
+    let Some(diff) = git_in(dir, &["diff", "--cached", "--unified=0"]) else {
         return 0;
     };
     diff.lines()
@@ -128,8 +136,8 @@ fn count_debug_lines() -> usize {
 
 /// Added plus deleted, matching the shell's `awk '{a+=$1; d+=$2}'` over
 /// `--numstat`. Binary files report `-`, which parses as 0 there and here.
-fn changed_line_count() -> u64 {
-    let Some(numstat) = git(&["diff", "--cached", "--numstat"]) else {
+fn changed_line_count(dir: Option<&std::path::Path>) -> u64 {
+    let Some(numstat) = git_in(dir, &["diff", "--cached", "--numstat"]) else {
         return 0;
     };
     numstat
@@ -145,9 +153,9 @@ fn changed_line_count() -> u64 {
 
 /// `None` when git is missing, times out, or exits non-zero, which the caller
 /// treats as "nothing to say" rather than an error.
-fn git(args: &[&str]) -> Option<String> {
+fn git_in(dir: Option<&std::path::Path>, args: &[&str]) -> Option<String> {
     crate::common::git::untrimmed(crate::common::git::run(
-        None,
+        dir,
         args,
         crate::common::git::TIMEOUT,
     ))

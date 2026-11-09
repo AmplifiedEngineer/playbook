@@ -307,6 +307,42 @@ fn no_plugin_a_false_config_key_or_a_failed_update_leave_the_exit_code_alone() {
 }
 
 #[test]
+fn a_failed_marketplace_refresh_leaves_the_migrate_exit_code_alone() {
+    let Some(old) = older_line() else {
+        return;
+    };
+    // Arrange: the marketplace refresh fails, the plugin update succeeds and
+    // leaves the old plugin in place.
+    let h = Home::new("market-fail");
+    let stale = h.plugin(&old, &old);
+    h.install(&stale, &old);
+    let bin = h.home.join("bin/claude");
+    fs::create_dir_all(bin.parent().unwrap()).unwrap();
+    fs::write(
+        &bin,
+        "#!/bin/sh\necho \"$*\" >> \"$HOME/claude-calls.log\"\ncase \"$*\" in\n*marketplace*) echo 'git pull failed' >&2; exit 1;;\nesac\nexit 0\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+
+    // Act
+    let out = h.playbook(&["migrate"], "", None);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert_eq!(
+        h.claude_calls(),
+        "plugin marketplace update amplifiedengineer\nplugin update playbook@amplifiedengineer\n"
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("the marketplace refresh failed (git pull failed)"),
+        "{text}"
+    );
+}
+
+#[test]
 fn a_session_from_a_stale_plugin_folder_says_to_restart() {
     let Some(old) = older_line() else {
         return;

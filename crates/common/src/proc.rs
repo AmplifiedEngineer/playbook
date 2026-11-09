@@ -66,6 +66,24 @@ fn collect_by(rx: &mpsc::Receiver<Vec<u8>>, deadline: Instant) -> Option<Vec<u8>
 /// is drained while the child runs, so a chatty child (a git hook, a push)
 /// cannot stall on a full pipe. Never panics.
 pub fn run_with_timeout(command: &mut Command, timeout: Duration) -> Option<Output> {
+    run_bounded(command, None, timeout).ok()
+}
+
+/// Why a bounded run gave no output.
+#[derive(Debug)]
+pub enum RunFailure {
+    /// The child could not be started.
+    Spawn(std::io::Error),
+    /// The child started but did not finish, or its pipes failed.
+    Incomplete,
+}
+
+/// [`run_with_timeout`] that tells a spawn failure from a run that did not
+/// finish.
+pub fn try_run_with_timeout(
+    command: &mut Command,
+    timeout: Duration,
+) -> Result<Output, RunFailure> {
     run_bounded(command, None, timeout)
 }
 
@@ -73,7 +91,7 @@ pub fn run_with_timeout(command: &mut Command, timeout: Duration) -> Option<Outp
 /// input, then closed. The write happens on its own thread, so a child that
 /// does not read it cannot stall the deadline.
 pub fn run_with_input(command: &mut Command, input: &[u8], timeout: Duration) -> Option<Output> {
-    run_bounded(command, Some(input.to_vec()), timeout)
+    run_bounded(command, Some(input.to_vec()), timeout).ok()
 }
 
 /// Trimmed stdout of `program args` run in `dir` when it exits zero within
@@ -122,7 +140,11 @@ fn stop(child: &mut Child) {
 /// and macOS use.
 const PIPE_CAPACITY: usize = 64 * 1024;
 
-fn run_bounded(command: &mut Command, input: Option<Vec<u8>>, timeout: Duration) -> Option<Output> {
+fn run_bounded(
+    command: &mut Command,
+    input: Option<Vec<u8>>,
+    timeout: Duration,
+) -> Result<Output, RunFailure> {
     // The `playbook` binary restores the default SIGPIPE action so that
     // `| head` ends quietly. A child that exits before the writer thread runs,
     // or never reads its input, would then make a plain write end this whole
@@ -137,8 +159,10 @@ fn run_bounded(command: &mut Command, input: Option<Vec<u8>>, timeout: Duration)
             command.stdin(Stdio::null());
         }
         Some(bytes) if bytes.len() <= PIPE_CAPACITY => {
-            let (reader, writer) = std::io::pipe().ok()?;
-            command.stdin(Stdio::from(reader.try_clone().ok()?));
+            let (reader, writer) = std::io::pipe().map_err(|_| RunFailure::Incomplete)?;
+            command.stdin(Stdio::from(
+                reader.try_clone().map_err(|_| RunFailure::Incomplete)?,
+            ));
             kept = Some((reader, writer, bytes));
         }
         Some(bytes) => {
@@ -150,7 +174,7 @@ fn run_bounded(command: &mut Command, input: Option<Vec<u8>>, timeout: Duration)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .ok()?;
+        .map_err(RunFailure::Spawn)?;
     // Drop the command's own copy of the child's read end.
     command.stdin(Stdio::null());
     if let Some((reader, mut writer, bytes)) = kept {
@@ -167,7 +191,7 @@ fn run_bounded(command: &mut Command, input: Option<Vec<u8>>, timeout: Duration)
     let (Some(out_pipe), Some(err_pipe)) = (child.stdout.take(), child.stderr.take()) else {
         let _ = child.kill();
         let _ = child.wait();
-        return None;
+        return Err(RunFailure::Incomplete);
     };
     let out_rx = drain(out_pipe);
     let err_rx = drain(err_pipe);
@@ -180,20 +204,20 @@ fn run_bounded(command: &mut Command, input: Option<Vec<u8>>, timeout: Duration)
             Ok(None) => {}
             Err(_) => {
                 stop(&mut child);
-                return None;
+                return Err(RunFailure::Incomplete);
             }
         }
         if Instant::now() >= deadline {
             stop(&mut child);
-            return None;
+            return Err(RunFailure::Incomplete);
         }
         std::thread::sleep(poll_pause(started.elapsed()));
     };
     // A grandchild that keeps a pipe open past the child's exit must not hang
     // us either: the same deadline bounds the final read.
-    let stdout = collect_by(&out_rx, deadline)?;
-    let stderr = collect_by(&err_rx, deadline)?;
-    Some(Output {
+    let stdout = collect_by(&out_rx, deadline).ok_or(RunFailure::Incomplete)?;
+    let stderr = collect_by(&err_rx, deadline).ok_or(RunFailure::Incomplete)?;
+    Ok(Output {
         status,
         stdout,
         stderr,
