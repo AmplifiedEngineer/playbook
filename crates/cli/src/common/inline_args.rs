@@ -133,6 +133,9 @@ pub fn parse(text: &str) -> Result<Parsed, ParseError> {
             "--auto" => p.auto = true,
             "--ask" => p.ask = true,
             "--no-signoff" => p.no_signoff = true,
+            "--all" => p.stage_all = true,
+            "--update" => p.tracked = true,
+            "--amend" => p.amend = true,
             "--ready" => p.ready = true,
             "-m" | "--message" => p.message = Some(value(word)?),
             "--base" => p.base = Some(value(word)?),
@@ -213,6 +216,12 @@ mod tests {
     fn combined_short_flags_and_auto() {
         let p = parse("-Au --auto").unwrap();
         assert!(p.stage_all && p.tracked && p.auto && !p.amend);
+    }
+
+    #[test]
+    fn the_long_forms_of_the_stage_and_amend_flags_are_parsed() {
+        let p = parse("--all --update --amend").unwrap();
+        assert!(p.stage_all && p.tracked && p.amend);
     }
 
     #[test]
