@@ -15,12 +15,12 @@
     "q003": [
       "lighthouse-beam-calibration",
       "contract-rotation-01664",
-      "lamp-alarm-01744"
+      "raises-each-01488"
     ],
     "q004": [
       "tide-table-import-format",
-      "centimetres-sheet-00204",
-      "every-tide-01492"
+      "dispatch-seafarer-01424",
+      "electrician-east-00998"
     ],
     "q005": [
       "buoy-telemetry-retention",
@@ -54,8 +54,8 @@
     ],
     "q011": [
       "radar-sweep-noise-filter",
-      "call-ghost-00629",
-      "echoes-renewal-01888"
+      "alarms-week-00506",
+      "date-always-01530"
     ],
     "q012": [
       "tug-fleet-dispatch-rules",
@@ -65,7 +65,7 @@
     "q013": [
       "quay-wall-inspection-cycle",
       "reefer-wall-00320",
-      "knowing-loss-00050"
+      "agents-clutter-01435"
     ],
     "q014": [
       "refrigerated-container-alarms",
@@ -85,7 +85,7 @@
     "q017": [
       "ballast-water-reporting",
       "radio-missing-01829",
-      "editing-shared-01359"
+      "whole-flags-00460"
     ],
     "q018": [
       "lock-gate-hydraulic-sequence",
@@ -170,7 +170,7 @@
     "q034": [
       "customs-hold-release-codes",
       "seventy-patrols-00064",
-      "dock-store-00757"
+      "canteen-opening-hours"
     ],
     "q035": [
       "freight-forwarder-api-keys",
@@ -264,8 +264,8 @@
     ],
     "q053": [
       "lost-property-handling",
-      "covered-whole-01656",
-      "fires-motion-00691"
+      "comparison-side-01627",
+      "covered-whole-01656"
     ],
     "q054": [
       "visitor-escort-rules",
@@ -300,12 +300,12 @@
     "q060": [
       "noise-complaint-log",
       "assigned-boats-01234",
-      "nightly-photographs-00265"
+      "model-asks-00589"
     ],
     "q061": [
       "flag-etiquette-notes",
-      "every-structural-00911",
-      "flag-name-00569"
+      "backpressure-port-01152",
+      "every-structural-00911"
     ],
     "q062": [
       "spare-key-register",

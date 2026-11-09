@@ -18,7 +18,7 @@ default = ["engine-rusqlite"]
 engine-rusqlite = ["dep:rusqlite"]
 
 [dependencies]
-rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"], optional = true }
+rusqlite = { version = "=0.41.1", default-features = false, features = ["bundled"], optional = true }
 
 [lints]
 workspace = true

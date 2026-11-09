@@ -41,11 +41,7 @@ impl SqliteFake {
 
     fn run(&self, sql: &str, args: &[Value]) -> Result<StatementResult, String> {
         let mut prepared = self.conn.prepare(sql).map_err(|e| e.to_string())?;
-        let columns = prepared
-            .column_names()
-            .iter()
-            .map(|c| c.to_string())
-            .collect();
+        let columns = prepared.column_names().map(|c| c.to_string()).collect();
         let binds = args.iter().map(to_sql);
         let mut rows = prepared
             .query(params_from_iter(binds))
