@@ -48,6 +48,30 @@ where
     slots.into_iter().map(filled).collect()
 }
 
+/// [`map`] for an `f` that can fail. A panic in `f` becomes that item's `Err`
+/// instead of reaching the caller, so one broken call never hides the others.
+/// The default panic hook still prints the panic message to standard error.
+pub fn try_map<I, T, F>(items: &[I], cap: usize, f: F) -> Vec<Result<T, String>>
+where
+    I: Sync,
+    T: Send,
+    F: Fn(&I) -> Result<T, String> + Sync,
+{
+    map(items, cap, |item| {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(item)))
+            .unwrap_or_else(|payload| Err(panic_text(payload.as_ref())))
+    })
+}
+
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    let what = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("no message");
+    format!("a parallel call panicked: {what}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,5 +112,120 @@ mod tests {
     #[test]
     fn a_cap_of_zero_still_runs_everything() {
         assert_eq!(map(&[1u8, 2, 3], 0, |n| *n), vec![1, 2, 3]);
+    }
+
+    /// Holds each item until the item after it has finished, so the finish
+    /// order is the reverse of the input order without any sleep. It also
+    /// proves the items overlap: one at a time would never get past item 0.
+    struct ReverseGate {
+        done: Mutex<Vec<bool>>,
+        changed: std::sync::Condvar,
+    }
+
+    /// Longest the gate waits before it gives up and fails the test.
+    const GATE_LIMIT: Duration = Duration::from_secs(10);
+
+    impl ReverseGate {
+        fn new(len: usize) -> Self {
+            Self {
+                done: Mutex::new(vec![false; len]),
+                changed: std::sync::Condvar::new(),
+            }
+        }
+
+        fn pass(&self, i: usize) {
+            let mut done = self.done.lock().unwrap();
+            if i + 1 < done.len() {
+                let (guard, timeout) = self
+                    .changed
+                    .wait_timeout_while(done, GATE_LIMIT, |d| !d[i + 1])
+                    .unwrap();
+                assert!(!timeout.timed_out(), "item {i} never saw item {}", i + 1);
+                done = guard;
+            }
+            done[i] = true;
+            self.changed.notify_all();
+        }
+    }
+
+    #[test]
+    fn try_map_keeps_input_order_when_the_items_finish_in_reverse() {
+        let items: Vec<usize> = (0..4).collect();
+        let gate = ReverseGate::new(items.len());
+
+        let out = try_map(&items, items.len(), |&i| {
+            gate.pass(i);
+            Ok(i * 10)
+        });
+
+        assert_eq!(out, vec![Ok(0), Ok(10), Ok(20), Ok(30)]);
+    }
+
+    #[test]
+    fn try_map_gives_the_same_results_as_a_plain_loop() {
+        let items: Vec<u32> = (0..9).collect();
+        let call = |n: &u32| {
+            if n % 4 == 3 {
+                Err(format!("odd {n}"))
+            } else {
+                Ok(n * 2)
+            }
+        };
+
+        let parallel = try_map(&items, 4, call);
+        let sequential: Vec<_> = items.iter().map(call).collect();
+
+        assert_eq!(parallel, sequential);
+        assert_eq!(parallel[3], Err("odd 3".to_string()));
+        assert_eq!(parallel[4], Ok(8));
+    }
+
+    #[test]
+    fn a_failure_in_one_item_leaves_the_others_in_place() {
+        let out = try_map(&[1u8, 2, 3], 3, |n| {
+            if *n == 2 {
+                Err("two failed".to_string())
+            } else {
+                Ok(*n)
+            }
+        });
+
+        assert_eq!(out, vec![Ok(1), Err("two failed".to_string()), Ok(3)]);
+    }
+
+    #[test]
+    fn a_panic_in_one_item_becomes_that_items_error() {
+        let out = try_map(&[1u8, 2, 3], 3, |n| {
+            assert_ne!(*n, 2, "boom at two");
+            Ok(*n)
+        });
+
+        assert_eq!(out[0], Ok(1));
+        assert_eq!(out[2], Ok(3));
+        let Err(text) = &out[1] else {
+            panic!("item 2 should fail: {out:?}");
+        };
+        assert!(text.contains("boom at two"), "{text}");
+    }
+
+    #[test]
+    fn try_map_never_runs_more_than_the_cap_at_once() {
+        const CAP: usize = 3;
+        let live = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        let items = [0u8; 12];
+
+        try_map(&items, CAP, |_| {
+            let now = live.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(now, Ordering::SeqCst);
+            let waited = std::time::Instant::now();
+            while peak.load(Ordering::SeqCst) < CAP && waited.elapsed() < GATE_LIMIT {
+                std::thread::yield_now();
+            }
+            live.fetch_sub(1, Ordering::SeqCst);
+            Ok(())
+        });
+
+        assert_eq!(peak.load(Ordering::SeqCst), CAP);
     }
 }
