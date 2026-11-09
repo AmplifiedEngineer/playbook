@@ -1,7 +1,7 @@
 ---
 description: Use on first install or to repair the local setup. Wires safety guards, settings.json, the pb short name and system prompt.
 allowed-tools: Bash, Read, AskUserQuestion
-argument-hint: "[--only <PART>...] [--yes] [--dry-run] [--explain [<PART>]] [--hooks|--no-hooks] [--statusline|--no-statusline] [--security|--no-security] [--path|--no-path] [--system-prompt|--no-system-prompt] [--telemetry|--no-telemetry] [--short-name|--no-short-name] [--completions|--no-completions] [--policy-guard|--no-policy-guard] [--attribution|--no-attribution] [--codex-hooks|--no-codex-hooks] [--help] [--auto] [--ask]"
+argument-hint: "[--only <PART>...] [--yes] [--dry-run] [--explain [<PART>]] [--plugin|--no-plugin] [--hooks|--no-hooks] [--statusline|--no-statusline] [--security|--no-security] [--path|--no-path] [--system-prompt|--no-system-prompt] [--telemetry|--no-telemetry] [--short-name|--no-short-name] [--completions|--no-completions] [--policy-guard|--no-policy-guard] [--attribution|--no-attribution] [--codex-hooks|--no-codex-hooks] [--help] [--auto] [--ask]"
 
 model: haiku
 effort: low
@@ -50,7 +50,7 @@ Take `$ARGUMENTS` word by word:
 - When an `--only` value had only retired names, stop there and run nothing.
 - Every other word must be a flag from the Flags table below, or the value after `--only` or `--explain`. A value is part names from the Questions table or `security`, joined by commas. When a word is neither, stop with one line that names it and points to `/playbook:setup --help`. Ask nothing and run nothing.
 
-The rest of this file calls the kept words the arguments. A part flag is any flag in the Flags table from `--hooks` to `--no-attribution`. When you build a command, put each argument in single quotes.
+The rest of this file calls the kept words the arguments. A part flag is any flag in the Flags table from `--plugin` to `--no-attribution`. When you build a command, put each argument in single quotes.
 
 ## Step 3: Runs that ask nothing
 
@@ -125,6 +125,8 @@ The same flags as `playbook setup`, with the same text as `playbook setup --help
 
 | Flag | What it does |
 | --- | --- |
+| `--plugin` | Install or update the playbook plugin in Claude Code with the `claude` command. Given by name it runs even without a terminal, with `update.plugin` off or in CI |
+| `--no-plugin` | Leave the playbook plugin as it is |
 | `--hooks` | Wire every playbook hook into settings.json (guards, session and worktree hooks) |
 | `--no-hooks` | Add no playbook hook entries, including the guards in the shared settings |
 | `--statusline` | Use the playbook status line (sets statusLine.command to `playbook statusline`) |
@@ -147,7 +149,7 @@ The same flags as `playbook setup`, with the same text as `playbook setup --help
 | `--no-attribution` | Attribution OFF. Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values. Setup applies this when you choose nothing and have not chosen ON before |
 | `--codex-hooks` | Register the playbook Bash guards in the hooks.json of Codex (off unless asked) |
 | `--no-codex-hooks` | Do not register guards in Codex |
-| `--only <PART>...` | Run only these parts and ask nothing. Parts, comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution, codex-hooks. Everything else stays untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON |
+| `--only <PART>...` | Run only these parts and ask nothing. Parts, comma separated: plugin, hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution, codex-hooks. Everything else stays untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON |
 | `-y`, `--yes`, `--defaults` | Never ask: use the default for every part you did not answer with a flag |
 | `--dry-run` | Print what would change for each part and change nothing |
 | `--explain [<PART>]` | Describe a part, or every part when none is named, and change nothing |
@@ -161,15 +163,16 @@ The questions `playbook setup` asks in a terminal, in its order, with its defaul
 
 | Order | Part | Header | Question | Default | If no |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `hooks` | Hooks | Wire the playbook hooks into ~/.claude/settings.json? (see them with `playbook hooks list`) | Yes | No hooks are added. The safety guards, session helpers and usage warm-up do not run. |
-| 2 | `statusline` | Status line | Set the status line in ~/.claude/settings.json to `playbook statusline`? | Yes | Your status line stays as it is. |
-| 3 | `path` | PATH | Add the playbook binary's directory to PATH in your shell startup files (~/.zshenv for zsh, ~/.bashrc and a login file for bash)? | Yes | Your shell files are not touched. Hooks may not find playbook unless it is already on PATH. |
-| 4 | `system-prompt` | Prompt | Copy the playbook system prompt to ~/.config/playbook/prompts/SYSTEM_PROMPT.md? | Yes | No file is copied, and `systemPrompt.enabled` is set to false, so `pb cc` starts with Claude Code's own prompt. |
-| 5 | `telemetry` | Telemetry | Turn on Claude Code telemetry by writing the OpenTelemetry variables for the local usage collector into the env block of ~/.claude/settings.json, so plain claude, the IDE and the desktop app feed `playbook usage`? (skipped with one line when telemetry is already on, set up by you, or switched off by a setting that `playbook setup` will not change) | Yes | No variables are written. `playbook usage` reads transcripts instead. |
-| 6 | `short-name` | Short name | Add `pb` as a short name for `playbook`, as a symlink `pb -> playbook` in the playbook install folder (~/.local/bin or $PLAYBOOK_BIN_DIR)? No link is made when a `pb` command already exists. | Yes | No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing. |
-| 7 | `completions` | Completions | Install tab completion for `playbook` and `pb` in your shell? It adds small files (bash: ~/.local/share/bash-completion/completions, fish: ~/.config/fish/completions, zsh: ~/.local/share/playbook/completions.zsh) and, for zsh, one marked line in ~/.zshrc, created when missing. | Yes | No completion files are written, and your shell files are not touched. Tab does not complete `playbook` or `pb` until you run `playbook setup --only completions`. |
-| 8 | `policy-guard` | Policy guard | Turn on the policy guard? It denies git commands that skip checks or signing, a hand-run `gh pr create`, memory writes outside playbook's store, Edit or Write on settings.json and settings.local.json, writes to Claude Code's own memory folders, and model-run changes to protected config keys. The choice is stored in ~/.config/playbook. | No | The policy guard setting is not changed. It is off by default, and its hook entry allows every call while off. A guard you turned on stays on until `hooks.policyGuard.enabled` is set to false. Turn it on later with `playbook config set --global hooks.policyGuard.enabled true`. |
-| 9 | `attribution` | Attribution | Turn attribution ON, so Claude Code adds its Co-Authored-By trailer, generated-by line and claude.ai session link to commits and pull requests? The default is OFF: playbook sets `attribution` in ~/.claude/settings.json so Claude Code adds none of them. | No | Attribution is OFF, the default: playbook adds the missing `attribution` keys to ~/.claude/settings.json and keeps your own values, so Claude Code adds no trailer, generated-by line or session link. |
-| 10 | `codex-hooks` | Codex hooks | Register the playbook Bash guards in Codex? It adds the rm-workspace-guard and precommit-check entries to ~/.codex/hooks.json. Codex skips them until you trust them in /hooks. | No | ~/.codex/hooks.json is not touched. Entries from an earlier run stay until `playbook uninstall`, and without them the playbook guards do not run in Codex. Register them later with `playbook setup --only codex-hooks`. |
+| 1 | `plugin` | Plugin | Install or update the playbook plugin in Claude Code with the `claude` command? Claude Code keeps its plugins in ~/.claude/plugins. | Yes | The plugin is left as it is. Install or update it later with `playbook setup --only plugin`. |
+| 2 | `hooks` | Hooks | Wire the playbook hooks into ~/.claude/settings.json? (see them with `playbook hooks list`) | Yes | No hooks are added. The safety guards, session helpers and usage warm-up do not run. |
+| 3 | `statusline` | Status line | Set the status line in ~/.claude/settings.json to `playbook statusline`? | Yes | Your status line stays as it is. |
+| 4 | `path` | PATH | Add the playbook binary's directory to PATH in your shell startup files (~/.zshenv for zsh, ~/.bashrc and a login file for bash)? | Yes | Your shell files are not touched. Hooks may not find playbook unless it is already on PATH. |
+| 5 | `system-prompt` | Prompt | Copy the playbook system prompt to ~/.config/playbook/prompts/SYSTEM_PROMPT.md? | Yes | No file is copied, and `systemPrompt.enabled` is set to false, so `pb cc` starts with Claude Code's own prompt. |
+| 6 | `telemetry` | Telemetry | Turn on Claude Code telemetry by writing the OpenTelemetry variables for the local usage collector into the env block of ~/.claude/settings.json, so plain claude, the IDE and the desktop app feed `playbook usage`? (skipped with one line when telemetry is already on, set up by you, or switched off by a setting that `playbook setup` will not change) | Yes | No variables are written. `playbook usage` reads transcripts instead. |
+| 7 | `short-name` | Short name | Add `pb` as a short name for `playbook`, as a symlink `pb -> playbook` in the playbook install folder (~/.local/bin or $PLAYBOOK_BIN_DIR)? No link is made when a `pb` command already exists. | Yes | No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing. |
+| 8 | `completions` | Completions | Install tab completion for `playbook` and `pb` in your shell? It adds small files (bash: ~/.local/share/bash-completion/completions, fish: ~/.config/fish/completions, zsh: ~/.local/share/playbook/completions.zsh) and, for zsh, one marked line in ~/.zshrc, created when missing. | Yes | No completion files are written, and your shell files are not touched. Tab does not complete `playbook` or `pb` until you run `playbook setup --only completions`. |
+| 9 | `policy-guard` | Policy guard | Turn on the policy guard? It denies git commands that skip checks or signing, a hand-run `gh pr create`, memory writes outside playbook's store, Edit or Write on settings.json and settings.local.json, writes to Claude Code's own memory folders, and model-run changes to protected config keys. The choice is stored in ~/.config/playbook. | No | The policy guard setting is not changed. It is off by default, and its hook entry allows every call while off. A guard you turned on stays on until `hooks.policyGuard.enabled` is set to false. Turn it on later with `playbook config set --global hooks.policyGuard.enabled true`. |
+| 10 | `attribution` | Attribution | Turn attribution ON, so Claude Code adds its Co-Authored-By trailer, generated-by line and claude.ai session link to commits and pull requests? The default is OFF: playbook sets `attribution` in ~/.claude/settings.json so Claude Code adds none of them. | No | Attribution is OFF, the default: playbook adds the missing `attribution` keys to ~/.claude/settings.json and keeps your own values, so Claude Code adds no trailer, generated-by line or session link. |
+| 11 | `codex-hooks` | Codex hooks | Register the playbook Bash guards in Codex? It adds the rm-workspace-guard and precommit-check entries to ~/.codex/hooks.json. Codex skips them until you trust them in /hooks. | No | ~/.codex/hooks.json is not touched. Entries from an earlier run stay until `playbook uninstall`, and without them the playbook guards do not run in Codex. Register them later with `playbook setup --only codex-hooks`. |
 
 The security part is never asked about, in a terminal or here. It runs only with `--security` or when `security.defaults` is true.

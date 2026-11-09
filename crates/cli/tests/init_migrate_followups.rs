@@ -35,6 +35,7 @@ fn plugin_root(base: &Path, prompt: &str, skill: &str) -> PathBuf {
 
 fn paths(home: &Path, root: &Path, repo: Option<(PathBuf, PathBuf)>) -> InitPaths {
     InitPaths {
+        plugin: playbook::init::run::PluginRun::Skip,
         plugin_root: Some(root.to_path_buf()),
         self_root: Some(root.to_path_buf()),
         claude_home: home.join(".claude"),

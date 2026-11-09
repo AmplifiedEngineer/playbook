@@ -230,6 +230,17 @@ fn run_retrying_busy(
     }
 }
 
+/// Test seam that shortens every `claude` call's timeout, in seconds. Read
+/// only in debug builds, so a release binary cannot be fooled by it.
+#[cfg(debug_assertions)]
+const TIMEOUT_SECS_ENV: &str = "PLAYBOOK_TEST_PLUGIN_TIMEOUT_SECS";
+
+#[cfg(debug_assertions)]
+fn test_timeout() -> Option<Duration> {
+    let secs = std::env::var(TIMEOUT_SECS_ENV).ok()?.parse().ok()?;
+    Some(Duration::from_secs(secs))
+}
+
 /// Runs `claude` with `args` under the probe's home, the skip variable, no
 /// stdin and `timeout`. `Err` carries why it failed.
 fn run_claude(
@@ -238,6 +249,8 @@ fn run_claude(
     args: &[&str],
     timeout: Duration,
 ) -> Result<(), String> {
+    #[cfg(debug_assertions)]
+    let timeout = test_timeout().unwrap_or(timeout);
     let mut cmd = std::process::Command::new(claude);
     cmd.args(args)
         .env("HOME", &probe.home)
@@ -399,6 +412,16 @@ pub struct SyncOpts {
     /// Ignore [`setup_blocked`] and `update.plugin` set to off, for a caller
     /// the user asked to touch the plugin.
     pub force: bool,
+    /// Print one stderr line before each `claude` call, so a slow call is
+    /// not silent. Only `playbook setup` sets it; the automatic path is quiet.
+    pub progress: bool,
+}
+
+/// Prints `line` to stderr when the caller asked for progress.
+fn say(opts: SyncOpts, line: &str) {
+    if opts.progress {
+        eprintln!("{line}");
+    }
 }
 
 /// Why a command that sets the machine up must leave the plugin alone, or
@@ -497,7 +520,7 @@ fn sync_at(
 /// Installs the plugin. A marketplace known only under an older name is used
 /// as it is, so the old name stays fixed; with none known, the marketplace is
 /// added first.
-fn install(probe: &Probe) -> Outcome {
+fn install(probe: &Probe, opts: SyncOpts) -> Outcome {
     let known = known_marketplaces(&probe.home);
     let marketplace = known.first().copied().unwrap_or(MARKETPLACE);
     let id = format!("playbook@{marketplace}");
@@ -514,10 +537,15 @@ fn install(probe: &Probe) -> Outcome {
     };
     if known.is_empty() {
         let add = ["plugin", "marketplace", "add", MARKETPLACE_SOURCE, "--json"];
+        say(
+            opts,
+            &format!("plugin: adding the {MARKETPLACE} marketplace"),
+        );
         if let Err(why) = run_claude(probe, claude, &add, TIMEOUT) {
             return failed(id, why);
         }
     }
+    say(opts, &format!("plugin: installing {id}"));
     if let Err(why) = run_claude(
         probe,
         claude,
@@ -627,6 +655,43 @@ pub fn auto_update_after(outcome: &Outcome, home: &Path) -> Option<AutoUpdate> {
     }
 }
 
+/// The commands a setup run would start for this home, for a dry run.
+pub fn planned_commands(home: &Path) -> String {
+    match plugin_id(&home.join(".claude")) {
+        Some(id) => format!("{} && {}", marketplace_command(&id), command(&id)),
+        None => install_commands(PLUGIN_KEY),
+    }
+}
+
+/// The folder of the plugin that `outcome` installed or moved, so setup can
+/// seed from it. `None` for any other outcome.
+pub fn installed_dir(outcome: &Outcome, home: &Path) -> Option<PathBuf> {
+    match outcome {
+        Outcome::Installed { id, .. } | Outcome::Updated { id, .. } => {
+            installed_path(&home.join(".claude"), id)
+        }
+        _ => None,
+    }
+}
+
+/// Records how setup's plugin run ended in the marker the session hook
+/// reads, so it does not repeat the work. A run that did not try anything is
+/// not recorded.
+pub fn record_setup_run(home: &Path, outcome: &Outcome) {
+    if matches!(outcome, Outcome::Skipped(_) | Outcome::NotInstalled) {
+        return;
+    }
+    let claude_home = home.join(".claude");
+    let after = plugin_id(&claude_home).and_then(|id| installed_version(&claude_home, &id));
+    finish(
+        &crate::common::paths::playbook_root_from(home),
+        outcome,
+        env!("CARGO_PKG_VERSION"),
+        after.as_deref(),
+        now(),
+    );
+}
+
 /// [`run`] for a binary at version `running`.
 pub(crate) fn run_for_binary(probe: &Probe, running: &str) -> Outcome {
     sync_at(probe, SyncOpts::default(), running, &|name| {
@@ -647,7 +712,7 @@ fn run_with_marketplace(probe: &Probe, opts: SyncOpts) -> (Outcome, Option<Strin
     }
     let Some(id) = plugin_id(&claude_home) else {
         let outcome = if opts.allow_install {
-            install(probe)
+            install(probe, opts)
         } else {
             Outcome::NotInstalled
         };
@@ -669,6 +734,7 @@ fn run_with_marketplace(probe: &Probe, opts: SyncOpts) -> (Outcome, Option<Strin
     // A failed refresh never stops the plugin update; it is named later only
     // when the plugin ends older than the binary.
     let marketplace = marketplace_of(&id).and_then(|name| {
+        say(opts, &format!("plugin: refreshing the {name} marketplace"));
         run_claude(
             probe,
             claude,
@@ -677,6 +743,7 @@ fn run_with_marketplace(probe: &Probe, opts: SyncOpts) -> (Outcome, Option<Strin
         )
         .err()
     });
+    say(opts, &format!("plugin: updating {id}"));
     if let Err(why) = run_claude(probe, claude, &["plugin", "update", &id], TIMEOUT) {
         let failed = Outcome::Failed {
             id,
@@ -1091,7 +1158,7 @@ const ASSUME_BOTH_TTY: &str = "1";
 #[cfg(debug_assertions)]
 const ASSUME_STDERR_TTY: &str = "stderr";
 
-fn assumed_tty(for_stdin: bool) -> bool {
+pub(crate) fn assumed_tty(for_stdin: bool) -> bool {
     #[cfg(debug_assertions)]
     if let Some(v) = std::env::var_os(ASSUME_TTY_ENV) {
         return v == ASSUME_BOTH_TTY || (!for_stdin && v == ASSUME_STDERR_TTY);
@@ -2496,6 +2563,7 @@ mod tests {
         let opts = SyncOpts {
             allow_install: true,
             force: true,
+            ..SyncOpts::default()
         };
 
         // Act
@@ -2597,6 +2665,45 @@ mod tests {
     }
 
     #[test]
+    fn the_setup_default_and_sync_agree_for_every_guard() {
+        // Arrange
+        let open = scratch_dir("plugin-agree-open");
+        let off = scratch_dir("plugin-agree-off");
+        set_off(&off);
+        let cases: Vec<(&Path, Vec<(&str, &str)>)> = vec![
+            (&open, vec![]),
+            (&open, vec![(SKIP_ENV, "1")]),
+            (&open, vec![("GITHUB_ACTIONS", "true")]),
+            (&open, vec![("CI", "true")]),
+            (&open, vec![("PLAYBOOK_HEADLESS", "1")]),
+            (&off, vec![]),
+        ];
+        let install = SyncOpts {
+            allow_install: true,
+            ..SyncOpts::default()
+        };
+
+        for (home, vars) in cases {
+            let env = env_with(&vars);
+            let probe = Probe {
+                home: home.to_path_buf(),
+                claude: None,
+            };
+
+            // Act
+            let blocked = blocked_by(home, &env);
+            let outcome = sync_with_env(&probe, install, &env);
+
+            // Assert
+            let skipped = blocked.map(|why| Outcome::Skipped(why.to_string()));
+            match skipped {
+                Some(expected) => assert_eq!(outcome, expected, "{vars:?}"),
+                None => assert!(!matches!(outcome, Outcome::Skipped(_)), "{vars:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn an_install_caller_is_held_back_by_the_guard_unless_forced() {
         // Arrange
         let home = scratch_dir("plugin-sync-guard");
@@ -2607,7 +2714,7 @@ mod tests {
         };
         let install = SyncOpts {
             allow_install: true,
-            force: false,
+            ..SyncOpts::default()
         };
         let forced = SyncOpts {
             force: true,
@@ -2645,7 +2752,7 @@ mod tests {
         };
         let install = SyncOpts {
             allow_install: true,
-            force: false,
+            ..SyncOpts::default()
         };
 
         // Act

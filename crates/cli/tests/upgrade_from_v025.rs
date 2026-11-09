@@ -139,6 +139,7 @@ impl V025Home {
 
     fn init(&self) {
         let outcome = run(&InitPaths {
+            plugin: playbook::init::run::PluginRun::Skip,
             plugin_root: None,
             self_root: Some(PathBuf::from(env!("PLAYBOOK_REPO_ROOT")).join("seed")),
             claude_home: self.home.join(".claude"),

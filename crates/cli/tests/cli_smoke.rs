@@ -492,14 +492,20 @@ fn table() -> Vec<Case> {
     let mut t = vec![
         // setup and lifecycle
         case("setup", &["setup", "--dry-run"]).out("nothing is changed"),
-        case("setup", &["setup", "--yes"]).out("Applying").writes(),
+        case("setup", &["setup", "--yes"])
+            .out("Applying")
+            .err("plugin: installing playbook@amplifiedengineer")
+            .writes(),
         case("setup", &["setup", "--explain"]).plain(),
         case("setup", &["setup", "--only", "telemetry"])
             .out("changes only the parts you named")
             .writes(),
         // the deprecated name runs the same code
         case("init", &["init", "--dry-run"]).out("nothing is changed"),
-        case("init", &["init", "--yes"]).out("Applying").writes(),
+        case("init", &["init", "--yes"])
+            .out("Applying")
+            .err("plugin: installing playbook@amplifiedengineer")
+            .writes(),
         case("hooks list", &["hooks", "list"]).out("Safety guards").plain(),
         case("hooks explain-rm", &["hooks", "explain-rm", "ls"]).code(2).err("was removed"),
         case("skills sync", &["skills", "sync", "--dry-run"]).out("no other agents found"),

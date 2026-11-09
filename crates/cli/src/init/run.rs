@@ -16,7 +16,10 @@ use std::path::{Path, PathBuf};
 /// configuration, resolved once by the caller (`main.rs`) so this module
 /// never reads the environment itself and stays trivial to test against a
 /// scratch directory.
+#[derive(Clone)]
 pub struct InitPaths {
+    /// Whether the plugin step runs, and whether it overrides the guards.
+    pub plugin: PluginRun,
     /// The installed playbook plugin (`plugin_root::resolve`), whose shipped
     /// skills init records to notice later edits. `None` when not installed.
     pub plugin_root: Option<PathBuf>,
@@ -70,6 +73,17 @@ pub struct InitPaths {
     pub path_setup: Option<path::Setup>,
     /// `(repo_root, dest_base)` when init runs inside a repo with a resolvable slug.
     pub repo: Option<(PathBuf, PathBuf)>,
+}
+
+/// Whether setup runs the plugin step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginRun {
+    Skip,
+    /// Run it, but let `update.plugin` off, CI and the skip variable stop it.
+    Guarded,
+    /// The user named the part with `--plugin` or `--only plugin`, so the
+    /// guards do not stop it.
+    Forced,
 }
 
 /// How one step of `run` landed.
@@ -156,12 +170,77 @@ impl InitOutcome {
 /// Run every `init` step against `paths`. Copy steps run first; `settings`
 /// only rewrites its file once its copy step is confirmed.
 pub fn run(paths: &InitPaths) -> InitOutcome {
-    let self_root = paths.self_root.as_deref();
     // One stamp for every backup of this run, so a second boundary cannot split them.
     let epoch = crate::common::time::now_epoch_secs();
-    if paths.only {
-        return run_only(paths, epoch);
+    // First, so a plugin installed or moved now seeds the steps after it.
+    let (plugin_step, reseeded) = plugin_step(paths);
+    let paths = reseeded.as_ref().unwrap_or(paths);
+    let mut outcome = if paths.only {
+        run_only(paths, epoch)
+    } else {
+        run_all(paths, epoch)
+    };
+    outcome.steps.splice(0..0, plugin_step);
+    outcome
+}
+
+/// The plugin step, when it is on, and the paths with `self_root` moved to
+/// the plugin folder when the step installed or updated the plugin there.
+fn plugin_step(paths: &InitPaths) -> (Option<StepReport>, Option<InitPaths>) {
+    use crate::plugin_update as pu;
+    let force = match paths.plugin {
+        PluginRun::Skip => return (None, None),
+        PluginRun::Guarded => false,
+        PluginRun::Forced => true,
+    };
+    let opts = pu::SyncOpts {
+        allow_install: true,
+        force,
+        progress: true,
+    };
+    let outcome = pu::sync(&pu::Probe::for_home(&paths.home), opts);
+    pu::record_setup_run(&paths.home, &outcome);
+    let auto_update = pu::auto_update_after(&outcome, &paths.home);
+    let reseeded = pu::installed_dir(&outcome, &paths.home)
+        .and_then(|dir| crate::init::self_root::seed_root(dir.to_str()))
+        .map(|root| InitPaths {
+            self_root: Some(root),
+            ..paths.clone()
+        });
+    (
+        Some(plugin_report(&outcome, auto_update.as_ref())),
+        reseeded,
+    )
+}
+
+/// One report line for the outcome. A plugin that could not be installed or
+/// updated is a skip with the command to run, never a failure, so setup
+/// still exits 0.
+fn plugin_report(
+    outcome: &crate::plugin_update::Outcome,
+    auto_update: Option<&crate::plugin_update::AutoUpdate>,
+) -> StepReport {
+    use crate::plugin_update::Outcome;
+    let strip = |line: String| line.trim_start_matches("plugin: ").to_string();
+    let mut detail = outcome
+        .line()
+        .map(strip)
+        .unwrap_or_else(|| "the plugin is not installed".to_string());
+    let auto_line = auto_update.and_then(|a| a.line()).map(strip);
+    if let Some(line) = &auto_line {
+        detail = format!("{detail}. {line}");
     }
+    let set = auto_update == Some(&crate::plugin_update::AutoUpdate::Set);
+    match outcome {
+        Outcome::Installed { .. } | Outcome::Updated { .. } => StepReport::wired("plugin", detail),
+        Outcome::Current { .. } if set => StepReport::wired("plugin", detail),
+        Outcome::Current { .. } => StepReport::already_correct("plugin", detail),
+        _ => StepReport::skipped("plugin", detail),
+    }
+}
+
+fn run_all(paths: &InitPaths, epoch: u64) -> InitOutcome {
+    let self_root = paths.self_root.as_deref();
 
     // The skills live in the `playbook` plugin, not in the root the seed files
     // come from, so the skill-edit tracking looks for them separately.

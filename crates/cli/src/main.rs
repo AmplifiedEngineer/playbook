@@ -672,6 +672,10 @@ fn real_main() {
                     &flags,
                     asking,
                     !init::choices::unattended(&flags, terminal),
+                    init::choices::plugin_default(
+                        !init::choices::unattended(&flags, terminal),
+                        playbook::plugin_update::setup_blocked(&home_dir),
+                    ),
                     security_config,
                     &mut |question, default| {
                         init::wizard::guided_answer(&guided, question, default)
@@ -679,6 +683,8 @@ fn real_main() {
                 )
             });
             let only_run = only.is_some();
+            // Naming the part is consent that overrides the CI and config guards.
+            let force_plugin = flags.plugin || flags.only.iter().any(|n| n == "plugin");
             // --yes takes the default, which an earlier no or install without
             // the prompt keeps off (ADR 0044 decision 5).
             if init::choices::prompt_may_be_held_off(
@@ -722,6 +728,20 @@ fn real_main() {
                     eprintln!("{line}");
                 }
             }
+            // Unattended runs already name the command; a guard that turned the
+            // part off on its own says why.
+            if !only_run
+                && !choices.plugin
+                && !flags.no_plugin
+                && !flags.dry_run
+                && !init::choices::unattended(&flags, terminal)
+            {
+                if let Some(why) = playbook::plugin_update::setup_blocked(&home_dir) {
+                    println!(
+                        "setup: the plugin was left as it is because {why}. To run it anyway: playbook setup --only plugin"
+                    );
+                }
+            }
             let system_prompt = init::choices::system_prompt_answer(
                 &flags,
                 choices.system_prompt,
@@ -752,6 +772,11 @@ fn real_main() {
                 common::paths::RepoScope::Worktree,
             ));
             let paths = InitPaths {
+                plugin: match (choices.plugin, force_plugin) {
+                    (false, _) => init::run::PluginRun::Skip,
+                    (true, false) => init::run::PluginRun::Guarded,
+                    (true, true) => init::run::PluginRun::Forced,
+                },
                 plugin_root: playbook::plugin_root::find_here(),
                 repo,
                 self_root,

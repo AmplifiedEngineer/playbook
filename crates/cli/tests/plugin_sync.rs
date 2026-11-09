@@ -55,6 +55,17 @@ impl Fixture {
         let script = format!(
             r#"#!/bin/sh
 echo "$*" >> "$HOME/claude-calls.log"
+[ -n "$FAKE_CLAUDE_SLEEP" ] && exec sleep 5
+place() {{
+  mkdir -p "{dir}/.claude-plugin" "{dir}/skills"
+  printf '{{"name":"playbook","version":"{listed}"}}' > "{dir}/.claude-plugin/plugin.json"
+  printf '{{"version":2,"plugins":{{"{PLUGIN_ID}":[{{"scope":"user","installPath":"{dir}"}}]}}}}' > "$HOME/.claude/plugins/installed_plugins.json"
+  if [ -n "$FAKE_CLAUDE_SEED" ]; then
+    mkdir -p "{dir}/prompts"
+    printf '{{"cleanupPeriodDays":77}}' > "{dir}/settings.shared.json"
+    printf 'PLUGIN SEED PROMPT' > "{dir}/prompts/SYSTEM_PROMPT.md"
+  fi
+}}
 case "$*" in
 "plugin marketplace add"*)
   mkdir -p "$HOME/.claude/plugins"
@@ -63,9 +74,10 @@ case "$*" in
   ;;
 "plugin install"*)
   if [ {install_exit} -ne 0 ]; then echo 'install failed: network' >&2; exit {install_exit}; fi
-  mkdir -p "{dir}/.claude-plugin" "{dir}/skills"
-  printf '{{"name":"playbook","version":"{listed}"}}' > "{dir}/.claude-plugin/plugin.json"
-  printf '{{"version":2,"plugins":{{"{PLUGIN_ID}":[{{"scope":"user","installPath":"{dir}"}}]}}}}' > "$HOME/.claude/plugins/installed_plugins.json"
+  place
+  ;;
+"plugin update"*)
+  if [ -n "$FAKE_CLAUDE_UPDATE_MOVES" ]; then place; fi
   ;;
 esac
 "#,
@@ -206,6 +218,7 @@ fn install_allowed() -> SyncOpts {
     SyncOpts {
         allow_install: true,
         force: true,
+        ..SyncOpts::default()
     }
 }
 
@@ -767,4 +780,303 @@ fn the_upgrade_path_never_writes_auto_update() {
     assert!(matches!(outcome, Outcome::Current { .. }), "{outcome:?}");
     assert_eq!(f.settings_bytes(), bytes);
     assert_eq!(f.backups(), Vec::<String>::new());
+}
+
+const SKIPPED_BY_CI: &str = "a CI environment was detected";
+const ONLY_PLUGIN: &str = "playbook setup --only plugin";
+const CI_VARS: [&str; 7] = [
+    "CI",
+    "GITHUB_ACTIONS",
+    "GITLAB_CI",
+    "BUILDKITE",
+    "CIRCLECI",
+    "JENKINS_URL",
+    "TF_BUILD",
+];
+
+impl Fixture {
+    /// Runs `playbook <args>` in this home with the fake `claude` first on
+    /// PATH, no CI variable but those in `env`, and a terminal when `tty`.
+    fn setup(&self, args: &[&str], env: &[(&str, &str)], tty: bool) -> std::process::Output {
+        let mut cmd = isolated::playbook_in(&self.home);
+        let bin = self.claude.parent().unwrap().display();
+        cmd.args(args)
+            .env("PATH", format!("{bin}:/usr/bin:/bin"))
+            .env_remove("PLAYBOOK_SKIP_PLUGIN_UPDATE")
+            .current_dir(&self.home)
+            .stdin(std::process::Stdio::null());
+        for var in CI_VARS {
+            cmd.env_remove(var);
+        }
+        if tty {
+            cmd.env("PLAYBOOK_TEST_ASSUME_TTY", "1");
+        }
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        cmd.output().unwrap()
+    }
+}
+
+fn text(out: &std::process::Output) -> String {
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    )
+}
+
+#[test]
+fn setup_plugin_guard_table() {
+    struct Case<'a> {
+        name: &'static str,
+        args: &'static [&'static str],
+        env: &'static [(&'static str, &'static str)],
+        tty: bool,
+        older: bool,
+        calls: &'a str,
+        line: &'static str,
+    }
+    let install_calls = format!("{MARKETPLACE_ADD}{INSTALL}");
+    let update_calls = format!("{MARKETPLACE_UPDATE}{UPDATE}");
+    let installed_line = "installed playbook@amplifiedengineer";
+    let cases = [
+        Case {
+            name: "yes on an empty home installs",
+            args: &["setup", "--yes"],
+            env: &[],
+            tty: true,
+            older: false,
+            calls: &install_calls,
+            line: installed_line,
+        },
+        Case {
+            name: "yes with an older plugin refreshes and updates",
+            args: &["setup", "--yes"],
+            env: &[("FAKE_CLAUDE_UPDATE_MOVES", "1")],
+            tty: true,
+            older: true,
+            calls: &update_calls,
+            line: "updated playbook@amplifiedengineer from",
+        },
+        Case {
+            name: "only plugin without a terminal runs",
+            args: &["setup", "--only", "plugin"],
+            env: &[],
+            tty: false,
+            older: false,
+            calls: &install_calls,
+            line: installed_line,
+        },
+        Case {
+            name: "plugin flag without a terminal runs",
+            args: &["setup", "--plugin"],
+            env: &[],
+            tty: false,
+            older: false,
+            calls: &install_calls,
+            line: installed_line,
+        },
+        Case {
+            name: "yes in CI runs nothing and says why",
+            args: &["setup", "--yes"],
+            env: &[("CI", "true")],
+            tty: true,
+            older: false,
+            calls: "",
+            line: SKIPPED_BY_CI,
+        },
+        Case {
+            name: "only plugin in CI runs",
+            args: &["setup", "--only", "plugin"],
+            env: &[("CI", "true")],
+            tty: false,
+            older: false,
+            calls: &install_calls,
+            line: installed_line,
+        },
+        Case {
+            name: "the skip variable runs nothing and says why",
+            args: &["setup", "--yes"],
+            env: &[("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1")],
+            tty: true,
+            older: false,
+            calls: "",
+            line: "PLAYBOOK_SKIP_PLUGIN_UPDATE is set",
+        },
+        Case {
+            name: "plain setup without a terminal runs nothing and names the command",
+            args: &["setup"],
+            env: &[],
+            tty: false,
+            older: false,
+            calls: "",
+            line: ONLY_PLUGIN,
+        },
+        Case {
+            name: "dry run runs nothing and lists the commands",
+            args: &["setup", "--yes", "--dry-run"],
+            env: &[],
+            tty: true,
+            older: false,
+            calls: "",
+            line: "claude plugin install playbook@amplifiedengineer",
+        },
+        Case {
+            name: "no-plugin runs nothing",
+            args: &["setup", "--yes", "--no-plugin"],
+            env: &[],
+            tty: true,
+            older: false,
+            calls: "",
+            line: "",
+        },
+        Case {
+            name: "a call that times out is reported and setup still succeeds",
+            args: &["setup", "--only", "plugin"],
+            env: &[
+                ("FAKE_CLAUDE_SLEEP", "1"),
+                ("PLAYBOOK_TEST_PLUGIN_TIMEOUT_SECS", "1"),
+            ],
+            tty: false,
+            older: true,
+            calls: &update_calls,
+            line: "it did not finish within 1 s",
+        },
+    ];
+    for case in cases {
+        // Arrange
+        let f = Fixture::new(0);
+        if case.older {
+            f.installed_at("0.1.0");
+            f.known_marketplace();
+        }
+
+        // Act
+        let out = f.setup(case.args, case.env, case.tty);
+
+        // Assert
+        let shown = text(&out);
+        assert!(out.status.success(), "{}: {shown}", case.name);
+        if case.calls.is_empty() {
+            f.no_calls();
+        } else {
+            assert_eq!(f.calls(), case.calls, "{}: {shown}", case.name);
+        }
+        assert!(shown.contains(case.line), "{}: {shown}", case.name);
+    }
+}
+
+#[test]
+fn setup_yes_on_an_empty_home_ends_registered_installed_and_auto_updating() {
+    // Arrange
+    let f = Fixture::new(0);
+
+    // Act
+    let out = f.setup(&["setup", "--yes"], &[], true);
+
+    // Assert
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(f.calls(), format!("{MARKETPLACE_ADD}{INSTALL}"));
+    let plugins = f.home.join(".claude/plugins");
+    assert!(plugins.join("known_marketplaces.json").is_file());
+    let installed = fs::read_to_string(plugins.join("installed_plugins.json")).unwrap();
+    assert!(installed.contains(PLUGIN_ID));
+    let settings = f.settings();
+    let entry = &settings["extraKnownMarketplaces"][MARKETPLACE];
+    assert_eq!(entry["autoUpdate"], json!(true));
+    assert_eq!(entry["source"], source());
+    // The settings merge ran after the plugin step and kept the key.
+    assert!(settings.get("hooks").is_some(), "{settings}");
+}
+
+#[test]
+fn only_plugin_writes_auto_update_and_nothing_else() {
+    // Arrange
+    let f = Fixture::new(0);
+
+    // Act
+    let out = f.setup(&["setup", "--only", "plugin"], &[], false);
+
+    // Assert
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(f.calls(), format!("{MARKETPLACE_ADD}{INSTALL}"));
+    let expected = json!({"extraKnownMarketplaces": {MARKETPLACE: {
+        "source": source(), "autoUpdate": true }}});
+    assert_eq!(f.settings(), expected);
+}
+
+#[test]
+fn dry_run_and_no_plugin_write_no_marketplace_setting() {
+    for args in [
+        &["setup", "--yes", "--dry-run"][..],
+        &["setup", "--yes", "--no-plugin"][..],
+    ] {
+        // Arrange
+        let f = Fixture::new(0);
+
+        // Act
+        let out = f.setup(args, &[], true);
+
+        // Assert
+        assert!(out.status.success(), "{args:?}: {}", text(&out));
+        f.no_calls();
+        let settings = f.settings_path();
+        let written = settings.is_file()
+            && fs::read_to_string(&settings)
+                .unwrap()
+                .contains("autoUpdate");
+        assert!(!written, "{args:?}");
+    }
+}
+
+#[test]
+fn setup_prints_one_progress_line_before_each_claude_call() {
+    // Arrange
+    let install = Fixture::new(0);
+    let update = Fixture::new(0);
+    update.installed_at("0.1.0");
+    update.known_marketplace();
+
+    // Act
+    let installed = install.setup(&["setup", "--only", "plugin"], &[], false);
+    let updated = update.setup(&["setup", "--only", "plugin"], &[], false);
+
+    // Assert
+    let lines = |out: &std::process::Output| {
+        String::from_utf8_lossy(&out.stderr)
+            .lines()
+            .filter(|l| l.starts_with("plugin: "))
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        lines(&installed),
+        [
+            "plugin: adding the amplifiedengineer marketplace",
+            "plugin: installing playbook@amplifiedengineer",
+        ]
+    );
+    assert_eq!(
+        lines(&updated),
+        [
+            "plugin: refreshing the amplifiedengineer marketplace",
+            "plugin: updating playbook@amplifiedengineer",
+        ]
+    );
+}
+
+#[test]
+fn a_plugin_installed_mid_run_seeds_the_template_and_prompt_from_its_folder() {
+    // Arrange
+    let f = Fixture::new(0);
+
+    // Act
+    let out = f.setup(&["setup", "--yes"], &[("FAKE_CLAUDE_SEED", "1")], true);
+
+    // Assert
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(f.settings()["cleanupPeriodDays"], json!(77));
+    let prompt = fs::read_to_string(f.home.join(".config/playbook/prompts/SYSTEM_PROMPT.md"));
+    assert_eq!(prompt.unwrap(), "PLUGIN SEED PROMPT");
 }

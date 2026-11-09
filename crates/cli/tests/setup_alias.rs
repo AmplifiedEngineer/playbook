@@ -206,7 +206,7 @@ fn assert_same(args: &[&str]) -> Run {
 
 #[test]
 fn a_full_run_writes_the_same_files_under_both_names() {
-    let setup = assert_same(&["--yes", "--no-telemetry"]);
+    let setup = assert_same(&["--yes", "--no-telemetry", "--no-plugin"]);
     assert!(setup.code == Some(0) && setup.files.contains_key(".claude/settings.json"));
 }
 

@@ -182,6 +182,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
     };
     let sh = scratch.0.clone();
     let scratch_paths = InitPaths {
+        plugin: run::PluginRun::Skip,
         plugin_root: paths.plugin_root.clone(),
         self_root: paths.self_root.clone(),
         claude_home: sh.join(".claude"),
@@ -231,6 +232,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
 
     let on = |b: bool| if b { "on" } else { "off" };
     let flags = [
+        ("plugin", choices.plugin),
         ("hooks", choices.hooks),
         ("statusline", choices.statusline),
         ("security", choices.security),
@@ -293,6 +295,10 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
             "completions" => {
                 completions_lines(paths, &completions_step, &after_path, &after_completions)
             }
+            "plugin" => vec![format!(
+                "runs: {}",
+                crate::plugin_update::planned_commands(&paths.home)
+            )],
             "policy-guard" => vec![policy_guard_line(&paths.home)],
             "codex-hooks" => vec![codex_hooks_line(&paths.home)],
             "path" => file_lines(&before_rc, &after_path, &path_step),
