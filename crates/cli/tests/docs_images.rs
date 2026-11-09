@@ -17,23 +17,6 @@ const MAX_FILE_BYTES: u64 = 153_600;
 const MAX_TOTAL_BYTES: u64 = 2_621_440;
 /// Text an SVG must never hold: user home folders and addresses.
 const DENIED: [&str; 3] = ["/Users/", "/home/", "@"];
-/// Pictures a page does not use yet, by path under `docs/images`. The pbtop
-/// page uses the captures; the page that does is added in the same series.
-const UNUSED_FOR_NOW: [&str; 12] = [
-    "pbtop/budget-dark.svg",
-    "pbtop/budget-light.svg",
-    "pbtop/charts-dark.svg",
-    "pbtop/charts-light.svg",
-    "pbtop/help-dark.svg",
-    "pbtop/help-light.svg",
-    "pbtop/layout-editor-dark.svg",
-    "pbtop/layout-editor-light.svg",
-    "pbtop/numbers-dark.svg",
-    "pbtop/numbers-light.svg",
-    "pbtop/sessions-dark.svg",
-    "pbtop/sessions-light.svg",
-];
-
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("PLAYBOOK_REPO_ROOT"))
 }
@@ -393,6 +376,6 @@ fn an_svg_with_a_home_folder_or_an_address_fails() {
 
 #[test]
 fn the_pictures_in_this_repository_pass() {
-    let found = problems(&repo_root(), &UNUSED_FOR_NOW);
+    let found = problems(&repo_root(), &[]);
     assert!(found.is_empty(), "{}", found.join("\n"));
 }

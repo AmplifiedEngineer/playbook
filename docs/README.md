@@ -18,7 +18,7 @@ A map of the Playbook docs, for people who use Claude Code and want to know wher
 | Review | Commit, review and answer feedback | [Guide](guides/02-review-and-pr-flow.md) |
 | Code search | One index per repo, searched with `playbook code` | [Page](code-search.md), [recipe](recipes/search-the-code.md) |
 | Document reading | A PDF or Office file as text, for fewer tokens | [Guide](guides/06-reading-documents.md), [recipe](recipes/read-a-document.md) |
-| pbtop | The Agent Budget Dashboard | [Guide](guides/11-pbtop.md) |
+| pbtop | The Agent Budget Dashboard | [Page](pbtop.md) |
 | Safety guards | The rm guard and the opt-in policy guard | [rm guard](guides/07-rm-guard.md), [policy guard](guides/08-policy-guard.md) |
 | Memory | Facts that sessions recall, per repo, org and global | [Guide](guides/15-memory.md) |
 | Launcher | `playbook cc`, worktrees and the `pb` alias | [Guide](guides/09-launcher.md) |
