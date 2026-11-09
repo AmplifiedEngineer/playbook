@@ -2,7 +2,7 @@
 
 <!-- verify: names -->
 
-Short, copy-pasteable how-tos for the common tasks. A `run` recipe has its commands run in a sandbox in CI, with no network, and its `# expect:` lines compared with the real output. A `names` recipe has every command name checked against the real CLI.
+Short, copy-pasteable how-tos for the common tasks. CI runs the commands of a `run` recipe in a sandbox: a temp folder, a cleared environment and a small demo repo. It compares each `# expect:` line with the real output. A `names` recipe has every command name checked against the real CLI.
 
 | Task | Recipe | Class |
 |---|---|---|
