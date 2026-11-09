@@ -27,7 +27,7 @@ Run `playbook pr finish-context <n> --json` (add `--flag auto` or `--flag ask` i
 - `quick`: run `/playbook:quick-review <n> --self`.
 - `skip`: say "auto-review is disabled for this repo, review skipped" in the final report.
 
-In auto mode, skip the review when `/playbook:implement` opened this PR, because its review covered the code. Any other auto mode caller gets no review here, and the report says so. Never issue `/clear`.
+In auto mode, skip the self-review below when `/playbook:implement` opened this PR, because its review covered the code. Any other caller gets no review here, and the final report says that no self-review ran. This skill never merges a PR whose code no review covered. Never issue `/clear`.
 
 ## 3. Fix
 
@@ -39,7 +39,7 @@ Fix the review findings. With `autoReview.fix` true, fix every finding that surv
 
 If the PR is a draft and (`--ready` was passed or `autoMerge.enabled` is true), run `gh pr ready <n>`. If `autoMerge.enabled` is not true, stop here and leave the PR as it is.
 
-If `autoMerge.enabled` is true, merge only when a review covered the code (in auto mode, no review means no merge: say so and stop). Then run `playbook pr land <n>` as its own Bash call with `timeout` 600000. It waits for checks, arms auto-merge pinned to the head, and confirms the result. Read the `LAND=<verdict>` line (exit 0 merged, 3 a gate, 6 failed or closed, 7 still waiting, 8 not queued):
+If `autoMerge.enabled` is true, merge only when a review covered the code (no review means no merge: say so and stop). Then run `playbook pr land <n>` as its own Bash call with `timeout` 600000. It waits for checks, arms auto-merge pinned to the head, and confirms the result. Read the `LAND=<verdict>` line (exit 0 merged, 3 a gate, 6 failed or closed, 7 still waiting, 8 not queued):
 
 - `MERGED`: merged.
 - `STILL_WAITING`: run it again with `--settle 0`, up to five more times, then report it as still waiting.
