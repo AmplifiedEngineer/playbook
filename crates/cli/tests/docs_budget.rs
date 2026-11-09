@@ -63,6 +63,15 @@ const LIMITS: &[Limits] = &[
         max_commands: None,
     },
     Limits {
+        path: "docs/pbtop.md",
+        max_lines: None,
+        max_words: 2500,
+        max_h2: None,
+        max_pictures: None,
+        max_badges: None,
+        max_commands: None,
+    },
+    Limits {
         path: "docs/code-search.md",
         max_lines: None,
         max_words: 900,
@@ -167,10 +176,28 @@ fn count_lines(text: &str) -> usize {
     text.lines().count()
 }
 
+/// The text without a generated block: the lines from `<!-- keys:start -->`
+/// through `<!-- keys:end -->`. A test rebuilds that block from the code, so it
+/// is not prose a person wrote. Without an end marker the rest is cut.
+fn without_generated_block(text: &str) -> String {
+    let Some(start) = text.find("<!-- keys:start -->") else {
+        return text.to_string();
+    };
+    let tail = &text[start..];
+    let end = tail
+        .find("<!-- keys:end -->")
+        .map_or(tail.len(), |e| e + "<!-- keys:end -->".len());
+    let skipped = &tail[..end];
+    // Keep the line breaks so line numbers stay put.
+    let breaks: String = skipped.chars().filter(|c| *c == '\n').collect();
+    format!("{}{}{}", &text[..start], breaks, &tail[end..])
+}
+
 /// Prose words: outside fences and comments, skipping the badge line, image
-/// lines and `<picture>` blocks. A token with no letter or digit is not a word.
+/// lines, `<picture>` blocks and a generated keys block. A token with no
+/// letter or digit is not a word.
 fn count_words(text: &str) -> usize {
-    let clean = strip_comments(text);
+    let clean = strip_comments(&without_generated_block(text));
     let badge = badge_line(&clean);
     let mut in_picture = false;
     let mut words = 0;
@@ -401,6 +428,18 @@ mod synthetic {
     fn words_in_fences_and_comments_do_not_count() {
         let text = "one\n```bash\nfence words here\n```\n<!-- a comment\nspanning lines -->\ntwo <!-- inline note --> three\n";
         assert_eq!(count_words(text), 3);
+    }
+
+    #[test]
+    fn the_generated_keys_block_does_not_count() {
+        let text = "one\n<!-- keys:start -->\nmany words in the table\n<!-- keys:end -->\ntwo\n";
+        assert_eq!(count_words(text), 2);
+    }
+
+    #[test]
+    fn a_keys_block_with_no_end_marker_cuts_the_rest() {
+        let text = "one\n<!-- keys:start -->\nmany words\n";
+        assert_eq!(count_words(text), 1);
     }
 
     #[test]
