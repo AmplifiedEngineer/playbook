@@ -29,22 +29,7 @@ The view is styled after a classic terminal system monitor: black ground, rounde
 
 It needs at least 80 columns by 24 rows. Below that it says so and draws nothing else. Every redraw reads the current size, so resizing needs no handling.
 
-**Tabs.** Three by default: Charts (cost per day beside cost per model per day, then tokens and the burn-up), Numbers (models, breakdown, the Budget panel and the Projection panel, see [Spending limits and budget headroom](#spending-limits-and-budget-headroom)) and Sessions (live sessions and sessions per day). Every tab has a header (range, cost, tokens, messages) and a tab bar under it. The tabs and panels come from the `usage.ui.layout` config key (see the [config keys page](../reference/config-keys.md)): up to 12 tabs, `F1` to `F12` select them, a `|` in a tab starts a new row of one or two panels, and a word like `spend.model` or `breakdown.agents` pins a panel to one view while `spend` and `breakdown` switch with `v`. A pinned panel ignores `v` and says so in the footer. `]` and `[` walk every panel on screen, even two views of the same panel, and the number key picks the first. A layout with one tab keeps the old single screen, with the Budget panel from 36 rows.
-
-**Header.** For `today`, `week` and `month` it is a comparison. It names the two spans and says they cover the same elapsed span (see [Period comparison](#period-comparison)), then shows cost, tokens and messages for both with the change in amount and percent (`new` when the previous value was zero). Increases are yellow and decreases green, and the sign carries it without color. The other ranges show their own totals and say `(no previous period to compare)`. The header names the time zone in use, local time by default or UTC, and `z` switches it. It also names the first day of the week when the range is a week.
-
-**Refresh.** The view re-reads the store every 5 seconds (`usage.refreshSeconds`, 1 to 3600). The footer shows when it last did (`updated 01:46:40 UTC, every 5s`), or why the read failed. A short footer keeps the time and drops the interval. A refresh leaves the chart cursor, focus, sorts, spend view, a filter being typed and the selected rows alone. Each table finds its selected row again by what it is (a model, a project, a session, a day), so a row that moved stays selected and the scroll follows it.
-
-The panels:
-
-| Key | Panel | Shows |
-|---|---|---|
-| `1` | Spend per day, USD | A bar chart of the cost for each day in the chosen time zone in the range, with axes (below). `v` steps it through three views: the total, the same bars stacked by model, and a table with a row for each day (see below). |
-| `2` | Tokens per day | The same for tokens, in the net gradient. |
-| `3` | Models | Messages, tokens and cost per model, with a swatch in the model's color. For `today`, `week` and `month` it also shows the cost in the previous period and the change in amount and percent, for every model used in either period (a model that only the previous period used reads `$0.00` now, and one with no spend before reads `new`). Other ranges show a share meter instead. `s` also sorts by the previous cost and the change. |
-| `4` | Projects | The same, per repo. `v` steps it through Agents, Skills, Tools and Health: requests, tokens and cost per agent or per skill from telemetry, with a note of how much of the spend telemetry covers. With no telemetry rows in the range it says `Telemetry off` and how to turn it on. Agent, skill, tool and health rows cannot filter the view. Tools and Health are described under [Tool latency and health](#tool-latency-and-health). |
-| `5` | Live sessions | Sessions with a message in the last 15 minutes, with state, cost and age. |
-| `6` | Sessions per day | Every session in the range, grouped by day in the chosen time zone with the newest day first. Each row has the short session id, project, main model, messages, tokens and cost for that day, and a session that runs past midnight has a row for each day. The day is named on the first row of its group, and `s` orders the sessions inside each day. `Enter` filters the view to the session. |
+**Views.** Tabs, the header, the panels and the refresh are described with pictures on the [pbtop page](../pbtop.md#views). The tabs and panels come from the `usage.ui.layout` config key (see the [config keys page](../reference/config-keys.md)). The header comparison follows [Period comparison](#period-comparison), and the [Ranges](#ranges) below list every range. Tool rows and health are described under [Tool latency and health](#tool-latency-and-health).
 
 ### The charts
 
@@ -71,54 +56,14 @@ Both charts use eighth blocks, one bar per day in the chosen time zone. Idle day
 
 A model keeps one color in its Models swatch, stacked band, legend entry and daily table name. The color is a hash of the model name, stable across ranges. Two models that want the same color in one range get the next free one, and with more than eight models colors are shared.
 
-Keys:
+The keys, with what each does, are on the [pbtop page](../pbtop.md#keys). That table comes from the help window, so it cannot drift. Four keys change what the view reads or what the store holds, and their details stay here:
 
 | Key | Action |
 |---|---|
-| `Tab`, `Shift-Tab` | Show the next or previous tab. With one tab they move the panel focus instead. |
-| `F1` to `F12` | Show a tab by its number. |
-| `e` | Open the layout editor. It draws the tab as rows of cells and keeps a cursor on one panel: `h`, `l` move the cursor along the panels and `j`, `k` between rows, `H`, `L` swap the panel with its neighbour in the row, `J`, `K` with the cell below or above, `f` splits a row of two or joins a row of one with its neighbour, `a` opens a picker of the panels the tab lacks and `Enter` adds one after the cursor, or on a row of its own after the cursor's row in an arranged tab, `d` removes the panel, `u` undoes the last 20 changes, `Left`, `Right` pick the tab, `<`, `>` reorder tabs, `n` adds a tab, `x` deletes one, `r` renames. Every change shows on the tab behind the window and is saved to `usage.ui.layout` within 200 ms, and anything still pending is saved when the editor closes or `pbtop` quits; `Esc` or `q` close the window. A failed write is retried and the footer says why. With no config store the footer shows the command to run, once. `R` asks `[y/N]` and on `y` resets the layout and the saved view settings (`usage.ui.state`: tab, range, views, sorts, filter, machine) to the defaults; the theme and every other setting stay. |
-| `1` to `6`, `]`, `[` | Focus a panel of the current tab by number, or the next or previous one. The focused panel's hint is a badge. |
-| `Left`, `Right`, `h`, `l` | Move the chart cursor one day (or one bar). `Home`, `End`, `g`, `G` jump to the ends while a chart has the focus. |
-| `Up`, `Down`, `j`, `k`, `PageUp`, `PageDown`, `Home`, `End`, `g`, `G` | Move the selected row of the focused table. |
-| `v` | Change the view of the focused panel, and only that panel. With Spend focused it steps total, by model and daily table. With Projects focused it steps projects, agents, skills, tools and health. On the other four panels it does nothing. The title of Spend and Projects always shows `v view: <name>`, and the other panels show no such tag. |
-| `R`, `B` | Read new usage and the budget limits now. The view also refreshes by itself. |
-| `b` | Open the budget window: type the manual monthly budget in dollars, `Enter` saves it to `usage.budget.monthlyUsd`, `0` clears it, `Esc` cancels. |
 | `X` | Reset the usage history. A window asks first; `y` (or `Y`) deletes, and any other key cancels. The events, the tool events and the read progress are deleted in one transaction, so another reader sees the old history or none, never half. The worker then reads every transcript again like a first run, newest first, and the panels fill while the footer shows the progress. The budget, the limit readings, the account names, the telemetry rows and the layout stay. |
-| `?` | Open the help window (below). |
-| `z` | Switch every time and day between local time and UTC for this session. The footer and the title name the zone. `usage.timeZone` sets the start-up zone. |
 | `u`, `U` | Pick the account. The view opens on the account of the newest event, and the title names it (a name set with `playbook usage account name`, else the account key). `u` steps to the next account, then to all accounts, then back to the newest. `U` jumps to all accounts and back. The totals, the charts and the budget panel count only the account shown. The agents, skills and health tables read telemetry rows, which carry no account, so they follow the machine pick instead (see `x`). |
 | `x` | Pick the machine for the machine panels. The view opens on this machine, and the title names it after the account (the name set with `playbook usage machine`, or the first eight characters of another machine's id). `x` steps to each other machine that wrote events, newest first, then to all machines, then back to this one. With one machine `x` changes nothing and says so. Live, agents, skills, tools, health, sessions and projects follow the pick. Budget, projection, burnup, spend, tokens and models count every machine of the account shown. The pick is saved in `usage.ui.state` and a stored value that cannot be read means this machine. |
-| `s` | Sort the focused table by the next column. A marker in the header shows the column and the direction. Text columns start ascending and number columns descending. |
-| `S` | Reverse the sort. |
-| `Enter` | Filter the whole view to the selected row: a model, a project or a session id. `Enter` on that row again lifts the filter. |
-| `r` | Step between today and this week, the two default views. From any other range it goes to today. |
-| `d`, `w`, `m` | Jump to today, this week, this month (month to date). Each is shown against the previous period. |
-| `W`, `M`, `a` | Jump to last week, last month, all time. These are plain ranges with no comparison. |
 | `/` | Type a filter, a case insensitive substring of model, repo, branch or session id. `Enter` applies it, `Esc` cancels, `Backspace` edits. While you type, every key is text, so `q` and `r` do not quit or change the range until you press `Enter` or `Esc`. |
-| `c` | Clear the filter. |
-| `p` | Open the [Sessions management view](09-sessions.md#the-sessions-view), a full screen table of recent sessions with their PR, state and suggestions. |
-| `t` | Cycle the theme: default, spectrum, dark, light, mono. Spectrum colors usage from green to red. |
-| `q`, `Esc`, `Ctrl-C` | Quit. |
-
-The view is keyboard only, so the terminal's own text selection and scrolling keep working.
-
-#### The key map
-
-A key that deletes data is an uppercase letter and asks first. On the main view each letter has one meaning. The layout editor is a separate window with its own keys; its `R` resets the layout and asks `[y/N]`.
-
-| Group | Keys |
-|---|---|
-| Move | `1` to `6`, `[`, `]`, `Tab`, `Shift-Tab`, `F1` to `F12`, `j`, `k`, `h`, `l`, `g`, `G`, arrows, `PageUp`, `PageDown`, `Home`, `End` |
-| Period | `d`, `w`, `W`, `m`, `M`, `a`, `r`, `z` |
-| View | `v`, `t`, `p`, `e`, `?` |
-| Sort and filter | `s`, `S`, `/`, `Enter`, `c`, `u`, `U`, `x` |
-| Refresh and data | `R` or `B` read now, `b` budget, `X` reset the usage history |
-| Quit | `q`, `Esc`, `Ctrl-C` |
-
-The review of the map found no key to remove. The layout editor no longer has the `w` and `s` save keys the review asked about, because it saves each change within 200 ms. `x` stays the editor's delete-a-tab key, so the reset took `X` on the main view, which no key used. Terminals send a capital letter with Caps Lock on and do not say it was Caps Lock, so a pair such as `w` and `W` cannot be told apart then. For that reason no capital letter is the only way to a destructive action without a confirmation, and `Y` confirms the reset like `y`. No key changed, so nothing needs an alias.
-
-**Help window.** `?` opens a centered window listing every key, grouped (navigation, periods, views, sorting, filtering, refresh, quit), with the panels each acts on. It is sized for 80 by 24. On a shorter screen the arrows, `j`, `k`, `PageUp`, `PageDown`, `Home` and `End` scroll it. Any other key closes it, and `Ctrl-C` still quits. Data keeps refreshing underneath and nothing the user set (focus, selection, sorts, views, cursor) changes.
 
 The key handler, the footer hints and the help window read one table, `BINDINGS` in `crates/telemetry/src/tui/keys.rs`, so the help cannot list a dead key or miss a live one. A test presses every key on every panel and fails if one changes anything without a row in the table. The footer shows each hint with its verb (`m month`, `/ filter`, `? help`). On a narrow screen it drops hints in the table's `drop` order, always keeping `v view`, `/ filter`, `? help` and `q quit`, and `Tab tab` when there is more than one tab.
 
