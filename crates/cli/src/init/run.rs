@@ -172,9 +172,8 @@ impl InitOutcome {
 pub fn run(paths: &InitPaths) -> InitOutcome {
     // One stamp for every backup of this run, so a second boundary cannot split them.
     let epoch = crate::common::time::now_epoch_secs();
-    // First, so a plugin installed or moved now seeds the steps after it.
-    let (plugin_step, reseeded) = plugin_step(paths);
-    let paths = reseeded.as_ref().unwrap_or(paths);
+    // No reseed from the plugin after an install: it ships neither seed file (ADR 0034).
+    let plugin_step = plugin_step(paths);
     let mut outcome = if paths.only {
         run_only(paths, epoch)
     } else {
@@ -184,12 +183,11 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     outcome
 }
 
-/// The plugin step, when it is on, and the paths with `self_root` moved to
-/// the plugin folder when the step installed or updated the plugin there.
-fn plugin_step(paths: &InitPaths) -> (Option<StepReport>, Option<InitPaths>) {
+/// The plugin step, when it is on.
+fn plugin_step(paths: &InitPaths) -> Option<StepReport> {
     use crate::plugin_update as pu;
     let force = match paths.plugin {
-        PluginRun::Skip => return (None, None),
+        PluginRun::Skip => return None,
         PluginRun::Guarded => false,
         PluginRun::Forced => true,
     };
@@ -201,16 +199,7 @@ fn plugin_step(paths: &InitPaths) -> (Option<StepReport>, Option<InitPaths>) {
     let outcome = pu::sync(&pu::Probe::for_home(&paths.home), opts);
     pu::record_setup_run(&paths.home, &outcome);
     let auto_update = pu::auto_update_after(&outcome, &paths.home);
-    let reseeded = pu::installed_dir(&outcome, &paths.home)
-        .and_then(|dir| crate::init::self_root::seed_root(dir.to_str()))
-        .map(|root| InitPaths {
-            self_root: Some(root),
-            ..paths.clone()
-        });
-    (
-        Some(plugin_report(&outcome, auto_update.as_ref())),
-        reseeded,
-    )
+    Some(plugin_report(&outcome, auto_update.as_ref()))
 }
 
 /// One report line for the outcome. A plugin that could not be installed or

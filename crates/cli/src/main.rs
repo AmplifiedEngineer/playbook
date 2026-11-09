@@ -626,6 +626,10 @@ fn real_main() {
                 let said_no: Vec<&str> = [
                     ("system-prompt", !init::system_prompt::enabled(&home_dir)),
                     ("short-name", init::pb_link::declined(&home_dir)),
+                    (
+                        "plugin",
+                        playbook::plugin_update::setup_blocked(&home_dir).is_some(),
+                    ),
                 ]
                 .into_iter()
                 .filter_map(|(id, no)| no.then_some(id))

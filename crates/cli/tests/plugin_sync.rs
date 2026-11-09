@@ -60,11 +60,6 @@ place() {{
   mkdir -p "{dir}/.claude-plugin" "{dir}/skills"
   printf '{{"name":"playbook","version":"{listed}"}}' > "{dir}/.claude-plugin/plugin.json"
   printf '{{"version":2,"plugins":{{"{PLUGIN_ID}":[{{"scope":"user","installPath":"{dir}"}}]}}}}' > "$HOME/.claude/plugins/installed_plugins.json"
-  if [ -n "$FAKE_CLAUDE_SEED" ]; then
-    mkdir -p "{dir}/prompts"
-    printf '{{"cleanupPeriodDays":77}}' > "{dir}/settings.shared.json"
-    printf 'PLUGIN SEED PROMPT' > "{dir}/prompts/SYSTEM_PROMPT.md"
-  fi
 }}
 case "$*" in
 "plugin marketplace add"*)
@@ -1064,19 +1059,4 @@ fn setup_prints_one_progress_line_before_each_claude_call() {
             "plugin: updating playbook@amplifiedengineer",
         ]
     );
-}
-
-#[test]
-fn a_plugin_installed_mid_run_seeds_the_template_and_prompt_from_its_folder() {
-    // Arrange
-    let f = Fixture::new(0);
-
-    // Act
-    let out = f.setup(&["setup", "--yes"], &[("FAKE_CLAUDE_SEED", "1")], true);
-
-    // Assert
-    assert!(out.status.success(), "{}", text(&out));
-    assert_eq!(f.settings()["cleanupPeriodDays"], json!(77));
-    let prompt = fs::read_to_string(f.home.join(".config/playbook/prompts/SYSTEM_PROMPT.md"));
-    assert_eq!(prompt.unwrap(), "PLUGIN SEED PROMPT");
 }

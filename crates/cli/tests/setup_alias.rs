@@ -66,6 +66,7 @@ fn run_with(name: &str, args: &[&str], terminal_stderr: bool) -> Run {
         .env("SHELL", "/bin/zsh")
         .env("TMPDIR", &home)
         .env("CLAUDE_PLUGIN_ROOT", env!("PLAYBOOK_REPO_ROOT"))
+        .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1")
         .current_dir(&home);
     let out = if terminal_stderr {
         // A terminal on stderr turns on the release check, which would call

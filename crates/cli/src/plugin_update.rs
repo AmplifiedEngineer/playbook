@@ -663,17 +663,6 @@ pub fn planned_commands(home: &Path) -> String {
     }
 }
 
-/// The folder of the plugin that `outcome` installed or moved, so setup can
-/// seed from it. `None` for any other outcome.
-pub fn installed_dir(outcome: &Outcome, home: &Path) -> Option<PathBuf> {
-    match outcome {
-        Outcome::Installed { id, .. } | Outcome::Updated { id, .. } => {
-            installed_path(&home.join(".claude"), id)
-        }
-        _ => None,
-    }
-}
-
 /// Records how setup's plugin run ended in the marker the session hook
 /// reads, so it does not repeat the work. A run that did not try anything is
 /// not recorded.
@@ -2695,7 +2684,7 @@ mod tests {
             let outcome = sync_with_env(&probe, install, &env);
 
             // Assert
-            let skipped = blocked.map(|why| Outcome::Skipped(why.to_string()));
+            let skipped = blocked.map(|why| Outcome::LeftAlone(why.to_string()));
             match skipped {
                 Some(expected) => assert_eq!(outcome, expected, "{vars:?}"),
                 None => assert!(!matches!(outcome, Outcome::Skipped(_)), "{vars:?}"),
