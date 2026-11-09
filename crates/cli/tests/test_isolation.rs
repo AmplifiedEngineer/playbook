@@ -20,9 +20,12 @@ const SPAWNS: [&str; 2] = [
 
 /// Files the check skips, each with its reason. The binary refuses to heal
 /// the real home from a cargo test anyway.
-const EXEMPT: [&str; 1] = [
+const EXEMPT: [&str; 2] = [
     // Copies the binary for shell scripts; each caller sets HOME.
     "cli/tests/support/shell_bin_dir.rs",
+    // Links the binary into a sandbox bin folder. Every child it runs has a
+    // cleared environment with HOME inside the sandbox.
+    "cli/tests/docs_recipes.rs",
 ];
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {

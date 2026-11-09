@@ -6,6 +6,7 @@ A map of the Playbook docs, for people who use Claude Code and want to know wher
 
 - [Get started](get-started.md): install Playbook and open your first pull request.
 - [Concepts](concepts.md): the plugin, the binary, commands, skills, agents, hooks and memory in one page.
+- [Recipes](recipes/README.md): short how-tos for the common tasks, each checked in CI.
 - [Install](guides/00-install.md): every route, the Homebrew tap, upgrade and uninstall.
 - [What setup installs](guides/05-what-setup-installs.md): every change `playbook setup` makes, and how to undo each.
 
