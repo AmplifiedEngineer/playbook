@@ -16,7 +16,7 @@ See which parts of Playbook work on this machine and what to run to fix the rest
 
 ## What you see
 
-Each line starts with `PASS`, `INFO`, `WARN` or `FAIL`. A `WARN` or `FAIL` line ends with the command that fixes it, such as `playbook setup --yes`. Run that command, then check again.
+Each line starts with `PASS`, `INFO`, `WARN` or `FAIL`. A `WARN` or `FAIL` line usually names the command that fixes it, such as `playbook setup --yes`. Run that command, then check again.
 
 ## Next
 
