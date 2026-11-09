@@ -1992,6 +1992,9 @@ fn real_main() {
                     None => text,
                 }
             };
+            if message_file.as_deref() == Some("-") && body_file.as_deref() == Some("-") {
+                die("--message-file and --body-file cannot both read stdin".into());
+            }
             let message = read(message_file, message);
             let body = read(body_file, body);
             let dir = dir.map(|d| absolute_from_cwd(&d));

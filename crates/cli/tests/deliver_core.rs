@@ -1055,3 +1055,26 @@ fn a_pr_create_that_failed_after_the_push_is_finished_by_a_second_run() {
     assert_eq!(rig.remote_head("feat/x"), remote, "no force, same head");
     assert!(!rig.gh_log().contains("--force"));
 }
+
+#[test]
+fn classify_maps_each_real_message_to_its_rule_and_place() {
+    for (message, rule, place) in [
+        ("PR title is 81 characters, the limit is 72", "title-length", "title"),
+        ("PR title is not a conventional commit title (type(scope): description)", "title-format", "title"),
+        ("commit title is not a conventional commit title (type(scope): description)", "title-format", "commit"),
+        ("commit message is empty", "title-format", "commit"),
+        ("commit message line 3 has an em dash", "dash", "commit"),
+        ("PR body line 2 has an en dash", "dash", "body"),
+        ("PR body line 2 carries AI attribution (trailer)", "attribution", "body"),
+        ("PR body has text before ## Summary; only the ticket line may come first", "template", "body"),
+        ("PR body must start its sections with ## Summary (fix it)", "template", "body"),
+        ("PR body is 1300 characters, the cap is 1200; cut it", "body-length", "body"),
+        ("the first line of the PR body must carry the ticket PROJ-1, for example: Ticket: PROJ-1", "ticket-line", "body"),
+        ("commit title `handle the merge commit case` must carry the ticket in its scope, for example `feat(PROJ-1): x`", "ticket-scope", "commit"),
+        ("PR title must carry the ticket in its scope, for example `feat(PROJ-1): x`", "ticket-scope", "title"),
+        ("the PR body must name issue #4: add `Closes #4`", "issue", "body"),
+        ("something is staged but no commit message was given (rule staged)", "staged", "body"),
+    ] {
+        assert_eq!(deliver::classify(message), (rule, place), "{message}");
+    }
+}
