@@ -7,7 +7,11 @@
 //! only, never for another plugin. A missing CLI, a failed update, a plugin
 //! that is off in Claude Code or `update.plugin` set to off never fails
 //! the command: the result names the command to run by hand.
+//!
+//! [`sync`] adds an install of a missing plugin for a caller that allows it,
+//! guarded by [`setup_blocked`].
 
+use crate::common::plugin_state::{known_marketplaces, MARKETPLACE, PLUGIN_KEY};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -33,6 +37,9 @@ const TIMEOUT: Duration = Duration::from_secs(120);
 /// How long `claude plugin marketplace update` may take.
 const MARKETPLACE_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// The repository `claude plugin marketplace add` reads the marketplace from.
+const MARKETPLACE_SOURCE: &str = "amplifiedengineer/marketplace";
+
 /// What a plugin update did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
@@ -48,10 +55,18 @@ pub enum Outcome {
     Skipped(String),
     /// The playbook plugin is not installed, so there is nothing to say.
     NotInstalled,
-    /// `claude` is not on PATH.
-    NoCli { id: String },
-    /// `claude plugin update` failed or timed out.
-    Failed { id: String, why: String },
+    /// `claude` is not on PATH. `install` is set when the plugin was to be
+    /// installed, not updated.
+    NoCli { id: String, install: bool },
+    /// `claude plugin update` failed or timed out, or with `install` set, the
+    /// marketplace add or the install did.
+    Failed {
+        id: String,
+        why: String,
+        install: bool,
+    },
+    /// `claude plugin install` ran and the plugin is now installed.
+    Installed { id: String, version: Option<String> },
     /// The update ran and the installed plugin is still older than the
     /// binary. With `marketplace` unset, the marketplace was refreshed and
     /// has not published the binary's version yet. With it set, the refresh
@@ -87,13 +102,34 @@ impl Outcome {
                     .unwrap_or_default()
             ),
             Outcome::Skipped(why) => format!("plugin: not updated, {why}"),
-            Outcome::NoCli { id } => format!(
+            Outcome::Installed { id, version } => format!(
+                "plugin: installed {id}{}. Restart Claude Code to load it",
+                version
+                    .as_deref()
+                    .map(|v| format!(" {v}"))
+                    .unwrap_or_default(),
+            ),
+            Outcome::NoCli { id, install: true } => format!(
+                "plugin: the claude command is not on PATH, so the plugin was not installed; run: {}",
+                install_commands(id)
+            ),
+            Outcome::NoCli { id, install: false } => format!(
                 "plugin: the claude command is not on PATH, so the plugin was not updated; run: {}",
                 command(id)
             ),
-            Outcome::Failed { id, why } => {
-                format!("plugin: the update failed ({why}); run: {}", command(id))
-            }
+            Outcome::Failed {
+                id,
+                why,
+                install: true,
+            } => format!(
+                "plugin: the install failed ({why}); run: {}",
+                install_commands(id)
+            ),
+            Outcome::Failed {
+                id,
+                why,
+                install: false,
+            } => format!("plugin: the update failed ({why}); run: {}", command(id)),
             Outcome::Behind {
                 id,
                 version,
@@ -137,6 +173,12 @@ pub const COMMAND_PREFIX: &str = "claude plugin update ";
 /// The command that updates plugin `id`.
 pub fn command(id: &str) -> String {
     format!("{COMMAND_PREFIX}{id}")
+}
+
+/// The commands that install plugin `id` from scratch, as the README gives
+/// them.
+fn install_commands(id: &str) -> String {
+    format!("claude plugin marketplace add {MARKETPLACE_SOURCE} && claude plugin install {id}")
 }
 
 /// Shown where the installed plugin version cannot be read.
@@ -314,16 +356,94 @@ impl Probe {
     }
 }
 
+/// What [`sync`] may do beyond updating a plugin that is already installed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SyncOpts {
+    /// Install the plugin when none is installed.
+    pub allow_install: bool,
+    /// Ignore [`setup_blocked`] and `update.plugin` set to off, for a caller
+    /// the user asked to touch the plugin.
+    pub force: bool,
+}
+
+/// Why a command that sets the machine up must leave the plugin alone, or
+/// `None` when it may touch it. The one owner of this guard, so a caller
+/// cannot drift from [`sync`].
+pub fn setup_blocked(home: &Path) -> Option<&'static str> {
+    blocked_by(home, &|name| std::env::var(name).ok())
+}
+
+fn blocked_by(home: &Path, env: &dyn Fn(&str) -> Option<String>) -> Option<&'static str> {
+    if mode(home) == Mode::Off {
+        return Some("update.plugin is off");
+    }
+    if env(SKIP_ENV).is_some_and(|v| v == SKIP_VALUE) {
+        return Some("PLAYBOOK_SKIP_PLUGIN_UPDATE is set");
+    }
+    // A vendor variable, or the `CI` and `PLAYBOOK_HEADLESS` switch every hook
+    // reads: a plain `CI=true` is not a vendor variable.
+    let headless = crate::common::headless::headless_from(
+        env("PLAYBOOK_HEADLESS").as_deref(),
+        env("CI").as_deref(),
+    );
+    (crate::update::check::ci_vendor_env(env) || headless)
+        .then_some("a CI environment was detected")
+}
+
 /// Updates the playbook plugin, unless `update.plugin` is off, the plugin
 /// is not installed, or it is off in Claude Code.
 pub fn run(probe: &Probe) -> Outcome {
-    run_with_marketplace(probe).0
+    sync(probe, SyncOpts::default())
+}
+
+/// [`run`], and with `opts.allow_install` also installs a missing plugin. An
+/// install is held back by [`setup_blocked`] unless `opts.force`.
+pub fn sync(probe: &Probe, opts: SyncOpts) -> Outcome {
+    sync_with_env(probe, opts, &|name| std::env::var(name).ok())
+}
+
+fn sync_with_env(probe: &Probe, opts: SyncOpts, env: &dyn Fn(&str) -> Option<String>) -> Outcome {
+    if opts.allow_install && !opts.force {
+        if let Some(why) = blocked_by(&probe.home, env) {
+            return Outcome::Skipped(why.to_string());
+        }
+    }
+    run_with_marketplace(probe, opts).0
+}
+
+/// Adds the marketplace when it is not known, then installs the plugin.
+fn install(probe: &Probe) -> Outcome {
+    let id = PLUGIN_KEY.to_string();
+    let Some(claude) = &probe.claude else {
+        return Outcome::NoCli { id, install: true };
+    };
+    let failed = |id: String, why: String| Outcome::Failed {
+        id,
+        why,
+        install: true,
+    };
+    if !known_marketplaces(&probe.home).contains(&MARKETPLACE) {
+        let add = ["plugin", "marketplace", "add", MARKETPLACE_SOURCE, "--json"];
+        if let Err(why) = run_claude(probe, claude, &add, TIMEOUT) {
+            return failed(id, why);
+        }
+    }
+    if let Err(why) = run_claude(
+        probe,
+        claude,
+        &["plugin", "install", &id, "--json"],
+        TIMEOUT,
+    ) {
+        return failed(id, why);
+    }
+    let version = installed_version(&probe.home.join(".claude"), &id);
+    Outcome::Installed { id, version }
 }
 
 /// [`run`] for a binary at version `running`: an update that leaves the
 /// plugin older than the binary comes back as [`Outcome::Behind`].
 pub(crate) fn run_for_binary(probe: &Probe, running: &str) -> Outcome {
-    let (outcome, marketplace) = run_with_marketplace(probe);
+    let (outcome, marketplace) = run_with_marketplace(probe, SyncOpts::default());
     let (Outcome::Current { id, version: v } | Outcome::Updated { id, to: v, .. }) = &outcome
     else {
         return outcome;
@@ -342,10 +462,10 @@ pub(crate) fn run_for_binary(probe: &Probe, running: &str) -> Outcome {
     }
 }
 
-/// [`run`], also giving why the marketplace refresh failed, if it did.
-fn run_with_marketplace(probe: &Probe) -> (Outcome, Option<String>) {
+/// [`sync`], also giving why the marketplace refresh failed, if it did.
+fn run_with_marketplace(probe: &Probe, opts: SyncOpts) -> (Outcome, Option<String>) {
     let claude_home = probe.home.join(".claude");
-    if mode(&probe.home) == Mode::Off {
+    if !opts.force && mode(&probe.home) == Mode::Off {
         return (
             Outcome::Skipped(format!(
                 "{CONFIG_KEY} is off; to turn it on, run: playbook config set {CONFIG_KEY} {MODE_AUTO}"
@@ -354,7 +474,12 @@ fn run_with_marketplace(probe: &Probe) -> (Outcome, Option<String>) {
         );
     }
     let Some(id) = plugin_id(&claude_home) else {
-        return (Outcome::NotInstalled, None);
+        let outcome = if opts.allow_install {
+            install(probe)
+        } else {
+            Outcome::NotInstalled
+        };
+        return (outcome, None);
     };
     if is_off_in_claude_code(&claude_home, &id) {
         return (
@@ -366,7 +491,7 @@ fn run_with_marketplace(probe: &Probe) -> (Outcome, Option<String>) {
         );
     }
     let Some(claude) = &probe.claude else {
-        return (Outcome::NoCli { id }, None);
+        return (Outcome::NoCli { id, install: false }, None);
     };
     let before = installed_version(&claude_home, &id);
     // A failed refresh never stops the plugin update; it is named later only
@@ -381,7 +506,12 @@ fn run_with_marketplace(probe: &Probe) -> (Outcome, Option<String>) {
         .err()
     });
     if let Err(why) = run_claude(probe, claude, &["plugin", "update", &id], TIMEOUT) {
-        return (Outcome::Failed { id, why }, marketplace);
+        let failed = Outcome::Failed {
+            id,
+            why,
+            install: false,
+        };
+        return (failed, marketplace);
     }
     if let Some(dir) = installed_path(&claude_home, &id) {
         refresh_system_prompt(&probe.home, &dir);
@@ -609,7 +739,8 @@ pub fn claim(root: &Path, seen: Option<&str>, running: &str, now: u64) -> bool {
     .unwrap_or(false)
 }
 
-/// The state an attempt ends in. An update that left the plugin older than
+/// The state an attempt ends in. A fresh install ends `done`: the marketplace
+/// holds what it holds, and a retry cannot change that. An update that left the plugin older than
 /// the binary, changed or not, counts as failed, so it retries after
 /// [`FAILED_RETRY`].
 fn end_state(outcome: &Outcome, running: &str, installed_after: Option<&str>) -> State {
@@ -1289,7 +1420,7 @@ mod tests {
         };
 
         // Act
-        let (outcome, marketplace) = run_with_marketplace(&probe);
+        let (outcome, marketplace) = run_with_marketplace(&probe, SyncOpts::default());
 
         // Assert
         assert!(matches!(outcome, Outcome::Current { .. }), "{outcome:?}");
@@ -1904,6 +2035,7 @@ mod tests {
         Outcome::Failed {
             id: "p@x".into(),
             why: "timeout".into(),
+            install: false,
         }
     }
 
@@ -1969,7 +2101,10 @@ mod tests {
             ("not installed", Outcome::NotInstalled, None, State::Done),
             (
                 "no claude on PATH",
-                Outcome::NoCli { id: "p@x".into() },
+                Outcome::NoCli {
+                    id: "p@x".into(),
+                    install: false,
+                },
                 Some("1.1.0"),
                 State::Failed,
             ),
@@ -2005,5 +2140,182 @@ mod tests {
 
         // Assert
         assert_eq!(seen(&root), Some(format!("{RUN} done {T0}")));
+    }
+
+    fn no_env(_: &str) -> Option<String> {
+        None
+    }
+
+    fn env_with<'a>(set: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            set.iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| v.to_string())
+        }
+    }
+
+    fn set_off(home: &Path) {
+        let root = crate::common::paths::playbook_root_from(home);
+        fs::create_dir_all(&root).unwrap();
+        crate::config::store::put(
+            &root,
+            crate::config::write::Tier::Global,
+            None,
+            CONFIG_KEY,
+            &serde_json::json!("off"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn setup_is_blocked_by_the_skip_variable_a_ci_vendor_and_config_off() {
+        // Arrange
+        let open = scratch_dir("plugin-blocked-open");
+        let off = scratch_dir("plugin-blocked-off");
+        set_off(&off);
+
+        // Act
+        let cases = [
+            ("nothing set", blocked_by(&open, &no_env), None),
+            (
+                "skip variable",
+                blocked_by(&open, &env_with(&[(SKIP_ENV, "1")])),
+                Some("PLAYBOOK_SKIP_PLUGIN_UPDATE is set"),
+            ),
+            (
+                "skip variable not 1",
+                blocked_by(&open, &env_with(&[(SKIP_ENV, "0")])),
+                None,
+            ),
+            (
+                "CI vendor",
+                blocked_by(&open, &env_with(&[("GITHUB_ACTIONS", "true")])),
+                Some("a CI environment was detected"),
+            ),
+            (
+                "plain CI",
+                blocked_by(&open, &env_with(&[("CI", "true")])),
+                Some("a CI environment was detected"),
+            ),
+            (
+                "headless switch",
+                blocked_by(&open, &env_with(&[("PLAYBOOK_HEADLESS", "1")])),
+                Some("a CI environment was detected"),
+            ),
+            (
+                "config off",
+                blocked_by(&off, &no_env),
+                Some("update.plugin is off"),
+            ),
+        ];
+
+        // Assert
+        for (name, got, expected) in cases {
+            assert_eq!(got, expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn an_install_caller_is_held_back_by_the_guard_unless_forced() {
+        // Arrange
+        let home = scratch_dir("plugin-sync-guard");
+        let bin = fake_claude(&home, None, 0);
+        let probe = Probe {
+            home: home.clone(),
+            claude: Some(bin),
+        };
+        let install = SyncOpts {
+            allow_install: true,
+            force: false,
+        };
+        let forced = SyncOpts {
+            force: true,
+            ..install
+        };
+
+        // Act
+        let ci = sync_with_env(&probe, install, &env_with(&[("GITHUB_ACTIONS", "true")]));
+        let skipped = sync_with_env(&probe, install, &env_with(&[(SKIP_ENV, "1")]));
+        let held_calls = calls(&home);
+        sync_with_env(&probe, forced, &env_with(&[("GITHUB_ACTIONS", "true")]));
+
+        // Assert
+        assert_eq!(
+            ci,
+            Outcome::Skipped("a CI environment was detected".to_string())
+        );
+        assert_eq!(
+            skipped,
+            Outcome::Skipped("PLAYBOOK_SKIP_PLUGIN_UPDATE is set".to_string())
+        );
+        assert_eq!(held_calls, "");
+        assert!(calls(&home).contains("plugin install"));
+    }
+
+    #[test]
+    fn config_off_skips_an_install_caller_and_force_overrides_it() {
+        // Arrange
+        let home = scratch_dir("plugin-sync-off");
+        set_off(&home);
+        let bin = fake_claude(&home, None, 0);
+        let probe = Probe {
+            home: home.clone(),
+            claude: Some(bin),
+        };
+        let install = SyncOpts {
+            allow_install: true,
+            force: false,
+        };
+
+        // Act
+        let held = sync_with_env(&probe, install, &no_env);
+        let forced = sync_with_env(
+            &probe,
+            SyncOpts {
+                force: true,
+                ..install
+            },
+            &no_env,
+        );
+
+        // Assert
+        assert_eq!(held, Outcome::Skipped("update.plugin is off".to_string()));
+        assert!(matches!(forced, Outcome::Installed { .. }), "{forced:?}");
+    }
+
+    #[test]
+    fn run_keeps_updating_only_and_ignores_the_guard() {
+        // Arrange
+        let home = scratch_dir("plugin-run-default");
+        let probe = Probe { home, claude: None };
+
+        // Act
+        let outcome = run(&probe);
+
+        // Assert
+        assert_eq!(outcome, Outcome::NotInstalled);
+    }
+
+    #[test]
+    fn an_install_reads_with_a_restart_notice_and_ends_done() {
+        // Arrange
+        let installed = Outcome::Installed {
+            id: PLUGIN_KEY.to_string(),
+            version: Some("1.2.3".to_string()),
+        };
+
+        // Act
+        let line = installed.line();
+        let state = end_state(&installed, "1.2.3", Some("1.0.0"));
+
+        // Assert
+        assert_eq!(
+            line.as_deref(),
+            Some(
+                "plugin: installed playbook@amplifiedengineer 1.2.3. Restart Claude Code to load it"
+            )
+        );
+        assert_eq!(state, State::Done);
+        assert_eq!(notice_line(&installed, state), line);
     }
 }
