@@ -33,5 +33,5 @@ The page runs step 2 on a fresh machine, so it prints `No usage in this month`. 
 
 ## Next
 
-- [pbtop](../guides/11-pbtop.md): the views and the keys.
+- [pbtop](../pbtop.md): the views and the keys.
 - [Telemetry](../guides/10-telemetry.md): what it records and how to turn it off.

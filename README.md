@@ -4,7 +4,10 @@
 
 Plan and ship with Claude Code, and see what it costs.
 
-![pbtop on the monthly view, with the spend and token charts, using sample data](docs/images/pbtop-month.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/pbtop/charts-dark.svg">
+  <img src="docs/images/pbtop/charts-light.svg" alt="pbtop Charts tab: spend per day, spend per day by model, tokens per day and a burn-up panel, sample data">
+</picture>
 
 For developers who use Claude Code every day and want a repeatable workflow, safety guards and a clear view of their spend.
 
@@ -19,7 +22,7 @@ Out of the box, Claude Code leaves planning, review, safety rules and cost track
 | Plan to PR | `/playbook:plan` makes a checked plan. `/playbook:implement` builds it one small PR at a time. | [Guide](docs/guides/01-plan-and-implement.md) |
 | Code search | One tree-sitter index per repo, shared by every worktree. `playbook code` finds symbols and fits whole declarations into a token budget. | [Commands](docs/reference/cli-and-config.md#playbook-code) |
 | Document reading | `playbook doc read` turns a PDF or Office file into text on your machine, with about 41% fewer tokens on text PDFs. | [Guide](docs/guides/06-reading-documents.md) |
-| pbtop | A terminal dashboard of token use and cost by session and by model, with your usage limits. | [Guide](docs/guides/11-pbtop.md) |
+| pbtop | A terminal dashboard of token use and cost by session and by model, with your usage limits. | [Page](docs/pbtop.md) |
 | Review | `/playbook:review` sizes the diff, then runs a quick or a deep review. | [Guide](docs/guides/02-review-and-pr-flow.md) |
 | Safety guards | The rm guard blocks `rm -rf /` and `rm -rf ~`. An opt-in guard denies a short list of risky calls. | [Guide](docs/guides/07-rm-guard.md) |
 
