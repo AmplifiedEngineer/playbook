@@ -29,6 +29,7 @@ case "$1 $2" in
       *) [ -f "$d/title" ] && echo "[$(json)]" || echo "[]";;
     esac;;
   "pr create")
+    [ -f "$d/fail_create" ] && { echo "boom" >&2; exit 1; }
     val --title "$@" > "$d/title"; val --base "$@" > "$d/base"
     case "$*" in *--draft*) echo true > "$d/draft";; *) echo false > "$d/draft";; esac
     [ -f "$d/state" ] || echo OPEN > "$d/state"; cp "$(val --body-file "$@")" "$d/body"
@@ -971,4 +972,109 @@ fn parity_no_force_a_remote_that_moved_during_the_lease_is_exit_5_never_a_force(
 
     assert_eq!(err.code, exit::FAILED);
     assert_eq!(rig.remote_head("feat/x"), theirs);
+}
+
+#[test]
+fn a_title_a_body_and_a_missing_ticket_are_all_listed_at_once() {
+    let rig = Rig::new();
+    rig.git(&["push", "-q", "origin", "main:refs/heads/feat/parent"]);
+    rig.git(&["checkout", "-q", "-b", "feat/PROJ-9-b"]);
+    let mut opts = with_rules(dirty(&rig));
+    opts.base = Some("feat/parent".into());
+    opts.message = Some("feat(PROJ-9): add b".into());
+    opts.title = Some(format!("feat: {}", "x".repeat(75)));
+    opts.body = Some("## Test plan\n\n- run it\n".into());
+
+    let err = deliver::run(&opts).expect_err("refused");
+
+    assert_eq!(err.code, exit::REFUSED);
+    let json = deliver::failure_json(&err);
+    let rules: Vec<&str> = json["problems"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["rule"].as_str().unwrap())
+        .collect();
+    assert!(rules.contains(&"title-length"), "{rules:?}");
+    assert!(rules.contains(&"template"), "{rules:?}");
+    assert!(rules.len() >= 3, "{rules:?}");
+    assert!(!rig.gh_log().contains("pr create"));
+    assert!(!pushed(&rig, "feat/PROJ-9-b"));
+}
+
+#[test]
+fn parity_staged_refusal_a_staged_file_without_a_message_has_the_staged_rule() {
+    let rig = Rig::new();
+    rig.write("b.txt", "new\n");
+    rig.git(&["add", "b.txt"]);
+
+    let err = deliver::run(&rig.opts()).expect_err("refused");
+
+    assert_eq!(err.code, exit::REFUSED);
+    let json = deliver::failure_json(&err);
+    assert_eq!(json["problems"][0]["rule"], "staged");
+    assert_eq!(json["verdict"], "REFUSED");
+}
+
+#[test]
+fn a_rule_set_to_warn_delivers_and_reports_the_warning() {
+    let rig = Rig::new();
+    let mut opts = with_rules(dirty(&rig));
+    opts.body = Some(format!("## Summary\n\n{}\n", "word ".repeat(300)));
+
+    let report = deliver::run(&opts).expect("delivered");
+
+    assert!(!report.warnings.is_empty(), "{:?}", report.warnings);
+    assert!(report.to_json().contains("\"verdict\": \"DELIVERED\""));
+}
+
+#[test]
+fn parity_pr_draft_the_setting_decides_when_no_flag_is_passed() {
+    let rig = Rig::new();
+    let mut opts = dirty(&rig);
+    opts.default_draft = false;
+
+    let report = deliver::run(&opts).expect("delivered");
+
+    assert_eq!(report.draft, Some(false));
+}
+
+#[test]
+fn a_pr_create_that_failed_after_the_push_is_finished_by_a_second_run() {
+    let rig = Rig::new();
+    rig.fake_file("fail_create", "1");
+
+    let first = deliver::run(&dirty(&rig)).expect_err("gh pr create fails");
+    assert_eq!(first.code, exit::FAILED);
+    let remote = rig.remote_head("feat/x");
+    fs::remove_file(rig.fake.join("fail_create")).unwrap();
+
+    let second = deliver::run(&rig.opts()).expect("second run opens the PR");
+
+    assert_eq!(second.pr_number, Some(7));
+    assert_eq!(rig.remote_head("feat/x"), remote, "no force, same head");
+    assert!(!rig.gh_log().contains("--force"));
+}
+
+#[test]
+fn classify_maps_each_real_message_to_its_rule_and_place() {
+    for (message, rule, place) in [
+        ("PR title is 81 characters, the limit is 72", "title-length", "title"),
+        ("PR title is not a conventional commit title (type(scope): description)", "title-format", "title"),
+        ("commit title is not a conventional commit title (type(scope): description)", "title-format", "commit"),
+        ("commit message is empty", "title-format", "commit"),
+        ("commit message line 3 has an em dash", "dash", "commit"),
+        ("PR body line 2 has an en dash", "dash", "body"),
+        ("PR body line 2 carries AI attribution (trailer)", "attribution", "body"),
+        ("PR body has text before ## Summary; only the ticket line may come first", "template", "body"),
+        ("PR body must start its sections with ## Summary (fix it)", "template", "body"),
+        ("PR body is 1300 characters, the cap is 1200; cut it", "body-length", "body"),
+        ("the first line of the PR body must carry the ticket PROJ-1, for example: Ticket: PROJ-1", "ticket-line", "body"),
+        ("commit title `handle the merge commit case` must carry the ticket in its scope, for example `feat(PROJ-1): x`", "ticket-scope", "commit"),
+        ("PR title must carry the ticket in its scope, for example `feat(PROJ-1): x`", "ticket-scope", "title"),
+        ("the PR body must name issue #4: add `Closes #4`", "issue", "body"),
+        ("something is staged but no commit message was given (rule staged)", "staged", "body"),
+    ] {
+        assert_eq!(deliver::classify(message), (rule, place), "{message}");
+    }
 }

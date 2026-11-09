@@ -514,6 +514,8 @@ Example: `playbook deliver --dir ../wt -A --message "fix(x): y" --title "fix(x):
 - `--ticket <TICKET>`: Ticket key for the branch (`none` turns the ticket rules off)
 - `--issue <ISSUE>`: GitHub issue number the PR handles
 - `--json`: Print JSON instead of text
+- `--branch <BRANCH>`: Refuse unless `--dir` is on this branch
+- `--auto`: Auto mode: never force a push; a branch that needs a force is parked
 
 ### `playbook deps`
 
