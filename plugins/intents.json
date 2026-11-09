@@ -160,7 +160,7 @@
     "required": false
   },
   {
-    "intent": "pr-finish-context",
+    "intent": "pr-finish",
     "required": false
   },
   {
