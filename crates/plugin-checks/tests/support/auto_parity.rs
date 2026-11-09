@@ -12,7 +12,7 @@
 //!
 //! The file table is `COMMANDS`. A row is covered by the Step 0 and ordering
 //! checks, and by the per-row checks for its `Auto` kind where one exists. The
-//! checks for the `Dedicated`, `ParksInsteadOfForcing`, `Stages` and
+//! checks for the `Dedicated`, `Stages` and
 //! `SkipsSelfReview` kinds name their files, so a new command of those kinds
 //! needs its own test. Model behaviour is not testable here: these checks
 //! cover prose structure only.
@@ -38,8 +38,6 @@ pub(super) enum Auto {
     ReportsOnly,
     /// Behaves as `--stage`: collects candidates and skips the write prompt.
     Stages,
-    /// Never force-pushes; parks the work when a plain push cannot succeed.
-    ParksInsteadOfForcing,
     /// Skips the `/clear` self-review and says in the final report that no
     /// self-review ran when the caller was not `implement`.
     SkipsSelfReview,
