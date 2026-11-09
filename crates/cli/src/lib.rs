@@ -492,8 +492,8 @@ pub enum Command {
     },
     /// Check the playbook setup, or read one fact the check uses
     ///
-    /// `playbook doctor check` runs the full health check, the same one the
-    /// `/playbook:doctor` command uses. The other subcommands print one fact
+    /// `playbook doctor` with no subcommand runs `playbook doctor check`, the
+    /// full health check the `/playbook:doctor` command uses. It only reads. The other subcommands print one fact
     /// each, such as pending migrations, plugin version or hook wiring, and
     /// help when a layer reports a miss.
     ///
@@ -503,6 +503,8 @@ pub enum Command {
     /// attribution OFF, the default, by adding the missing `attribution`
     /// keys; that yes is the only Claude Code setting it writes. A no stores
     /// attribution ON.
+    ///
+    /// Example: `playbook doctor`
     ///
     /// Example: `playbook doctor pending-migrations`
     #[command(args_conflicts_with_subcommands = true, subcommand_required = false)]

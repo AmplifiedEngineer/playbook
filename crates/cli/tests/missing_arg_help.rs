@@ -80,20 +80,3 @@ fn a_missing_nested_positional_or_flag_names_the_missing_argument() {
         assert_names_missing(&stderr, missing);
     }
 }
-
-#[test]
-fn doctor_with_no_arguments_keeps_its_one_line_message() {
-    // Arrange
-    let args = ["doctor"];
-
-    // Act
-    let out = run(&args);
-
-    // Assert
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(out.status.code(), Some(2));
-    assert_eq!(
-        stderr.trim_end(),
-        "playbook doctor: pass a subcommand such as `check`, or `--fix`"
-    );
-}

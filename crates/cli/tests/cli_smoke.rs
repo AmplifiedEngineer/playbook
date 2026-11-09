@@ -525,7 +525,7 @@ fn table() -> Vec<Case> {
         // health facts
         case("doctor check", &["doctor", "check"]).out("FAIL").plain().writes(),
         case("doctor models", &["doctor", "models"]).out("haiku").plain(),
-        case("doctor", &["doctor"]).code(2).err("pass a subcommand").plain(),
+        case("doctor", &["doctor"]).out("FAIL").plain().writes(),
         case("doctor", &["doctor", "--fix"]).out("nothing to fix").plain().writes(),
         case("migrate", &["migrate"]).out("nothing to fix").plain().writes(),
         case("migrate", &["migrate", "--json"]).out("\"recorded\":true").plain().writes(),
