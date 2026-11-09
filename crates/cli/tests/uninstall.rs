@@ -465,8 +465,7 @@ fn the_installer_scripts_in_the_claude_dir_are_removed_and_nothing_else() {
     assert!(sb.path(".claude/projects/p/s.jsonl").is_file());
 }
 
-const LISTED: &str =
-    r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{"scope":"user"}]}}"#;
+const LISTED: &str = r#"{"version":2,"plugins":{"playbook@amplifiedengineer":[{"scope":"user"}]}}"#;
 
 #[test]
 fn uninstall_lists_the_plugin_and_marketplace_steps_that_still_apply() {
@@ -475,7 +474,7 @@ fn uninstall_lists_the_plugin_and_marketplace_steps_that_still_apply() {
     sb.write(".claude/plugins/installed_plugins.json", LISTED);
     sb.write(
         ".claude/plugins/known_marketplaces.json",
-        r#"{"pragmatic-engineer":{"source":{}}}"#,
+        r#"{"amplifiedengineer":{"source":{}}}"#,
     );
 
     // Act
@@ -484,11 +483,53 @@ fn uninstall_lists_the_plugin_and_marketplace_steps_that_still_apply() {
     // Assert
     let shown = text(&out);
     assert!(
+        shown.contains("claude plugin uninstall playbook@amplifiedengineer"),
+        "{shown}"
+    );
+    assert!(
+        shown.contains("claude plugin marketplace remove amplifiedengineer"),
+        "{shown}"
+    );
+    assert!(!shown.contains("pragmatic-engineer"), "{shown}");
+}
+
+#[test]
+fn uninstall_names_the_old_plugin_and_marketplace_for_an_install_that_kept_them() {
+    let sb = Sandbox::new("manual-old-name");
+    sb.write(
+        ".claude/plugins/installed_plugins.json",
+        r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{"scope":"user"}]}}"#,
+    );
+    sb.write(
+        ".claude/plugins/known_marketplaces.json",
+        r#"{"pragmatic-engineer":{"source":{}}}"#,
+    );
+
+    let shown = text(&sb.run(&["uninstall", "--yes"]));
+
+    assert!(
         shown.contains("claude plugin uninstall playbook@pragmatic-engineer"),
         "{shown}"
     );
     assert!(
         shown.contains("claude plugin marketplace remove pragmatic-engineer"),
+        "{shown}"
+    );
+    assert!(!shown.contains("amplifiedengineer"), "{shown}");
+}
+
+#[test]
+fn uninstall_lists_the_hooks_plugin_under_the_new_marketplace_name() {
+    let sb = Sandbox::new("manual-hooks-new-name");
+    sb.write(
+        ".claude/plugins/installed_plugins.json",
+        r#"{"version":2,"plugins":{"playbook-hooks@amplifiedengineer":[{}]}}"#,
+    );
+
+    let shown = text(&sb.run(&["uninstall", "--yes"]));
+
+    assert!(
+        shown.contains("claude plugin uninstall playbook-hooks@amplifiedengineer"),
         "{shown}"
     );
 }
@@ -498,7 +539,7 @@ fn uninstall_lists_the_hooks_plugin_too() {
     let sb = Sandbox::new("manual-hooks-plugin");
     sb.write(
         ".claude/plugins/installed_plugins.json",
-        r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{}],"playbook-hooks@pragmatic-engineer":[{}]}}"#,
+        r#"{"version":2,"plugins":{"playbook@amplifiedengineer":[{}],"playbook-hooks@pragmatic-engineer":[{}]}}"#,
     );
 
     let shown = text(&sb.run(&["uninstall", "--yes"]));
@@ -519,7 +560,7 @@ fn uninstall_lists_only_the_steps_that_apply() {
     );
     sb.write(
         ".claude/plugins/known_marketplaces.json",
-        r#"{"pragmatic-engineer":{"source":{}}}"#,
+        r#"{"amplifiedengineer":{"source":{}}}"#,
     );
 
     // Act
@@ -528,7 +569,7 @@ fn uninstall_lists_only_the_steps_that_apply() {
     // Assert
     assert!(!shown.contains("claude plugin uninstall"), "{shown}");
     assert!(
-        shown.contains("claude plugin marketplace remove pragmatic-engineer"),
+        shown.contains("claude plugin marketplace remove amplifiedengineer"),
         "{shown}"
     );
 }

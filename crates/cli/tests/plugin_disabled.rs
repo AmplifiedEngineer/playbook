@@ -10,8 +10,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
-const DISABLED: &str = r#"{"enabledPlugins":{"playbook@pragmatic-engineer":false}}"#;
-const ENABLED: &str = r#"{"enabledPlugins":{"playbook@pragmatic-engineer":true}}"#;
+const DISABLED: &str = r#"{"enabledPlugins":{"playbook@amplifiedengineer":false}}"#;
+const ENABLED: &str = r#"{"enabledPlugins":{"playbook@amplifiedengineer":true}}"#;
 
 fn scratch_home(tag: &str, settings: Option<&str>) -> PathBuf {
     let home = std::env::temp_dir().join(format!(
@@ -79,7 +79,7 @@ fn a_missing_settings_file_still_runs_the_guard() {
 fn a_malformed_settings_file_still_runs_the_guard() {
     let home = scratch_home(
         "malformed",
-        Some(r#"{"enabledPlugins":{"playbook@pragmatic-engineer":false"#),
+        Some(r#"{"enabledPlugins":{"playbook@amplifiedengineer":false"#),
     );
     let out = run_rm_guard(&home, false);
     assert!(String::from_utf8_lossy(&out.stdout).contains(r#""permissionDecision":"deny""#));

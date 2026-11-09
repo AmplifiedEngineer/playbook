@@ -17,12 +17,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const PLUGIN_ID: &str = "playbook@pragmatic-engineer";
-const EXPECTED_CALL: &str = "plugin update playbook@pragmatic-engineer\n";
+const PLUGIN_ID: &str = "playbook@amplifiedengineer";
+const EXPECTED_CALL: &str = "plugin update playbook@amplifiedengineer\n";
 const MARKER_KEY: &str = "versions/plugin-update";
 const START_LINE: &str =
-    "playbook: updating the playbook plugin (claude plugin update playbook@pragmatic-engineer)";
-const MANUAL_COMMAND: &str = "claude plugin update playbook@pragmatic-engineer";
+    "playbook: updating the playbook plugin (claude plugin update playbook@amplifiedengineer)";
+const MANUAL_COMMAND: &str = "claude plugin update playbook@amplifiedengineer";
 const CI_VARS: [&str; 7] = [
     "CI",
     "GITHUB_ACTIONS",
@@ -45,7 +45,7 @@ const BACKGROUND_LINE: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     " in the background. Start Claude Code again to load it."
 );
-const UPDATED_LINE: &str = "plugin: updated playbook@pragmatic-engineer from";
+const UPDATED_LINE: &str = "plugin: updated playbook@amplifiedengineer from";
 const HEADLESS_ENV: &str = "PLAYBOOK_HEADLESS";
 const NO_SPAWN_ENV: &str = "PLAYBOOK_TEST_NO_SPAWN";
 const STILL_OLDER_NOTICE: &str = "plugin: the playbook plugin is still older than this playbook";
@@ -72,7 +72,7 @@ impl Fixture {
     fn plugin_dir(&self, version: &str) -> PathBuf {
         let dir = self
             .home
-            .join(".claude/plugins/cache/pragmatic-engineer/playbook")
+            .join(".claude/plugins/cache/amplifiedengineer/playbook")
             .join(version);
         fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
         fs::create_dir_all(dir.join("skills")).unwrap();

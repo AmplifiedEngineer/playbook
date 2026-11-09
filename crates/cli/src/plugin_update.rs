@@ -141,8 +141,8 @@ pub fn mode(home: &Path) -> Mode {
 }
 
 /// The id Claude Code lists for the playbook plugin in
-/// `installed_plugins.json`: `playbook@pragmatic-engineer` when listed,
-/// else the one `playbook@<marketplace>` entry. `None` when the plugin is
+/// `installed_plugins.json`: the first of `plugin_keys()` that is listed
+/// (`playbook@amplifiedengineer`, then the old names), else the one `playbook@<marketplace>` entry. `None` when the plugin is
 /// not installed, or more than one other marketplace lists it.
 pub fn plugin_id(claude_home: &Path) -> Option<String> {
     use crate::common::plugin_state::{installed_entry_at, plugin_keys};
@@ -800,7 +800,7 @@ mod tests {
 
     fn plugin(home: &Path, version: &str) -> PathBuf {
         let dir = home.join(format!(
-            ".claude/plugins/cache/pragmatic-engineer/playbook/{version}"
+            ".claude/plugins/cache/amplifiedengineer/playbook/{version}"
         ));
         fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
         fs::create_dir_all(dir.join("skills")).unwrap();
@@ -830,7 +830,7 @@ mod tests {
         fs::create_dir_all(bin.parent().unwrap()).unwrap();
         let swap = to.map_or(String::new(), |dir| {
             format!(
-                "printf '%s' '{{\"version\":2,\"plugins\":{{\"playbook@pragmatic-engineer\":[{{\"scope\":\"user\",\"installPath\":\"{}\"}}]}}}}' > \"$HOME/.claude/plugins/installed_plugins.json\"\n",
+                "printf '%s' '{{\"version\":2,\"plugins\":{{\"playbook@amplifiedengineer\":[{{\"scope\":\"user\",\"installPath\":\"{}\"}}]}}}}' > \"$HOME/.claude/plugins/installed_plugins.json\"\n",
                 dir.display()
             )
         });
@@ -881,7 +881,7 @@ mod tests {
     #[test]
     fn a_still_older_plugin_never_reads_as_up_to_date() {
         // Arrange
-        let id = "playbook@pragmatic-engineer".to_string();
+        let id = "playbook@amplifiedengineer".to_string();
         let current = Outcome::Current {
             id: id.clone(),
             version: Some("0.36.0".to_string()),
@@ -905,7 +905,7 @@ mod tests {
                 line.contains("still older than this playbook binary"),
                 "{line}"
             );
-            assert!(line.ends_with("claude plugin update playbook@pragmatic-engineer"));
+            assert!(line.ends_with("claude plugin update playbook@amplifiedengineer"));
         }
     }
 
@@ -943,7 +943,7 @@ mod tests {
         let home = scratch_dir("plugin-update-ok");
         let old = plugin(&home, "0.36.0");
         let new = plugin(&home, "0.37.0");
-        install(&home, "playbook@pragmatic-engineer", &old);
+        install(&home, "playbook@amplifiedengineer", &old);
         let claude = fake_claude(&home, Some(&new), 0);
 
         // Act
@@ -953,10 +953,50 @@ mod tests {
         });
 
         // Assert
-        assert_eq!(calls(&home), "plugin update playbook@pragmatic-engineer\n");
+        assert_eq!(calls(&home), "plugin update playbook@amplifiedengineer\n");
         assert_eq!(
             out.line().unwrap(),
-            "plugin: updated playbook@pragmatic-engineer from 0.36.0 to 0.37.0. Restart Claude Code to load it"
+            "plugin: updated playbook@amplifiedengineer from 0.36.0 to 0.37.0. Restart Claude Code to load it"
+        );
+    }
+
+    #[test]
+    fn an_install_that_kept_the_old_name_is_updated_under_that_name() {
+        let home = scratch_dir("plugin-update-old-name");
+        let old = plugin(&home, "0.36.0");
+        let new = plugin(&home, "0.37.0");
+        install(&home, "playbook@pragmatic-engineer", &old);
+        let claude = fake_claude(&home, Some(&new), 0);
+
+        run(&Probe {
+            home: home.clone(),
+            claude: Some(claude),
+        });
+
+        assert_eq!(calls(&home), "plugin update playbook@pragmatic-engineer\n");
+    }
+
+    #[test]
+    fn the_new_id_is_picked_first_when_both_ids_are_listed() {
+        let home = scratch_dir("plugin-update-both-ids");
+        let dir = plugin(&home, "0.37.0");
+        fs::write(
+            home.join(".claude/plugins/installed_plugins.json"),
+            format!(
+                r#"{{"version":2,"plugins":{{"playbook@pragmatic-engineer":[{{"installPath":"{0}"}}],"playbook@amplifiedengineer":[{{"installPath":"{0}"}}]}}}}"#,
+                dir.display()
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(
+            plugin_id(&home.join(".claude")).as_deref(),
+            Some("playbook@amplifiedengineer")
+        );
+        install(&home, "playbook@pragmatic-engineer", &dir);
+        assert_eq!(
+            plugin_id(&home.join(".claude")).as_deref(),
+            Some("playbook@pragmatic-engineer")
         );
     }
 
@@ -979,7 +1019,7 @@ mod tests {
         if let Some(text) = edit_before {
             fs::write(&placed, text).unwrap();
         }
-        install(&home, "playbook@pragmatic-engineer", &old);
+        install(&home, "playbook@amplifiedengineer", &old);
         let claude = fake_claude(&home, Some(&new), 0);
 
         run(&Probe {
@@ -1008,7 +1048,7 @@ mod tests {
     fn a_missing_cli_or_a_failed_update_names_the_command_and_does_not_fail() {
         let home = scratch_dir("plugin-update-fail");
         let dir = plugin(&home, "0.36.0");
-        install(&home, "playbook@pragmatic-engineer", &dir);
+        install(&home, "playbook@amplifiedengineer", &dir);
         let missing = run(&Probe {
             home: home.clone(),
             claude: None,
@@ -1020,10 +1060,10 @@ mod tests {
         assert!(missing
             .line()
             .unwrap()
-            .ends_with("run: claude plugin update playbook@pragmatic-engineer"));
+            .ends_with("run: claude plugin update playbook@amplifiedengineer"));
         assert_eq!(
             failed.line().unwrap(),
-            "plugin: the update failed (update failed: network); run: claude plugin update playbook@pragmatic-engineer"
+            "plugin: the update failed (update failed: network); run: claude plugin update playbook@amplifiedengineer"
         );
     }
 
@@ -1032,11 +1072,11 @@ mod tests {
         // Arrange
         let home = scratch_dir("plugin-update-off");
         let dir = plugin(&home, "0.36.0");
-        install(&home, "playbook@pragmatic-engineer", &dir);
+        install(&home, "playbook@amplifiedengineer", &dir);
         let claude = fake_claude(&home, None, 0);
         fs::write(
             home.join(".claude/settings.json"),
-            r#"{"enabledPlugins":{"playbook@pragmatic-engineer":false}}"#,
+            r#"{"enabledPlugins":{"playbook@amplifiedengineer":false}}"#,
         )
         .unwrap();
 
@@ -1146,7 +1186,7 @@ mod tests {
         // Arrange
         let home = scratch_dir("plugin-update-ask");
         let dir = plugin(&home, "0.36.0");
-        install(&home, "playbook@pragmatic-engineer", &dir);
+        install(&home, "playbook@amplifiedengineer", &dir);
         let claude = fake_claude(&home, None, 0);
         let root = crate::common::paths::playbook_root_from(&home);
         fs::create_dir_all(&root).unwrap();
@@ -1166,7 +1206,7 @@ mod tests {
         });
 
         // Assert
-        assert_eq!(calls(&home), "plugin update playbook@pragmatic-engineer\n");
+        assert_eq!(calls(&home), "plugin update playbook@amplifiedengineer\n");
         assert!(!matches!(out, Outcome::Skipped(_)), "{out:?}");
     }
 
@@ -1225,10 +1265,10 @@ mod tests {
             plugin_id(&home.join(".claude")).as_deref(),
             Some("playbook@my-fork")
         );
-        install(&home, "playbook@pragmatic-engineer", &dir);
+        install(&home, "playbook@amplifiedengineer", &dir);
         assert_eq!(
             plugin_id(&home.join(".claude")).as_deref(),
-            Some("playbook@pragmatic-engineer")
+            Some("playbook@amplifiedengineer")
         );
     }
 
@@ -1255,7 +1295,7 @@ mod tests {
             headless: false,
             ci_vendor: false,
             disabled_in_claude: false,
-            plugin_id: Some("playbook@pragmatic-engineer"),
+            plugin_id: Some("playbook@amplifiedengineer"),
         }
     }
 

@@ -31,7 +31,7 @@ and stop.
 ## What each layer checks
 
 1. **Plugin enabled.** `claude plugin list` names playbook and does not show it
-   disabled. Hint on a miss: `claude plugin marketplace add amplifiedengineer/marketplace && claude plugin install playbook@pragmatic-engineer`.
+   disabled. Hint on a miss: `claude plugin marketplace add amplifiedengineer/marketplace && claude plugin install playbook@amplifiedengineer`. When the plugin is installed, the enable hint names the id that is listed.
 2. **Safety guards wired.** `settings.json` runs the binary's hook command for the
    five PreToolUse guards (`rm-workspace-guard`, `bg-await-guard`,
    `precommit-check`, `commit-message-sanitizer`,
@@ -59,7 +59,7 @@ and stop.
      one fix command. A binary below `minBinaryVersion` or a plugin on a newer
      minor line gets the binary upgrade (`brew upgrade playbook` when the
      binary path resolves to Homebrew, else `playbook update`). A plugin on an
-     older minor line gets `claude plugin update playbook@pragmatic-engineer`. The
+     older minor line gets `claude plugin update` with the id that is listed (`playbook@amplifiedengineer`, or `playbook@pragmatic-engineer` on an install that kept the old name). The
      plugin is found the same way as `playbook path plugin-root`, with
      `PLAYBOOK_PLUGIN_DIR` first.
    - **Upgrade record row.** Reads the version record in `config.db` read-only

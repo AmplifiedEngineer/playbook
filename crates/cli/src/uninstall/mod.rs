@@ -155,17 +155,16 @@ fn synced_skills_step(opts: &Options, report: &mut Report) {
 /// Code's own plugin state. Only the ones that still apply are listed.
 fn manual_steps(home: &Path, report: &mut Report) {
     use crate::common::plugin_state::{
-        installed_in, listed_in, marketplace_known_in, HOOKS_PLUGIN_KEY, MARKETPLACE, PLUGIN_KEY,
+        hooks_plugin_keys, known_marketplaces, listed_in, plugin_keys,
     };
     let mut steps = Vec::new();
-    if installed_in(home) == Some(true) {
-        steps.push(format!("claude plugin uninstall {PLUGIN_KEY}"));
+    for key in plugin_keys().into_iter().chain(hooks_plugin_keys()) {
+        if listed_in(home, &key) == Some(true) {
+            steps.push(format!("claude plugin uninstall {key}"));
+        }
     }
-    if listed_in(home, HOOKS_PLUGIN_KEY) == Some(true) {
-        steps.push(format!("claude plugin uninstall {HOOKS_PLUGIN_KEY}"));
-    }
-    if marketplace_known_in(home) {
-        steps.push(format!("claude plugin marketplace remove {MARKETPLACE}"));
+    for name in known_marketplaces(home) {
+        steps.push(format!("claude plugin marketplace remove {name}"));
     }
     if steps.is_empty() {
         return;

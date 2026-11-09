@@ -12,17 +12,16 @@
 use std::path::{Path, PathBuf};
 
 /// The command a user runs when no plugin directory is found.
-pub const INSTALL_HINT: &str = "claude plugin install playbook@pragmatic-engineer";
+pub const INSTALL_HINT: &str = "claude plugin install playbook@amplifiedengineer";
 
 /// An explicit override, for a dev checkout. It wins over every other source.
 pub const OVERRIDE_ENV: &str = "PLAYBOOK_PLUGIN_DIR";
 
-const CACHE_DIR: &str = "plugins/cache/pragmatic-engineer/playbook";
-/// Every cache folder the plugin may sit in, by marketplace name: the one
-/// above, then the names a renamed marketplace would use.
+/// Every cache folder the plugin may sit in, by marketplace name: the current
+/// one first, then the old name installs may have kept, then a dashed spelling.
 const CACHE_DIRS: [&str; 3] = [
-    CACHE_DIR,
     "plugins/cache/amplifiedengineer/playbook",
+    "plugins/cache/pragmatic-engineer/playbook",
     "plugins/cache/amplified-engineer/playbook",
 ];
 /// The file Claude Code writes into a plugin cache version it no longer uses.
@@ -154,7 +153,6 @@ pub fn resolve(inputs: &Inputs) -> Result<Resolved, NotFound> {
         None => tried.push("CLAUDE_PLUGIN_ROOT (unset)".to_string()),
     }
 
-    let cache = inputs.claude_home.join(CACHE_DIR);
     if let Some(root) = newest_in_any_cache(inputs.claude_home) {
         return Ok(Resolved {
             root,
@@ -162,7 +160,12 @@ pub fn resolve(inputs: &Inputs) -> Result<Resolved, NotFound> {
             skipped: tried,
         });
     }
-    tried.push(format!("{} (no usable version)", cache.display()));
+    tried.extend(CACHE_DIRS.iter().map(|d| {
+        format!(
+            "{} (no usable version)",
+            inputs.claude_home.join(d).display()
+        )
+    }));
     Err(NotFound { tried })
 }
 
@@ -272,11 +275,17 @@ pub fn binary_too_old(root: &Path, binary: &str, homebrew: bool) -> Option<Strin
 /// One line when the plugin `version` is not in the minor line of `binary`
 /// (ADR 0038 decision 7), naming the command that fixes it, else `None`.
 /// A plugin and a binary work together when their MAJOR.MINOR match.
+/// `plugin_key` is the id Claude Code lists, named in the update command.
 /// `homebrew` picks the binary upgrade command for a newer plugin. A leading
 /// `v` and a `+build` suffix are ignored, as `update::resolve::compare`
 /// ignores them. A plugin version that does not parse says nothing, and a
 /// binary version that does not parse says the range was not checked.
-pub fn plugin_out_of_range(version: &str, binary: &str, homebrew: bool) -> Option<String> {
+pub fn plugin_out_of_range(
+    version: &str,
+    binary: &str,
+    plugin_key: &str,
+    homebrew: bool,
+) -> Option<String> {
     let minor_line = |v: &str| {
         let v = v.strip_prefix('v').unwrap_or(v);
         version_key(v.split('+').next().unwrap_or(v)).map(|k| (k.0, k.1))
@@ -290,7 +299,7 @@ pub fn plugin_out_of_range(version: &str, binary: &str, homebrew: bool) -> Optio
     match plugin.cmp(&line) {
         std::cmp::Ordering::Equal => None,
         std::cmp::Ordering::Less => Some(format!(
-            "the playbook plugin {version} is older than the {}.{} line of this binary ({binary}). Run: claude plugin update playbook@pragmatic-engineer",
+            "the playbook plugin {version} is older than the {}.{} line of this binary ({binary}). Run: claude plugin update {plugin_key}",
             line.0, line.1
         )),
         std::cmp::Ordering::Greater => {
@@ -305,11 +314,6 @@ pub fn plugin_out_of_range(version: &str, binary: &str, homebrew: bool) -> Optio
             ))
         }
     }
-}
-
-/// The folder that holds one subfolder per cached plugin version.
-pub fn cache_dir(claude_home: &Path) -> PathBuf {
-    claude_home.join(CACHE_DIR)
 }
 
 /// Version folders in the plugin cache that Claude Code marked orphaned. The
@@ -476,6 +480,7 @@ fn write_embedded_rules(home: &Path) -> std::io::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::plugin_state::PLUGIN_KEY;
     use crate::common::test_support::scratch_dir;
     use std::fs;
 
@@ -492,7 +497,7 @@ mod tests {
 
     fn cached(claude_home: &Path, version: &str) -> PathBuf {
         plugin_at(
-            &claude_home.join(CACHE_DIR).join(version),
+            &claude_home.join(CACHE_DIRS[0]).join(version),
             "playbook",
             version,
         )
@@ -502,7 +507,7 @@ mod tests {
         fs::create_dir_all(claude_home.join("plugins")).unwrap();
         fs::write(
             claude_home.join("plugins/installed_plugins.json"),
-            format!(r#"{{"version":2,"plugins":{{"playbook@pragmatic-engineer":[{entries}]}}}}"#),
+            format!(r#"{{"version":2,"plugins":{{"playbook@amplifiedengineer":[{entries}]}}}}"#),
         )
         .unwrap();
     }
@@ -565,7 +570,7 @@ mod tests {
         fs::write(
             home.join("plugins/installed_plugins.json"),
             format!(
-                r#"{{"version":1,"plugins":{{"playbook@pragmatic-engineer":{{"version":"0.25.0","installPath":"{}"}}}}}}"#,
+                r#"{{"version":1,"plugins":{{"playbook@amplifiedengineer":{{"version":"0.25.0","installPath":"{}"}}}}}}"#,
                 active.display()
             ),
         )
@@ -660,7 +665,7 @@ mod tests {
         let want = cached(&home, "0.15.0");
         let orphan = cached(&home, "0.40.0");
         fs::write(orphan.join(ORPHAN_MARKER), "1").unwrap();
-        fs::create_dir_all(home.join(CACHE_DIR).join("not-a-version/skills")).unwrap();
+        fs::create_dir_all(home.join(CACHE_DIRS[0]).join("not-a-version/skills")).unwrap();
 
         // Act
         let got = run(&home, None).unwrap();
@@ -727,7 +732,9 @@ mod tests {
         for part in [
             "installPath",
             "CLAUDE_PLUGIN_ROOT (unset)",
-            CACHE_DIR,
+            CACHE_DIRS[0],
+            CACHE_DIRS[1],
+            CACHE_DIRS[2],
             INSTALL_HINT,
         ] {
             assert!(err.contains(part), "{part} missing: {err}");
@@ -913,17 +920,32 @@ mod tests {
 
     #[test]
     fn a_plugin_in_the_minor_line_of_the_binary_passes() {
-        assert_eq!(plugin_out_of_range("0.32.0", "0.32.0", false), None);
-        assert_eq!(plugin_out_of_range("0.32.4", "0.32.1", false), None);
-        assert_eq!(plugin_out_of_range("0.32.0-rc.1", "0.32.3", false), None);
-        assert_eq!(plugin_out_of_range("0.32.0", "v0.32.1+dirty", false), None);
-        assert_eq!(plugin_out_of_range("not a version", "0.32.0", false), None);
+        assert_eq!(
+            plugin_out_of_range("0.32.0", "0.32.0", PLUGIN_KEY, false),
+            None
+        );
+        assert_eq!(
+            plugin_out_of_range("0.32.4", "0.32.1", PLUGIN_KEY, false),
+            None
+        );
+        assert_eq!(
+            plugin_out_of_range("0.32.0-rc.1", "0.32.3", PLUGIN_KEY, false),
+            None
+        );
+        assert_eq!(
+            plugin_out_of_range("0.32.0", "v0.32.1+dirty", PLUGIN_KEY, false),
+            None
+        );
+        assert_eq!(
+            plugin_out_of_range("not a version", "0.32.0", PLUGIN_KEY, false),
+            None
+        );
     }
 
     #[test]
     fn a_binary_version_that_does_not_parse_says_the_range_was_not_checked() {
         // Act
-        let line = plugin_out_of_range("0.32.0", "1.2", false);
+        let line = plugin_out_of_range("0.32.0", "1.2", PLUGIN_KEY, false);
 
         // Assert
         assert_eq!(
@@ -938,14 +960,19 @@ mod tests {
         let binary = "0.32.1";
 
         // Act
-        let old = plugin_out_of_range("0.31.9", binary, true).unwrap();
-        let newer_brew = plugin_out_of_range("0.33.0", binary, true).unwrap();
-        let newer_major = plugin_out_of_range("1.32.1", binary, false).unwrap();
+        let old = plugin_out_of_range("0.31.9", binary, PLUGIN_KEY, true).unwrap();
+        let newer_brew = plugin_out_of_range("0.33.0", binary, PLUGIN_KEY, true).unwrap();
+        let newer_major = plugin_out_of_range("1.32.1", binary, PLUGIN_KEY, false).unwrap();
 
         // Assert
         assert_eq!(
             old,
-            "the playbook plugin 0.31.9 is older than the 0.32 line of this binary (0.32.1). Run: claude plugin update playbook@pragmatic-engineer"
+            "the playbook plugin 0.31.9 is older than the 0.32 line of this binary (0.32.1). Run: claude plugin update playbook@amplifiedengineer"
+        );
+        assert!(
+            plugin_out_of_range("0.31.9", binary, "playbook@pragmatic-engineer", true)
+                .unwrap()
+                .ends_with("claude plugin update playbook@pragmatic-engineer")
         );
         assert_eq!(
             newer_brew,
@@ -960,7 +987,7 @@ mod tests {
     #[test]
     fn only_marked_cache_folders_count_as_orphaned() {
         let home = scratch_dir("orphans");
-        let cache = home.join(".claude").join(CACHE_DIR);
+        let cache = home.join(".claude").join(CACHE_DIRS[0]);
         fs::create_dir_all(cache.join("0.25.0")).unwrap();
         fs::write(cache.join("0.25.0").join(ORPHAN_MARKER), "1").unwrap();
         fs::create_dir_all(cache.join("0.31.1")).unwrap();

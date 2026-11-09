@@ -39,7 +39,7 @@ impl Home {
     fn plugin(&self, version: &str, min: &str) -> PathBuf {
         let dir = self
             .home
-            .join(".claude/plugins/cache/pragmatic-engineer/playbook")
+            .join(".claude/plugins/cache/amplifiedengineer/playbook")
             .join(version);
         fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
         fs::create_dir_all(dir.join("skills")).unwrap();
@@ -58,7 +58,7 @@ impl Home {
         fs::write(
             self.home.join(".claude/plugins/installed_plugins.json"),
             format!(
-                r#"{{"version":2,"plugins":{{"playbook@pragmatic-engineer":[{{"scope":"user","installPath":"{}","version":"{version}"}}]}}}}"#,
+                r#"{{"version":2,"plugins":{{"playbook@amplifiedengineer":[{{"scope":"user","installPath":"{}","version":"{version}"}}]}}}}"#,
                 dir.display()
             ),
         )
@@ -73,7 +73,7 @@ impl Home {
         fs::create_dir_all(bin.parent().unwrap()).unwrap();
         let swap = to.map_or(String::new(), |(dir, version)| {
             format!(
-                "printf '%s' '{{\"version\":2,\"plugins\":{{\"playbook@pragmatic-engineer\":[{{\"scope\":\"user\",\"installPath\":\"{}\",\"version\":\"{version}\"}}]}}}}' > \"$HOME/.claude/plugins/installed_plugins.json\"\n",
+                "printf '%s' '{{\"version\":2,\"plugins\":{{\"playbook@amplifiedengineer\":[{{\"scope\":\"user\",\"installPath\":\"{}\",\"version\":\"{version}\"}}]}}}}' > \"$HOME/.claude/plugins/installed_plugins.json\"\n",
                 dir.display()
             )
         });
@@ -179,7 +179,7 @@ fn the_reported_notice_lists_the_item_and_migrate_updates_the_plugin_once() {
     // Assert
     assert!(first.contains("1 item needs you:\n  - "), "{first}");
     assert!(
-        first.contains("    Fix: claude plugin update playbook@pragmatic-engineer"),
+        first.contains("    Fix: claude plugin update playbook@amplifiedengineer"),
         "{first}"
     );
     assert!(
@@ -198,12 +198,12 @@ fn the_reported_notice_lists_the_item_and_migrate_updates_the_plugin_once() {
     assert_eq!(migrate.status.code(), Some(0));
     assert_eq!(
         h.claude_calls(),
-        "plugin update playbook@pragmatic-engineer\n"
+        "plugin update playbook@amplifiedengineer\n"
     );
     let text = String::from_utf8_lossy(&migrate.stdout);
     assert!(
         text.contains(&format!(
-            "plugin: updated playbook@pragmatic-engineer from {old} to {VERSION}. Restart Claude Code to load it\n"
+            "plugin: updated playbook@amplifiedengineer from {old} to {VERSION}. Restart Claude Code to load it\n"
         )),
         "{text}"
     );
@@ -237,7 +237,7 @@ fn migrate_lists_a_report_it_could_not_fix_once_and_the_session_stays_quiet() {
     assert!(
         text.starts_with(
             "plugin: the claude command is not on PATH, so the plugin was not updated; \
-             run: claude plugin update playbook@pragmatic-engineer\n"
+             run: claude plugin update playbook@amplifiedengineer\n"
         ),
         "{text}"
     );
@@ -278,7 +278,7 @@ fn no_plugin_a_false_config_key_or_a_failed_update_leave_the_exit_code_alone() {
     assert_eq!(failed.status.code(), Some(0));
     assert!(
         String::from_utf8_lossy(&failed.stdout).contains(
-            "plugin: the update failed (exit 1); run: claude plugin update playbook@pragmatic-engineer"
+            "plugin: the update failed (exit 1); run: claude plugin update playbook@amplifiedengineer"
         ),
         "{}",
         String::from_utf8_lossy(&failed.stdout)
@@ -296,7 +296,7 @@ fn no_plugin_a_false_config_key_or_a_failed_update_leave_the_exit_code_alone() {
     );
     assert_eq!(
         h.claude_calls(),
-        "plugin update playbook@pragmatic-engineer\n"
+        "plugin update playbook@amplifiedengineer\n"
     );
     assert_ne!(
         bad.status.code(),

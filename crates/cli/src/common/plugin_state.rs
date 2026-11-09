@@ -6,22 +6,23 @@
 //!
 //! `playbook setup` writes user-level hook entries and a status line into
 //! `~/.claude/settings.json`. Disabling the plugin in Claude Code sets
-//! `enabledPlugins["playbook@pragmatic-engineer"]` to `false` and leaves those
+//! `enabledPlugins["playbook@amplifiedengineer"]` to `false` and leaves those
 //! entries in place, so every hook entry point and the status line ask here
-//! first. Only an explicit `false` pauses playbook. A missing key, a missing
+//! first. Only an explicit `false` pauses playbook, and an explicit `true`
+//! under another marketplace name keeps it running. A missing key, a missing
 //! file and a file that cannot be read or parsed all count as enabled, so
 //! Homebrew-only users and broken settings never lose their guards.
 
 use std::path::Path;
 
 /// The plugin's key in `enabledPlugins`.
-pub const PLUGIN_KEY: &str = "playbook@pragmatic-engineer";
+pub const PLUGIN_KEY: &str = "playbook@amplifiedengineer";
 
 /// Marketplace names Claude Code may list the plugin under besides the one in
-/// [`PLUGIN_KEY`]. The marketplace is named `pragmatic-engineer` today. If its
-/// owner renames it to a new organization name, installs under that name must
-/// work too, and so must installs that kept the old one.
-pub const ALT_MARKETPLACES: [&str; 2] = ["amplifiedengineer", "amplified-engineer"];
+/// [`PLUGIN_KEY`]. The marketplace is named `amplifiedengineer`. Installs that
+/// kept the old name `pragmatic-engineer` still work, and so does a spelling
+/// with a dash.
+pub const ALT_MARKETPLACES: [&str; 2] = ["pragmatic-engineer", "amplified-engineer"];
 
 /// Every key the plugin may have in `enabledPlugins` and `installed_plugins.json`,
 /// the preferred one first.
@@ -31,13 +32,15 @@ pub fn plugin_keys() -> Vec<String> {
         .collect()
 }
 
-/// Every key the retired `playbook-hooks` plugin may have.
+/// Every key the retired `playbook-hooks` plugin may have, [`HOOKS_PLUGIN_KEY`]
+/// first.
 pub fn hooks_plugin_keys() -> Vec<String> {
     std::iter::once(HOOKS_PLUGIN_KEY.to_string())
         .chain(
-            ALT_MARKETPLACES
-                .iter()
-                .map(|m| format!("playbook-hooks@{m}")),
+            std::iter::once(MARKETPLACE)
+                .chain(ALT_MARKETPLACES)
+                .map(|m| format!("playbook-hooks@{m}"))
+                .filter(|k| k != HOOKS_PLUGIN_KEY),
         )
         .collect()
 }
@@ -54,12 +57,12 @@ pub fn paused() -> bool {
     is_disabled_in(&crate::common::home_dir())
 }
 
-/// Whether `home`'s `.claude/settings.json` sets the plugin to `false`.
+/// Whether `home`'s `.claude/settings.json` pauses the plugin.
 pub fn is_disabled_in(home: &Path) -> bool {
     disabled_in_file(&home.join(".claude").join("settings.json"))
 }
 
-/// Whether the settings file at `path` sets the plugin to `false`.
+/// Whether the settings file at `path` pauses the plugin.
 pub fn disabled_in_file(path: &Path) -> bool {
     let Ok(text) = std::fs::read_to_string(path) else {
         return false;
@@ -73,21 +76,28 @@ pub fn disabled_in_file(path: &Path) -> bool {
         .is_some_and(|v| disables_plugin(&v))
 }
 
-/// Whether a parsed settings value sets the plugin to `false`, which pauses
-/// every hook.
+/// Whether a parsed settings value pauses every hook: at least one plugin key
+/// is `false` and none is `true`. A stale `false` under one marketplace name
+/// does not pause a plugin that is enabled under another.
 pub fn disables_plugin(settings: &serde_json::Value) -> bool {
-    plugin_keys().iter().any(|key| {
-        settings.pointer("/enabledPlugins").and_then(|e| e.get(key))
-            == Some(&serde_json::Value::Bool(false))
-    })
+    let states: Vec<Option<bool>> = plugin_keys()
+        .iter()
+        .map(|key| {
+            settings
+                .pointer("/enabledPlugins")
+                .and_then(|e| e.get(key))
+                .and_then(serde_json::Value::as_bool)
+        })
+        .collect();
+    states.contains(&Some(false)) && !states.contains(&Some(true))
 }
 
-/// The key of the `playbook-hooks` plugin. `playbook uninstall` and the doctor
-/// hooks row read it, to tell a machine that installed the plugin how to remove it.
+/// The key of the `playbook-hooks` plugin, which only existed under the old
+/// marketplace name. `hooks_plugin_keys` adds the other names.
 pub const HOOKS_PLUGIN_KEY: &str = "playbook-hooks@pragmatic-engineer";
 
 /// The marketplace the plugin comes from.
-pub const MARKETPLACE: &str = "pragmatic-engineer";
+pub const MARKETPLACE: &str = "amplifiedengineer";
 
 fn installed_entry(home: &Path, key: &str) -> Option<Option<serde_json::Value>> {
     installed_value(&home.join(".claude"), key)
@@ -172,16 +182,40 @@ pub fn installed_in(home: &Path) -> Option<bool> {
     (!seen.is_empty()).then(|| seen.contains(&true))
 }
 
-/// Whether the marketplace is listed in `known_marketplaces.json`.
-pub fn marketplace_known_in(home: &Path) -> bool {
-    std::fs::read_to_string(home.join(".claude/plugins/known_marketplaces.json"))
+/// The names the marketplace is listed under in `known_marketplaces.json`,
+/// the preferred name first. Empty when none is listed.
+pub fn known_marketplaces(home: &Path) -> Vec<&'static str> {
+    let Some(value) = std::fs::read_to_string(home.join(".claude/plugins/known_marketplaces.json"))
         .ok()
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .is_some_and(|v| {
-            std::iter::once(MARKETPLACE)
-                .chain(ALT_MARKETPLACES)
-                .any(|name| v.get(name).is_some())
-        })
+    else {
+        return Vec::new();
+    };
+    std::iter::once(MARKETPLACE)
+        .chain(ALT_MARKETPLACES)
+        .filter(|name| value.get(name).is_some())
+        .collect()
+}
+
+/// The first of `keys` that `installed_plugins.json` lists, or the first key
+/// when none is listed.
+fn first_listed(claude_home: &Path, keys: Vec<String>) -> String {
+    keys.iter()
+        .find(|k| installed_entry_at(claude_home, k).is_some())
+        .or(keys.first())
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The plugin key Claude Code lists, so a hint names a command that works for
+/// this install. Falls back to [`PLUGIN_KEY`] when none is listed.
+pub fn installed_key(claude_home: &Path) -> String {
+    first_listed(claude_home, plugin_keys())
+}
+
+/// The `playbook-hooks` key Claude Code lists, or [`HOOKS_PLUGIN_KEY`].
+pub fn installed_hooks_key(claude_home: &Path) -> String {
+    first_listed(claude_home, hooks_plugin_keys())
 }
 
 #[cfg(test)]
@@ -210,7 +244,11 @@ mod tests {
                 format!(r#"{{"{marketplace}":{{}}}}"#),
             )
             .unwrap();
-            assert!(marketplace_known_in(&home), "{marketplace}");
+            assert_eq!(
+                known_marketplaces(&home),
+                vec![marketplace],
+                "{marketplace}"
+            );
         }
     }
 
@@ -241,15 +279,39 @@ mod tests {
     #[test]
     fn an_explicit_false_means_disabled() {
         let home = home_with(Some(
+            r#"{"enabledPlugins":{"playbook@amplifiedengineer":false}}"#,
+        ));
+        assert!(is_disabled_in(&home));
+    }
+
+    #[test]
+    fn a_false_under_the_old_name_means_disabled() {
+        let home = home_with(Some(
             r#"{"enabledPlugins":{"playbook@pragmatic-engineer":false}}"#,
         ));
         assert!(is_disabled_in(&home));
     }
 
     #[test]
+    fn a_stale_false_under_the_old_name_does_not_pause_an_enabled_new_name() {
+        let home = home_with(Some(
+            r#"{"enabledPlugins":{"playbook@pragmatic-engineer":false,"playbook@amplifiedengineer":true}}"#,
+        ));
+        assert!(!is_disabled_in(&home));
+    }
+
+    #[test]
+    fn a_true_under_the_old_name_keeps_a_false_new_name_from_pausing() {
+        let home = home_with(Some(
+            r#"{"enabledPlugins":{"playbook@pragmatic-engineer":true,"playbook@amplifiedengineer":false}}"#,
+        ));
+        assert!(!is_disabled_in(&home));
+    }
+
+    #[test]
     fn true_means_enabled() {
         let home = home_with(Some(
-            r#"{"enabledPlugins":{"playbook@pragmatic-engineer":true}}"#,
+            r#"{"enabledPlugins":{"playbook@amplifiedengineer":true}}"#,
         ));
         assert!(!is_disabled_in(&home));
     }
@@ -270,7 +332,7 @@ mod tests {
     #[test]
     fn a_malformed_file_means_enabled() {
         let home = home_with(Some(
-            r#"{"enabledPlugins":{"playbook@pragmatic-engineer":false"#,
+            r#"{"enabledPlugins":{"playbook@amplifiedengineer":false"#,
         ));
         assert!(!is_disabled_in(&home));
     }
@@ -278,7 +340,7 @@ mod tests {
     #[test]
     fn a_non_boolean_value_means_enabled() {
         let home = home_with(Some(
-            r#"{"enabledPlugins":{"playbook@pragmatic-engineer":"false"}}"#,
+            r#"{"enabledPlugins":{"playbook@amplifiedengineer":"false"}}"#,
         ));
         assert!(!is_disabled_in(&home));
     }
@@ -294,18 +356,71 @@ mod tests {
         let v2 = home_with(None);
         write_installed(
             &v2,
-            r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{"scope":"user"}]}}"#,
+            r#"{"version":2,"plugins":{"playbook@amplifiedengineer":[{"scope":"user"}]}}"#,
         );
         assert_eq!(installed_in(&v2), Some(true));
         let v1 = home_with(None);
         write_installed(
             &v1,
-            r#"{"version":1,"plugins":{"playbook@pragmatic-engineer":{"version":"0.25.0"}}}"#,
+            r#"{"version":1,"plugins":{"playbook@amplifiedengineer":{"version":"0.25.0"}}}"#,
         );
         assert_eq!(installed_in(&v1), Some(true));
         let empty = home_with(None);
         write_installed(&empty, r#"{"version":2,"plugins":{}}"#);
         assert_eq!(installed_in(&empty), Some(false));
+    }
+
+    #[test]
+    fn the_installed_key_is_the_one_listed_with_the_new_name_first() {
+        let new = home_with(None);
+        write_installed(
+            &new,
+            r#"{"version":2,"plugins":{"playbook@amplifiedengineer":[{}]}}"#,
+        );
+        let old = home_with(None);
+        write_installed(
+            &old,
+            r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{}],"playbook-hooks@pragmatic-engineer":[{}]}}"#,
+        );
+        let both = home_with(None);
+        write_installed(
+            &both,
+            r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{}],"playbook@amplifiedengineer":[{}]}}"#,
+        );
+        assert_eq!(
+            installed_key(&new.join(".claude")),
+            "playbook@amplifiedengineer"
+        );
+        assert_eq!(
+            installed_key(&old.join(".claude")),
+            "playbook@pragmatic-engineer"
+        );
+        assert_eq!(
+            installed_key(&both.join(".claude")),
+            "playbook@amplifiedengineer"
+        );
+        assert_eq!(installed_key(&home_with(None).join(".claude")), PLUGIN_KEY);
+        assert_eq!(
+            installed_hooks_key(&old.join(".claude")),
+            "playbook-hooks@pragmatic-engineer"
+        );
+        assert_eq!(installed_hooks_key(&new.join(".claude")), HOOKS_PLUGIN_KEY);
+    }
+
+    #[test]
+    fn known_marketplaces_lists_every_name_listed_with_the_new_name_first() {
+        let home = home_with(None);
+        assert!(known_marketplaces(&home).is_empty());
+        std::fs::create_dir_all(home.join(".claude/plugins")).unwrap();
+        std::fs::write(
+            home.join(".claude/plugins/known_marketplaces.json"),
+            r#"{"pragmatic-engineer":{},"amplifiedengineer":{},"other":{}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            known_marketplaces(&home),
+            vec!["amplifiedengineer", "pragmatic-engineer"]
+        );
     }
 
     #[test]
@@ -327,7 +442,7 @@ mod tests {
             std::fs::write(claude_home.join("plugins/installed_plugins.json"), text).unwrap()
         };
         write(
-            r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{}],"playbook-hooks@pragmatic-engineer":[{}],"playbook@fork":[{"projectPath":"/elsewhere"},{}],"playbook@team":[{"projectPath":"/elsewhere"}],"other@x":[{}]}}"#,
+            r#"{"version":2,"plugins":{"playbook@amplifiedengineer":[{}],"playbook-hooks@pragmatic-engineer":[{}],"playbook@fork":[{"projectPath":"/elsewhere"},{}],"playbook@team":[{"projectPath":"/elsewhere"}],"other@x":[{}]}}"#,
         );
         assert_eq!(
             other_playbook_plugins(&claude_home, &cwd),

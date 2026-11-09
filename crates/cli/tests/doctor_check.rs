@@ -145,7 +145,7 @@ fn guard_settings(pre: &[&str], post: &[&str]) -> String {
 
 // A paused plugin
 
-const PAUSED: &str = r#""enabledPlugins":{"playbook@pragmatic-engineer":false}"#;
+const PAUSED: &str = r#""enabledPlugins":{"playbook@amplifiedengineer":false}"#;
 
 const STATUS: &str = r#""statusLine":{"type":"command","command":"playbook statusline"}"#;
 
@@ -187,7 +187,7 @@ fn a_plugin_that_is_enabled_or_not_listed_keeps_its_pass_rows() {
     let live = guard_settings(&GUARDS, &["commit-message-sanitizer"]);
     let enabled = live.replacen(
         '{',
-        r#"{"enabledPlugins":{"playbook@pragmatic-engineer":true},"#,
+        r#"{"enabledPlugins":{"playbook@amplifiedengineer":true},"#,
         1,
     );
     for (tag, settings) in [("enabled", enabled), ("not-listed", live)] {
@@ -578,7 +578,7 @@ fn l6_a_plugin_on_an_older_minor_line_warns_with_the_update_command() {
     manifest(&root, "0.30.9");
     let t = version_row(&b.run(&[&bin], "/bin/zsh", Some(&root)));
     assert!(
-        t.starts_with("WARN") && t.contains("claude plugin update playbook@pragmatic-engineer"),
+        t.starts_with("WARN") && t.contains("claude plugin update playbook@amplifiedengineer"),
         "{t}"
     );
 }
@@ -633,7 +633,7 @@ fn l6_the_newest_cached_plugin_is_the_baseline() {
     for v in ["0.9.0", "0.31.1"] {
         manifest(
             &b.home().join(format!(
-                ".claude/plugins/cache/pragmatic-engineer/playbook/{v}"
+                ".claude/plugins/cache/amplifiedengineer/playbook/{v}"
             )),
             v,
         );
@@ -1116,7 +1116,7 @@ fn layer_one_reads_the_playbook_block_even_when_a_longer_named_plugin_is_listed_
     let b = Box::new("layer1-exact");
     let dir = fake_claude(
         &b,
-        "  playbook-hooks@pragmatic-engineer\\n    Status: disabled\\n\\n  playbook@pragmatic-engineer\\n    Status: enabled\\n",
+        "  playbook-hooks@pragmatic-engineer\\n    Status: disabled\\n\\n  playbook@amplifiedengineer\\n    Status: enabled\\n",
     );
 
     let rows = b.run(&[&dir], "/bin/bash", None);
@@ -1141,6 +1141,37 @@ fn layer_one_is_info_not_a_failure_for_a_binary_only_install() {
 #[test]
 fn layer_one_fails_when_the_playbook_plugin_is_disabled() {
     let b = Box::new("layer1-disabled");
+    let dir = fake_claude(&b, "  playbook@amplifiedengineer\\n    Status: disabled\\n");
+
+    let rows = b.run(&[&dir], "/bin/bash", None);
+
+    assert!(text(&layer(&rows, "1")).contains("FAIL plugin installed but disabled"));
+}
+
+#[test]
+fn layer_one_hints_the_new_id_for_a_disabled_plugin_and_for_a_missing_one() {
+    let b = Box::new("layer1-hint-new");
+    let dir = fake_claude(&b, "  playbook@amplifiedengineer\\n    Status: disabled\\n");
+    let disabled = hints(&layer(&b.run(&[&dir], "/bin/bash", None), "1"));
+    let missing = Box::new("layer1-hint-missing");
+    let none = fake_claude(&missing, "No plugins installed\\n");
+    let absent = hints(&layer(&missing.run(&[&none], "/bin/bash", None), "1"));
+
+    assert!(
+        disabled.contains("claude plugin enable playbook@amplifiedengineer"),
+        "{disabled}"
+    );
+    assert!(
+        absent.contains(
+            "claude plugin marketplace add amplifiedengineer/marketplace && claude plugin install playbook@amplifiedengineer"
+        ),
+        "{absent}"
+    );
+}
+
+#[test]
+fn layer_one_hints_the_old_id_for_a_disabled_plugin_that_kept_it() {
+    let b = Box::new("layer1-hint-old");
     let dir = fake_claude(
         &b,
         "  playbook@pragmatic-engineer\\n    Status: disabled\\n",
@@ -1148,7 +1179,56 @@ fn layer_one_fails_when_the_playbook_plugin_is_disabled() {
 
     let rows = b.run(&[&dir], "/bin/bash", None);
 
-    assert!(text(&layer(&rows, "1")).contains("FAIL plugin installed but disabled"));
+    let row = hints(&layer(&rows, "1"));
+    assert!(
+        row.contains("claude plugin enable playbook@pragmatic-engineer"),
+        "{row}"
+    );
+}
+
+#[test]
+fn a_paused_plugin_hints_the_key_that_is_installed() {
+    let b = Box::new("paused-old-key");
+    b.settings(&paused_settings());
+    let dir = b.home().join(".claude/plugins");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("installed_plugins.json"),
+        r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{"scope":"user"}]}}"#,
+    )
+    .unwrap();
+
+    let rows = b.run(&[], "/bin/zsh", None);
+
+    let row = hints(&layer(&rows, "1"));
+    assert!(
+        row.contains("claude plugin enable playbook@pragmatic-engineer"),
+        "{row}"
+    );
+}
+
+#[test]
+fn a_hooks_plugin_under_the_new_marketplace_name_is_reported_with_its_own_key() {
+    let b = Box::new("hooks-plugin-new-name");
+    wire_all(&b);
+    let dir = b.home().join(".claude/plugins");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("installed_plugins.json"),
+        r#"{"version":2,"plugins":{"playbook-hooks@amplifiedengineer":[{"scope":"user"}]}}"#,
+    )
+    .unwrap();
+
+    let rows = hook_rows(&b.run(&[], "/bin/sh", None));
+
+    let row = rows
+        .iter()
+        .find(|r| r.contains("playbook-hooks plugin is still installed"))
+        .expect("overlap row");
+    assert!(
+        row.ends_with("run: claude plugin uninstall playbook-hooks@amplifiedengineer"),
+        "{row}"
+    );
 }
 
 #[test]
