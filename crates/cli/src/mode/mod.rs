@@ -68,6 +68,20 @@ fn flag_warning(shown: Mode, hook: Mode) -> Option<&'static str> {
     }
 }
 
+/// The mode `flag`, the environment and the config resolve to, as the
+/// `mode` object of `pr finish-context`: `mode`, `source` and `warning`
+/// (the resolver warnings joined, empty when there are none).
+pub fn report(flag: Option<Mode>) -> Value {
+    let slug = repo_slug();
+    let env = std::env::var("PLAYBOOK_MODE").ok();
+    let shown = mode::resolve(flag, env.as_deref(), configured_mode(&slug).as_deref());
+    json!({
+        "mode": mode_label(shown.mode),
+        "source": source_label(shown.source),
+        "warning": shown.warnings.join("; "),
+    })
+}
+
 /// Report the resolved mode, as one line or as a JSON object.
 pub fn run_status(flag: Option<Mode>, json: bool) -> String {
     let slug = repo_slug();

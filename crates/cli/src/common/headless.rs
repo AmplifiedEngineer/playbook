@@ -15,7 +15,7 @@ fn is_word(value: &str, words: &[&str]) -> bool {
 
 /// Pure form of `is_headless`, so the truth table is testable without
 /// touching the process environment.
-fn headless_from(playbook_headless: Option<&str>, ci: Option<&str>) -> bool {
+pub(crate) fn headless_from(playbook_headless: Option<&str>, ci: Option<&str>) -> bool {
     match playbook_headless {
         Some(v) if is_word(v, &TRUE_WORDS) => true,
         Some(v) if is_word(v, &FALSE_WORDS) => false,
