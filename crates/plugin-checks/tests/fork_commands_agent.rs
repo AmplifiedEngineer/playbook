@@ -24,7 +24,8 @@ fn frontmatter_value(file: &str, key: &str) -> Option<String> {
 
 #[test]
 fn create_pull_request_forks_into_the_prefixed_git_agent() {
-    for file in ["commands/create-pull-request.md"] {
+    let file = "commands/create-pull-request.md";
+    {
         assert_eq!(
             frontmatter_value(file, "context").as_deref(),
             Some("fork"),
