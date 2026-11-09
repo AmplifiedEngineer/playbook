@@ -154,8 +154,6 @@ pub struct Report {
     pub dry_run: bool,
     pub actions: Vec<String>,
     pub outcome: String,
-    /// `DELIVERED`, or `DRY_RUN` when nothing was changed.
-    pub verdict: String,
     /// Findings that did not block: rules set to warn.
     pub warnings: Vec<String>,
     #[serde(skip)]
@@ -456,23 +454,25 @@ fn plan_text(
 /// `pr::body_rules` are matched by what they name.
 pub fn classify(message: &str) -> (&'static str, &'static str) {
     let m = message.to_lowercase();
-    let title = m.contains("pr title") || m.contains("commit title") || m.starts_with("title");
-    let place = if title {
-        "title"
-    } else if m.contains("commit") {
+    let place = if m.starts_with("commit title") || m.starts_with("commit message") {
         "commit"
+    } else if m.starts_with("pr title") || m.starts_with("title") {
+        "title"
+    } else if m.starts_with("pr body") || m.starts_with("the pr body") {
+        "body"
+    } else if m.contains("pr title") {
+        "title"
     } else {
         "body"
     };
-    let rule = if m.contains("pr body must start")
-        || m.contains("section ##")
-        || m.contains("not in the template")
-    {
-        "template"
+    let rule = if m == "commit message is empty" || m.contains("conventional commit title") {
+        "title-format"
     } else if m.contains("characters, the limit") {
         "title-length"
-    } else if m.contains("conventional commit title") {
-        "title-format"
+    } else if m.starts_with("merge-commit") || m.contains("merge commits on the branch") {
+        "merge-commit"
+    } else if m.contains("something is staged") {
+        "staged"
     } else if m.contains("attribution") {
         "attribution"
     } else if m.contains("em dash") || m.contains("en dash") {
@@ -481,17 +481,19 @@ pub fn classify(message: &str) -> (&'static str, &'static str) {
         "prose"
     } else if m.contains("commit type check") {
         "commit-type"
-    } else if m.contains("merge commit") || m.contains("merge-commit") {
-        "merge-commit"
-    } else if m.contains("something is staged") {
-        "staged"
-    } else if m.contains("ticket") && m.contains("scope") {
+    } else if m.contains("must carry the ticket in its scope") {
         "ticket-scope"
-    } else if m.contains("ticket") {
+    } else if m.contains("first line of the pr body must carry the ticket") {
         "ticket-line"
-    } else if m.contains("issue") {
+    } else if m.contains("must name issue") {
         "issue"
-    } else if m.contains("characters") || m.contains("long") || m.contains("length") {
+    } else if m.contains("must start its sections")
+        || m.contains("section ##")
+        || m.contains("not in the template")
+        || m.contains("text before ## summary")
+    {
+        "template"
+    } else if m.contains("characters, the cap is") {
         "body-length"
     } else {
         "rule"
@@ -593,12 +595,25 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
                 .lines()
                 .map(String::from),
         );
-        let base = opts.base.clone().unwrap_or_else(|| default.clone());
+        let base = opts
+            .base
+            .clone()
+            .or_else(|| parent_branch(&sys, &branch))
+            .unwrap_or_else(|| default.clone());
+        let mut commit_messages: Vec<String> = opts.message.iter().cloned().collect();
+        commit_messages.extend(
+            sys.git_out(&["rev-list", "--reverse", &range])
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|c| sys.git_out(&["log", "-1", "--format=%B", c])),
+        );
+        let kept = pr::kept_lines(commit_messages.iter().map(String::as_str));
+        let body = opts.body.as_deref().map(|b| pr::with_kept(b, &kept));
         let mut ignored = Vec::new();
         problems.extend(rule_blocks(
             opts,
             opts.title.as_deref(),
-            opts.body.as_deref(),
+            body.as_deref(),
             &branch,
             &subjects,
             &base,
