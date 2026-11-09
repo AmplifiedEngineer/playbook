@@ -6,7 +6,7 @@
 //! few polls instead of a wall clock timeout.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn fake_gh(tag: &str, view_state: &str, check_bucket: &str) -> PathBuf {
@@ -34,7 +34,7 @@ esac
     dir
 }
 
-fn land(dir: &PathBuf) -> (i32, String) {
+fn land(dir: &Path) -> (i32, String) {
     let path = format!(
         "{}:{}",
         dir.display(),
