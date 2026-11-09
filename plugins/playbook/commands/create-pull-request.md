@@ -39,7 +39,7 @@ PRBODY_EOF
 ```
 
 - `verdict` `DELIVERED`: print the `url`, the title, the base and whether it is a draft. List `warnings`.
-- `REFUSED`: nothing was pushed. `problems` lists every rule that failed, each with a `rule`, a `where` and a `message`. Fix all of them and call once more. A second refusal stops: print the list.
+- `REFUSED`: nothing was pushed. `problems` lists every rule that failed, each with a `rule`, a `where` and a `message`. When every `rule` is a text rule (`title-length`, `title-format`, `dash`, `attribution`, `prose`, `template`, `body-length`, `ticket-line`, `ticket-scope`, `issue`), fix all of them and call once more. A second refusal stops: print the list. For any other rule (`staged`, `merge-commit`, `commit-type`, a parked branch, a diverged remote, the size limit) the text is not the cause: print the problems as they are and stop.
 - Any other verdict (`FAILED`, `CONFLICT`, `NOTHING_TO_DO`): print `error` and stop. A run that failed after the push can be repeated, it reuses the pushed branch.
 
 Unless the caller said a review already covered the code (for example `/playbook:implement`), end with "Next: invoke playbook:finish-pull-request for this PR.", adding `--ready` when it was passed. In auto mode that skill skips the self-review and says so.

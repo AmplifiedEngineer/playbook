@@ -171,6 +171,10 @@ fn create_pull_request_makes_one_deliver_call_with_one_retry_and_no_draft_flag()
     assert!(text.contains("--body-file -"), "the body goes on stdin");
     assert!(text.contains("call once more"), "one retry after a refusal");
     assert!(
+        text.contains("When every `rule` is a text rule"),
+        "only a text problem is retried"
+    );
+    assert!(
         text.contains("A second refusal stops"),
         "the retry is capped at one"
     );
@@ -193,4 +197,14 @@ fn commit_and_push_has_no_tool_call_and_under_sixty_lines() {
     assert!(text.lines().count() < 60);
     assert!(!text.contains("context: fork") && !text.contains("agent:"));
     assert!(text.contains("Make no tool call"));
+}
+
+#[test]
+fn the_finish_skill_skips_the_review_in_auto_and_says_so() {
+    let text = fs::read_to_string(plugin_root().join("skills/finish-pull-request/SKILL.md"))
+        .expect("skill file");
+
+    assert!(text.contains("skip the self-review below when `/playbook:implement` opened this PR"));
+    assert!(text.contains("the final report says that no self-review ran"));
+    assert!(text.contains("never merges a PR whose code no review covered"));
 }
