@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook pr finish-context` against a fake `gh` on PATH and a scratch HOME.
+//! `playbook pr finish context` against a fake `gh` on PATH and a scratch HOME.
 
 use serde_json::Value;
 use std::fs;
@@ -73,7 +73,7 @@ fn quick_type_on_a_draft_pr_reports_the_pr_and_the_review() {
     let s = Sandbox::new("quick");
     s.gh_draft_pr();
     s.config("autoReview.type", "quick");
-    let o = s.run(&["pr", "finish-context", "7", "--json"]);
+    let o = s.run(&["pr", "finish", "context", "7", "--json"]);
     assert_eq!(o.status.code(), Some(0));
     let v = json_of(&o);
     assert_eq!(v["ok"], true);
@@ -88,7 +88,7 @@ fn quick_type_on_a_draft_pr_reports_the_pr_and_the_review() {
 fn the_flag_sets_the_mode_and_its_source() {
     let s = Sandbox::new("flag");
     s.gh_draft_pr();
-    let o = s.run(&["pr", "finish-context", "7", "--json", "--flag", "auto"]);
+    let o = s.run(&["pr", "finish", "context", "7", "--json", "--flag", "auto"]);
     let v = json_of(&o);
     assert_eq!(v["mode"]["mode"], "auto");
     assert_eq!(v["mode"]["source"], "flag");
@@ -98,7 +98,7 @@ fn the_flag_sets_the_mode_and_its_source() {
 fn a_failed_pr_view_exits_zero_with_code_five() {
     let s = Sandbox::new("fail");
     s.gh("echo 'no pull requests found' >&2; exit 1");
-    let o = s.run(&["pr", "finish-context", "7", "--json"]);
+    let o = s.run(&["pr", "finish", "context", "7", "--json"]);
     assert_eq!(o.status.code(), Some(0));
     let v = json_of(&o);
     assert_eq!(v["ok"], false);
@@ -112,7 +112,8 @@ fn a_missing_dir_exits_zero_with_the_error_in_the_envelope() {
     s.gh_draft_pr();
     let o = s.run(&[
         "pr",
-        "finish-context",
+        "finish",
+        "context",
         "7",
         "--json",
         "--dir",
@@ -128,6 +129,6 @@ fn a_missing_dir_exits_zero_with_the_error_in_the_envelope() {
 fn plain_mode_keeps_the_failure_exit_code() {
     let s = Sandbox::new("plain");
     s.gh("exit 1");
-    let o = s.run(&["pr", "finish-context", "7"]);
+    let o = s.run(&["pr", "finish", "context", "7"]);
     assert_eq!(o.status.code(), Some(5));
 }

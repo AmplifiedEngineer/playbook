@@ -69,7 +69,7 @@ fn flag_warning(shown: Mode, hook: Mode) -> Option<&'static str> {
 }
 
 /// The mode `flag`, the environment and the config resolve to, as the
-/// `mode` object of `pr finish-context`: `mode`, `source` and `warning`
+/// `mode` object of `pr finish context`: `mode`, `source` and `warning`
 /// (the resolver warnings joined, empty when there are none).
 pub fn report(flag: Option<Mode>) -> Value {
     let slug = repo_slug();
