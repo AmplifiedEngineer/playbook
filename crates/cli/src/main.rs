@@ -2011,6 +2011,7 @@ fn real_main() {
             opts.rules = Some(pr::body_rules::Rules::load(&common::home_dir(), repo_slug));
             opts.ticket = ticket;
             opts.issue = issue;
+            opts.signoff = commit_signoff_on();
             match deliver::run(&opts) {
                 Ok(report) => {
                     if json {

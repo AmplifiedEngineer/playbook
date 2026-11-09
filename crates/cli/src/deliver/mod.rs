@@ -17,6 +17,7 @@ pub mod check;
 pub mod pr;
 pub mod sys;
 
+use crate::pr::text_rules;
 use pr::{Check, Pr};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -80,6 +81,11 @@ pub struct Options {
     pub ticket: Option<String>,
     /// The GitHub issue number the PR handles.
     pub issue: Option<String>,
+    /// The `commit.signOff` setting. A hook that writes the trailer, or a
+    /// trailer already in the message, still avoids a second one.
+    pub signoff: bool,
+    /// Auto mode: never force a push; a branch that needs a force is parked.
+    pub auto: bool,
 }
 
 impl Options {
@@ -109,6 +115,8 @@ impl Options {
             rules: None,
             ticket: None,
             issue: None,
+            signoff: true,
+            auto: false,
         }
     }
 }
@@ -631,6 +639,23 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
 
     // 4. Commit.
     let signed = signing_flag(&sys);
+    let signoff = has_staged
+        && opts.message.as_deref().is_some_and(|m| {
+            crate::commit::run::signoff_wanted(&sys.dir, m, !opts.signoff, opts.signoff, |a| {
+                sys.git_out(a)
+            })
+        });
+    if has_staged {
+        if let Some(message) = &opts.message {
+            let staged = sys
+                .git_out(&["diff", "--cached", "--name-only"])
+                .unwrap_or_default();
+            let files: Vec<&str> = staged.lines().filter(|l| !l.is_empty()).collect();
+            if let Some(p) = text_rules::commit_type(message, &files) {
+                return Err(refuse_all(vec![p.message], "the commit type breaks a rule"));
+            }
+        }
+    }
     if has_staged {
         let message = opts.message.as_deref().ok_or_else(|| {
             fail(
@@ -642,7 +667,10 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
             if let Some(before) = opts.before_commit {
                 before(&sys.dir).map_err(|e| fail(exit::REFUSED, e))?;
             }
-            let mut args = vec!["commit", "-s"];
+            let mut args = vec!["commit"];
+            if signoff {
+                args.push("-s");
+            }
             if signed {
                 args.push("-S");
             }
@@ -656,7 +684,8 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
             }
         }
         report.actions.push(format!(
-            "commit with -s{} (never --no-verify)",
+            "commit with{}{} (never --no-verify)",
+            if signoff { " -s" } else { " no sign off" },
             if signed { " -S" } else { "" }
         ));
     } else if opts.message.is_some() {
@@ -718,7 +747,12 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
         let message = sys
             .git_out(&["log", "-1", "--format=%B", c])
             .unwrap_or_default();
-        let problems = check::commit_message(&message);
+        let mut problems = check::commit_message(&message);
+        let touched = sys
+            .git_out(&["diff-tree", "--no-commit-id", "--name-only", "-r", c])
+            .unwrap_or_default();
+        let files: Vec<&str> = touched.lines().filter(|l| !l.is_empty()).collect();
+        problems.extend(text_rules::commit_type(&message, &files).map(|p| p.message));
         if !problems.is_empty() {
             let short = c.get(..8).unwrap_or(c);
             return Err(refuse_all(
@@ -726,6 +760,20 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
                 &format!("commit {short} breaks a text rule; amend it first"),
             ));
         }
+    }
+    let merges = sys
+        .git_out(&["rev-list", "--merges", &ahead_range])
+        .unwrap_or_default();
+    if !merges.trim().is_empty() {
+        let mut f = refuse_all(
+            vec![format!(
+                "merge-commit: {} merge commit(s) on this branch",
+                merges.lines().count()
+            )],
+            &format!("merge commits on the branch; run git rebase origin/{base} to remove them"),
+        );
+        f.message = format!("{} (rule merge-commit)", f.message);
+        return Err(f);
     }
 
     // 6. Push.
@@ -750,6 +798,16 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
             if (rebased || (opts.dry_run && !contains_base))
                 && sys.git(&["merge-base", "--is-ancestor", r, &lease_base]).ok =>
         {
+            if opts.auto {
+                // Auto mode never forces. Park the branch: the commits stay
+                // local and the remote is left as it is.
+                return Err(fail(
+                    exit::REFUSED,
+                    format!(
+                        "PARKED: pushing {branch} needs a force after the rebase, and auto mode never forces. The commits are local only; push by hand once the remote is checked"
+                    ),
+                ));
+            }
             Some(vec![
                 "push".into(),
                 format!("--force-with-lease={remote_ref}:{r}"),
