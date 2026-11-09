@@ -71,7 +71,7 @@ The base is `--base`, then the open PR's base, then the nearest open PR branch t
 
 ## Claude Code 2.1.318
 
-`playbook doctor` warns when Claude Code 2.1.318 runs in a linked worktree. That release can refuse shell commands there. If one is refused, call ExitWorktree with action `keep`, then continue from the original directory.
+`playbook doctor check` warns when Claude Code 2.1.318 runs in a linked worktree. That release can refuse shell commands there. If one is refused, call ExitWorktree with action `keep`, then continue from the original directory.
 
 ## See also
 

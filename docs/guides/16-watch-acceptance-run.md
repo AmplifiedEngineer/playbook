@@ -28,7 +28,7 @@ Expected: `dry-run` lists the three rules with their level and prints no write. 
 ## Run
 
 1. Start the loop in a terminal you will leave open, and note the time: `playbook watch`.
-2. Or install the timer instead (one of the two, not both): `playbook watch install-service`, then `playbook doctor` and expect the row `watch timer installed`.
+2. Or install the timer instead (one of the two, not both): `playbook watch install-service`, then `playbook doctor check` and expect the row `watch timer installed`.
 3. The first poll of each source prints `watching from now` and queues nothing. Wait for it before creating issues.
 4. Create 6 issues over the day, a few in the first hour and the rest spread out. Title and body can be anything.
 5. Close the laptop lid for at least 2 hours in the middle of the day with the loop (or the timer) installed, then open it. Create 2 more issues while it is asleep, from a phone or another machine.

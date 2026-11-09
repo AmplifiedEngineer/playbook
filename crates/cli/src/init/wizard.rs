@@ -225,7 +225,7 @@ pub fn progress(caps: &Caps, steps: &[StepReport]) -> String {
     let counts = Counts::tally(&statuses);
     let mut next: Vec<&str> = vec![
         "Open a new terminal so a PATH change loads.",
-        "Run `playbook doctor` to check the result.",
+        "Run `playbook doctor check` to check the result.",
         "Run `playbook uninstall --dry-run` to see how to undo everything.",
     ];
     if counts.failed > 0 {

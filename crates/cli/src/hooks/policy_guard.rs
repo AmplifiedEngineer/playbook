@@ -149,7 +149,7 @@ const WORKTREE_ENV_REASON: &str = protected_reason!("an inline `WORKTREE_BASE_DI
 /// model may run itself.
 macro_rules! settings_reason_tail {
     () => {
-        " Ask the user to run `playbook setup --only hooks` (to add the hooks) or `playbook uninstall` (to remove them) themselves in the prompt with `!`. Use `playbook config set <key> <value>` for a playbook setting, or `playbook doctor` to check the setup. For any other settings change, ask the user to make it themselves in the prompt with `!`. Reading the file is fine."
+        " Ask the user to run `playbook setup --only hooks` (to add the hooks) or `playbook uninstall` (to remove them) themselves in the prompt with `!`. Use `playbook config set <key> <value>` for a playbook setting, or `playbook doctor check` to check the setup. For any other settings change, ask the user to make it themselves in the prompt with `!`. Reading the file is fine."
     };
 }
 

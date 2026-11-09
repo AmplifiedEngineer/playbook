@@ -10,8 +10,8 @@ Prompt text and tool content are never sent. Nothing leaves your machine unless 
 - If telemetry is set in project settings, your shell or next to other `OTEL_` keys, setup leaves all of it as it is (see [What setup installs](05-what-setup-installs.md)).
 - `DISABLE_TELEMETRY` and `DO_NOT_TRACK` only turn off Anthropic's own analytics and are left as they are.
 - Restart Claude Code after setup, because it reads settings at start.
-- `playbook doctor` checks that settings point at the collector, that the token Claude Code sends is the collector's, that it runs, and that rows arrived in the last day.
-- When usage sync is on, `playbook doctor` also shows one `sync` row with the age of the last success and the rows pending. With sync off there is no row.
+- `playbook doctor check` checks that settings point at the collector, that the token Claude Code sends is the collector's, that it runs, and that rows arrived in the last day.
+- When usage sync is on, `playbook doctor check` also shows one `sync` row with the age of the last success and the rows pending. With sync off there is no row.
 - `playbook uninstall` removes exactly the keys setup wrote and puts back any value they replaced, unless you changed a key since.
 
 See also [Usage view](../internals/04-usage-dashboard.md), [pbtop](11-pbtop.md) and [usage sync](17-sync.md).

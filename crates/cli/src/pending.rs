@@ -234,7 +234,7 @@ fn report(slug: &'static str, message: &str) -> Item {
         kind: Kind::Report,
         what,
         why: why(slug),
-        fix: run.unwrap_or_else(|| "playbook doctor".to_string()),
+        fix: run.unwrap_or_else(|| "playbook doctor check".to_string()),
     }
 }
 

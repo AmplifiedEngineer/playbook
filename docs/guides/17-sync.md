@@ -7,7 +7,7 @@ If you use playbook on more than one computer, `pbsync` can copy your usage numb
 - It copies usage rows (tokens and cost, with the model and effort, per event) to a database that you own, and copies the rows of your other machines back.
 - It copies a small list of shareable config keys, as a proposal you accept or ignore.
 - It never copies transcripts, memory, the code index or any file. It does not sync between different people.
-- Installing `pbsync` does not turn it on. A fresh install, an upgrade and `playbook doctor` never contact a remote.
+- Installing `pbsync` does not turn it on. A fresh install, an upgrade and `playbook doctor check` never contact a remote.
 - Nothing leaves your machine until you run `pbsync enable` and type `yes`.
 
 ## Where the data goes
@@ -81,10 +81,10 @@ A pulled config is a proposal. It changes nothing by itself, and your local valu
 
 ```bash
 pbsync status
-playbook doctor
+playbook doctor check
 ```
 
-`pbsync status` makes no network call. It shows whether sync is on, the host, the accounts, whether the token variable is set, the last success and last error, the failure count, the rows waiting for a push and the schema versions. `playbook doctor` adds one `sync` row once sync is on. It shows the age of the last success and the rows pending, and fails with a fix command when the token variable is empty.
+`pbsync status` makes no network call. It shows whether sync is on, the host, the accounts, whether the token variable is set, the last success and last error, the failure count, the rows waiting for a push and the schema versions. `playbook doctor check` adds one `sync` row once sync is on. It shows the age of the last success and the rows pending, and fails with a fix command when the token variable is empty.
 
 ## Stop
 
