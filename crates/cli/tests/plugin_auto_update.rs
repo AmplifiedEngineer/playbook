@@ -814,3 +814,25 @@ fn two_hooks_started_together_start_one_update() {
     assert_eq!(shown, 1, "only the hook that claimed the version says so");
     assert_eq!(f.calls(), EXPECTED_CALL);
 }
+
+#[test]
+fn the_upgrade_path_never_writes_auto_update() {
+    // Arrange
+    let f = Fixture::new(true, 0);
+    let settings = f.home.join(".claude/settings.json");
+    let text = r#"{"extraKnownMarketplaces":{"amplifiedengineer":{"source":{"source":"github","repo":"amplifiedengineer/marketplace"}}}}"#;
+    fs::write(&settings, text).unwrap();
+
+    // Act
+    let command = f.config_list(true, &[]);
+    let after_command = fs::read_to_string(&settings).unwrap();
+    f.set_marker(&format!("{VERSION} running {}", now()));
+    let refresh = f.run(&["update", "--refresh-plugin"], false, "", &[]);
+
+    // Assert
+    assert_eq!(command.status.code(), Some(0), "{}", stderr(&command));
+    assert_eq!(refresh.status.code(), Some(0), "{}", stderr(&refresh));
+    assert!(f.calls().contains("plugin update"), "the update ran");
+    assert_eq!(after_command, text);
+    assert_eq!(fs::read_to_string(&settings).unwrap(), text);
+}
