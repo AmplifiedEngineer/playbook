@@ -18,7 +18,8 @@ use std::process::{Output, Stdio};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PLUGIN_ID: &str = "playbook@amplifiedengineer";
-const EXPECTED_CALL: &str = "plugin update playbook@amplifiedengineer\n";
+const EXPECTED_CALL: &str =
+    "plugin marketplace update amplifiedengineer\nplugin update playbook@amplifiedengineer\n";
 const MARKER_KEY: &str = "versions/plugin-update";
 const START_LINE: &str =
     "playbook: updating the playbook plugin (claude plugin update playbook@amplifiedengineer)";
@@ -48,7 +49,8 @@ const BACKGROUND_LINE: &str = concat!(
 const UPDATED_LINE: &str = "plugin: updated playbook@amplifiedengineer from";
 const HEADLESS_ENV: &str = "PLAYBOOK_HEADLESS";
 const NO_SPAWN_ENV: &str = "PLAYBOOK_TEST_NO_SPAWN";
-const STILL_OLDER_NOTICE: &str = "plugin: the playbook plugin is still older than this playbook";
+const STILL_OLDER_NOTICE: &str = "plugin: playbook@amplifiedengineer ";
+const LAGGING_MARKETPLACE_TEXT: &str = "the marketplace has not published a newer plugin yet";
 
 struct Fixture {
     home: PathBuf,
@@ -524,7 +526,7 @@ fn the_claude_child_gets_the_re_entry_guard() {
 
     f.config_list(true, &[]);
 
-    assert_eq!(f.claude_env(), "1\n");
+    assert_eq!(f.claude_env(), "1\n1\n");
 }
 
 #[test]
@@ -556,7 +558,7 @@ fn the_detached_refresh_stores_the_updated_line_and_prints_nothing() {
     assert_eq!(f.calls(), EXPECTED_CALL);
     assert_eq!(
         f.claude_env(),
-        "1\n",
+        "1\n1\n",
         "the claude child gets the skip variable"
     );
     let notice = playbook::state::get(&f.root(), NOTICE_KEY)
@@ -636,7 +638,8 @@ fn a_refresh_that_leaves_the_plugin_older_stores_the_still_older_notice() {
         .unwrap()
         .unwrap();
     assert!(notice.starts_with(STILL_OLDER_NOTICE), "{notice}");
-    assert!(notice.ends_with(MANUAL_COMMAND), "{notice}");
+    assert!(notice.contains(LAGGING_MARKETPLACE_TEXT), "{notice}");
+    assert!(!notice.contains(MANUAL_COMMAND), "{notice}");
     assert!(!notice.contains("up to date"), "{notice}");
 }
 

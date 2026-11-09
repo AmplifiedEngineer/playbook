@@ -198,7 +198,7 @@ fn the_reported_notice_lists_the_item_and_migrate_updates_the_plugin_once() {
     assert_eq!(migrate.status.code(), Some(0));
     assert_eq!(
         h.claude_calls(),
-        "plugin update playbook@amplifiedengineer\n"
+        "plugin marketplace update amplifiedengineer\nplugin update playbook@amplifiedengineer\n"
     );
     let text = String::from_utf8_lossy(&migrate.stdout);
     assert!(
@@ -296,7 +296,7 @@ fn no_plugin_a_false_config_key_or_a_failed_update_leave_the_exit_code_alone() {
     );
     assert_eq!(
         h.claude_calls(),
-        "plugin update playbook@amplifiedengineer\n"
+        "plugin marketplace update amplifiedengineer\nplugin update playbook@amplifiedengineer\n"
     );
     assert_ne!(
         bad.status.code(),
