@@ -344,7 +344,7 @@ fn pick(mut found: Vec<StackPr>, what: &str, warnings: &mut Vec<String>) -> Opti
 }
 
 /// Follow the chain of PRs below and above `start` by branch name.
-/// `first_above` is the list the first step up needs, when it was read ahead.
+/// `first_above` holds the list the first step up needs, when the caller read it already.
 fn branch_chain(
     run: Gh,
     start: StackPr,
@@ -412,8 +412,9 @@ fn read_start(run: Gh, number: u64) -> Start {
 ///
 /// The start PR and the PRs above it depend only on the PR number, not on the
 /// repository read or the stack API, so one extra thread reads them while the
-/// main thread asks the API. The fallback uses them when the API has no stack;
-/// otherwise they are dropped, and a failure or a panic there is never shown.
+/// main thread asks the API. The fallback uses them when the API has no stack.
+/// When the API has the stack, `detect` drops them and shows no failure from
+/// them. A panic in that thread still prints its message to standard error.
 pub fn detect(run: Gh, pr: Option<u64>) -> Result<Stack, String> {
     std::thread::scope(|scope| {
         let read_ahead = |number: u64| {
@@ -422,7 +423,7 @@ pub fn detect(run: Gh, pr: Option<u64>) -> Result<Stack, String> {
                     .ok()
             })
         };
-        let mut ahead = pr.map(read_ahead);
+        let ahead = pr.map(read_ahead);
         let repo_json = run(&["repo", "view", "--json", "nameWithOwner,defaultBranchRef"])?;
         let repo_v = json_of(&repo_json, "the repository")?;
         let repo = repo_v["nameWithOwner"].as_str().unwrap_or("").to_string();
@@ -440,7 +441,7 @@ pub fn detect(run: Gh, pr: Option<u64>) -> Result<Stack, String> {
                 .and_then(|s| s.trim().parse().ok())
                 .ok_or("error: no PR for current branch; pass a PR number")?,
         };
-        let ahead = ahead.take().unwrap_or_else(|| read_ahead(number));
+        let ahead = ahead.unwrap_or_else(|| read_ahead(number));
 
         let mut warnings = Vec::new();
         let mut source = Source::Api;
@@ -778,13 +779,25 @@ mod tests {
         }
     }
 
-    /// The fixture `gh`, with a record of how many calls ran at once and
-    /// switches to fail or panic the start PR read.
+    /// Counts a call as live until it drops, even when the call panics.
+    struct Leave<'a>(&'a AtomicUsize);
+
+    impl Drop for Leave<'_> {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    /// The fixture `gh`. It records how many calls run at once and has
+    /// switches that fail or panic the start PR read.
     struct Probe {
         api: Option<&'static str>,
-        /// The stack API call returns only after the start PR read has.
-        api_waits_for_view: bool,
-        view_done: Latch,
+        /// The stack API call and the start PR read each wait for the other
+        /// to start, so a run that makes them one after another never ends.
+        calls_wait_for_each_other: bool,
+        api_started: Latch,
+        view_started: Latch,
+        repo_fails: bool,
         fail_view: bool,
         panic_view_once: AtomicBool,
         live: AtomicUsize,
@@ -795,8 +808,10 @@ mod tests {
         fn new(api: Option<&'static str>) -> Probe {
             Probe {
                 api,
-                api_waits_for_view: false,
-                view_done: Latch::default(),
+                calls_wait_for_each_other: false,
+                api_started: Latch::default(),
+                view_started: Latch::default(),
+                repo_fails: false,
                 fail_view: false,
                 panic_view_once: AtomicBool::new(false),
                 live: AtomicUsize::new(0),
@@ -807,9 +822,8 @@ mod tests {
         fn call(&self, args: &[&str]) -> Result<String, String> {
             let now = self.live.fetch_add(1, Ordering::SeqCst) + 1;
             self.peak.fetch_max(now, Ordering::SeqCst);
-            let result = self.answer(args);
-            self.live.fetch_sub(1, Ordering::SeqCst);
-            result
+            let _leave = Leave(&self.live);
+            self.answer(args)
         }
 
         fn answer(&self, args: &[&str]) -> Result<String, String> {
@@ -819,14 +833,22 @@ mod tests {
                     !self.panic_view_once.swap(false, Ordering::SeqCst),
                     "start read exploded"
                 );
-                self.view_done.raise();
+                self.view_started.raise();
+                if self.calls_wait_for_each_other && !self.api_started.wait() {
+                    return Err("the start PR read never overlapped the API call".to_string());
+                }
                 if self.fail_view {
                     return Err("gh is down".to_string());
                 }
             }
-            if args[..2] == ["api", "graphql"] && self.api_waits_for_view && !self.view_done.wait()
-            {
-                return Err("the API call never overlapped the start PR read".to_string());
+            if args[..2] == ["api", "graphql"] {
+                self.api_started.raise();
+                if self.calls_wait_for_each_other && !self.view_started.wait() {
+                    return Err("the API call never overlapped the start PR read".to_string());
+                }
+            }
+            if args[..2] == ["repo", "view"] && self.repo_fails {
+                return Err("repo is down".to_string());
             }
             if args[..3] == ["pr", "view", "--json"] {
                 return Ok("2".to_string());
@@ -841,10 +863,10 @@ mod tests {
 
     #[test]
     fn the_start_pr_is_read_while_the_stack_api_answers() {
-        // Arrange: the API answer is held until the start PR read is done, so
-        // only overlapping calls get past it.
+        // Arrange: each call waits for the other, so only overlapping calls
+        // get past.
         let mut probe = Probe::new(Some("api-none"));
-        probe.api_waits_for_view = true;
+        probe.calls_wait_for_each_other = true;
 
         // Act
         let s = probe.detect(Some(2)).unwrap();
@@ -854,15 +876,6 @@ mod tests {
         assert_eq!(numbers(&s), [1, 2, 3]);
         assert!(s.warnings.is_empty(), "{:?}", s.warnings);
         assert_eq!(probe.peak.load(Ordering::SeqCst), 2);
-    }
-
-    #[test]
-    fn no_more_than_one_extra_call_runs_beside_the_main_thread() {
-        let probe = Probe::new(Some("api-none"));
-
-        probe.detect(Some(2)).unwrap();
-
-        assert!(probe.peak.load(Ordering::SeqCst) <= 2);
     }
 
     #[test]
@@ -909,11 +922,24 @@ mod tests {
 
     #[test]
     fn a_branch_with_no_number_asks_gh_and_then_reads_ahead() {
-        let probe = Probe::new(Some("api-none"));
+        let mut probe = Probe::new(Some("api-none"));
+        probe.calls_wait_for_each_other = true;
 
         let s = probe.detect(None).unwrap();
 
+        assert_eq!(probe.peak.load(Ordering::SeqCst), 2);
         assert_eq!(s.current, 2);
         assert_eq!(numbers(&s), [1, 2, 3]);
+    }
+
+    #[test]
+    fn a_repo_failure_returns_its_error_while_the_read_ahead_panics() {
+        let mut probe = Probe::new(Some("api-none"));
+        probe.repo_fails = true;
+        probe.panic_view_once.store(true, Ordering::SeqCst);
+
+        let result = probe.detect(Some(2));
+
+        assert_eq!(result.unwrap_err(), "repo is down");
     }
 }
