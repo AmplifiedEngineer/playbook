@@ -272,6 +272,14 @@ pub fn binary_too_old(root: &Path, binary: &str, homebrew: bool) -> Option<Strin
     ))
 }
 
+/// The `(major, minor)` line of a MAJOR.MINOR.PATCH `version`, ignoring a
+/// leading `v`, a `-pre` suffix and a `+build` suffix, or `None` when it does
+/// not parse.
+pub(crate) fn minor_line(version: &str) -> Option<(u64, u64)> {
+    let v = version.strip_prefix('v').unwrap_or(version);
+    version_key(v.split('+').next().unwrap_or(v)).map(|k| (k.0, k.1))
+}
+
 /// One line when the plugin `version` is not in the minor line of `binary`
 /// (ADR 0038 decision 7), naming the command that fixes it, else `None`.
 /// A plugin and a binary work together when their MAJOR.MINOR match.
@@ -286,10 +294,6 @@ pub fn plugin_out_of_range(
     plugin_key: &str,
     homebrew: bool,
 ) -> Option<String> {
-    let minor_line = |v: &str| {
-        let v = v.strip_prefix('v').unwrap_or(v);
-        version_key(v.split('+').next().unwrap_or(v)).map(|k| (k.0, k.1))
-    };
     let plugin = minor_line(version)?;
     let Some(line) = minor_line(binary) else {
         return Some(format!(

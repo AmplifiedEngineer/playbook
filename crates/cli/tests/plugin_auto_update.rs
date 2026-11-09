@@ -415,7 +415,7 @@ fn only_the_playbook_id_is_passed_to_claude() {
 }
 
 #[test]
-fn an_update_that_changes_nothing_fails_and_is_due_again_later() {
+fn an_update_that_changes_nothing_ends_behind_and_is_due_again_later() {
     // Arrange: claude exits 0 and leaves the old plugin in place.
     let f = Fixture::new(false, 0);
 
@@ -424,11 +424,11 @@ fn an_update_that_changes_nothing_fails_and_is_due_again_later() {
     assert!(f
         .marker()
         .unwrap()
-        .starts_with(&format!("{VERSION} failed ")));
+        .starts_with(&format!("{VERSION} behind ")));
     f.config_list(true, &[]);
-    assert_eq!(f.calls(), EXPECTED_CALL, "failed recently, so not due");
+    assert_eq!(f.calls(), EXPECTED_CALL, "behind recently, so not due");
     let day_and_an_hour_ago = now() - 25 * HOUR_SECS;
-    f.set_marker(&format!("{VERSION} failed {day_and_an_hour_ago}"));
+    f.set_marker(&format!("{VERSION} behind {day_and_an_hour_ago}"));
     f.config_list(true, &[]);
     assert_eq!(f.calls(), EXPECTED_CALL.repeat(2));
 
@@ -437,6 +437,32 @@ fn an_update_that_changes_nothing_fails_and_is_due_again_later() {
     f.set_marker(&format!("{VERSION} running {stale}"));
     f.config_list(true, &[]);
     assert_eq!(f.calls(), EXPECTED_CALL.repeat(3));
+}
+
+#[test]
+fn a_behind_marker_waits_a_day_to_the_minute() {
+    // Arrange: claude exits 0 and leaves the old plugin in place.
+    let f = Fixture::new(false, 0);
+    let just_inside = now() - (24 * HOUR_SECS - MINUTE_SECS);
+    let just_past = now() - (24 * HOUR_SECS + MINUTE_SECS);
+
+    // Act: 23 h 59 m after the last try
+    f.set_marker(&format!("{VERSION} behind {just_inside}"));
+    f.config_list(true, &[]);
+
+    // Assert
+    assert_eq!(f.calls(), "", "23 h 59 m is not due");
+
+    // Act: 24 h 1 m after the last try
+    f.set_marker(&format!("{VERSION} behind {just_past}"));
+    f.config_list(true, &[]);
+
+    // Assert
+    assert_eq!(f.calls(), EXPECTED_CALL, "24 h 1 m is due");
+    assert!(f
+        .marker()
+        .unwrap()
+        .starts_with(&format!("{VERSION} behind ")));
 }
 
 #[test]
