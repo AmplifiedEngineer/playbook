@@ -617,7 +617,7 @@ fn table() -> Vec<Case> {
         case("eval bench", &["eval", "bench"]).code(1).err("No such file"),
         case("pr prepare", &["pr", "prepare"]).plain().code(1).err("not a git repository"),
         case( "pr create", &["pr", "create", "--title", "t", "--body-file", "{ROOT}/b.md"], ).file("b.md", "body").code(1).err("on the base branch"),
-        case("pr finish context", &["pr", "finish", "context", "1", "--json"]).out("\"ok\":false"),
+        case("pr status", &["pr", "status", "1", "--json"]).out("\"ok\":false"),
         case("pr review-triage", &["pr", "review-triage"]).out("review="),
         case("pr rules", &["pr", "rules"]).writes().grows().out("extracted and verified").err("embedded"),
         case("pr comments", &["pr", "comments"]).code(1).err("no PR"),

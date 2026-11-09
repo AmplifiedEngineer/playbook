@@ -10,11 +10,11 @@ use playbook::{
     plan_cleanup, planning, pr, prose, review, sanitize, settings, skills_sync, statusline,
     storage, tools_map, trust, update, usage, worktree, AdrCommand, AgentsCommand,
     AtlassianCommand, CcCommand, Cli, Command, CommitCommand, ConfigCommand, DepsCommand,
-    DocCommand, DoctorCommand, EvalCommand, FinishCommand, GateCommand, GlossaryCommand,
-    HandoffCommand, JsonCommand, LearnCommand, ManifestCommand, MemoryCommand, ModeArg,
-    ModeCommand, PlanCommand, PrCommand, ProseCommand, ReviewCommand, ReviewWorktreeCommand,
-    SanitizeCommand, SegmentCommand, SegmentTopology, SessionsCommand, SettingsCommand,
-    SkillsCommand, ToolsCommand, WorktreeCommand,
+    DocCommand, DoctorCommand, EvalCommand, GateCommand, GlossaryCommand, HandoffCommand,
+    JsonCommand, LearnCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PlanCommand,
+    PrCommand, ProseCommand, ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SegmentCommand,
+    SegmentTopology, SessionsCommand, SettingsCommand, SkillsCommand, ToolsCommand,
+    WorktreeCommand,
 };
 use std::io::{IsTerminal, Read, Write};
 
@@ -1502,15 +1502,12 @@ fn real_main() {
                     admin,
                     match_head,
                 } => println!("{}", pr::wait::merge(&pr, admin, match_head.as_deref())),
-                PrCommand::Finish {
-                    sub:
-                        FinishCommand::Context {
-                            pr,
-                            json,
-                            flag,
-                            dir,
-                        },
-                } => std::process::exit(run_pr_finish(pr, json, flag, dir.as_deref())),
+                PrCommand::Status {
+                    pr,
+                    json,
+                    flag,
+                    dir,
+                } => std::process::exit(run_pr_status(pr, json, flag, dir.as_deref())),
                 PrCommand::ReviewTriage { pr, base, dir } => {
                     enter_dir("pr review-triage", dir.as_deref());
                     let outcome = match pr::triage::collect(pr, base.as_deref()) {
@@ -3061,10 +3058,10 @@ fn absolute_from_cwd(path: &str) -> String {
         .unwrap_or_else(|_| path.to_string())
 }
 
-/// `pr finish context`: prints the report and returns the exit code. With
+/// `pr status`: prints the report and returns the exit code. With
 /// `json` every outcome goes through the envelope and the code is 0.
-fn run_pr_finish(pr: u64, json: bool, flag: Option<ModeArg>, dir: Option<&str>) -> i32 {
-    use pr::finish::context as fc;
+fn run_pr_status(pr: u64, json: bool, flag: Option<ModeArg>, dir: Option<&str>) -> i32 {
+    use pr::status as fc;
     let home = common::home_dir();
     let mode_flag = flag.map(|arg| match arg {
         ModeArg::Ask => common::mode::Mode::Ask,
@@ -3098,7 +3095,7 @@ fn run_pr_finish(pr: u64, json: bool, flag: Option<ModeArg>, dir: Option<&str>) 
             0
         }
         Err(failure) => {
-            eprintln!("pr finish context: {}", failure.error);
+            eprintln!("pr status: {}", failure.error);
             failure.code
         }
     }

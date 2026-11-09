@@ -160,10 +160,6 @@
     "required": false
   },
   {
-    "intent": "pr-finish",
-    "required": false
-  },
-  {
     "intent": "pr-land-wait",
     "required": false
   },
@@ -189,6 +185,10 @@
   },
   {
     "intent": "pr-stack",
+    "required": false
+  },
+  {
+    "intent": "pr-status",
     "required": false
   },
   {

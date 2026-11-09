@@ -134,13 +134,7 @@ pub const TOOLS: &[Tool] = &[
     t("pr-ci-wait", "pr", "ci-wait", "", "pr ci-wait 1"),
     t("pr-land-wait", "pr", "land-wait", "", "pr land-wait 1"),
     t("pr-merge", "pr", "merge", "", "pr merge 1"),
-    t(
-        "pr-finish",
-        "pr finish",
-        "context",
-        "",
-        "pr finish context 1 --json",
-    ),
+    t("pr-status", "pr", "status", "", "pr status 1 --json"),
     t(
         "pr-review-triage",
         "pr",

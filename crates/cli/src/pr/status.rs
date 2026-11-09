@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook pr finish context`: the settings, run mode, PR state and review
+//! `playbook pr status`: the settings, run mode, PR state and review
 //! choice the finish flow needs, read in one call.
 //!
 //! The review choice follows the rules the finish skill applies today: `skip`
