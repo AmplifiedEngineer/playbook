@@ -299,6 +299,7 @@ pub(crate) const META: &[Meta] = &[
     ro("pr ci-wait"),
     ro("pr comments"),
     free("pr create"),
+    ro("pr finish-context"),
     ro("pr land-wait"),
     free("pr merge"),
     free("pr prepare"),

@@ -1123,7 +1123,7 @@ These are the mechanical steps behind `/playbook:create-pull-request`.
 
 Example: `playbook pr prepare --base main`
 
-Subcommands: `ci-wait`, `comments`, `create`, `land-wait`, `merge`, `prepare`, `reply`, `review-triage`, `rules`, `stack`
+Subcommands: `ci-wait`, `comments`, `create`, `finish-context`, `land-wait`, `merge`, `prepare`, `reply`, `review-triage`, `rules`, `stack`
 
 ### `playbook pr ci-wait`
 
@@ -1161,6 +1161,19 @@ Example: `playbook pr create --title "fix(x): y" --body-file /tmp/body.md`
 - `--dir <DIR>`: Work in this directory instead of the current one
 - `--ticket <TICKET>`: Ticket key for the branch (`none` turns the ticket rules off)
 - `--issue <ISSUE>`: GitHub issue number the PR handles
+
+### `playbook pr finish-context`
+
+Read what the finish flow needs to know about a PR, in one call
+
+One call for the finish flow. With `--json` it prints the shared envelope (`ok`, `code`, `meaning`, `error`) around the report and exits 0 even on failure: read `ok` and `code`. A usage error still exits 2. Without `--json` it prints the same report as text and exits with the code.
+
+Example: `playbook pr finish-context 12 --json`
+
+- `<PR>`: PR number
+- `--json`: Print the JSON envelope and exit 0
+- `--flag <FLAG>`: Treat the run mode as this one, as `mode status --flag` does (one of `ask`, `auto`)
+- `--dir <DIR>`: Work in this directory instead of the current one
 
 ### `playbook pr land-wait`
 
