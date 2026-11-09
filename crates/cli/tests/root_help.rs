@@ -14,6 +14,7 @@ const USER: &[&str] = &[
     "hooks",
     "uninstall",
     "update",
+    "plugin",
     "version",
     "deps",
     "doctor",

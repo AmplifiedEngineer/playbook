@@ -496,6 +496,13 @@ fn sync_at(
         }
     }
     let (outcome, marketplace) = run_with_marketplace(probe, opts);
+    judge(outcome, marketplace, running)
+}
+
+/// Turns an install, an update or an unchanged plugin that is older than the
+/// binary at version `running` into [`Outcome::Behind`]; any other outcome
+/// comes back as it is.
+fn judge(outcome: Outcome, marketplace: Option<String>, running: &str) -> Outcome {
     // An unreadable version after an update counts as behind; after an
     // install it does not, since nothing yet says the install lags.
     let (id, v, unreadable_lags) = match &outcome {
@@ -707,6 +714,14 @@ fn run_with_marketplace(probe: &Probe, opts: SyncOpts) -> (Outcome, Option<Strin
         };
         return (outcome, None);
     };
+    update_installed(probe, id, opts)
+}
+
+/// Updates the installed plugin `id`: refreshes its marketplace, runs
+/// `claude plugin update` and reads the version before and after. The one
+/// path [`sync`] and [`update_command`] share.
+fn update_installed(probe: &Probe, id: String, opts: SyncOpts) -> (Outcome, Option<String>) {
+    let claude_home = probe.home.join(".claude");
     if is_off_in_claude_code(&claude_home, &id) {
         return (
             Outcome::Skipped(format!(
@@ -758,6 +773,169 @@ fn run_with_marketplace(probe: &Probe, opts: SyncOpts) -> (Outcome, Option<Strin
         }
     };
     (outcome, marketplace)
+}
+
+/// Every playbook plugin id Claude Code lists as installed, the preferred
+/// marketplace first. A machine that kept the old marketplace name lists the
+/// old id, and one that moved lists both.
+pub fn installed_ids(claude_home: &Path) -> Vec<String> {
+    crate::common::plugin_state::plugin_keys()
+        .into_iter()
+        .filter(|key| crate::common::plugin_state::installed_entry_at(claude_home, key).is_some())
+        .collect()
+}
+
+/// What `playbook update --plugin` did, one [`Outcome`] per installed id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandReport {
+    pub outcomes: Vec<Outcome>,
+    /// The plugin is not installed, so there is nothing to update.
+    pub not_installed: bool,
+}
+
+/// The hint after an update changed the plugin on disk.
+const RELOAD_HINT: &str = "Restart Claude Code or run /reload-plugins to load it";
+
+impl CommandReport {
+    /// Whether the user must restart Claude Code or reload plugins.
+    pub fn needs_reload(&self) -> bool {
+        self.outcomes
+            .iter()
+            .any(|o| matches!(o, Outcome::Updated { .. }))
+    }
+
+    /// Whether a real failure happened: a failed update, a missing `claude`
+    /// or a marketplace refresh that failed while the plugin lags.
+    pub fn failed(&self) -> bool {
+        self.outcomes.iter().any(|o| {
+            matches!(
+                o,
+                Outcome::Failed { .. }
+                    | Outcome::NoCli { .. }
+                    | Outcome::Behind {
+                        marketplace: Some(_),
+                        ..
+                    }
+            )
+        })
+    }
+
+    /// One line per outcome, then the reload hint when the plugin changed.
+    pub fn lines(&self) -> Vec<String> {
+        let mut lines: Vec<String> = if self.not_installed {
+            vec![format!(
+                "plugin: not installed; run: {}",
+                install_commands(PLUGIN_KEY)
+            )]
+        } else {
+            self.outcomes.iter().filter_map(command_line).collect()
+        };
+        if self.needs_reload() {
+            lines.push(format!("plugin: {RELOAD_HINT}"));
+        }
+        lines
+    }
+}
+
+/// The line `playbook update --plugin` shows for `outcome`. It differs from
+/// [`Outcome::line`] where an explicit command has no 24 hour retry to
+/// mention.
+fn command_line(outcome: &Outcome) -> Option<String> {
+    match outcome {
+        Outcome::Updated { id, from, to } => Some(format!(
+            "plugin: updated {id}{}{}",
+            from.as_deref()
+                .map(|v| format!(" from {v}"))
+                .unwrap_or_default(),
+            to.as_deref()
+                .map(|v| format!(" to {v}"))
+                .unwrap_or_default(),
+        )),
+        Outcome::Behind {
+            id,
+            version,
+            running,
+            marketplace: None,
+        } => Some(format!(
+            "plugin: {id} {} is older than this binary ({running}); the marketplace has not published a newer plugin yet",
+            version.as_deref().unwrap_or(UNKNOWN_VERSION)
+        )),
+        other => other.line(),
+    }
+}
+
+/// `playbook update --plugin`: refreshes the marketplace and runs
+/// `claude plugin update` for every installed playbook plugin id. It is an
+/// explicit request, so `update.plugin` set to off, the skip variable and a
+/// CI environment do not stop it.
+pub fn update_command(probe: &Probe) -> CommandReport {
+    update_command_at(probe, env!("CARGO_PKG_VERSION"))
+}
+
+fn update_command_at(probe: &Probe, running: &str) -> CommandReport {
+    let opts = SyncOpts {
+        progress: true,
+        ..SyncOpts::default()
+    };
+    let ids = installed_ids(&probe.home.join(".claude"));
+    let outcomes: Vec<Outcome> = ids
+        .into_iter()
+        .map(|id| {
+            let (outcome, marketplace) = update_installed(probe, id, opts);
+            judge(outcome, marketplace, running)
+        })
+        .collect();
+    CommandReport {
+        not_installed: outcomes.is_empty(),
+        outcomes,
+    }
+}
+
+/// The `--json` fields of [`CommandReport`], beside the envelope.
+fn report_json(report: &CommandReport) -> serde_json::Value {
+    serde_json::json!({
+        "plugins": report.outcomes.iter().map(|o| serde_json::json!({
+            "status": status_of(o),
+            "line": command_line(o),
+        })).collect::<Vec<_>>(),
+        "not_installed": report.not_installed,
+        "reload": report.needs_reload(),
+        "lines": report.lines(),
+    })
+}
+
+/// A stable word for what happened to one plugin id.
+fn status_of(outcome: &Outcome) -> &'static str {
+    match outcome {
+        Outcome::Updated { .. } => "updated",
+        Outcome::Current { .. } => "current",
+        Outcome::Behind { .. } => "behind",
+        Outcome::NoCli { .. } => "no-claude",
+        Outcome::Failed { .. } => "failed",
+        _ => "skipped",
+    }
+}
+
+/// Runs [`update_command`], prints its result and returns the exit code: 1
+/// on a real failure, else 0. With `json` it prints the shared envelope and
+/// returns 0.
+pub fn print_update_command(probe: &Probe, json: bool) -> i32 {
+    let report = update_command(probe);
+    let code = i32::from(report.failed());
+    if json {
+        let error = if code == 0 {
+            String::new()
+        } else {
+            report.lines().join("; ")
+        };
+        let value = crate::json::envelope::wrap(code, &error, report_json(&report));
+        println!("{value}");
+        return 0;
+    }
+    for line in report.lines() {
+        println!("{line}");
+    }
+    code
 }
 
 /// [`run`] for a command, unless `--no-plugin` was passed or the caller set
