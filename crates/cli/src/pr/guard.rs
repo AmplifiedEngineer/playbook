@@ -5,9 +5,7 @@
 //! attribution anywhere, and no em or en dashes in the title or body.
 
 use crate::common::attribution::{problems, prose_problems};
-
-const EM_DASH: char = '\u{2014}';
-const EN_DASH: char = '\u{2013}';
+use crate::pr::text_rules;
 
 /// Attribution found in the title, the body, or a commit message. `commits`
 /// is `(short sha, full message)`. Each hit names its place, never the text.
@@ -30,51 +28,22 @@ pub fn attribution_problems(title: &str, body: &str, commits: &[(String, String)
 /// Em or en dashes outside code. Lines inside a fenced block and text inside
 /// inline backticks are ignored. The title is line 0, body lines start at 1.
 pub fn dash_problems(title: &str, body: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    for ch in prose(title)
-        .chars()
-        .filter(|c| *c == EM_DASH || *c == EN_DASH)
-    {
-        out.push(format!("line 0 (title) has a {} dash", name(ch)));
-    }
-    let mut fenced = false;
-    for (i, line) in body.lines().enumerate() {
-        if line.trim_start().starts_with("```") {
-            fenced = !fenced;
-            continue;
+    let name = |c: char| {
+        if c == '\u{2014}' {
+            "em (U+2014)"
+        } else {
+            "en (U+2013)"
         }
-        if fenced {
-            continue;
-        }
-        for ch in prose(line)
-            .chars()
-            .filter(|c| *c == EM_DASH || *c == EN_DASH)
-        {
-            out.push(format!("line {} has a {} dash", i + 1, name(ch)));
-        }
-    }
-    out
-}
-
-fn name(c: char) -> &'static str {
-    if c == EM_DASH {
-        "em (U+2014)"
-    } else {
-        "en (U+2013)"
-    }
-}
-
-/// The line with every inline-backtick span removed.
-fn prose(line: &str) -> String {
-    let mut out = String::new();
-    let mut in_code = false;
-    for c in line.chars() {
-        if c == '`' {
-            in_code = !in_code;
-        } else if !in_code {
-            out.push(c);
-        }
-    }
+    };
+    let mut out: Vec<String> = text_rules::dash_hits(title)
+        .into_iter()
+        .map(|(_, c)| format!("line 0 (title) has a {} dash", name(c)))
+        .collect();
+    out.extend(
+        text_rules::dash_hits(body)
+            .into_iter()
+            .map(|(n, c)| format!("line {n} has a {} dash", name(c))),
+    );
     out
 }
 

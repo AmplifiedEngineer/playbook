@@ -46,9 +46,17 @@ pub fn hook_writes_signoff(source: &str) -> bool {
         .any(|l| trailers.is_match(l) || flag.is_match(l) || append.is_match(l))
 }
 
-/// Whether `--signoff` should be passed.
-fn wants_signoff(dir: &Path, message: &str, opts: Options, config_on: bool) -> bool {
-    if !config_on || opts.no_signoff {
+/// Whether `--signoff` should be passed: `commit.signOff` is on, the caller
+/// did not opt out, the message has no trailer yet and no hook writes one.
+/// `deliver` shares this decision.
+pub fn signoff_wanted(
+    dir: &Path,
+    message: &str,
+    no_signoff: bool,
+    config_on: bool,
+    git: impl Fn(&[&str]) -> Option<String>,
+) -> bool {
+    if !config_on || no_signoff {
         return false;
     }
     let has_trailer = message
@@ -58,7 +66,7 @@ fn wants_signoff(dir: &Path, message: &str, opts: Options, config_on: bool) -> b
         return false;
     }
     for name in ["prepare-commit-msg", "commit-msg"] {
-        let path = git_text(dir, &["rev-parse", "--git-path", &format!("hooks/{name}")]).map(|p| {
+        let path = git(&["rev-parse", "--git-path", &format!("hooks/{name}")]).map(|p| {
             if Path::new(&p).is_absolute() {
                 p.into()
             } else {
@@ -226,7 +234,9 @@ pub fn run(
     if opts.amend {
         args.push("--amend".into());
     }
-    if wants_signoff(dir, &message, opts, config_signoff) {
+    if signoff_wanted(dir, &message, opts.no_signoff, config_signoff, |a| {
+        git_text(dir, a)
+    }) {
         args.push("--signoff".into());
     }
     if git_success(dir, &["config", "--get", "user.signingkey"]) {

@@ -1,125 +1,26 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The text rules for a commit message, a PR title and a PR body. The AI
-//! attribution rule is the one the commit-message sanitizer hook uses
-//! (`common::attribution`), so both refuse the same lines.
+//! The text checks of a delivery as plain sentences. The rules live in
+//! `pr::text_rules`; this module keeps the string form `deliver` reports.
 
-use crate::common::attribution;
+use crate::pr::text_rules::{self, messages};
 
-/// A title is refused above this many characters, prefix included.
-pub const TITLE_LIMIT: usize = 72;
-
-const TYPES: &[&str] = &[
-    "feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert",
-];
-
-/// Whether `title` is `type(scope)!: description` with a known type.
-pub fn is_conventional(title: &str) -> bool {
-    let Some((head, rest)) = title.split_once(": ") else {
-        return false;
-    };
-    if rest.trim().is_empty() {
-        return false;
-    }
-    let head = head.strip_suffix('!').unwrap_or(head);
-    let kind = match head.split_once('(') {
-        Some((kind, scope)) => {
-            if !scope.ends_with(')') || scope.len() < 2 {
-                return false;
-            }
-            kind
-        }
-        None => head,
-    };
-    TYPES.contains(&kind)
-}
-
-fn dash_lines(text: &str, label: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut fenced = false;
-    for (i, line) in text.lines().enumerate() {
-        if line.trim_start().starts_with("```") {
-            fenced = !fenced;
-            continue;
-        }
-        if fenced {
-            continue;
-        }
-        let mut in_code = false;
-        for c in line.chars() {
-            if c == '`' {
-                in_code = !in_code;
-            } else if !in_code && (c == '\u{2014}' || c == '\u{2013}') {
-                let name = if c == '\u{2014}' { "em" } else { "en" };
-                out.push(format!("{label} line {} has an {name} dash", i + 1));
-            }
-        }
-    }
-    out
-}
-
-fn attribution_lines(text: &str, label: &str, prose: bool) -> Vec<String> {
-    let found = if prose {
-        attribution::prose_problems(text)
-    } else {
-        attribution::problems(text)
-    };
-    found
-        .into_iter()
-        .map(|(line, shape)| {
-            format!(
-                "{label} line {} carries AI attribution ({})",
-                line + 1,
-                shape.name()
-            )
-        })
-        .collect()
-}
+pub use text_rules::TITLE_LIMIT;
 
 /// Every problem with a commit message, empty when it is fine.
 pub fn commit_message(message: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let title = message.lines().next().unwrap_or("").trim();
-    if title.is_empty() {
-        out.push("commit message is empty".to_string());
-        return out;
-    }
-    out.extend(title_problems(title, "commit title"));
-    out.extend(dash_lines(message, "commit message"));
-    out.extend(attribution_lines(message, "commit message", false));
-    out
+    messages(text_rules::commit_message(message))
 }
 
 /// Every problem with a PR title, empty when it is fine.
 pub fn pr_title(title: &str) -> Vec<String> {
-    let mut out = title_problems(title, "PR title");
-    out.extend(dash_lines(title, "PR title"));
-    out.extend(attribution_lines(title, "PR title", true));
-    out
+    messages(text_rules::pr_title(title))
 }
 
 /// Every problem with a PR body, empty when it is fine.
 pub fn pr_body(body: &str) -> Vec<String> {
-    let mut out = dash_lines(body, "PR body");
-    out.extend(attribution_lines(body, "PR body", true));
-    out
-}
-
-fn title_problems(title: &str, label: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let length = title.chars().count();
-    if length > TITLE_LIMIT {
-        out.push(format!(
-            "{label} is {length} characters, the limit is {TITLE_LIMIT}"
-        ));
-    }
-    if !is_conventional(title) {
-        out.push(format!(
-            "{label} is not a conventional commit title (type(scope): description)"
-        ));
-    }
-    out
+    messages(text_rules::pr_body(body))
 }
 
 #[cfg(test)]

@@ -769,3 +769,206 @@ fn an_unreadable_issue_is_refused() {
         err.details
     );
 }
+
+#[test]
+fn parity_message_prose_a_curly_quote_in_the_message_is_refused() {
+    let rig = Rig::new();
+    let mut opts = dirty(&rig);
+    opts.message = Some("feat(x): it\u{2019}s b".into());
+
+    let err = deliver::run(&opts).expect_err("refused");
+
+    assert_eq!(err.code, exit::REFUSED);
+    assert!(
+        err.details.iter().any(|d| d.contains("curly quote")),
+        "got {:?}",
+        err.details
+    );
+    assert!(!pushed(&rig, "feat/x"));
+}
+
+#[test]
+fn parity_commit_type_a_docs_only_diff_cannot_be_a_feat() {
+    let rig = Rig::new();
+    rig.write("README.md", "docs\n");
+    let mut opts = rig.opts();
+    opts.stage = Stage::All;
+    opts.message = Some("feat: x".into());
+
+    let err = deliver::run(&opts).expect_err("refused");
+
+    assert_eq!(err.code, exit::REFUSED);
+    assert!(
+        err.details.iter().any(|d| d.contains("commit type check")),
+        "got {:?}",
+        err.details
+    );
+    assert!(!pushed(&rig, "feat/x"));
+}
+
+fn trailers(rig: &Rig) -> usize {
+    rig.git(&["log", "-1", "--format=%B"])
+        .lines()
+        .filter(|l| l.starts_with("Signed-off-by:"))
+        .count()
+}
+
+#[test]
+fn parity_signoff_follows_the_setting_the_default_and_a_writing_hook() {
+    let off = Rig::new();
+    let mut opts = dirty(&off);
+    opts.signoff = false;
+    deliver::run(&opts).expect("delivered");
+    assert_eq!(trailers(&off), 0);
+
+    let on = Rig::new();
+    deliver::run(&dirty(&on)).expect("delivered");
+    assert_eq!(trailers(&on), 1);
+
+    let hooked = Rig::new();
+    let hook = hooked.work.join(".git/hooks/commit-msg");
+    fs::write(
+        &hook,
+        "#!/bin/sh\ngit interpret-trailers --in-place --trailer 'Signed-off-by: t <t@t.test>' \"$1\"\n",
+    )
+    .unwrap();
+    sh(&hooked.work, &[], "chmod", &["+x", hook.to_str().unwrap()]);
+    deliver::run(&dirty(&hooked)).expect("delivered");
+    assert_eq!(trailers(&hooked), 1);
+}
+
+#[test]
+fn parity_signing_an_unset_key_adds_no_sign_flag() {
+    let rig = Rig::new();
+    let mut opts = dirty(&rig);
+    opts.dry_run = true;
+
+    let report = deliver::run(&opts).expect("plan");
+
+    assert!(report
+        .actions
+        .iter()
+        .any(|a| a.contains("commit with -s (")));
+    assert!(!report.actions.iter().any(|a| a.contains(" -S")));
+}
+
+#[test]
+fn parity_merge_commit_a_merge_on_the_branch_is_refused() {
+    let rig = Rig::new();
+    rig.git(&["checkout", "-q", "-b", "side", "main"]);
+    rig.write("s.txt", "side\n");
+    rig.git(&["add", "-A"]);
+    rig.git(&["commit", "-q", "-m", "feat: side"]);
+    rig.git(&["checkout", "-q", "feat/x"]);
+    rig.write("f.txt", "feat\n");
+    rig.git(&["add", "-A"]);
+    rig.git(&["commit", "-q", "-m", "feat: own"]);
+    rig.git(&["merge", "-q", "--no-ff", "-m", "chore: merge side", "side"]);
+
+    let mut opts = rig.opts();
+    opts.title = Some("feat: merge test".into());
+
+    let err = deliver::run(&opts).expect_err("refused");
+
+    assert_eq!(err.code, exit::REFUSED);
+    assert!(err.message.contains("merge"), "{}", err.message);
+    assert!(!pushed(&rig, "feat/x"));
+}
+
+fn moved_main(rig: &Rig) {
+    rig.git(&["checkout", "-q", "main"]);
+    rig.write("c.txt", "main moved\n");
+    rig.git(&["add", "-A"]);
+    rig.git(&["commit", "-q", "-m", "chore: main moves"]);
+    rig.git(&["push", "-q", "origin", "main"]);
+    rig.git(&["checkout", "-q", "feat/x"]);
+}
+
+#[test]
+fn parity_no_force_auto_mode_parks_a_pushed_branch_that_needs_a_rebase() {
+    let rig = Rig::new();
+    deliver::run(&dirty(&rig)).expect("first delivery");
+    let remote = rig.remote_head("feat/x");
+    moved_main(&rig);
+    let mut opts = rig.opts();
+    opts.auto = true;
+
+    let err = deliver::run(&opts).expect_err("parked");
+
+    assert_eq!(err.code, exit::REFUSED);
+    assert!(err.message.starts_with("PARKED"), "{}", err.message);
+    assert_eq!(rig.remote_head("feat/x"), remote);
+}
+
+#[test]
+fn parity_no_force_auto_mode_pushes_plainly_when_the_remote_branch_is_absent() {
+    let rig = Rig::new();
+    let mut opts = dirty(&rig);
+    opts.auto = true;
+
+    let report = deliver::run(&opts).expect("delivered");
+
+    assert!(report.pushed);
+    assert!(!report.actions.iter().any(|a| a.contains("force")));
+}
+
+#[test]
+fn parity_no_force_ask_mode_pushes_with_a_lease_on_the_remote_sha() {
+    let rig = Rig::new();
+    deliver::run(&dirty(&rig)).expect("first delivery");
+    let remote = rig.remote_head("feat/x");
+    moved_main(&rig);
+
+    let report = deliver::run(&rig.opts()).expect("lease push");
+
+    assert!(report
+        .actions
+        .iter()
+        .any(|a| a == "push with --force-with-lease"));
+    assert_ne!(rig.remote_head("feat/x"), remote);
+}
+
+#[test]
+fn parity_no_force_a_remote_that_moved_during_the_lease_is_exit_5_never_a_force() {
+    let rig = Rig::new();
+    deliver::run(&dirty(&rig)).expect("first delivery");
+    moved_main(&rig);
+    // A pre-push hook that moves the remote branch after deliver read it.
+    let other = rig.root.join("other");
+    sh(
+        &rig.root,
+        &rig.env(),
+        "git",
+        &[
+            "clone",
+            "-q",
+            rig.origin.to_str().unwrap(),
+            other.to_str().unwrap(),
+        ],
+    );
+    sh(&other, &rig.env(), "git", &["checkout", "-q", "feat/x"]);
+    fs::write(other.join("z.txt"), "z\n").unwrap();
+    sh(&other, &rig.env(), "git", &["add", "-A"]);
+    sh(
+        &other,
+        &rig.env(),
+        "git",
+        &["commit", "-q", "-m", "feat: other"],
+    );
+    let hook = rig.work.join(".git/hooks/pre-push");
+    fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\ncd {} && git push -q origin feat/x\n",
+            other.display()
+        ),
+    )
+    .unwrap();
+    sh(&rig.work, &[], "chmod", &["+x", hook.to_str().unwrap()]);
+    let theirs = sh(&other, &rig.env(), "git", &["rev-parse", "HEAD"]);
+
+    let err = deliver::run(&rig.opts()).expect_err("lease fails");
+
+    assert_eq!(err.code, exit::FAILED);
+    assert_eq!(rig.remote_head("feat/x"), theirs);
+}
