@@ -178,6 +178,49 @@ pub fn extract(plugin_root: &Path, out_dir: &Path) -> Result<Extracted, String> 
     Ok(ex)
 }
 
+/// The plugin root that holds the rule files, or the embedded copies; empty
+/// when neither is found. Prints nothing.
+pub fn plugin_root_quiet() -> PathBuf {
+    let home = crate::common::home_dir();
+    let resolved = crate::plugin_root::resolve_here().ok();
+    crate::plugin_root::rules_root(resolved, &home)
+        .map(|found| found.root)
+        .unwrap_or_default()
+}
+
+/// The rule sections as text, for a caller that wants them inline instead of
+/// as four files to read.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RulesText {
+    /// The universal writing rules.
+    pub writing: String,
+    /// The pull request title and body rules.
+    pub prs: String,
+    /// What a GitHub text must never carry.
+    pub github: String,
+    /// The readiness and size rules.
+    pub readiness: String,
+}
+
+/// Cut and verify like [`extract`], returning the text. The scratch files go
+/// to a private temp directory that is removed afterwards.
+pub fn extract_texts(plugin_root: &Path) -> Result<RulesText, String> {
+    let dir = std::env::temp_dir().join(format!("pb-rules-text-{}", std::process::id()));
+    let result = extract(plugin_root, &dir).and_then(|ex| {
+        let read = |p: &Path| {
+            fs::read_to_string(p).map_err(|e| format!("could not read {}: {e}", p.display()))
+        };
+        Ok(RulesText {
+            writing: read(&ex.core)?,
+            prs: read(&ex.prs)?,
+            github: read(&ex.github)?,
+            readiness: read(&ex.eng)?,
+        })
+    });
+    let _ = fs::remove_dir_all(&dir);
+    result
+}
+
 /// The text the command prints on success.
 pub fn report(ex: &Extracted) -> String {
     format!(

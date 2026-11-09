@@ -171,6 +171,34 @@ pub trait GhClient {
     /// Returns the PR's `baseRefName`.
     fn pr_view_base(&self, branch: &str) -> Result<String, String>;
     fn pr_edit_base(&self, branch: &str, base: &str) -> Result<(), String>;
+    /// Head branch names of the open PRs, used to find a stacked base. A
+    /// failed call is an empty list: no stack is assumed.
+    fn open_pr_heads(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// The nearest open PR branch that `branch` is built on: an ancestor of HEAD
+/// by `is_ancestor(remote ref)`, the fewest commits behind HEAD by
+/// `count(range)`. One rule for `pr prepare` and `deliver`.
+pub fn nearest_parent(
+    heads: &[String],
+    branch: &str,
+    is_ancestor: &dyn Fn(&str) -> bool,
+    count: &dyn Fn(&str) -> Option<u64>,
+) -> Option<String> {
+    let mut best: Option<(u64, &String)> = None;
+    for head in heads.iter().filter(|h| h.as_str() != branch) {
+        let remote = format!("refs/remotes/origin/{head}");
+        if !is_ancestor(&remote) {
+            continue;
+        }
+        let n = count(&format!("{remote}..HEAD")).unwrap_or(u64::MAX);
+        if best.as_ref().is_none_or(|(m, _)| n < *m) {
+            best = Some((n, head));
+        }
+    }
+    best.map(|(_, head)| head.clone())
 }
 
 /// Reads `gh pr view --json url,state` output. A PR missing either field is
@@ -279,6 +307,28 @@ impl GhClient for RealGhClient {
         gh(&["pr", "edit", "--base", base, "--", branch])
             .map(|_| ())
             .map_err(|e| format!("gh pr edit failed: {e}"))
+    }
+
+    fn open_pr_heads(&self) -> Vec<String> {
+        let Ok(out) = gh(&[
+            "pr",
+            "list",
+            "--state",
+            "open",
+            "--json",
+            "headRefName",
+            "--limit",
+            "100",
+        ]) else {
+            return Vec::new();
+        };
+        let value: serde_json::Value = serde_json::from_str(&out).unwrap_or_default();
+        value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.get("headRefName")?.as_str().map(String::from))
+            .collect()
     }
 }
 
