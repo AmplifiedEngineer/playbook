@@ -14,6 +14,8 @@
 
 pub(crate) mod activity;
 pub mod links;
+#[allow(dead_code)] // The hooks that write the store are not wired yet.
+pub(crate) mod store;
 mod sweep;
 
 pub use crate::usage::session_view::{
@@ -21,6 +23,10 @@ pub use crate::usage::session_view::{
 };
 use crate::usage::UsageEvent;
 use serde_json::{json, Value};
+
+/// Seconds of silence after which a session no longer counts as active.
+#[allow(dead_code)] // Read once the close and crash logic lands.
+pub(crate) const ACTIVE_SECONDS: i64 = 900;
 
 /// Seconds of silence under which a session reads `working`.
 pub const WORKING_SECONDS: i64 = 120;
