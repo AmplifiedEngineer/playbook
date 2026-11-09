@@ -1432,6 +1432,12 @@ fn real_main() {
                     admin,
                     match_head,
                 } => println!("{}", pr::wait::merge(&pr, admin, match_head.as_deref())),
+                PrCommand::FinishContext {
+                    pr,
+                    json,
+                    flag,
+                    dir,
+                } => std::process::exit(run_finish_context(pr, json, flag, dir.as_deref())),
                 PrCommand::ReviewTriage { pr, base, dir } => {
                     enter_dir("pr review-triage", dir.as_deref());
                     let outcome = match pr::triage::collect(pr, base.as_deref()) {
@@ -2933,6 +2939,48 @@ fn absolute_from_cwd(path: &str) -> String {
     std::env::current_dir()
         .map(|cwd| cwd.join(p).to_string_lossy().into_owned())
         .unwrap_or_else(|_| path.to_string())
+}
+
+/// `pr finish-context`: prints the report and returns the exit code. With
+/// `json` every outcome goes through the envelope and the code is 0.
+fn run_finish_context(pr: u64, json: bool, flag: Option<ModeArg>, dir: Option<&str>) -> i32 {
+    use pr::finish_context as fc;
+    let home = common::home_dir();
+    let slug = common::repo_slug();
+    let reader = fc::ConfigReader {
+        home: home.clone(),
+        repo_slug: Some(slug).filter(|s| !s.is_empty()),
+    };
+    let mode_flag = flag.map(|arg| match arg {
+        ModeArg::Ask => common::mode::Mode::Ask,
+        ModeArg::Auto => common::mode::Mode::Auto,
+    });
+    let entered = match dir {
+        Some(dir) => pr::shared::enter_dir(dir).map_err(fc::Failure::bad_input),
+        None => Ok(()),
+    };
+    let result = entered.and_then(|()| {
+        fc::collect(
+            pr,
+            mode::report(mode_flag),
+            &fc::RealGh,
+            &reader,
+            &fc::RealTriager,
+        )
+    });
+    if json {
+        return fc::emit(result);
+    }
+    match result {
+        Ok(report) => {
+            println!("{report:#}");
+            0
+        }
+        Err(failure) => {
+            eprintln!("pr finish-context: {}", failure.error);
+            failure.code
+        }
+    }
 }
 
 /// Moves into `--dir` before any git or gh call, so a shell that resets to
