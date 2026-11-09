@@ -337,7 +337,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "code-bench"
-version = "0.41.0"
+version = "0.42.0"
 dependencies = [
  "playbook-common",
  "serde",
@@ -1256,7 +1256,7 @@ dependencies = [
 
 [[package]]
 name = "pbdoc"
-version = "0.41.0"
+version = "0.42.0"
 dependencies = [
  "anydoc",
  "rayon",
@@ -1266,7 +1266,7 @@ dependencies = [
 
 [[package]]
 name = "pbsync"
-version = "0.41.0"
+version = "0.42.0"
 dependencies = [
  "playbook-common",
  "playbook-data",
@@ -1315,7 +1315,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "playbook"
-version = "0.41.0"
+version = "0.42.0"
 dependencies = [
  "chrono",
  "clap",
@@ -1336,7 +1336,7 @@ dependencies = [
 
 [[package]]
 name = "playbook-code"
-version = "0.41.0"
+version = "0.42.0"
 dependencies = [
  "clap",
  "insta",
@@ -1387,7 +1387,7 @@ dependencies = [
 
 [[package]]
 name = "playbook-telemetry"
-version = "0.41.0"
+version = "0.42.0"
 dependencies = [
  "chrono",
  "clap",
