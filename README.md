@@ -1,98 +1,62 @@
 # Playbook
 
-> **Renamed.** The GitHub organization was `pragmatic-engineer` (and for a while `amplified-engineer`). It is now `amplifiedengineer`. GitHub redirects the old addresses, but do not rely on that.
->
-> The Claude Code marketplace was renamed too. The plugin id `playbook@pragmatic-engineer` is now `playbook@amplifiedengineer`. An install on the old id keeps working and keeps updating until you move. New installs use the new id. Your data stays in `~/.config/playbook`.
->
-> To move, update the binary first. Releases after v0.41.0 know both ids. Then pick your route:
->
-> - **Homebrew:** `brew uninstall playbook` (add `pbtop` if installed), `brew untap pragmatic-engineer/tap`, then `brew install amplifiedengineer/tap/playbook`. To keep the installed formula, follow [Moving from the old tap name](docs/guides/00-install.md#moving-from-the-old-tap-name).
-> - **Nix:** `nix profile remove playbook`, then `nix profile install github:amplifiedengineer/nix#playbook`. If the name does not match, find it with `nix profile list`.
-> - **Plugin:** `claude plugin uninstall playbook@pragmatic-engineer`, `claude plugin marketplace remove pragmatic-engineer`, `claude plugin marketplace add amplifiedengineer/marketplace`, then `claude plugin install playbook@amplifiedengineer`. If the retired hooks plugin is still there, run `claude plugin uninstall playbook-hooks@pragmatic-engineer`.
-> - **Install script:** run it again from the new address.
+[![CI](https://github.com/amplifiedengineer/playbook/actions/workflows/rust-ci.yml/badge.svg)](https://github.com/amplifiedengineer/playbook/actions/workflows/rust-ci.yml) [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/amplifiedengineer/playbook/badge)](https://scorecard.dev/viewer/?uri=github.com/amplifiedengineer/playbook) [![Release](https://img.shields.io/github/v/release/amplifiedengineer/playbook)](https://github.com/amplifiedengineer/playbook/releases) [![License](https://img.shields.io/github/license/amplifiedengineer/playbook)](LICENSE)
 
-An opinionated toolkit for Claude Code. It gives you slash commands, skills and subagents for planning, building, reviewing and remembering, plus a small Rust binary that runs the safety guards, hooks, launcher and status line.
-
-The skills ship as a Claude Code plugin and work on their own. The binary, which adds the guards, hooks, status line and launcher, is optional. Only want the Agent Budget Dashboard? See [pbtop](docs/guides/11-pbtop.md).
+Plan and ship with Claude Code, and see what it costs.
 
 ![pbtop on the monthly view, with the spend and token charts, using sample data](docs/images/pbtop-month.svg)
 
-*`pbtop`, the Agent Budget Dashboard, on the monthly view with sample data.*
+For developers who use Claude Code every day and want a repeatable workflow, safety guards and a clear view of their spend.
+
+## Why
+
+Out of the box, Claude Code leaves planning, review, safety rules and cost tracking to you. Playbook adds slash commands and skills for planning and review, plus a small Rust binary that runs the guards and a usage dashboard. The plugin works alone, and the binary is optional.
+
+## What you get
+
+| Feature | What it does | Learn more |
+|---|---|---|
+| Plan to PR | `/playbook:plan` makes a checked plan. `/playbook:implement` builds it one small PR at a time. | [Guide](docs/guides/01-plan-and-implement.md) |
+| Code search | One tree-sitter index per repo, shared by every worktree. `playbook code` finds symbols and fits whole declarations into a token budget. | [Commands](docs/reference/cli-and-config.md#playbook-code) |
+| Document reading | `playbook doc read` turns a PDF or Office file into text on your machine, with about 41% fewer tokens on text PDFs. | [Guide](docs/guides/06-reading-documents.md) |
+| pbtop | A terminal dashboard of token use and cost by session and by model, with your usage limits. | [Guide](docs/guides/11-pbtop.md) |
+| Review | `/playbook:review` sizes the diff, then runs a quick or a deep review. | [Guide](docs/guides/02-review-and-pr-flow.md) |
+| Safety guards | The rm guard blocks `rm -rf /` and `rm -rf ~`. An opt-in guard denies a short list of risky calls. | [Guide](docs/guides/07-rm-guard.md) |
 
 ## Install
-
-Pick the first route that fits. Each one installs the `playbook` binary. Then run `playbook setup`. When the `claude` command is found, setup asks whether to install or update the playbook plugin to match the binary, and installs it only if you say yes.
-
-1. **Homebrew** (macOS and Linux):
-
-   ```bash
-   brew install amplifiedengineer/tap/playbook
-   playbook setup
-   ```
-
-   Use the full name. It trusts only this formula. See [Homebrew tap trust](#homebrew-tap-trust).
-
-2. **Install script**, when you have no Homebrew. It downloads the release binary, checks its SHA256 checksum, and its build attestation when `gh` can check it, puts it on `PATH`, and asks whether to run `playbook setup`:
-
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh | bash
-   ```
-
-3. **Marketplace plugin by hand**, for the skills only, or when `claude` is not on `PATH` while you run setup. It adds no binary, hooks or guards:
-
-   ```bash
-   claude plugin marketplace add amplifiedengineer/marketplace
-   claude plugin install playbook@amplifiedengineer
-   ```
-
-For the best result, install the binary first. `playbook setup` then installs the plugin for you. Nix, Windows (experimental, with the raw `.exe`), a pinned version and a route with no `curl | bash` are in the [install guide](docs/guides/00-install.md). To see what `playbook setup` changes before you agree, read [What setup installs](docs/guides/05-what-setup-installs.md).
-
-Pin a version of the install script with `PLAYBOOK_REF=v0.41.0`. Update with `brew upgrade playbook` on Homebrew, or `playbook update` on the other routes. To update only the Claude Code plugin and its marketplace, run `playbook plugin update`, then restart Claude Code or run /reload-plugins. On a brew install, `playbook update` stops and tells you to run `brew upgrade playbook`. Run `playbook doctor check` to see what is in place, or `/playbook:doctor` in a Claude Code session.
-
-### Homebrew tap trust
-
-Since Homebrew 6.0.0, a tap that is not official needs your trust. Installing a fully qualified name trusts only that formula:
 
 ```bash
 brew install amplifiedengineer/tap/playbook
 ```
 
-The install records that trust, so a later `brew upgrade playbook` works by short name. To install by short name without using the full name first, trust the formula:
+Use the full name, which trusts only this formula. With no Homebrew, run the install script. It checks the release checksum, and its build attestation when `gh` can check it:
 
 ```bash
-brew tap amplifiedengineer/tap
-brew trust --formula amplifiedengineer/tap/playbook
+curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh | bash
 ```
 
-`pbtop` is a separate formula: `brew trust --formula amplifiedengineer/tap/pbtop`. To trust every current and future formula in the tap, run `brew trust amplifiedengineer/tap`. This is broader, so prefer per-formula trust. Run `brew trust` to list trusted entries, and `brew untrust <target>` to remove one. If Homebrew says a formula is not trusted, run the trust command it names. More in the [install guide](docs/guides/00-install.md#homebrew-tap-trust).
+Pin a version with `PLAYBOOK_REF=v0.41.0`. Nix, Windows, the plugin on its own and every other route are in the [install guide](docs/guides/00-install.md). Coming from the old org or tap name? See [Moving from the old tap name](docs/guides/00-install.md#moving-from-the-old-tap-name).
 
-## A first session
+## First use
+
+```bash
+playbook setup
+```
+
+Setup shows each change and asks first. [What setup installs](docs/guides/05-what-setup-installs.md) lists them all. Then, in a Claude Code session:
 
 ```text
-/playbook:plan          turn an idea into a verified plan
-/playbook:implement     build it with subagents and TDD, one commit per work unit
-/playbook:create-pull-request
-/playbook:review        recommends a quick or a deep review, then runs the one you pick
+/playbook:plan         turn an idea into a verified plan
+/playbook:implement    build it with subagents and tests, one small PR at a time
+/playbook:review       review the result
 ```
 
-For a small bug, `/playbook:fix` goes from a failing test to one pull request. For a big choice, `/playbook:adr` records the decision. The [guides](docs/guides/01-plan-and-implement.md) walk through each flow. The full list of commands is in the [slash command table](docs/reference/commands.md).
+## Trust
+
+- Every release asset has a SHA256SUMS entry and a GitHub build provenance attestation.
+- CI runs the tests on every pull request, and OpenSSF Scorecard scores the repo.
+- Apache License 2.0. To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Docs
 
-Start at the [docs index](docs/README.md).
-
-- [Install](docs/guides/00-install.md): every route, upgrade and uninstall.
-- [Launcher](docs/guides/09-launcher.md), [telemetry](docs/guides/10-telemetry.md) and [pbtop](docs/guides/11-pbtop.md).
-- [Settings](docs/guides/12-settings.md), [security defaults](docs/guides/13-security-defaults.md), [models and effort](docs/guides/14-models-and-effort.md), [memory](docs/guides/15-memory.md) and [auto mode](docs/guides/04-auto-mode.md).
-- [Usage sync](docs/guides/17-sync.md): the opt-in way to share usage between your own machines.
-- [CLI and config reference](docs/reference/cli-and-config.md), [hook reference](docs/reference/hooks.md), [config keys](docs/reference/config-keys.md), [slash commands](docs/reference/commands.md), [layers](docs/reference/layers.md) and [repository layout](docs/reference/repository-layout.md).
-- [Guides](docs/README.md#guides), [Reference](docs/README.md#reference), [Authoring](docs/README.md#authoring) and [Internals](docs/README.md#internals).
-- [Decisions](docs/adr/): the architecture decision records.
-
-## Security
-
-To report a vulnerability, see [SECURITY.md](SECURITY.md).
-
-## License
-
-Apache License 2.0. See `LICENSE`.
+Start at the [docs map](docs/README.md). Look things up in the [CLI and config reference](docs/reference/cli-and-config.md), the [hook reference](docs/reference/hooks.md) and [What setup installs](docs/guides/05-what-setup-installs.md).
