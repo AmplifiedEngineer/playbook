@@ -68,8 +68,12 @@ esac
 "#,
             dir = plugin_dir.display()
         );
-        fs::write(&claude, script).unwrap();
-        fs::set_permissions(&claude, fs::Permissions::from_mode(0o755)).unwrap();
+        // Written under another name and renamed, so no writer still holds the
+        // script when it first runs.
+        let staged = bin_dir.join("claude.tmp");
+        fs::write(&staged, script).unwrap();
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::rename(&staged, &claude).unwrap();
         Fixture { home, claude }
     }
 
@@ -117,6 +121,16 @@ esac
         fs::write(
             dir.join("known_marketplaces.json"),
             r#"{"amplifiedengineer":{}}"#,
+        )
+        .unwrap();
+    }
+
+    fn known_marketplace_named(&self, name: &str) {
+        let dir = self.home.join(".claude/plugins");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("known_marketplaces.json"),
+            format!(r#"{{"{name}":{{}}}}"#),
         )
         .unwrap();
     }
@@ -174,6 +188,26 @@ fn a_known_marketplace_is_not_added_again() {
     // Assert
     assert_eq!(f.calls(), INSTALL);
     assert!(matches!(outcome, Outcome::Installed { .. }));
+}
+
+#[test]
+fn an_old_marketplace_name_is_installed_from_as_it_is() {
+    // Arrange
+    let f = Fixture::new(0);
+    f.known_marketplace_named("pragmatic-engineer");
+
+    // Act
+    let outcome = sync(&f.probe(), install_allowed());
+
+    // Assert
+    assert_eq!(
+        f.calls(),
+        "plugin install playbook@pragmatic-engineer --json\n"
+    );
+    assert!(
+        matches!(&outcome, Outcome::Installed { id, .. } if id == "playbook@pragmatic-engineer"),
+        "{outcome:?}"
+    );
 }
 
 #[test]

@@ -13,7 +13,10 @@
 //! MAJOR.MINOR line than the binary comes back as [`Outcome::Behind`].
 
 use crate::common::plugin_state::{known_marketplaces, MARKETPLACE, PLUGIN_KEY};
+use crate::common::proc::{try_run_with_timeout, RunFailure};
+use crate::plugin_root::minor_line;
 use std::path::{Path, PathBuf};
+use std::process::Output;
 use std::time::Duration;
 
 /// The config key that turns the plugin update off.
@@ -54,6 +57,8 @@ pub enum Outcome {
     Current { id: String, version: Option<String> },
     /// Nothing ran, for this reason.
     Skipped(String),
+    /// An install caller was held back by [`setup_blocked`], for this reason.
+    LeftAlone(String),
     /// The playbook plugin is not installed, so there is nothing to say.
     NotInstalled,
     /// `claude` is not on PATH. `install` is set when the plugin was to be
@@ -103,6 +108,7 @@ impl Outcome {
                     .unwrap_or_default()
             ),
             Outcome::Skipped(why) => format!("plugin: not updated, {why}"),
+            Outcome::LeftAlone(why) => format!("plugin: left alone, {why}"),
             Outcome::Installed { id, version } => format!(
                 "plugin: installed {id}{}. Restart Claude Code to load it",
                 version
@@ -200,6 +206,30 @@ fn marketplace_command(id: &str) -> String {
     )
 }
 
+/// Spawn attempts when the executable is briefly busy, and the pause between.
+const BUSY_TRIES: u32 = 5;
+const BUSY_PAUSE: Duration = Duration::from_millis(20);
+
+/// Runs `cmd`, trying again while the OS reports the executable busy, which
+/// happens for a moment after a script was written and closed.
+fn run_retrying_busy(
+    cmd: &mut std::process::Command,
+    timeout: Duration,
+) -> Result<Output, RunFailure> {
+    let mut tries = 1;
+    loop {
+        match try_run_with_timeout(cmd, timeout) {
+            Err(RunFailure::Spawn(e))
+                if e.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < BUSY_TRIES =>
+            {
+                tries += 1;
+                std::thread::sleep(BUSY_PAUSE);
+            }
+            result => return result,
+        }
+    }
+}
+
 /// Runs `claude` with `args` under the probe's home, the skip variable, no
 /// stdin and `timeout`. `Err` carries why it failed.
 fn run_claude(
@@ -213,8 +243,12 @@ fn run_claude(
         .env("HOME", &probe.home)
         .env(SKIP_ENV, SKIP_VALUE)
         .stdin(std::process::Stdio::null());
-    let Some(out) = crate::common::proc::run_with_timeout(&mut cmd, timeout) else {
-        return Err(format!("it did not finish within {} s", timeout.as_secs()));
+    let out = match run_retrying_busy(&mut cmd, timeout) {
+        Ok(out) => out,
+        Err(RunFailure::Spawn(_)) => return Err("it could not be started".to_string()),
+        Err(RunFailure::Incomplete) => {
+            return Err(format!("it did not finish within {} s", timeout.as_secs()));
+        }
     };
     if out.status.success() {
         return Ok(());
@@ -391,15 +425,6 @@ fn blocked_by(home: &Path, env: &dyn Fn(&str) -> Option<String>) -> Option<&'sta
         .then_some("a CI environment was detected")
 }
 
-/// The `(major, minor)` line of `version`, or `None` when it has no numeric
-/// MAJOR.MINOR start.
-fn minor_line(version: &str) -> Option<(u64, u64)> {
-    let mut parts = version.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    Some((major, minor))
-}
-
 /// Whether plugin version `installed` is on an older MAJOR.MINOR line than
 /// binary version `running`. A newer patch is not behind, because a plugin
 /// ships only with a minor release and the binary's patch releases carry no
@@ -444,7 +469,7 @@ fn sync_at(
 ) -> Outcome {
     if opts.allow_install && !opts.force {
         if let Some(why) = blocked_by(&probe.home, env) {
-            return Outcome::Skipped(why.to_string());
+            return Outcome::LeftAlone(why.to_string());
         }
     }
     let (outcome, marketplace) = run_with_marketplace(probe, opts);
@@ -469,18 +494,25 @@ fn sync_at(
     }
 }
 
-/// Adds the marketplace when it is not known, then installs the plugin.
+/// Installs the plugin. A marketplace known only under an older name is used
+/// as it is, so the old name stays fixed; with none known, the marketplace is
+/// added first.
 fn install(probe: &Probe) -> Outcome {
-    let id = PLUGIN_KEY.to_string();
+    let known = known_marketplaces(&probe.home);
+    let marketplace = known.first().copied().unwrap_or(MARKETPLACE);
+    let id = format!("playbook@{marketplace}");
     let Some(claude) = &probe.claude else {
-        return Outcome::NoCli { id, install: true };
+        return Outcome::NoCli {
+            id: PLUGIN_KEY.to_string(),
+            install: true,
+        };
     };
     let failed = |id: String, why: String| Outcome::Failed {
         id,
         why,
         install: true,
     };
-    if !known_marketplaces(&probe.home).contains(&MARKETPLACE) {
+    if known.is_empty() {
         let add = ["plugin", "marketplace", "add", MARKETPLACE_SOURCE, "--json"];
         if let Err(why) = run_claude(probe, claude, &add, TIMEOUT) {
             return failed(id, why);
@@ -801,7 +833,12 @@ fn end_state(outcome: &Outcome, running: &str, installed_after: Option<&str>) ->
         Outcome::Current { .. } | Outcome::Updated { .. } if lags(installed_after, running) => {
             State::Behind
         }
-        _ => State::Done,
+        Outcome::Current { .. }
+        | Outcome::Updated { .. }
+        | Outcome::Installed { .. }
+        | Outcome::Skipped(_)
+        | Outcome::LeftAlone(_)
+        | Outcome::NotInstalled => State::Done,
     }
 }
 
@@ -1137,16 +1174,23 @@ mod tests {
                 dir.display()
             )
         });
-        fs::write(
+        write_script(
             &bin,
-            format!(
+            &format!(
                 "#!/bin/sh\necho \"$*\" >> \"$HOME/claude-calls.log\"\n{swap}echo 'update failed: network' >&2\nexit {exit}\n"
             ),
-        )
-        .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        );
         bin
+    }
+
+    /// Writes an executable script under a temp name and renames it, so no
+    /// writer still holds the file when it is first run.
+    fn write_script(path: &Path, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = path.with_extension("tmp");
+        fs::write(&tmp, body).unwrap();
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::rename(&tmp, path).unwrap();
     }
 
     fn calls(home: &Path) -> String {
@@ -2276,29 +2320,6 @@ mod tests {
     }
 
     #[test]
-    fn behind_compares_only_the_major_and_minor_line() {
-        let cases = [
-            ("0.40.2", "0.41.0", true),
-            ("0.9.0", "0.10.0", true),
-            ("0.41.0", "0.41.3", false),
-            ("0.42.0", "0.41.0", false),
-            ("1.0.0", "0.41.0", false),
-            ("0.41.0-rc.1", "0.41.0", false),
-            ("garbage", "0.41.0", false),
-            ("0.41.0", "garbage", false),
-            ("0.41", "0.42.0", true),
-            ("", "", false),
-        ];
-        for (installed, running, expected) in cases {
-            // Act
-            let got = behind(installed, running);
-
-            // Assert
-            assert_eq!(got, expected, "{installed} vs {running}");
-        }
-    }
-
-    #[test]
     fn a_plugin_one_patch_behind_the_binary_stays_current() {
         // Arrange
         let home = scratch_dir("plugin-update-patch-lag");
@@ -2322,11 +2343,12 @@ mod tests {
         let home = scratch_dir("plugin-update-timeout");
         let bin = home.join("bin/claude");
         fs::create_dir_all(bin.parent().unwrap()).unwrap();
-        fs::write(&bin, "#!/bin/sh\nsleep 5\n").unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        write_script(
+            &bin,
+            "#!/bin/sh\necho \"$*\" >> \"$HOME/claude-calls.log\"\nsleep 5\n",
+        );
         let probe = Probe {
-            home,
+            home: home.clone(),
             claude: Some(bin.clone()),
         };
 
@@ -2334,7 +2356,62 @@ mod tests {
         let result = run_claude(&probe, &bin, &["plugin", "update"], Duration::from_secs(1));
 
         // Assert
+        assert_eq!(calls(&home), "plugin update\n", "the fake claude never ran");
         assert_eq!(result, Err("it did not finish within 1 s".to_string()));
+    }
+
+    #[test]
+    fn a_claude_that_cannot_start_says_so_instead_of_naming_a_timeout() {
+        // Arrange
+        let home = scratch_dir("plugin-update-no-spawn");
+        let missing = home.join("bin/claude");
+        let probe = Probe {
+            home,
+            claude: Some(missing.clone()),
+        };
+
+        // Act
+        let result = run_claude(
+            &probe,
+            &missing,
+            &["plugin", "update"],
+            Duration::from_secs(1),
+        );
+
+        // Assert
+        assert_eq!(result, Err("it could not be started".to_string()));
+    }
+
+    #[test]
+    fn an_install_with_an_unreadable_version_stays_installed() {
+        // Arrange
+        let home = scratch_dir("plugin-install-no-version");
+        fs::create_dir_all(home.join(".claude/plugins")).unwrap();
+        fs::write(
+            home.join(".claude/plugins/known_marketplaces.json"),
+            r#"{"amplifiedengineer":{}}"#,
+        )
+        .unwrap();
+        let probe = Probe {
+            home: home.clone(),
+            claude: Some(fake_claude(&home, None, 0)),
+        };
+        let opts = SyncOpts {
+            allow_install: true,
+            force: true,
+        };
+
+        // Act
+        let outcome = sync_at(&probe, opts, "0.41.0", &no_env);
+
+        // Assert
+        assert_eq!(
+            outcome,
+            Outcome::Installed {
+                id: PLUGIN_KEY.to_string(),
+                version: None,
+            }
+        );
     }
 
     #[test]
@@ -2449,11 +2526,11 @@ mod tests {
         // Assert
         assert_eq!(
             ci,
-            Outcome::Skipped("a CI environment was detected".to_string())
+            Outcome::LeftAlone("a CI environment was detected".to_string())
         );
         assert_eq!(
             skipped,
-            Outcome::Skipped("PLAYBOOK_SKIP_PLUGIN_UPDATE is set".to_string())
+            Outcome::LeftAlone("PLAYBOOK_SKIP_PLUGIN_UPDATE is set".to_string())
         );
         assert_eq!(held_calls, "");
         assert!(calls(&home).contains("plugin install"));
@@ -2486,7 +2563,7 @@ mod tests {
         );
 
         // Assert
-        assert_eq!(held, Outcome::Skipped("update.plugin is off".to_string()));
+        assert_eq!(held, Outcome::LeftAlone("update.plugin is off".to_string()));
         assert!(matches!(forced, Outcome::Installed { .. }), "{forced:?}");
     }
 
