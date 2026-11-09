@@ -742,3 +742,146 @@ fn all_follows_the_signoff_setting() {
     assert!(r.pb(&["commit", "all"], "").status.success());
     assert!(!git(&r.work, &["log", "-1", "--format=%B"]).contains("Signed-off-by"));
 }
+
+// commit all --json --args-stdin
+
+/// Runs `commit all --json --args-stdin` from `cwd` and parses the report.
+/// The process always exits 0, whatever the verdict.
+fn inline(r: &Repo, cwd: &Path, text: &str) -> serde_json::Value {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["commit", "all", "--json", "--args-stdin"])
+        .env("HOME", r.root.join("home"))
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@t")
+        .env_remove("PLAYBOOK_MODE")
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(text.as_bytes())
+        .unwrap();
+    let o = child.wait_with_output().unwrap();
+    assert!(o.status.success(), "must exit 0: {}{}", out(&o), err(&o));
+    serde_json::from_str(&out(&o)).unwrap_or_else(|e| panic!("bad json {e}: {}", out(&o)))
+}
+
+#[test]
+fn inline_pushes_with_a_drafted_message_and_reports_it() {
+    let r = Repo::new("inline-push");
+    put(&r, "docs/guide.md", "g\n");
+
+    let v = inline(&r, &r.work, "-A");
+
+    assert_eq!(v["verdict"], "PUSHED", "{v}");
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["pushed"], true);
+    assert_eq!(v["branch"], "feat");
+    assert_eq!(v["message"], "docs: add guide.md");
+    assert_eq!(r.remote_head("feat"), git(&r.work, &["rev-parse", "HEAD"]));
+}
+
+#[test]
+fn inline_with_no_flags_commits_only_what_is_staged() {
+    let r = Repo::new("inline-staged");
+    put(&r, "docs/staged.md", "s\n");
+    git(&r.work, &["add", "docs/staged.md"]);
+    put(&r, "docs/loose.md", "l\n");
+
+    let v = inline(&r, &r.work, "");
+
+    assert_eq!(v["verdict"], "PUSHED", "{v}");
+    assert!(git(&r.work, &["status", "--porcelain", "-uall"]).contains("loose.md"));
+}
+
+#[test]
+fn inline_reports_no_staged_changes_with_ok_true() {
+    let r = Repo::new("inline-none");
+
+    let v = inline(&r, &r.work, "");
+
+    assert_eq!(v["verdict"], "NO_STAGED_CHANGES");
+    assert_eq!(v["ok"], true);
+}
+
+#[test]
+fn parity_default_branch_inline_refuses_main_with_exit_0() {
+    let r = Repo::new("inline-main");
+    git(&r.work, &["checkout", "-q", "main"]);
+    put(&r, "docs/x.md", "x\n");
+
+    let v = inline(&r, &r.work, "-A");
+
+    assert_eq!(v["verdict"], "REFUSED", "{v}");
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["code"], 1);
+}
+
+#[test]
+fn parity_worktree_guard_inline_a_wrong_branch_is_wrong_directory() {
+    let r = Repo::new("inline-wrong");
+    put(&r, "docs/x.md", "x\n");
+    let text = format!("-A Worktree root: {}, branch: other", r.work.display());
+
+    let v = inline(&r, &r.root, &text);
+
+    assert_eq!(v["verdict"], "WRONG_DIRECTORY", "{v}");
+    assert!(git(&r.work, &["status", "--porcelain", "-uall"]).contains("x.md"));
+}
+
+#[test]
+fn parity_root_cwd_inline_acts_on_the_named_root_not_the_session_cwd() {
+    let r = Repo::new("inline-root");
+    put(&r, "docs/x.md", "x\n");
+    let text = format!("-A Worktree root: {}, branch: feat", r.work.display());
+
+    let v = inline(&r, &r.root, &text);
+
+    assert_eq!(v["verdict"], "PUSHED", "{v}");
+    assert_eq!(v["branch"], "feat");
+    assert_eq!(v["root"], git(&r.work, &["rev-parse", "--show-toplevel"]));
+}
+
+#[test]
+fn parity_no_force_inline_auto_amend_is_parked() {
+    let r = Repo::new("inline-park");
+    put(&r, "docs/a.md", "a\n");
+    assert_eq!(inline(&r, &r.work, "-A")["verdict"], "PUSHED");
+    let remote = r.remote_head("feat");
+    put(&r, "docs/b.md", "b\n");
+
+    let v = inline(&r, &r.work, "-A -a --auto");
+
+    assert_eq!(v["verdict"], "PARKED", "{v}");
+    assert_eq!(r.remote_head("feat"), remote);
+}
+
+#[test]
+fn parity_precommit_warnings_inline_names_a_secret_shaped_file() {
+    let r = Repo::new("inline-warn");
+    put(&r, "creds/id_rsa", "k\n");
+
+    let v = inline(&r, &r.work, "-A");
+
+    let warnings = v["warnings"].to_string();
+    assert!(warnings.contains("Secret-shaped"), "{v}");
+}
+
+#[test]
+fn inline_conflicting_modes_are_refused_with_exit_0() {
+    let r = Repo::new("inline-conflict");
+
+    let v = inline(&r, &r.work, "--auto --ask");
+
+    assert_eq!(v["verdict"], "REFUSED");
+    assert!(v["error"].as_str().unwrap().contains("conflict"));
+}

@@ -384,6 +384,8 @@ Example: `playbook commit all`
 - `-m, --message <MESSAGE>`: Commit message (default: drafted from the staged files)
 - `--auto`: Auto mode: never force a push
 - `--no-signoff`: Leave the sign-off trailer off
+- `--json`: Print one JSON report that always exits 0, the outcome in `verdict`
+- `--args-stdin`: Read the flags and the worktree phrase from stdin; stages per `-A`/`-u`
 
 ### `playbook commit prepare`
 

@@ -1825,6 +1825,12 @@ pub enum CommitCommand {
         /// Leave the sign-off trailer off
         #[arg(long)]
         no_signoff: bool,
+        /// Print one JSON report that always exits 0, the outcome in `verdict`
+        #[arg(long)]
+        json: bool,
+        /// Read the flags and the worktree phrase from stdin; stages per `-A`/`-u`
+        #[arg(long, requires = "json")]
+        args_stdin: bool,
     },
     /// Commit, rebase when behind, and push
     ///

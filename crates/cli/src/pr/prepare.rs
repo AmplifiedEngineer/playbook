@@ -287,14 +287,20 @@ pub fn render_json(outcome: &Outcome, input: &JsonInput<'_>) -> serde_json::Valu
     }
 }
 
-/// A refusal in JSON: `REFUSED` or `WRONG_DIRECTORY`.
+/// A refusal in JSON: `REFUSED` or `WRONG_DIRECTORY`, in the envelope with
+/// the plain mode exit code 1.
 pub fn refusal_json(verdict: &str, reason: &str, mode: &str) -> serde_json::Value {
-    serde_json::json!({ "verdict": verdict, "reason": reason, "mode": mode })
+    crate::json::envelope::wrap(
+        1,
+        reason,
+        serde_json::json!({ "verdict": verdict, "reason": reason, "mode": mode }),
+    )
 }
 
 /// The whole `--json` run: parse the inline text, check the worktree, move
 /// into it, gather the facts and render them. Returns the report and the exit
 /// code plain mode would use (0 for READY and PR_EXISTS, 1 for a refusal).
+/// The report sits in the shared envelope; the caller exits 0 with `--json`.
 pub fn run_json(
     gh: &dyn GhClient,
     args_text: Option<&str>,
@@ -367,7 +373,7 @@ pub fn run_json(
         Ok(render_json(&outcome, &input))
     };
     match run() {
-        Ok(report) => (report, 0),
+        Ok(report) => (crate::json::envelope::wrap(0, "", report), 0),
         Err(reason) => (refusal_json("REFUSED", &reason, mode), 1),
     }
 }

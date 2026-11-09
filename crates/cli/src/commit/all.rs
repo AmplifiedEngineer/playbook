@@ -23,6 +23,12 @@ pub struct Options {
     pub message: Option<String>,
     pub auto: bool,
     pub no_signoff: bool,
+    /// `git add -A` first. `playbook commit all` always does.
+    pub stage_all: bool,
+    /// `git add -u` first.
+    pub stage_update: bool,
+    /// Replace the last commit; its message is kept unless `message` is set.
+    pub amend: bool,
 }
 
 /// One staged file: its git status letter and path.
@@ -126,8 +132,9 @@ pub fn run(dir: &Path, opts: Options, config_signoff: bool) -> Result<String, St
     let staged = prepare::run(
         dir,
         prepare::Options {
-            stage_all: true,
-            ..Default::default()
+            stage_all: opts.stage_all,
+            stage_update: opts.stage_update,
+            amend: opts.amend,
         },
     )?;
     if staged == NOTHING_STAGED {
@@ -146,8 +153,13 @@ pub fn run(dir: &Path, opts: Options, config_signoff: bool) -> Result<String, St
         )
         .unwrap_or_default(),
     );
-    let drafted = opts.message.is_none();
-    let message = opts.message.unwrap_or_else(|| draft(&changes));
+    let kept = if opts.amend && opts.message.is_none() {
+        git_text(dir, &["log", "-1", "--format=%B"]).filter(|m| !m.is_empty())
+    } else {
+        None
+    };
+    let drafted = opts.message.is_none() && kept.is_none();
+    let message = opts.message.or(kept).unwrap_or_else(|| draft(&changes));
 
     let file = std::env::temp_dir().join(format!("playbook-commit-all-{}.txt", std::process::id()));
     std::fs::write(&file, format!("{message}\n"))
@@ -156,6 +168,7 @@ pub fn run(dir: &Path, opts: Options, config_signoff: bool) -> Result<String, St
         dir,
         &file,
         run::Options {
+            amend: opts.amend,
             auto: opts.auto,
             no_signoff: opts.no_signoff,
             no_prose_check: drafted,
@@ -172,6 +185,126 @@ pub fn run(dir: &Path, opts: Options, config_signoff: bool) -> Result<String, St
         current_branch(dir),
         message.lines().next().unwrap_or("")
     ))
+}
+
+/// The `--json --args-stdin` form. Parses `text` (the command's arguments and
+/// the worktree phrase), runs in the named root and reports in the shared
+/// envelope. It never fails the process: the outcome is in `verdict`.
+pub fn run_inline(
+    text: &str,
+    message_override: Option<String>,
+    config_signoff: bool,
+) -> serde_json::Value {
+    use crate::common::inline_args;
+    use crate::json::envelope::wrap;
+    use serde_json::json;
+
+    let refuse = |verdict: &str, code: i32, why: String, mode: &str| {
+        wrap(
+            code,
+            &why,
+            json!({
+                "verdict": verdict, "branch": null, "root": null, "commit": "",
+                "message": "", "pushed": false, "rebased": false, "forced": false,
+                "mode": mode, "warnings": [], "errors": [why],
+            }),
+        )
+    };
+    let parsed = match inline_args::parse(text) {
+        Ok(p) => p,
+        Err(e) => return refuse("REFUSED", 1, format!("{}: {}", e.code, e.message), "ask"),
+    };
+    let home = crate::common::home_dir();
+    let slug = crate::common::repo_slug();
+    let mode = parsed
+        .mode_at(
+            std::env::var("PLAYBOOK_MODE").ok().as_deref(),
+            &home,
+            (!slug.is_empty()).then_some(slug.as_str()),
+        )
+        .mode;
+    let auto = mode == crate::common::mode::Mode::Auto;
+    let mode_text = if auto { "auto" } else { "ask" };
+    let dir = std::path::PathBuf::from(
+        parsed
+            .root
+            .clone()
+            .or(parsed.dir.clone())
+            .unwrap_or_else(|| ".".into()),
+    );
+    if let (Some(root), Some(branch)) = (&parsed.root, &parsed.branch) {
+        if let Err(why) = inline_args::guard(Path::new(root), branch) {
+            return refuse("WRONG_DIRECTORY", 1, why, mode_text);
+        }
+    }
+    let top = git_text(&dir, &["rev-parse", "--show-toplevel"]);
+    let Some(top) = top else {
+        return refuse(
+            "REFUSED",
+            1,
+            format!("{} is not a git worktree", dir.display()),
+            mode_text,
+        );
+    };
+    let root = Path::new(&top);
+    let opts = Options {
+        message: message_override.or_else(|| parsed.message.clone()),
+        auto,
+        no_signoff: parsed.no_signoff,
+        stage_all: parsed.stage_all,
+        stage_update: parsed.tracked,
+        amend: parsed.amend,
+    };
+    // Before the commit: afterwards nothing is staged to look at.
+    let stage_flags = |args: &[&str]| git_text(root, args).is_some();
+    if parsed.stage_all {
+        stage_flags(&["add", "-A"]);
+    } else if parsed.tracked {
+        stage_flags(&["add", "-u"]);
+    }
+    let warnings = crate::hooks::precommit_check::findings_in(Some(root));
+    let result = run(root, opts, config_signoff);
+    let branch = current_branch(root);
+    let sha = git_text(root, &["rev-parse", "--short", "HEAD"]).unwrap_or_default();
+    let message = git_text(root, &["log", "-1", "--format=%B"]).unwrap_or_default();
+    let (verdict, code, log, error) = match &result {
+        Ok(text) if text.trim() == NOTHING_STAGED => {
+            (NOTHING_STAGED, 0, String::new(), String::new())
+        }
+        Ok(text) => ("PUSHED", 0, text.clone(), String::new()),
+        Err(text) if text.contains("PARKED") => ("PARKED", 1, text.clone(), text.clone()),
+        Err(text)
+            if text.contains("never commits there")
+                || text.contains("breaks the writing rules")
+                || text.contains("commit type check") =>
+        {
+            ("REFUSED", 1, text.clone(), text.clone())
+        }
+        Err(text) if text.to_lowercase().contains("conflict") => {
+            ("CONFLICT", 4, text.clone(), text.clone())
+        }
+        Err(text) => ("FAILED", 1, text.clone(), text.clone()),
+    };
+    let pushed = verdict == "PUSHED";
+    let rebased = log.contains("Rebasing");
+    let forced = pushed && !auto && (parsed.amend || rebased);
+    // After a refusal the HEAD commit is not ours, so it is not reported.
+    let (commit, message) = if pushed {
+        (sha, message.lines().next().unwrap_or("").to_string())
+    } else {
+        (String::new(), String::new())
+    };
+    wrap(
+        code,
+        &error,
+        json!({
+            "verdict": verdict, "branch": branch, "root": top, "commit": commit,
+            "message": message, "pushed": pushed, "rebased": rebased, "forced": forced,
+            "mode": mode_text, "warnings": warnings,
+            "errors": if error.is_empty() { vec![] } else { vec![error.clone()] },
+            "log": log,
+        }),
+    )
 }
 
 #[cfg(test)]
