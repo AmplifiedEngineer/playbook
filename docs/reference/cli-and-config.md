@@ -563,9 +563,11 @@ Say which document converter is in use, or that none was found
 
 Check the playbook setup, or read one fact the check uses
 
-`playbook doctor check` runs the full health check, the same one the `/playbook:doctor` command uses. The other subcommands print one fact each, such as pending migrations, plugin version or hook wiring, and help when a layer reports a miss.
+`playbook doctor` with no subcommand runs `playbook doctor check`, the full health check the `/playbook:doctor` command uses. It only reads. The other subcommands print one fact each, such as pending migrations, plugin version or hook wiring, and help when a layer reports a miss.
 
 `playbook doctor --fix` repairs playbook's own files after an upgrade and prints the list of what still needs you, the same as `playbook migrate`. At a terminal it first asks whether to turn attribution OFF, the default, by adding the missing `attribution` keys; that yes is the only Claude Code setting it writes. A no stores attribution ON.
+
+Example: `playbook doctor`
 
 Example: `playbook doctor pending-migrations`
 

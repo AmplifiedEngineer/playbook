@@ -101,6 +101,33 @@ fn run_build_output_flag(
     )
 }
 
+/// Runs `playbook doctor check`; a bare `playbook doctor` runs it too.
+fn run_doctor_check(json: bool) {
+    let home = common::home_dir();
+    let claude_home = home.join(".claude");
+    let slug = common::repo_slug();
+    let env = doctor::check::Env {
+        plugin_root: std::env::var_os("CLAUDE_PLUGIN_ROOT").map(Into::into),
+        shell: std::env::var("SHELL").unwrap_or_default(),
+        path_var: std::env::var_os("PATH").unwrap_or_default(),
+        repo_root: manifest::check::toplevel(),
+        repo_slug: (!slug.is_empty()).then_some(slug),
+        home,
+        claude_home,
+    };
+    let rows = doctor::check::run(&env);
+    if json {
+        println!("{}", doctor::check::to_json(&rows));
+    } else if std::io::stdout().is_terminal() {
+        print!(
+            "{}",
+            doctor::style::render(&playbook::ui::Caps::detect(), &rows)
+        );
+    } else {
+        print!("{}", doctor::check::render(&rows));
+    }
+}
+
 /// Windows gives the main thread 1 MiB, against 8 MiB on Linux and macOS. The
 /// clap tree is deep enough to overflow that in a debug build (`doctor check`
 /// died with a stack overflow on the windows-smoke job), so run on a thread
@@ -2398,36 +2425,9 @@ fn real_main() {
         Command::Doctor {
             fix: false,
             sub: None,
-        } => {
-            eprintln!("playbook doctor: pass a subcommand such as `check`, or `--fix`");
-            std::process::exit(2);
-        }
+        } => run_doctor_check(false),
         Command::Doctor { sub: Some(sub), .. } => match sub {
-            DoctorCommand::Check { json } => {
-                let home = common::home_dir();
-                let claude_home = home.join(".claude");
-                let slug = common::repo_slug();
-                let env = doctor::check::Env {
-                    plugin_root: std::env::var_os("CLAUDE_PLUGIN_ROOT").map(Into::into),
-                    shell: std::env::var("SHELL").unwrap_or_default(),
-                    path_var: std::env::var_os("PATH").unwrap_or_default(),
-                    repo_root: manifest::check::toplevel(),
-                    repo_slug: (!slug.is_empty()).then_some(slug),
-                    home,
-                    claude_home,
-                };
-                let rows = doctor::check::run(&env);
-                if json {
-                    println!("{}", doctor::check::to_json(&rows));
-                } else if std::io::stdout().is_terminal() {
-                    print!(
-                        "{}",
-                        doctor::style::render(&playbook::ui::Caps::detect(), &rows)
-                    );
-                } else {
-                    print!("{}", doctor::check::render(&rows));
-                }
-            }
+            DoctorCommand::Check { json } => run_doctor_check(json),
             DoctorCommand::Models { json } => {
                 let home = common::home_dir();
                 let cwd = std::env::current_dir().unwrap_or_default();
