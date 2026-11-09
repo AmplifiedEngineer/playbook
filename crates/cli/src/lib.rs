@@ -1033,6 +1033,12 @@ pub enum Command {
         /// Print JSON instead of text
         #[arg(long)]
         json: bool,
+        /// Refuse unless `--dir` is on this branch
+        #[arg(long)]
+        branch: Option<String>,
+        /// Auto mode: never force a push; a branch that needs a force is parked
+        #[arg(long)]
+        auto: bool,
     },
     /// Run the mechanical steps behind the review commands
     Review {

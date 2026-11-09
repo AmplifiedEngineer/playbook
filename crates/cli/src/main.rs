@@ -1966,11 +1966,15 @@ fn real_main() {
             ticket,
             issue,
             json,
+            branch,
+            auto,
         } => {
             let die = |message: String| -> ! {
                 if json {
-                    let v = serde_json::json!({
-                        "error": message, "details": [], "exit_code": deliver::exit::REFUSED
+                    let v = deliver::failure_json(&deliver::Failure {
+                        code: deliver::exit::REFUSED,
+                        message,
+                        details: Vec::new(),
                     });
                     println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
                 } else {
@@ -1980,6 +1984,7 @@ fn real_main() {
             };
             let read = |file: Option<String>, text: Option<String>| -> Option<String> {
                 match file {
+                    Some(f) if f == "-" => Some(read_stdin_to_string()),
                     Some(f) => match std::fs::read_to_string(&f) {
                         Ok(t) => Some(t),
                         Err(e) => die(format!("could not read {f}: {e}")),
@@ -1996,9 +2001,26 @@ fn real_main() {
                 }
             }
             let cwd = std::env::current_dir().unwrap_or_default();
+            if let Some(expected) = &branch {
+                if let Err(why) = common::inline_args::guard(&cwd, expected) {
+                    if json {
+                        let mut v = deliver::failure_json(&deliver::Failure {
+                            code: deliver::exit::REFUSED,
+                            message: why,
+                            details: Vec::new(),
+                        });
+                        v["verdict"] = "WRONG_DIRECTORY".into();
+                        println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+                    } else {
+                        eprintln!("deliver: WRONG_DIRECTORY: {why}");
+                    }
+                    std::process::exit(deliver::exit::REFUSED);
+                }
+            }
             let slug = common::repo_slug();
             let repo_slug = (!slug.is_empty()).then_some(slug.as_str());
             let mut opts = deliver::Options::new(cwd);
+            opts.auto = auto;
             opts.stage = if all {
                 deliver::Stage::All
             } else if update {
@@ -2037,9 +2059,7 @@ fn real_main() {
                 }
                 Err(f) => {
                     if json {
-                        let v = serde_json::json!({
-                            "error": f.message, "details": f.details, "exit_code": f.code
-                        });
+                        let v = deliver::failure_json(&f);
                         println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
                     } else {
                         eprintln!("deliver: {}", f.message);

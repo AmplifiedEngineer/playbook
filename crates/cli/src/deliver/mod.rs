@@ -154,6 +154,10 @@ pub struct Report {
     pub dry_run: bool,
     pub actions: Vec<String>,
     pub outcome: String,
+    /// `DELIVERED`, or `DRY_RUN` when nothing was changed.
+    pub verdict: String,
+    /// Findings that did not block: rules set to warn.
+    pub warnings: Vec<String>,
     #[serde(skip)]
     pub code: i32,
 }
@@ -162,6 +166,7 @@ impl Report {
     pub fn to_json(&self) -> String {
         let mut v = serde_json::to_value(self).unwrap_or_default();
         v["exit_code"] = self.code.into();
+        v["verdict"] = self.outcome.to_uppercase().replace('-', "_").into();
         serde_json::to_string_pretty(&v).unwrap_or_default()
     }
 
@@ -281,6 +286,7 @@ fn text_problems(opts: &Options) -> Vec<String> {
 
 /// The shared rule path (`pr::body_rules::enforce`) for a PR about to be
 /// opened or edited. Warnings go to stderr; `Ok` carries the blocks.
+#[allow(clippy::too_many_arguments)]
 fn rule_blocks(
     opts: &Options,
     title: Option<&str>,
@@ -289,6 +295,7 @@ fn rule_blocks(
     subjects: &[String],
     base: &str,
     default: &str,
+    warnings: &mut Vec<String>,
 ) -> Vec<String> {
     let Some(rules) = &opts.rules else {
         return Vec::new();
@@ -306,6 +313,7 @@ fn rule_blocks(
         Ok(warns) => {
             for warn in warns {
                 eprintln!("deliver: WARN: {warn}");
+                warnings.push(warn);
             }
             Vec::new()
         }
@@ -322,6 +330,8 @@ struct Planned {
     new_title: Option<String>,
     /// A new body for an open PR.
     body: Option<String>,
+    /// Rule findings that only warn.
+    warnings: Vec<String>,
 }
 
 fn plan_text(
@@ -346,7 +356,8 @@ fn plan_text(
         .rules
         .as_ref()
         .is_none_or(|r| r.template == crate::pr::body_rules::Level::Off);
-    let (planned, problems) = match existing {
+    let mut warnings: Vec<String> = Vec::new();
+    let (mut planned, problems) = match existing {
         None => {
             let title = match (&opts.title, subjects.as_slice()) {
                 (Some(t), _) => t.clone(),
@@ -395,6 +406,7 @@ fn plan_text(
                 &subjects,
                 base,
                 default,
+                &mut warnings,
             ));
             (
                 Planned {
@@ -416,24 +428,101 @@ fn plan_text(
                 &subjects,
                 base,
                 default,
+                &mut warnings,
             ));
             (
                 Planned {
                     create: None,
                     new_title,
                     body,
+                    warnings: Vec::new(),
                 },
                 problems,
             )
         }
     };
     if problems.is_empty() {
+        planned.warnings = warnings;
         return Ok(planned);
     }
     Err(refuse_all(
         problems,
         "the PR title or body breaks a text rule",
     ))
+}
+
+/// A rule id and place for one refusal sentence, so a caller can fix every
+/// problem in one retry. The text rules carry their own ids; the sentences of
+/// `pr::body_rules` are matched by what they name.
+pub fn classify(message: &str) -> (&'static str, &'static str) {
+    let m = message.to_lowercase();
+    let title = m.contains("pr title") || m.contains("commit title") || m.starts_with("title");
+    let place = if title {
+        "title"
+    } else if m.contains("commit") {
+        "commit"
+    } else {
+        "body"
+    };
+    let rule = if m.contains("pr body must start")
+        || m.contains("section ##")
+        || m.contains("not in the template")
+    {
+        "template"
+    } else if m.contains("characters, the limit") {
+        "title-length"
+    } else if m.contains("conventional commit title") {
+        "title-format"
+    } else if m.contains("attribution") {
+        "attribution"
+    } else if m.contains("em dash") || m.contains("en dash") {
+        "dash"
+    } else if m.contains("curly quote") || m.contains("banned word") || m.contains("contrast") {
+        "prose"
+    } else if m.contains("commit type check") {
+        "commit-type"
+    } else if m.contains("merge commit") || m.contains("merge-commit") {
+        "merge-commit"
+    } else if m.contains("something is staged") {
+        "staged"
+    } else if m.contains("ticket") && m.contains("scope") {
+        "ticket-scope"
+    } else if m.contains("ticket") {
+        "ticket-line"
+    } else if m.contains("issue") {
+        "issue"
+    } else if m.contains("characters") || m.contains("long") || m.contains("length") {
+        "body-length"
+    } else {
+        "rule"
+    };
+    (rule, place)
+}
+
+/// The refusal as JSON: `verdict`, `problems` with rule ids, `exit_code`.
+pub fn failure_json(f: &Failure) -> serde_json::Value {
+    let verdict = match f.code {
+        exit::CONFLICT => "CONFLICT",
+        exit::NOTHING => "NOTHING_TO_DO",
+        exit::REFUSED => "REFUSED",
+        _ => "FAILED",
+    };
+    let sentences: Vec<&String> = if f.details.is_empty() {
+        vec![&f.message]
+    } else {
+        f.details.iter().collect()
+    };
+    let problems: Vec<serde_json::Value> = sentences
+        .into_iter()
+        .map(|s| {
+            let (rule, place) = classify(s);
+            serde_json::json!({"rule": rule, "where": place, "message": s})
+        })
+        .collect();
+    serde_json::json!({
+        "verdict": verdict, "error": f.message, "details": f.details,
+        "problems": problems, "warnings": [], "exit_code": f.code,
+    })
 }
 
 fn refuse_all(problems: Vec<String>, what: &str) -> Failure {
@@ -489,8 +578,33 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
             format!("{branch} is the default or a protected branch; deliver from a feature branch"),
         ));
     }
-    let problems = text_problems(opts);
+    let mut problems = text_problems(opts);
     if !problems.is_empty() {
+        // List the repo rule problems too, so one retry fixes everything.
+        let mut subjects: Vec<String> = opts
+            .message
+            .iter()
+            .map(|m| m.lines().next().unwrap_or("").to_string())
+            .collect();
+        let range = format!("origin/{default}..HEAD");
+        subjects.extend(
+            sys.git_out(&["log", "--format=%s", &range])
+                .unwrap_or_default()
+                .lines()
+                .map(String::from),
+        );
+        let base = opts.base.clone().unwrap_or_else(|| default.clone());
+        let mut ignored = Vec::new();
+        problems.extend(rule_blocks(
+            opts,
+            opts.title.as_deref(),
+            opts.body.as_deref(),
+            &branch,
+            &subjects,
+            &base,
+            &default,
+            &mut ignored,
+        ));
         return Err(refuse_all(
             problems,
             "the PR title or body breaks a text rule",
@@ -624,6 +738,7 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
         existing.as_ref(),
         &messages,
     )?;
+    report.warnings = planned.warnings.clone();
 
     // 4. Commit.
     let signed = signing_flag(&sys);
@@ -648,7 +763,7 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
         let message = opts.message.as_deref().ok_or_else(|| {
             fail(
                 exit::REFUSED,
-                "something is staged but no commit message was given",
+                "something is staged but no commit message was given (rule staged); stage nothing, or pass a message",
             )
         })?;
         if !opts.dry_run {
