@@ -1164,7 +1164,7 @@ Example: `playbook pr create --title "fix(x): y" --body-file /tmp/body.md`
 
 ### `playbook pr land`
 
-Wait for checks, arm auto-merge on the checked head, and wait for the merge
+Wait for checks, arm auto-merge, and wait for the merge
 
 Prints `LAND=<verdict>` and a JSON report. Exit codes: 0 merged, 3 a gate (draft, waiting on a base PR, head moved, review required, changes requested, needs a rebase), 6 a check failed or the PR closed, 7 still waiting (call again with `--settle 0`), 8 auto-merge did not queue. Never uses `--admin` and never deletes the branch.
 

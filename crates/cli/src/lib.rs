@@ -1597,7 +1597,7 @@ pub enum PrCommand {
         #[arg(long, default_value_t = 20)]
         interval: u64,
     },
-    /// Wait for checks, arm auto-merge on the checked head, and wait for the merge
+    /// Wait for checks, arm auto-merge, and wait for the merge
     ///
     /// Prints `LAND=<verdict>` and a JSON report. Exit codes: 0 merged, 3 a gate
     /// (draft, waiting on a base PR, head moved, review required, changes
