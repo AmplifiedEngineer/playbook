@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The pbtop picture in `docs/images/pbtop-month.svg`, drawn from the real
-//! view with the real default theme, so its colors cannot drift. The test
-//! renders the monthly view with sample data and compares it with the
+//! The pbtop pictures under `docs/images`, drawn from the real view with the
+//! real theme, so their colors cannot drift. Each `Shot` names a picture,
+//! its theme, its range and how to set up the app. The test renders every
+//! shot with sample data and a fixed clock, and compares it with the
 //! committed file. After an intended change, rewrite the file with
 //! `UPDATE_SNAPSHOTS=1 cargo test -p playbook-telemetry --lib tui::screenshot`
 //! and review the diff.
@@ -40,16 +41,40 @@ struct Ground {
 /// One run of same-styled text on a row: first cell, cell count, fill, text, bold.
 type Run = Option<(u16, u16, String, String, bool)>;
 
-fn month_buffer() -> (Buffer, Ground) {
+/// One picture: the file path under `docs/images`, the theme and range to
+/// draw, the text for screen readers, and a step that sets the public `App`
+/// fields to reach the view.
+struct Shot {
+    file: &'static str,
+    label: &'static str,
+    theme: Theme,
+    range: Range,
+    setup: fn(&mut App),
+}
+
+fn no_setup(_: &mut App) {}
+
+const SHOTS: &[Shot] = &[Shot {
+    file: "pbtop-month.svg",
+    label: "pbtop monthly charts view with sample data",
+    theme: Theme::Standard,
+    range: Range::CurrentMonth,
+    setup: no_setup,
+}];
+
+/// The sample data comes only from `fixture_at` and the fixed clock `NOW`, in
+/// UTC. It reads no environment, user name or store.
+fn buffer(shot: &Shot) -> (Buffer, Ground) {
     crate::tz::set(crate::tz::Zone::Utc);
     let events = fixture_at(NOW);
     let live = live_view(&events, &events, &events, NOW);
-    let mut app = App::new(Range::CurrentMonth);
-    app.theme = Theme::Standard;
-    app.data = Some(Data::build(&events, live, NOW, Range::CurrentMonth, ""));
+    let mut app = App::new(shot.range);
+    app.theme = shot.theme;
+    app.data = Some(Data::build(&events, live, NOW, shot.range, ""));
+    (shot.setup)(&mut app);
     let mut terminal = Terminal::new(TestBackend::new(COLS, ROWS)).unwrap();
     terminal.draw(|f| render(f, &app)).unwrap();
-    let pal = Theme::Standard.palette(ColorDepth::True);
+    let pal = shot.theme.palette(ColorDepth::True);
     let ground = Ground {
         bg: hex(pal.color(pal.bg), "#000000"),
         fg: hex(pal.color(pal.fg), "#cccccc"),
@@ -100,7 +125,7 @@ fn escape(text: &str) -> String {
 fn flush(run: &mut Run, top: f64, out: &mut String) {
     if let Some((x, cells, fill, body, bold)) = run.take() {
         let weight = if bold { " font-weight=\"700\"" } else { "" };
-        let _ = writeln!(
+        let _ = write!(
             out,
             "<text x=\"{:.1}\" y=\"{:.1}\" fill=\"{fill}\" textLength=\"{:.1}\" \
              lengthAdjust=\"spacingAndGlyphs\"{weight}>{}</text>",
@@ -118,7 +143,7 @@ fn rect(out: &mut String, x: u16, top: f64, cells: u16, part: (u8, u8, u8, u8), 
     let (l, t, w, h) = part;
     let unit_w = CELL_W / 8.0;
     let unit_h = CELL_H / 8.0;
-    let _ = writeln!(
+    let _ = write!(
         out,
         "<rect x=\"{:.1}\" y=\"{:.1}\" width=\"{:.1}\" height=\"{:.1}\" fill=\"{fill}\"/>",
         MARGIN + f64::from(x) * CELL_W + f64::from(l) * unit_w,
@@ -168,7 +193,16 @@ fn render_row(buf: &Buffer, y: u16, ground: &Ground, out: &mut String) {
     flush(&mut run, top, out);
 }
 
-fn render_svg(buf: &Buffer, ground: &Ground) -> String {
+/// A row's elements share one line; an empty row writes nothing.
+fn render_line(buf: &Buffer, y: u16, ground: &Ground, out: &mut String) {
+    let start = out.len();
+    render_row(buf, y, ground, out);
+    if out.len() > start {
+        out.push('\n');
+    }
+}
+
+fn render_svg(buf: &Buffer, ground: &Ground, label: &str) -> String {
     let width = f64::from(COLS) * CELL_W + 2.0 * MARGIN;
     let height = f64::from(ROWS) * CELL_H + 2.0 * MARGIN;
     let mut out = String::new();
@@ -176,7 +210,7 @@ fn render_svg(buf: &Buffer, ground: &Ground) -> String {
         out,
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" \
          viewBox=\"0 0 {width} {height}\" role=\"img\" \
-         aria-label=\"pbtop monthly charts view with sample data\">"
+         aria-label=\"{label}\">"
     );
     let _ = writeln!(
         out,
@@ -189,30 +223,57 @@ fn render_svg(buf: &Buffer, ground: &Ground) -> String {
          xml:space=\"preserve\">"
     );
     for y in 0..ROWS {
-        render_row(buf, y, ground, &mut out);
+        render_line(buf, y, ground, &mut out);
     }
     out.push_str("</g>\n</svg>\n");
     out
 }
 
+fn image_path(shot: &Shot) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../docs/images")
+        .join(shot.file)
+}
+
 #[test]
-fn the_month_picture_matches_the_committed_svg() {
+fn every_picture_matches_its_committed_svg() {
+    for shot in SHOTS {
+        // Arrange
+        let path = image_path(shot);
+        let (buf, ground) = buffer(shot);
+
+        // Act
+        let svg = render_svg(&buf, &ground, shot.label);
+
+        // Assert
+        if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
+            std::fs::write(&path, &svg).unwrap();
+            continue;
+        }
+        let want = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("missing {}: {e}", path.display()));
+        assert_eq!(
+            svg, want,
+            "docs/images/{} is out of date; rerun with UPDATE_SNAPSHOTS=1 if intended",
+            shot.file
+        );
+    }
+}
+
+#[test]
+fn a_picture_has_one_line_per_terminal_row() {
     // Arrange
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/images/pbtop-month.svg");
-    let (buf, ground) = month_buffer();
+    let shot = &SHOTS[0];
+    let (buf, ground) = buffer(shot);
 
     // Act
-    let svg = render_svg(&buf, &ground);
+    let svg = render_svg(&buf, &ground, shot.label);
 
     // Assert
-    if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
-        std::fs::write(&path, &svg).unwrap();
-        return;
-    }
-    let want = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("missing {}: {e}", path.display()));
-    assert_eq!(
-        svg, want,
-        "docs/images/pbtop-month.svg is out of date; rerun with UPDATE_SNAPSHOTS=1 if intended"
+    let lines = svg.lines().count();
+    assert!(
+        lines <= usize::from(ROWS) + 10,
+        "{lines} lines, the limit is {}",
+        ROWS + 10
     );
 }
