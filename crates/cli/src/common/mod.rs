@@ -12,6 +12,7 @@ pub mod config_hash;
 pub mod counter;
 pub mod emit;
 pub mod headless;
+pub mod inline_args;
 pub mod mode;
 pub mod par;
 pub mod paths;

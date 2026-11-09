@@ -248,28 +248,16 @@ fn is_protected(branch: &str, default: &str, protected: &[String]) -> bool {
 
 /// The nearest open PR branch that this branch is built on, else `None`.
 fn parent_branch(sys: &Sys, branch: &str) -> Option<String> {
-    let mut best: Option<(u64, String)> = None;
-    for (head, _) in pr::open_heads(sys) {
-        if head == branch {
-            continue;
-        }
-        let remote = format!("refs/remotes/origin/{head}");
-        if !sys
-            .git(&["merge-base", "--is-ancestor", &remote, "HEAD"])
-            .ok
-        {
-            continue;
-        }
-        let range = format!("{remote}..HEAD");
-        let n = sys
-            .git_out(&["rev-list", "--count", &range])
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(u64::MAX);
-        if best.as_ref().is_none_or(|(m, _)| n < *m) {
-            best = Some((n, head));
-        }
-    }
-    best.map(|(_, head)| head)
+    let heads: Vec<String> = pr::open_heads(sys).into_iter().map(|(h, _)| h).collect();
+    crate::pr::shared::nearest_parent(
+        &heads,
+        branch,
+        &|remote| sys.git(&["merge-base", "--is-ancestor", remote, "HEAD"]).ok,
+        &|range| {
+            sys.git_out(&["rev-list", "--count", range])
+                .and_then(|s| s.parse::<u64>().ok())
+        },
+    )
 }
 
 fn signing_flag(sys: &Sys) -> bool {

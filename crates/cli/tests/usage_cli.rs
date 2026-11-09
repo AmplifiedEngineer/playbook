@@ -335,6 +335,19 @@ fn the_week_start_key_moves_the_week_in_the_json_range() {
 }
 
 #[test]
+fn the_time_zone_setting_is_a_config_key_that_takes_local_or_utc() {
+    let home = Home::new("time-zone-key");
+
+    let set = home.run(&["config", "set", "--global", "usage.timeZone", "utc"]);
+    let get = home.run(&["config", "get", "usage.timeZone"]);
+    let bad = home.run(&["config", "set", "--global", "usage.timeZone", "mars"]);
+
+    assert!(set.status.success(), "{}", stderr(&set));
+    assert!(stdout(&get).contains("utc"));
+    assert!(!bad.status.success());
+}
+
+#[test]
 fn usage_status_says_not_running_and_prints_json_without_a_token() {
     let home = Home::new("status-none");
 

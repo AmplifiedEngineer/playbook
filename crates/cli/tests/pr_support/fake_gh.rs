@@ -16,6 +16,8 @@ pub(crate) struct FakeGh {
     pub reported_base: Option<String>,
     /// Makes `pr_view_base` fail with this message.
     pub base_view_error: Option<String>,
+    /// Head branches of open PRs, for stack detection.
+    pub heads: Vec<String>,
     pub calls: RefCell<Vec<String>>,
     pub created_base: RefCell<String>,
     /// The `draft` flag the last `pr_create` call received.
@@ -45,6 +47,10 @@ impl GhClient for FakeGh {
     fn pr_view(&self, _branch: &str) -> Result<Option<ExistingPr>, String> {
         self.calls.borrow_mut().push("pr_view".into());
         Ok(self.existing.clone())
+    }
+    fn open_pr_heads(&self) -> Vec<String> {
+        self.calls.borrow_mut().push("open_pr_heads".into());
+        self.heads.clone()
     }
     fn repo_default_branch(&self) -> Result<Option<String>, String> {
         self.calls.borrow_mut().push("repo_default_branch".into());
