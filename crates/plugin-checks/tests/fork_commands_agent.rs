@@ -23,11 +23,8 @@ fn frontmatter_value(file: &str, key: &str) -> Option<String> {
 }
 
 #[test]
-fn commit_and_push_and_create_pull_request_fork_into_the_prefixed_git_agent() {
-    for file in [
-        "commands/commit-and-push.md",
-        "commands/create-pull-request.md",
-    ] {
+fn create_pull_request_forks_into_the_prefixed_git_agent() {
+    for file in ["commands/create-pull-request.md"] {
         assert_eq!(
             frontmatter_value(file, "context").as_deref(),
             Some("fork"),
@@ -99,7 +96,7 @@ fn every_forked_command_opens_with_the_do_not_reinvoke_note() {
         checked += 1;
     }
     assert!(
-        checked >= 3,
-        "expected at least 3 forked commands, saw {checked}"
+        checked >= 2,
+        "expected at least 2 forked commands, saw {checked}"
     );
 }

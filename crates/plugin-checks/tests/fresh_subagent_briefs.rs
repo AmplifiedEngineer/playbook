@@ -41,7 +41,7 @@ fn plan_and_implement_name_the_agent_type() {
 
 #[test]
 fn forked_commands_use_a_prefixed_agent() {
-    for cmd in ["commit-and-push", "create-pull-request"] {
+    for cmd in ["create-pull-request"] {
         let s = read(&format!("commands/{cmd}.md"));
         let agent = s
             .lines()
