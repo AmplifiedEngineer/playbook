@@ -299,8 +299,6 @@ pub(crate) const META: &[Meta] = &[
     ro("pr ci-wait"),
     ro("pr comments"),
     free("pr create"),
-    free("pr finish"),
-    ro("pr finish context"),
     free("pr land"),
     ro("pr land-wait"),
     free("pr merge"),
@@ -309,6 +307,7 @@ pub(crate) const META: &[Meta] = &[
     free("pr review-triage"),
     ro("pr rules"),
     ro("pr stack"),
+    ro("pr status"),
     ro("prose").for_agents(),
     ro("prose check"),
     free("review")

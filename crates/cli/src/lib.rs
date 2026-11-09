@@ -1485,10 +1485,27 @@ pub enum PrCommand {
         #[arg(long)]
         issue: Option<String>,
     },
-    /// Run the steps of the finish flow
-    Finish {
-        #[command(subcommand)]
-        sub: FinishCommand,
+    /// Read what the finish flow needs to know about a PR, in one call
+    ///
+    /// One call for the finish flow. With `--json` it prints the shared
+    /// envelope (`ok`, `code`, `meaning`, `error`) around the report and
+    /// exits 0 even on failure: read `ok` and `code`. A usage error still
+    /// exits 2. Without `--json` it prints the same report as text and exits
+    /// with the code.
+    ///
+    /// Example: `playbook pr status 12 --json`
+    Status {
+        /// PR number
+        pr: u64,
+        /// Print the JSON envelope and exit 0
+        #[arg(long)]
+        json: bool,
+        /// Treat the run mode as this one, as `mode status --flag` does
+        #[arg(long, value_enum)]
+        flag: Option<ModeArg>,
+        /// Work in this directory instead of the current one
+        #[arg(long)]
+        dir: Option<String>,
     },
     /// Choose a quick or deep self-review for a PR
     ///
@@ -1654,33 +1671,6 @@ pub enum PrCommand {
         /// Refuse the merge unless the PR head is this commit
         #[arg(long)]
         match_head: Option<String>,
-    },
-}
-
-/// `playbook pr finish` subcommands.
-#[derive(Subcommand, Debug)]
-pub enum FinishCommand {
-    /// Read what the finish flow needs to know about a PR, in one call
-    ///
-    /// One call for the finish flow. With `--json` it prints the shared
-    /// envelope (`ok`, `code`, `meaning`, `error`) around the report and
-    /// exits 0 even on failure: read `ok` and `code`. A usage error still
-    /// exits 2. Without `--json` it prints the same report as text and exits
-    /// with the code.
-    ///
-    /// Example: `playbook pr finish context 12 --json`
-    Context {
-        /// PR number
-        pr: u64,
-        /// Print the JSON envelope and exit 0
-        #[arg(long)]
-        json: bool,
-        /// Treat the run mode as this one, as `mode status --flag` does
-        #[arg(long, value_enum)]
-        flag: Option<ModeArg>,
-        /// Work in this directory instead of the current one
-        #[arg(long)]
-        dir: Option<String>,
     },
 }
 

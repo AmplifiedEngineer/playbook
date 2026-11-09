@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook pr finish context`: the settings, run mode, PR state and review
+//! `playbook pr status`: the settings, run mode, PR state and review
 //! choice the finish flow needs, read in one call.
 //!
 //! The review choice follows the rules the finish skill applies today: `skip`
@@ -63,7 +63,7 @@ pub trait SettingsReader {
 }
 
 /// The `gh` reads the context needs.
-pub trait FinishGh {
+pub trait StatusGh {
     /// `gh pr view <pr> --json number,url,isDraft,headRefOid,baseRefName`.
     fn pr_view(&self, pr: u64) -> Result<String, String>;
     /// The numbers of the open PRs whose head branch is `branch`.
@@ -205,7 +205,7 @@ fn pr_object(raw: &str, stacked_on: Option<u64>) -> Result<Value, String> {
 pub fn collect(
     pr: u64,
     mode: Value,
-    gh: &dyn FinishGh,
+    gh: &dyn StatusGh,
     reader: &dyn SettingsReader,
     triager: &dyn Triager,
 ) -> Result<Value, Failure> {
@@ -284,7 +284,7 @@ fn source_label(source: config::Source) -> &'static str {
 /// The real `gh`.
 pub struct RealGh;
 
-impl FinishGh for RealGh {
+impl StatusGh for RealGh {
     fn pr_view(&self, pr: u64) -> Result<String, String> {
         crate::pr::shared::gh(&[
             "pr",
@@ -357,7 +357,7 @@ mod tests {
         stacked: Result<Vec<u64>, String>,
     }
 
-    impl FinishGh for Gh {
+    impl StatusGh for Gh {
         fn pr_view(&self, _pr: u64) -> Result<String, String> {
             self.view.clone()
         }

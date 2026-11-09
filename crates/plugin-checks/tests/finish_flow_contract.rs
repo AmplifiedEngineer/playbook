@@ -19,7 +19,7 @@ fn read(rel: &str) -> String {
 #[test]
 fn skill_uses_finish_and_land() {
     let s = read("SKILL.md");
-    assert!(s.contains("playbook pr finish context"));
+    assert!(s.contains("playbook pr status"));
     assert!(s.contains("playbook pr land"));
     assert!(s.lines().count() <= 60, "skill grew past 60 lines");
 }

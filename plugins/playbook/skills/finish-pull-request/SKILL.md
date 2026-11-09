@@ -10,11 +10,11 @@ Run this in the main session or in an agent that holds the `Agent` tool, right a
 
 Inputs: the PR number, its branch, whether `--ready` was passed, and an optional worktree path. With a worktree, run git as `git -C <worktree>`, pass the PR number to every tool, and never leave the worktree. If an input is missing, read it with `gh pr view`.
 
-If `playbook pr finish context` or `playbook pr land` is not in the session tool map, read `references/legacy-land.md` and follow it instead of this file.
+If `playbook pr status` or `playbook pr land` is not in the session tool map, read `references/legacy-land.md` and follow it instead of this file.
 
 ## 1. Read the context
 
-Run `playbook pr finish context <n> --json` (add `--flag auto` or `--flag ask` if the session started with one, and `--dir <worktree>` for a worktree). It always exits 0. Read `ok` first: when false, report `error` and stop. Otherwise it gives:
+Run `playbook pr status <n> --json` (add `--flag auto` or `--flag ask` if the session started with one, and `--dir <worktree>` for a worktree). It always exits 0. Read `ok` first: when false, report `error` and stop. Otherwise it gives:
 
 - `mode`: `ask` or `auto`.
 - `settings`: `autoReview.fix` and `autoMerge.enabled`, each with `value` and `error`. An error on either means `false`.

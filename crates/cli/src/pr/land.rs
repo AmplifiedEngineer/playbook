@@ -9,7 +9,7 @@
 //! The core takes a [`LandGh`] and a clock, so tests script `gh` and never
 //! sleep. It never passes `--admin` and never deletes the branch.
 //!
-//! Follow up: `pr finish context` (a separate change) defines its own trait
+//! Follow up: `pr status` (a separate change) defines its own trait
 //! for the same `gh` reads. When both have merged, fold them into one.
 
 use crate::pr::wait::latest_checks;

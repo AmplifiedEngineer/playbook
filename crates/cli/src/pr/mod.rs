@@ -6,7 +6,6 @@
 pub mod body_rules;
 pub mod comments;
 pub mod create;
-pub mod finish;
 pub mod guard;
 pub mod land;
 pub mod prepare;
@@ -17,6 +16,7 @@ pub mod stack;
 pub mod stack_context;
 pub mod stack_digest;
 pub mod stack_map;
+pub mod status;
 pub mod text_rules;
 pub mod triage;
 pub mod wait;

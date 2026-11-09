@@ -1127,7 +1127,7 @@ These are the mechanical steps behind `/playbook:create-pull-request`.
 
 Example: `playbook pr prepare --base main`
 
-Subcommands: `ci-wait`, `comments`, `create`, `finish`, `land`, `land-wait`, `merge`, `prepare`, `reply`, `review-triage`, `rules`, `stack`
+Subcommands: `ci-wait`, `comments`, `create`, `land`, `land-wait`, `merge`, `prepare`, `reply`, `review-triage`, `rules`, `stack`, `status`
 
 ### `playbook pr ci-wait`
 
@@ -1165,25 +1165,6 @@ Example: `playbook pr create --title "fix(x): y" --body-file /tmp/body.md`
 - `--dir <DIR>`: Work in this directory instead of the current one
 - `--ticket <TICKET>`: Ticket key for the branch (`none` turns the ticket rules off)
 - `--issue <ISSUE>`: GitHub issue number the PR handles
-
-### `playbook pr finish`
-
-Run the steps of the finish flow
-
-Subcommands: `context`
-
-### `playbook pr finish context`
-
-Read what the finish flow needs to know about a PR, in one call
-
-One call for the finish flow. With `--json` it prints the shared envelope (`ok`, `code`, `meaning`, `error`) around the report and exits 0 even on failure: read `ok` and `code`. A usage error still exits 2. Without `--json` it prints the same report as text and exits with the code.
-
-Example: `playbook pr finish context 12 --json`
-
-- `<PR>`: PR number
-- `--json`: Print the JSON envelope and exit 0
-- `--flag <FLAG>`: Treat the run mode as this one, as `mode status --flag` does (one of `ask`, `auto`)
-- `--dir <DIR>`: Work in this directory instead of the current one
 
 ### `playbook pr land`
 
@@ -1279,6 +1260,19 @@ Find the PRs stacked with a PR
 Reads the GitHub stack API, then falls back to the branch chain. Takes the arguments as one string (`#12 --json --max-prs 6 --max-lines 3000`). Prints a summary, or JSON with `--json`. `--context` writes one shared review context under `/tmp/pr-stack-<pr>`. `--digest` prints what the open PRs above the PR change, per file. `map --stack <file> --findings <file>` gives each finding to the PR whose diff holds the line and lists the findings a PR above changes under `fixed_above`.
 
 - `<ARGS>`: Command arguments as one string, such as `#12 --json`
+
+### `playbook pr status`
+
+Read what the finish flow needs to know about a PR, in one call
+
+One call for the finish flow. With `--json` it prints the shared envelope (`ok`, `code`, `meaning`, `error`) around the report and exits 0 even on failure: read `ok` and `code`. A usage error still exits 2. Without `--json` it prints the same report as text and exits with the code.
+
+Example: `playbook pr status 12 --json`
+
+- `<PR>`: PR number
+- `--json`: Print the JSON envelope and exit 0
+- `--flag <FLAG>`: Treat the run mode as this one, as `mode status --flag` does (one of `ask`, `auto`)
+- `--dir <DIR>`: Work in this directory instead of the current one
 
 ### `playbook prose`
 
