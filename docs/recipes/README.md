@@ -13,5 +13,7 @@ Short, copy-pasteable how-tos for the common tasks. CI runs the commands of a `r
 | Watch your Claude Code costs | [watch-costs](watch-costs.md) | run |
 | Check your Playbook setup | [check-your-setup](check-your-setup.md) | names |
 | Install Playbook without Homebrew | [install-without-homebrew](install-without-homebrew.md) | names |
+| Upgrade the binary and the plugin | [upgrade-playbook](upgrade-playbook.md) | names |
+| Install or update only the plugin | [sync-the-plugin](sync-the-plugin.md) | names |
 
 `read-a-document` is a `names` recipe because `pbdoc` is a separate binary that the docs checks do not build. `watch-costs` is a `run` recipe for the summary line. Its dashboard and status lines are `names`.

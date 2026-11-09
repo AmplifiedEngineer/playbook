@@ -23,7 +23,7 @@ With no Homebrew, run the install script. It checks the release checksum before 
 curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh | bash
 ```
 
-Nix, Windows and the plugin on its own are in the [install guide](guides/00-install.md).
+To add the plugin to a binary that did not come from Homebrew, run `playbook plugin install`. The [install guide](guides/00-install.md) covers Nix and Windows.
 
 ## 2. Run setup
 
@@ -79,7 +79,7 @@ For a small bug, `/playbook:fix` goes from a failing test to one pull request. F
 
 ## Keep it current
 
-On Homebrew, run `brew upgrade playbook`. For the other routes, see [Upgrade](guides/00-install.md#upgrade) in the install guide.
+On Homebrew, run `brew upgrade playbook`. For an install script install, run `playbook upgrade`, which updates the plugin too. See [Upgrade](guides/00-install.md#upgrade) in the install guide.
 
 ## Next
 

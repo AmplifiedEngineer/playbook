@@ -24,6 +24,12 @@ Install the binary with the install script, pin a version if you want one, then 
    playbook setup
    ```
 
+4. To add the Claude Code plugin without setup, run this with `claude` on your `PATH`.
+
+   ```bash
+   playbook plugin install
+   ```
+
 ## What you see
 
 The script downloads the release binary, checks it and puts it on your `PATH`. It asks whether to run `playbook setup`, so step 3 is for when you said no.

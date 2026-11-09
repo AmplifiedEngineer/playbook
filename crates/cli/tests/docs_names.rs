@@ -39,7 +39,7 @@ const LEGACY_EXTRA: &[&str] = &[];
 /// Names a change that is not on main yet will add. They count as legacy
 /// names, so they warn instead of failing. Delete an entry once the command
 /// exists, because a real command passes as a primary name.
-const PENDING_NAMES: &[&str] = &["plugin install", "plugin upgrade"];
+const PENDING_NAMES: &[&str] = &[];
 
 /// Pages in scope: files, or `dir/*.md` for the Markdown files in a folder.
 const SCOPE: &[&str] = &[

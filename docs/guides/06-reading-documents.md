@@ -1,6 +1,6 @@
 # Reading documents
 
-`playbook doc read <file>` reads a PDF or an Office file as Markdown text, on your machine and offline, so a session spends fewer tokens than it does on the raw file. On text PDFs the benchmark below measured 41 percent fewer tokens with every answer still correct. The converter comes with Playbook: `pbdoc` sits next to `playbook` on macOS and Linux, so there is nothing to install. Windows has no conversion, and the command and the hint are off there.
+`playbook doc read <file>` reads a PDF or an Office file as Markdown text, on your machine and offline, so a session spends fewer tokens than it does on the raw file. A benchmark of the converter's engine measured fewer tokens on text PDFs with every answer still correct (see the caveat below). The converter comes with Playbook: `pbdoc` sits next to `playbook` on macOS and Linux, so there is nothing to install. Windows has no conversion, and the command and the hint are off there.
 
 ## What it reads
 
@@ -26,7 +26,7 @@ Averages of 3 runs on synthetic documents, with a small model:
 | xlsx, 2 sheets | 18,072 | 12,175 | -33% |
 | docx, tracked deletion | 17,778 | 12,215 | -31% |
 
-Savings grow with document size. Across both PDFs the total was 41 percent lower, 49,081 tokens against 83,002, and all 18 answers were correct. A CSV costs slightly more as Markdown, so the hint skips CSV.
+Savings grow with document size. Across both PDFs the total was 41 percent lower in that run, 49,081 tokens against 83,002, and all 18 answers were correct. A CSV costs slightly more as Markdown, so the hint skips CSV.
 
 Read the caveat before you rely on these numbers. The benchmark used the npm `anydoc` package, the engine `pbdoc` builds on, not `pbdoc` itself. The documents were synthetic, 3 runs back each cell, and cost follows cache behavior, so treat the ratios as indicative. The docx run lost a tracked deletion, because the conversion drops deleted text. Read the original when that matters. Full tables and method are in the [benchmark](../internals/10-document-conversion-benchmark.md).
 
