@@ -357,7 +357,13 @@ fn install_paths(claude_home: &Path, cwd: &Path) -> Vec<PathBuf> {
     let found = crate::common::plugin_state::plugin_keys()
         .iter()
         .find_map(|key| crate::common::plugin_state::installed_entry_at(claude_home, key));
-    let entries: Vec<serde_json::Value> = match found {
+    ranked_install_paths(found, cwd)
+}
+
+/// [`install_paths`] for one `installed_plugins.json` entry, so a caller that
+/// follows another key ranks the installs the same way.
+pub(crate) fn ranked_install_paths(entry: Option<serde_json::Value>, cwd: &Path) -> Vec<PathBuf> {
+    let entries: Vec<serde_json::Value> = match entry {
         Some(serde_json::Value::Array(list)) => list,
         Some(obj @ serde_json::Value::Object(_)) => vec![obj],
         _ => return Vec::new(),
