@@ -119,7 +119,7 @@ The app secrets and their guards:
 
 A published release is not deleted and its tag is not moved, because installs and the tap may already point at them. To pull a bad release:
 
-1. Mark it as a pre-release, so it stops being the latest: `gh release edit vX.Y.Z --prerelease --latest=false`. Then mark the previous release as the latest with `gh release edit vA.B.C --latest`. `install.sh` and `playbook update` read the latest release.
+1. Mark it as a pre-release, so it stops being the latest: `gh release edit vX.Y.Z --prerelease --latest=false`. Then mark the previous release as the latest with `gh release edit vA.B.C --latest`. `install.sh` and `playbook upgrade` read the latest release.
 2. Add a warning at the top of its notes, saying what is wrong and which version to use. `--notes-file` replaces the whole body, so start from the current notes: `gh release view vX.Y.Z --json body --jq .body > notes.md`, add the warning at the top of `notes.md`, then `gh release edit vX.Y.Z --notes-file notes.md`.
 3. Move the plugin back: open a pull request in `amplifiedengineer/marketplace` that sets the `ref` of the `playbook` entry to `vA.B.C` and `metadata.version` to `A.B.C`. New installs then get the previous plugin. Claude Code never installs a lower plugin version over an installed one, so users who already updated keep the bad plugin until the next patch.
 4. Move the formulas back: in `amplifiedengineer/homebrew-tap`, run `SOURCE_REPO=playbook TAG_PREFIX=v .github/scripts/bump-formula.sh A.B.C Formula/<formula>.rb` for `playbook` and `pbtop`, and open a pull request with the result.
@@ -148,7 +148,7 @@ The Homebrew tap maps each formula to its asset.
 
 `pbsync`, the opt-in usage sync helper, ships in its own archive and installs only with the `playbook` formula in the tap, which adds it as a `resource "pbsync"`. There is no `pbsync` formula. The `formulas` job fails when the tap's `Formula/playbook.rb` has no `resource "pbsync"`, so merge that tap change before the release that adds the archives.
 
-`install.sh` and `playbook update` install `pbsync` beside `playbook` the same way as `pbdoc`: the same download, SHA256 check, attestation check and atomic swap, with the old file kept as `pbsync.<version>.bak`. `playbook uninstall` removes it. A release without a `pbsync` archive, or a failed `pbsync` update, only warns and never fails the `playbook` install or update, because sync is optional and off by default. When the version of `playbook` is unchanged, `playbook update` still installs a missing or older `pbsync`.
+`install.sh` and `playbook upgrade` install `pbsync` beside `playbook` the same way as `pbdoc`: the same download, SHA256 check, attestation check and atomic swap, with the old file kept as `pbsync.<version>.bak`. `playbook uninstall` removes it. A release without a `pbsync` archive, or a failed `pbsync` update, only warns and never fails the `playbook` install or update, because sync is optional and off by default. When the version of `playbook` is unchanged, `playbook upgrade` still installs a missing or older `pbsync`.
 
 ### pbdoc
 
@@ -158,7 +158,7 @@ Release checklist for the release that adds `pbdoc`: the tap pull request that a
 
 ### Raw asset names
 
-`install.sh`, `playbook update` and tools that read the release by name, such as `cargo binstall` and mise, depend on the raw `playbook-<version>-<target>` name. Those two tools are not a supported channel and no job installs with them.
+`install.sh`, `playbook upgrade` and tools that read the release by name, such as `cargo binstall` and mise, depend on the raw `playbook-<version>-<target>` name. Those two tools are not a supported channel and no job installs with them.
 
 - `[package.metadata.binstall]` in `crates/cli/Cargo.toml` holds the URL template.
 - `scripts/asset-names.test.sh` expands the template for every target of the build matrix and fails when it differs from the name `release.yml` gives the asset.

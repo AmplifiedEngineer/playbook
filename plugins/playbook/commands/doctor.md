@@ -58,7 +58,7 @@ and stop.
      `minBinaryVersion` from `plugin.json` metadata, the X.Y.0 of its line. Otherwise it warns with
      one fix command. A binary below `minBinaryVersion` or a plugin on a newer
      minor line gets the binary upgrade (`brew upgrade playbook` when the
-     binary path resolves to Homebrew, else `playbook update`). A plugin on an
+     binary path resolves to Homebrew, else `playbook upgrade`). A plugin on an
      older minor line gets `claude plugin update` with the id that is listed (`playbook@amplifiedengineer`, or `playbook@pragmatic-engineer` on an install that kept the old name). The
      plugin is found the same way as `playbook path plugin-root`, with
      `PLAYBOOK_PLUGIN_DIR` first.
@@ -81,7 +81,7 @@ and stop.
    After an upgrade, `playbook migrate` (binary 0.27.0 or later) brings
    playbook's own files up to date, and `playbook doctor --fix` runs the same
    step. `--status` and `--dry-run` show what is pending and write nothing.
-   `playbook update` runs it and prints the breaking changes of the new
+   `playbook upgrade` runs it and prints the breaking changes of the new
    release. The install script does the same with a terminal or `--yes`,
    unless `--no-init` is set. After `brew upgrade`, or to see the breaking
    changes of releases you skipped, read the release pages on GitHub.

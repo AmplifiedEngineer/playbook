@@ -26,11 +26,11 @@ const UNKNOWN: &str = "unknown";
 
 /// Shown when no converter is found.
 pub const INSTALL_HINT: &str = "the bundled converter pbdoc is missing next to the playbook \
-binary. Reinstall playbook with install.sh or `brew reinstall playbook`, or run `playbook update`.";
+binary. Reinstall playbook with install.sh or `brew reinstall playbook`, or run `playbook upgrade`.";
 
 /// Shown when a bundled converter exits 2 (it rejected its arguments).
 pub const OUT_OF_DATE_MESSAGE: &str =
-    "the bundled converter pbdoc is out of date for this playbook. Run `playbook update`.";
+    "the bundled converter pbdoc is out of date for this playbook. Run `playbook upgrade`.";
 
 pub const STATUS_BUNDLED_PREFIX: &str = "converter: pbdoc (bundled) at ";
 pub const STATUS_VERSION_PREFIX: &str = "version: pbdoc ";
@@ -72,7 +72,7 @@ pub fn pbdoc_number(version_output: &str) -> &str {
 
 /// The status note for a bundled converter whose version is not playbook's.
 pub fn version_skew_note(pbdoc: &str, playbook: &str) -> String {
-    format!("note: pbdoc {pbdoc} does not match playbook {playbook}. Run playbook update.")
+    format!("note: pbdoc {pbdoc} does not match playbook {playbook}. Run playbook upgrade.")
 }
 
 /// Where a converter came from.

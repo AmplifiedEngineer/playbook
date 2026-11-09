@@ -7,7 +7,7 @@
 1. Check it: `playbook doc status`. It names the converter in use and its version.
 2. Nothing more to do: `docs.convert` defaults to `auto`. A Read of a whole PDF, or of a Word, PowerPoint, Excel, EPUB, RTF or OpenDocument file, gets one line that suggests `playbook doc read <file>`. The hook only suggests. It never changes the call and never blocks. Set `docs.convert` to `off` to stop the hint. See the [benchmark](../internals/10-document-conversion-benchmark.md).
 
-If `pbdoc` is missing, `playbook doc status` says so. Reinstall with `install.sh` or `brew reinstall playbook`, or run `playbook update`.
+If `pbdoc` is missing, `playbook doc status` says so. Reinstall with `install.sh` or `brew reinstall playbook`, or run `playbook upgrade`.
 
 The converter was once an npm package. If you installed it earlier, `npm uninstall --global @firecrawl/anydoc` removes it, because playbook now uses the bundled one first. To run a different `anydoc` anyway, set `docs.anydocPath`. That program wins over the bundled one, and playbook does not check that it works offline.
 

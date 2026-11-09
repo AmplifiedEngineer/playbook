@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook update`: fetch a release binary, verify it (SHA256SUMS, then the
+//! `playbook upgrade`: fetch a release binary, verify it (SHA256SUMS, then the
 //! build attestation), show its release notes, swap it in with a backup,
 //! then check PATH.
 //! Install.sh and this share one policy; see `verify`.
@@ -50,6 +50,71 @@ pub struct Env {
     pub root: PathBuf,
     /// Shows text to the user at once, before the swap: the release notes.
     pub announce: fn(&str),
+    /// Asks the user to confirm an upgrade, with the question as its text.
+    pub confirm: fn(&str) -> Reply,
+}
+
+/// What the user said to the confirmation of an upgrade.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reply {
+    Yes,
+    No,
+    /// Nobody could answer: stdin or stderr is not a terminal.
+    NoTerminal,
+}
+
+/// Asks `question` on the terminal. An empty line or anything but a yes
+/// counts as no, since an upgrade replaces the running binary.
+pub fn ask_on_terminal(question: &str) -> Reply {
+    use crate::ui::wizard::{parse_answer, Answer};
+    use std::io::{BufRead, IsTerminal, Write};
+    let terminal = crate::plugin_update::assumed_tty(true)
+        || (std::io::stdin().is_terminal() && std::io::stderr().is_terminal());
+    if !terminal {
+        return Reply::NoTerminal;
+    }
+    eprint!("{question}");
+    let _ = std::io::stderr().flush();
+    let mut line = String::new();
+    match std::io::stdin().lock().read_line(&mut line) {
+        Ok(n) if n > 0 && parse_answer(&line, false) == Answer::Yes => Reply::Yes,
+        _ => Reply::No,
+    }
+}
+
+/// How an upgrade run ended, as a stable word for `--json`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    /// `--list` printed the releases.
+    #[default]
+    Listed,
+    /// This binary is the latest release, or newer.
+    Current,
+    /// `--check` found a newer release.
+    Available,
+    /// A Homebrew install: the binary stays, and the output names the brew
+    /// command.
+    Homebrew,
+    /// A newer release exists and nobody could confirm it.
+    NoTerminal,
+    /// The user said no.
+    Declined,
+    /// The binary was replaced.
+    Upgraded,
+}
+
+impl Status {
+    pub fn word(self) -> &'static str {
+        match self {
+            Status::Listed => "listed",
+            Status::Current => "current",
+            Status::Available => "available",
+            Status::Homebrew => "homebrew",
+            Status::NoTerminal => "no-terminal",
+            Status::Declined => "declined",
+            Status::Upgraded => "upgraded",
+        }
+    }
 }
 
 impl Env {
@@ -72,6 +137,7 @@ impl Env {
             download_base: format!("https://github.com/{REPO}/releases/download"),
             root: crate::common::paths::playbook_root(),
             announce: |text| eprint!("{text}"),
+            confirm: ask_on_terminal,
         })
     }
 }
@@ -95,6 +161,40 @@ pub struct Outcome {
     /// the heal need not show the release again. False when only the link
     /// was shown.
     pub notes_shown: bool,
+    /// How the run ended.
+    pub status: Status,
+    /// The latest release the run found, when it looked.
+    pub latest: Option<String>,
+}
+
+/// The `--json` report of an upgrade run: the shared envelope with the
+/// versions, the status word, the output lines and the plugin steps. It
+/// exits 0 whatever the result, so a failure sets `ok` false and `error`.
+pub fn json_report(
+    result: &Result<Outcome, String>,
+    plugin: Option<&crate::plugin_update::Ensured>,
+) -> serde_json::Value {
+    let plugin_json = plugin.map(crate::plugin_update::Ensured::json);
+    match result {
+        Ok(o) => crate::json::envelope::wrap(
+            0,
+            "",
+            serde_json::json!({
+                "status": o.status.word(),
+                "current": env!("CARGO_PKG_VERSION"),
+                "installed": o.installed,
+                "latest": o.latest,
+                "lines": o.out,
+                "warnings": o.warnings,
+                "plugin": plugin_json,
+            }),
+        ),
+        Err(err) => crate::json::envelope::wrap(
+            1,
+            err,
+            serde_json::json!({ "current": env!("CARGO_PKG_VERSION"), "plugin": plugin_json }),
+        ),
+    }
 }
 
 /// The first release whose binary has `doctor --fix`; `migrate` comes in the
@@ -224,13 +324,13 @@ and replace the binary, or re-run install.sh."
 fn refusals(env: &Env) -> Result<(), String> {
     if env.windows {
         return Err(format!(
-            "playbook update does not support Windows yet. {}",
+            "playbook upgrade does not support Windows yet. {}",
             manual_steps()
         ));
     }
     if is_homebrew(&env.exe) {
         return Err(format!(
-            "{} is managed by Homebrew; update it there: brew upgrade playbook. Or install a \
+            "{} is managed by Homebrew; to change versions there, run: brew upgrade playbook. Or install a \
              standalone copy with install.sh and put it first on PATH.",
             env.exe.display()
         ));
@@ -468,11 +568,17 @@ pub fn run(
     let release = resolve::select(&found, opts.version.as_deref(), opts.pre)?;
     let version = release.version().to_string();
     let order = resolve::compare(&version, current);
+    o.latest = Some(version.clone());
 
     if opts.check {
+        o.status = if order.is_gt() {
+            Status::Available
+        } else {
+            Status::Current
+        };
         o.out.push(match order {
             std::cmp::Ordering::Greater => {
-                format!("update available: {current} -> {version} (run `playbook update`)")
+                format!("update available: {current} -> {version} (run `playbook upgrade`)")
             }
             _ => format!("playbook {current} is up to date (latest is {version})"),
         });
@@ -480,21 +586,50 @@ pub fn run(
     }
 
     if order.is_eq() {
+        o.status = Status::Current;
         o.out
             .push(format!("playbook {current} is already installed"));
         complete_helpers(&mut o, opts, env, fetcher, attest, &release.tag, &version);
         return Ok(o);
     }
     if order.is_lt() && opts.version.is_none() {
+        o.status = Status::Current;
         o.out.push(format!(
             "playbook {current} is newer than the latest release {version}; nothing to do"
         ));
         return Ok(o);
     }
 
+    if order.is_gt() && is_homebrew(&env.exe) {
+        o.status = Status::Homebrew;
+        o.out.push(format!(
+            "playbook {version} is available (you have {current}). Homebrew owns this install, so upgrade leaves the binary alone; run: brew upgrade playbook"
+        ));
+        return Ok(o);
+    }
     refusals(env)?;
     if env.auto_mode && !opts.yes {
-        return Err("auto mode is on and an update replaces the running binary; re-run with --yes to confirm".into());
+        return Err("auto mode is on and an upgrade replaces the running binary; re-run with --yes to confirm".into());
+    }
+    if !opts.yes {
+        let question = format!("Upgrade playbook {current} -> {version}? [y/N] ");
+        match (env.confirm)(&question) {
+            Reply::Yes => {}
+            Reply::No => {
+                o.status = Status::Declined;
+                o.out.push(format!(
+                    "playbook {current} was not upgraded; nothing changed"
+                ));
+                return Ok(o);
+            }
+            Reply::NoTerminal => {
+                o.status = Status::NoTerminal;
+                o.out.push(format!(
+                    "playbook {version} is available (you have {current}). There is no terminal to confirm in, so nothing changed; run: playbook upgrade --yes"
+                ));
+                return Ok(o);
+            }
+        }
     }
 
     let asset = resolve::asset_name(&version, &env.os, &env.arch)?;
@@ -540,6 +675,7 @@ pub fn run(
 
     let done = swap::install(&stage, &env.exe, current, &version, smoke)?;
     o.installed = Some(version.clone());
+    o.status = Status::Upgraded;
     report_swap(&mut o, SWAPPED_PLAYBOOK, &env.exe, current, &version, done);
     swap_helpers(
         &mut o,
@@ -595,6 +731,7 @@ mod tests {
             download_base: DL.into(),
             root: dir.join("root"),
             announce: announce_to_test,
+            confirm: |_| crate::update::Reply::Yes,
         }
     }
 
@@ -1043,12 +1180,63 @@ echo ran\n",
         assert_eq!(swap::run_version(&env.exe).unwrap(), "playbook 0.16.0");
     }
 
+    fn brew_env(tag: &str) -> Env {
+        let mut env = env_in(tag);
+        env.exe = scratch_dir(&format!("{tag}-cellar")).join("Cellar/playbook/0.14.0/bin/playbook");
+        env.confirm = |_| panic!("a Homebrew install must not ask");
+        env
+    }
+
     #[test]
-    fn a_homebrew_binary_is_refused_with_the_brew_command() {
-        let mut env = env_in("up-brew");
-        env.exe = scratch_dir("up-brew-cellar").join("Cellar/playbook/0.14.0/bin/playbook");
-        let err = run(
+    fn a_homebrew_binary_with_a_newer_release_gets_the_brew_hint_and_no_change() {
+        let env = brew_env("up-brew");
+        let out = run(
             &Options::default(),
+            &env,
+            &fixture(b"", b""),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+        assert_eq!(out.status, Status::Homebrew);
+        assert_eq!(out.latest.as_deref(), Some("0.17.0"));
+        assert_eq!(out.installed, None);
+        let text = out.out.join("\n");
+        assert!(
+            text.contains("0.17.0 is available (you have 0.16.0)"),
+            "{text}"
+        );
+        assert!(text.contains("Homebrew owns this install"), "{text}");
+        assert!(text.contains("brew upgrade playbook"), "{text}");
+        assert!(!env.exe.with_file_name("pbdoc").exists());
+    }
+
+    #[test]
+    fn a_homebrew_binary_that_is_current_reports_current() {
+        let mut env = brew_env("up-brew-current");
+        env.current_version = "0.17.0".into();
+        let out = run(
+            &Options::default(),
+            &env,
+            &fixture(b"", b""),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+        assert_eq!(out.status, Status::Current);
+    }
+
+    #[test]
+    fn a_homebrew_binary_asked_for_an_older_version_is_refused_with_the_brew_command() {
+        let env = brew_env("up-brew-older");
+        let mut env = env;
+        env.current_version = "0.18.0".into();
+        let opts = Options {
+            version: Some("0.17.0".into()),
+            ..Options::default()
+        };
+        let err = run(
+            &opts,
             &env,
             &fixture(b"", b""),
             &ok_attest(),
@@ -1056,7 +1244,173 @@ echo ran\n",
         )
         .unwrap_err();
         assert!(err.contains("brew upgrade playbook"), "{err}");
-        assert!(!env.exe.with_file_name("pbdoc").exists());
+    }
+
+    thread_local! {
+        static ASKED: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    fn asked() -> Vec<String> {
+        ASKED.with(|a| a.borrow_mut().drain(..).collect())
+    }
+
+    fn remember(question: &str) {
+        ASKED.with(|a| a.borrow_mut().push(question.to_string()));
+    }
+
+    #[test]
+    fn a_yes_to_the_question_installs_and_the_question_names_both_versions() {
+        let mut env = env_in("up-confirm-yes");
+        env.confirm = |q| {
+            remember(q);
+            Reply::Yes
+        };
+        let bin = script_bytes("0.17.0");
+        let out = run(
+            &Options::default(),
+            &env,
+            &fixture(&bin, &bin),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+        assert_eq!(out.status, Status::Upgraded);
+        assert_eq!(swap::run_version(&env.exe).unwrap(), "playbook 0.17.0");
+        assert_eq!(asked(), ["Upgrade playbook 0.16.0 -> 0.17.0? [y/N] "]);
+    }
+
+    #[test]
+    fn a_no_to_the_question_changes_nothing() {
+        let mut env = env_in("up-confirm-no");
+        env.confirm = |q| {
+            remember(q);
+            Reply::No
+        };
+        let bin = script_bytes("0.17.0");
+        let out = run(
+            &Options::default(),
+            &env,
+            &fixture(&bin, &bin),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+        assert_eq!(out.status, Status::Declined);
+        assert_eq!(out.installed, None);
+        assert!(out.out[0].contains("was not upgraded"), "{:?}", out.out);
+        assert_eq!(swap::run_version(&env.exe).unwrap(), "playbook 0.16.0");
+        assert!(!env.exe.with_file_name("playbook.0.16.0.bak").exists());
+        assert_eq!(asked().len(), 1);
+    }
+
+    #[test]
+    fn no_terminal_and_no_yes_prints_the_hint_and_changes_nothing() {
+        let mut env = env_in("up-confirm-none");
+        env.confirm = |_| Reply::NoTerminal;
+        let bin = script_bytes("0.17.0");
+        let out = run(
+            &Options::default(),
+            &env,
+            &fixture(&bin, &bin),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+        assert_eq!(out.status, Status::NoTerminal);
+        let text = out.out.join("\n");
+        assert!(
+            text.contains("0.17.0 is available (you have 0.16.0)"),
+            "{text}"
+        );
+        assert!(text.contains("playbook upgrade --yes"), "{text}");
+        assert_eq!(swap::run_version(&env.exe).unwrap(), "playbook 0.16.0");
+    }
+
+    #[test]
+    fn yes_skips_the_question() {
+        let mut env = env_in("up-confirm-skip");
+        env.confirm = |_| panic!("--yes must not ask");
+        let bin = script_bytes("0.17.0");
+        let opts = Options {
+            yes: true,
+            ..Options::default()
+        };
+        let out = run(
+            &opts,
+            &env,
+            &fixture(&bin, &bin),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+        assert_eq!(out.status, Status::Upgraded);
+    }
+
+    #[test]
+    fn a_current_binary_never_asks() {
+        let mut env = env_in("up-confirm-current");
+        env.current_version = "0.17.0".into();
+        env.confirm = |_| panic!("nothing to confirm");
+        let out = run(
+            &Options::default(),
+            &env,
+            &fixture(b"", b""),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+        assert_eq!(out.status, Status::Current);
+        assert_eq!(out.latest.as_deref(), Some("0.17.0"));
+    }
+
+    #[test]
+    fn check_reports_available_or_current_without_asking() {
+        let mut env = env_in("up-check-status");
+        env.confirm = |_| panic!("--check must not ask");
+        let opts = Options {
+            check: true,
+            ..Options::default()
+        };
+        let out = run(
+            &opts,
+            &env,
+            &fixture(b"", b""),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+        assert_eq!(out.status, Status::Available);
+        env.current_version = "0.17.0".into();
+        let out = run(
+            &opts,
+            &env,
+            &fixture(b"", b""),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+        assert_eq!(out.status, Status::Current);
+    }
+
+    #[test]
+    fn the_json_report_carries_the_envelope_the_status_and_the_plugin_steps() {
+        let outcome = Outcome {
+            status: Status::NoTerminal,
+            latest: Some("0.17.0".into()),
+            out: vec!["a line".into()],
+            ..Outcome::default()
+        };
+        let v = json_report(&Ok(outcome), None);
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["code"], 0);
+        assert_eq!(v["status"], "no-terminal");
+        assert_eq!(v["latest"], "0.17.0");
+        assert_eq!(v["lines"][0], "a line");
+        assert!(v["plugin"].is_null());
+        let v = json_report(&Err("no network".into()), None);
+        assert_eq!(v["ok"], false);
+        assert_eq!(v["code"], 1);
+        assert_eq!(v["error"], "no network");
     }
 
     const RELEASE: &str = "https://dl.test/v0.17.0";

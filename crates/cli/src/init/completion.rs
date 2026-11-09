@@ -29,7 +29,7 @@ pub const LEGACY_BLOCK_REST: [&str; 2] = [
 pub const LOADER: &str = ".local/share/playbook/completions.zsh";
 /// First line of the loader, which tells our file from a user's.
 pub const LOADER_HEADER: &str =
-    "# Written by playbook setup; playbook update rewrites it. Edits are lost.";
+    "# Written by playbook setup; playbook upgrade rewrites it. Edits are lost.";
 /// The loader after its header. It registers a stub that loads the real
 /// function on the first Tab, so shell startup pays nothing.
 pub const LOADER_BODY: [&str; 7] = [

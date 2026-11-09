@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook update` wiring through the real binary. Nothing here touches the
+//! `playbook upgrade` wiring through the real binary. Nothing here touches the
 //! network.
 
 #![cfg(unix)]
@@ -16,14 +16,72 @@ fn playbook() -> Command {
 }
 
 #[test]
-fn update_and_its_hidden_alias_share_one_help() {
-    for name in ["update", "upgrade"] {
+fn upgrade_and_its_hidden_update_alias_share_one_help() {
+    for name in ["upgrade", "update"] {
         let out = playbook().args([name, "--help"]).output().unwrap();
         let text = String::from_utf8_lossy(&out.stdout);
         assert!(out.status.success(), "{name} --help failed");
-        for flag in ["--check", "--list", "--pre", "--yes", "--no-plugin"] {
+        for flag in [
+            "--check",
+            "--list",
+            "--pre",
+            "--yes",
+            "--json",
+            "--no-plugin",
+        ] {
             assert!(text.contains(flag), "{name} help lacks {flag}: {text}");
         }
+    }
+}
+
+#[test]
+fn the_root_help_lists_upgrade_and_hides_update() {
+    let out = playbook().arg("--help").output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.lines().any(|l| l.trim_start().starts_with("upgrade ")),
+        "{text}"
+    );
+    assert!(
+        !text.lines().any(|l| l.trim_start().starts_with("update ")),
+        "{text}"
+    );
+}
+
+#[test]
+fn json_reports_a_refusal_in_the_envelope_for_both_names_without_a_warning_line() {
+    for name in ["upgrade", "update"] {
+        // Arrange
+        let home = std::env::temp_dir().join(format!(
+            "playbook-upgrade-json-{name}-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(home.join(".config/playbook/update.lock")).unwrap();
+
+        // Act
+        let out = playbook()
+            .args([name, "--yes", "--json"])
+            .env("HOME", &home)
+            .output()
+            .unwrap();
+
+        // Assert
+        assert!(out.status.success(), "{name}: json exits 0");
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v["ok"], false, "{v}");
+        assert_eq!(v["code"], 1, "{v}");
+        assert!(
+            v["error"]
+                .as_str()
+                .unwrap()
+                .contains("another playbook process is updating"),
+            "{v}"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains("alias") && !stderr.contains("deprecated"),
+            "{stderr}"
+        );
     }
 }
 

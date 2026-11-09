@@ -17,7 +17,7 @@ Only `Owned` migrations run on their own:
 - `playbook migrate` runs them, then prints what it did and what is left for you. `playbook doctor --fix` is the same step. `--status` and `--dry-run` show what stands and what would run, plus the same list, and write nothing.
 - The first command after an upgrade runs them once, before the command, and prints one notice on stderr. Hot paths skip this so they stay fast: hooks, the status line, `version` and the hidden `json` helpers. So do `usage`, which the session hooks start in the background, the commands that run their own heal (`migrate`, `doctor --fix`, `setup` or its old name `init`), `update`, `uninstall`, and `doctor` and `state`, which show the home as it is.
 - The `session-init` hook runs them once per session when the binary is newer than the record, and adds the list of what needs you to the session message.
-- `playbook update` runs the new binary's `migrate` after the swap. The install script runs it after an install when it has a terminal or `--yes`, and not with `--no-init`.
+- `playbook upgrade` runs the new binary's `migrate` after the swap. The install script runs it after an install when it has a terminal or `--yes`, and not with `--no-init`.
 
 `playbook setup` runs every migration, `Consent` ones included, because it asks first. Nothing else writes Claude Code settings or your shell files, with one exception: `playbook doctor --fix` adds the missing `attribution` keys (attribution OFF, the default) after a yes at a terminal ([ADR 0042](../adr/0042-attribution-off-in-setup.md)).
 
@@ -46,7 +46,7 @@ The session shows a new item in full once. After that it shows it at most once a
 - An item disappears as soon as it is fixed.
 - The plugin items read `installed_plugins.json` and the folder the session runs from. A plugin update clears them. A session on an old plugin folder says to start Claude Code again.
 
-A `playbook migrate` run, and `playbook update`, also run `claude plugin update` for the playbook plugin before the list. A plugin they updated is not on the list, and they say to restart Claude Code. When the plugin needs that update and no setup change is open, the list's last line names `playbook migrate`. `--dry-run` and `--status` do not update the plugin. `--no-plugin` or `update.plugin` set to `off` turns it off. A missing `claude` command or a failed update prints the command and does not change the exit code.
+A `playbook migrate` run, and `playbook upgrade`, also run `claude plugin update` for the playbook plugin before the list. A plugin they updated is not on the list, and they say to restart Claude Code. When the plugin needs that update and no setup change is open, the list's last line names `playbook migrate`. `--dry-run` and `--status` do not update the plugin. `--no-plugin` or `update.plugin` set to `off` turns it off. A missing `claude` command or a failed update prints the command and does not change the exit code.
 
 Two more touch points update the plugin ([ADR 0034, second 2026-10-19 amendment](../adr/0034-self-healing-upgrades.md#amendment-2026-10-19-second-the-touch-points-update-the-plugin)). `update.plugin` is `auto` by default, so they run unless you set it to `off`:
 

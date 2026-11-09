@@ -514,7 +514,7 @@ fn table() -> Vec<Case> {
         case("uninstall", &["uninstall", "--yes"]).pre(&["setup", "--yes"]).writes(),
         case("plugin install", &["plugin", "install"]).out("plugin: installed playbook@amplifiedengineer"),
         case("plugin upgrade", &["plugin", "upgrade"]).out("plugin: not installed; run: claude plugin marketplace add"),
-        case("update", &["update", "--check"]).code(1).err("could not read the release list"),
+        case("upgrade", &["upgrade", "--check"]).code(1).err("could not read the release list"),
         case("effort", &["effort"]).writes(),
         case("effort", &["effort", "high"]).grows(),
         case("usage", &["usage", "--summary"]).writes(),
