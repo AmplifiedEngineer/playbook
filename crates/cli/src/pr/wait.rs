@@ -7,7 +7,6 @@
 //! without a network or a sleep.
 
 use crate::common::proc::run_with_timeout;
-use crate::json::ghjson;
 use serde_json::Value;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -21,17 +20,73 @@ pub struct Counts {
     pub pending: usize,
     pub fail: usize,
     pub cancel: usize,
+    /// Cancelled runs that a later run of the same check replaced.
+    pub superseded: usize,
+}
+
+/// The checks of one read with each check reduced to its latest run.
+///
+/// Runs group by `(workflow, name)`. A group of several runs keeps the one
+/// with the latest `startedAt`, and the older ones count as superseded when
+/// they were cancelled, so a cancelled run that a later run replaced is not a
+/// failure. A group where any run has no `startedAt` cannot be ordered, so
+/// every run counts as it did before.
+pub fn latest_checks(json: &str) -> (Vec<Value>, usize) {
+    let Ok(Value::Array(all)) = serde_json::from_str::<Value>(json) else {
+        return (Vec::new(), 0);
+    };
+    let key = |c: &Value| {
+        let f = |k: &str| c.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+        (f("workflow"), f("name"))
+    };
+    let started = |c: &Value| c.get("startedAt").and_then(Value::as_str).map(String::from);
+    let mut groups: Vec<((String, String), Vec<Value>)> = Vec::new();
+    for check in all {
+        let k = key(&check);
+        match groups.iter_mut().find(|(g, _)| *g == k) {
+            Some((_, runs)) => runs.push(check),
+            None => groups.push((k, vec![check])),
+        }
+    }
+    let mut kept = Vec::new();
+    let mut superseded = 0;
+    for (_, runs) in groups {
+        if runs.len() == 1 || runs.iter().any(|r| started(r).is_none()) {
+            kept.extend(runs);
+            continue;
+        }
+        let Some(latest) = runs.iter().filter_map(started).max() else {
+            kept.extend(runs);
+            continue;
+        };
+        let mut chosen = false;
+        for run in runs {
+            let is_latest = started(&run).as_deref() == Some(latest.as_str()) && !chosen;
+            if is_latest {
+                chosen = true;
+                kept.push(run);
+            } else if run.get("bucket").and_then(Value::as_str) == Some("cancel") {
+                superseded += 1;
+            }
+        }
+    }
+    (kept, superseded)
 }
 
 impl Counts {
     pub fn from_json(json: &str) -> Counts {
-        let b = ghjson::bucket_counts(json, &["pending", "fail", "cancel"]);
-        let n = |i: usize| b.get(i).map_or(0, |(_, c)| *c);
+        let (kept, superseded) = latest_checks(json);
+        let n = |bucket: &str| {
+            kept.iter()
+                .filter(|c| c.get("bucket").and_then(Value::as_str) == Some(bucket))
+                .count()
+        };
         Counts {
-            total: ghjson::array_length(json),
-            pending: n(0),
-            fail: n(1),
-            cancel: n(2),
+            total: kept.len(),
+            pending: n("pending"),
+            fail: n("fail"),
+            cancel: n("cancel"),
+            superseded,
         }
     }
 }
@@ -66,8 +121,8 @@ pub fn ci_wait(
     loop {
         let c = Counts::from_json(&read());
         emit(format!(
-            "checks total={} pending={} fail={} cancel={}",
-            c.total, c.pending, c.fail, c.cancel
+            "checks total={} pending={} fail={} cancel={} superseded={}",
+            c.total, c.pending, c.fail, c.cancel, c.superseded
         ));
         if let Some(v) = ci_verdict(c) {
             return v;
@@ -153,7 +208,7 @@ pub fn read_checks(pr: &str, all: bool) -> String {
     if !all {
         args.push("--required");
     }
-    args.extend(["--json", "name,bucket,link"]);
+    args.extend(["--json", "name,bucket,link,startedAt,workflow"]);
     gh_stdout(&args)
         .filter(|t| serde_json::from_str::<Value>(t).is_ok())
         .unwrap_or_else(|| "[]".to_string())
@@ -228,6 +283,60 @@ mod tests {
         ci_verdict(Counts::from_json(&checks(buckets)))
     }
 
+    fn run(workflow: &str, bucket: &str, at: Option<&str>) -> Value {
+        let mut v = json!({"name": "build", "workflow": workflow, "bucket": bucket});
+        if let Some(at) = at {
+            v["startedAt"] = json!(at);
+        }
+        v
+    }
+
+    fn counts_of(runs: Vec<Value>) -> Counts {
+        Counts::from_json(&serde_json::to_string(&runs).unwrap())
+    }
+
+    #[test]
+    fn a_cancel_replaced_by_a_later_pass_is_superseded() {
+        let c = counts_of(vec![
+            run("ci", "cancel", Some("2026-01-01T00:00:01Z")),
+            run("ci", "pass", Some("2026-01-01T00:00:02Z")),
+        ]);
+        assert_eq!((c.total, c.cancel, c.superseded), (1, 0, 1));
+        assert_eq!(ci_verdict(c), Some("PASS"));
+    }
+
+    #[test]
+    fn a_cancel_after_a_pass_is_cancelled() {
+        let c = counts_of(vec![
+            run("ci", "pass", Some("2026-01-01T00:00:01Z")),
+            run("ci", "cancel", Some("2026-01-01T00:00:02Z")),
+        ]);
+        assert_eq!((c.total, c.cancel, c.superseded), (1, 1, 0));
+        assert_eq!(ci_verdict(c), Some("CANCELLED"));
+    }
+
+    #[test]
+    fn a_lone_cancel_is_cancelled() {
+        let c = counts_of(vec![run("ci", "cancel", Some("2026-01-01T00:00:01Z"))]);
+        assert_eq!(ci_verdict(c), Some("CANCELLED"));
+    }
+
+    #[test]
+    fn runs_without_a_start_time_keep_the_old_counting() {
+        let c = counts_of(vec![run("ci", "cancel", None), run("ci", "pass", None)]);
+        assert_eq!((c.total, c.cancel, c.superseded), (2, 1, 0));
+        assert_eq!(ci_verdict(c), Some("CANCELLED"));
+    }
+
+    #[test]
+    fn the_same_name_in_another_workflow_is_a_different_check() {
+        let c = counts_of(vec![
+            run("a", "cancel", Some("2026-01-01T00:00:01Z")),
+            run("b", "pass", Some("2026-01-01T00:00:02Z")),
+        ]);
+        assert_eq!((c.total, c.cancel), (2, 1));
+    }
+
     #[test]
     fn a_merge_pins_the_head_only_when_asked() {
         assert_eq!(merge_args("7", false, None), ["pr", "merge", "7", "--auto"]);
@@ -277,8 +386,8 @@ mod tests {
         assert_eq!(
             lines,
             vec![
-                "checks total=1 pending=1 fail=0 cancel=0",
-                "checks total=1 pending=0 fail=0 cancel=0"
+                "checks total=1 pending=1 fail=0 cancel=0 superseded=0",
+                "checks total=1 pending=0 fail=0 cancel=0 superseded=0"
             ]
         );
     }

@@ -1123,7 +1123,7 @@ These are the mechanical steps behind `/playbook:create-pull-request`.
 
 Example: `playbook pr prepare --base main`
 
-Subcommands: `ci-wait`, `comments`, `create`, `land-wait`, `merge`, `prepare`, `reply`, `review-triage`, `rules`, `stack`
+Subcommands: `ci-wait`, `comments`, `create`, `land`, `land-wait`, `merge`, `prepare`, `reply`, `review-triage`, `rules`, `stack`
 
 ### `playbook pr ci-wait`
 
@@ -1162,6 +1162,20 @@ Example: `playbook pr create --title "fix(x): y" --body-file /tmp/body.md`
 - `--ticket <TICKET>`: Ticket key for the branch (`none` turns the ticket rules off)
 - `--issue <ISSUE>`: GitHub issue number the PR handles
 
+### `playbook pr land`
+
+Wait for checks, arm auto-merge on the checked head, and wait for the merge
+
+Prints `LAND=<verdict>` and a JSON report. Exit codes: 0 merged, 3 a gate (draft, waiting on a base PR, head moved, review required, changes requested, needs a rebase), 6 a check failed or the PR closed, 7 still waiting (call again with `--settle 0`), 8 auto-merge did not queue. Never uses `--admin` and never deletes the branch.
+
+Example: `playbook pr land 12`
+
+- `<PR>`: PR number
+- `--timeout <TIMEOUT>`: Give up after this many seconds in total
+- `--interval <INTERVAL>`: Seconds between reads
+- `--settle <SETTLE>`: Seconds to wait for the first checks to appear (use 0 on a repeat call)
+- `--dir <DIR>`: Work in this directory instead of the current one
+
 ### `playbook pr land-wait`
 
 Wait for a PR to merge or hit a gate
@@ -1178,7 +1192,7 @@ Example: `playbook pr land-wait 12`
 
 Merge a PR with auto-merge, or as an admin squash
 
-Prints `merge_rc=<code>` (or `admin_rc=`) and then what `gh` said. Always exits 0, so the caller reads the code.
+Prints `merge_rc=<code> (or `admin_rc=`) and then what `gh` said. Always exits 0, so the caller reads the code.
 
 Example: `playbook pr merge 12 --admin`
 

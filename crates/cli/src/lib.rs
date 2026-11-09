@@ -1597,9 +1597,34 @@ pub enum PrCommand {
         #[arg(long, default_value_t = 20)]
         interval: u64,
     },
+    /// Wait for checks, arm auto-merge on the checked head, and wait for the merge
+    ///
+    /// Prints `LAND=<verdict>` and a JSON report. Exit codes: 0 merged, 3 a gate
+    /// (draft, waiting on a base PR, head moved, review required, changes
+    /// requested, needs a rebase), 6 a check failed or the PR closed, 7 still
+    /// waiting (call again with `--settle 0`), 8 auto-merge did not queue. Never
+    /// uses `--admin` and never deletes the branch.
+    ///
+    /// Example: `playbook pr land 12`
+    Land {
+        /// PR number
+        pr: String,
+        /// Give up after this many seconds in total
+        #[arg(long, default_value_t = 480)]
+        timeout: u64,
+        /// Seconds between reads
+        #[arg(long, default_value_t = 20)]
+        interval: u64,
+        /// Seconds to wait for the first checks to appear (use 0 on a repeat call)
+        #[arg(long, default_value_t = 120)]
+        settle: u64,
+        /// Work in this directory instead of the current one
+        #[arg(long)]
+        dir: Option<String>,
+    },
     /// Merge a PR with auto-merge, or as an admin squash
     ///
-    /// Prints `merge_rc=<code>` (or `admin_rc=`) and then what `gh` said.
+    /// Prints `merge_rc=<code> (or `admin_rc=`) and then what `gh` said.
     /// Always exits 0, so the caller reads the code.
     ///
     /// Example: `playbook pr merge 12 --admin`
