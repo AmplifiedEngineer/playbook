@@ -43,7 +43,6 @@ impl SqliteFake {
         let mut prepared = self.conn.prepare(sql).map_err(|e| e.to_string())?;
         let columns = prepared
             .column_names()
-            .iter()
             .map(|c| c.to_string())
             .collect();
         let binds = args.iter().map(to_sql);
