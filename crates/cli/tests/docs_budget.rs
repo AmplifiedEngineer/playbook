@@ -21,6 +21,8 @@ struct Limits {
     max_h2: Option<usize>,
     max_pictures: Option<usize>,
     max_badges: Option<usize>,
+    /// Most command lines in `bash`, `sh` and `console` blocks.
+    max_commands: Option<usize>,
 }
 
 const LIMITS: &[Limits] = &[
@@ -31,6 +33,7 @@ const LIMITS: &[Limits] = &[
         max_h2: Some(6),
         max_pictures: Some(1),
         max_badges: Some(5),
+        max_commands: None,
     },
     Limits {
         path: "docs/README.md",
@@ -39,6 +42,7 @@ const LIMITS: &[Limits] = &[
         max_h2: None,
         max_pictures: None,
         max_badges: None,
+        max_commands: None,
     },
     Limits {
         path: "docs/get-started.md",
@@ -47,6 +51,7 @@ const LIMITS: &[Limits] = &[
         max_h2: None,
         max_pictures: None,
         max_badges: None,
+        max_commands: None,
     },
     Limits {
         path: "docs/concepts.md",
@@ -55,6 +60,16 @@ const LIMITS: &[Limits] = &[
         max_h2: None,
         max_pictures: None,
         max_badges: None,
+        max_commands: None,
+    },
+    Limits {
+        path: "docs/recipes/*.md",
+        max_lines: None,
+        max_words: 250,
+        max_h2: None,
+        max_pictures: None,
+        max_badges: None,
+        max_commands: Some(6),
     },
 ];
 
@@ -215,6 +230,28 @@ fn count_badges(text: &str) -> usize {
     })
 }
 
+/// Command lines: the non-empty lines of `bash`, `sh` and `console` blocks,
+/// not counting comment lines.
+fn count_commands(text: &str) -> usize {
+    let mut open = false;
+    let mut shell = false;
+    let mut commands = 0;
+    for line in strip_comments(text).lines() {
+        let t = line.trim_start();
+        if is_fence(line) {
+            open = !open;
+            shell = open
+                && matches!(
+                    t.trim_start_matches(['`', '~']).trim(),
+                    "bash" | "sh" | "console"
+                );
+        } else if shell && !t.is_empty() && !t.starts_with('#') {
+            commands += 1;
+        }
+    }
+    commands
+}
+
 /// Every failed limit for one page, each naming the file, the measure, the
 /// value and the limit.
 fn check(name: &str, text: &str, limits: &Limits) -> Vec<String> {
@@ -247,6 +284,14 @@ fn check(name: &str, text: &str, limits: &Limits) -> Vec<String> {
             count_badges(text),
             max,
             "Keep the badge line short.",
+        );
+    }
+    if let Some(max) = limits.max_commands {
+        over(
+            "command lines",
+            count_commands(text),
+            max,
+            "Split the recipe.",
         );
     }
     bad
@@ -300,6 +345,7 @@ mod synthetic {
         max_h2: None,
         max_pictures: None,
         max_badges: None,
+        max_commands: None,
     };
 
     fn lines_limit(n: usize) -> Limits {
@@ -410,6 +456,25 @@ mod synthetic {
         let bad = check("X.md", text, &l);
         assert_eq!(bad.len(), 1);
         assert!(bad[0].contains("X.md has 2 pictures, the limit is 1"));
+    }
+
+    #[test]
+    fn six_command_lines_pass_and_seven_fail() {
+        let l = Limits {
+            max_commands: Some(6),
+            ..ANY
+        };
+        let block = |n: usize| format!("```bash\n{}```\n", "echo hi\n".repeat(n));
+        assert!(check("X.md", &block(6), &l).is_empty());
+        let bad = check("X.md", &block(7), &l);
+        assert_eq!(bad.len(), 1);
+        assert!(bad[0].contains("X.md has 7 command lines, the limit is 6"));
+    }
+
+    #[test]
+    fn comments_blank_lines_and_other_blocks_are_not_commands() {
+        let text = "```bash\n# expect: ok\n\necho hi\n```\n```text\noutput\n```\n   ```sh\n   ls\n   ```\n";
+        assert_eq!(count_commands(text), 2);
     }
 
     #[test]
