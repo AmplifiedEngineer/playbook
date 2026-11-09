@@ -1,4 +1,4 @@
-//! Shipping costs for the demo shop.
+// SPDX-License-Identifier: Apache-2.0
 
 /// A parcel to ship.
 pub struct Parcel {

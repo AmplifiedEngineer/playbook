@@ -41,4 +41,4 @@ Each result is a file, a line range, a kind and the signature. `context` prints 
 
 ## Next
 
-- [Code search](../code-search.md): all eight commands and their limits.
+- [Code index evaluation](../internals/20-code-index-evaluation.md): how the index did against plain Grep.

@@ -1,4 +1,4 @@
-"""Checkout totals for the demo shop."""
+# SPDX-License-Identifier: Apache-2.0
 
 
 class Cart:
