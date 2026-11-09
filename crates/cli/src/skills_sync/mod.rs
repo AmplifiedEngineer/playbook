@@ -101,7 +101,7 @@ fn claim_due(claim: Option<&str>, version: &str, now: u64) -> bool {
     let age = std::time::Duration::from_secs(now.saturating_sub(marker.at));
     match marker.state {
         State::Done => false,
-        State::Failed => age > FAILED_RETRY,
+        State::Failed | State::Behind => age > FAILED_RETRY,
         State::Running => age > RUNNING_STALE,
     }
 }

@@ -300,7 +300,6 @@ pub fn refusal_json(verdict: &str, reason: &str, mode: &str) -> serde_json::Valu
 /// The whole `--json` run: parse the inline text, check the worktree, move
 /// into it, gather the facts and render them. Returns the report and the exit
 /// code plain mode would use (0 for READY and PR_EXISTS, 1 for a refusal).
-/// The report sits in the shared envelope; the caller exits 0 with `--json`.
 pub fn run_json(
     gh: &dyn GhClient,
     args_text: Option<&str>,

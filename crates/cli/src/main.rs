@@ -1446,6 +1446,12 @@ fn real_main() {
                     admin,
                     match_head,
                 } => println!("{}", pr::wait::merge(&pr, admin, match_head.as_deref())),
+                PrCommand::FinishContext {
+                    pr,
+                    json,
+                    flag,
+                    dir,
+                } => std::process::exit(run_finish_context(pr, json, flag, dir.as_deref())),
                 PrCommand::ReviewTriage { pr, base, dir } => {
                     enter_dir("pr review-triage", dir.as_deref());
                     let outcome = match pr::triage::collect(pr, base.as_deref()) {
@@ -1966,11 +1972,15 @@ fn real_main() {
             ticket,
             issue,
             json,
+            branch,
+            auto,
         } => {
             let die = |message: String| -> ! {
                 if json {
-                    let v = serde_json::json!({
-                        "error": message, "details": [], "exit_code": deliver::exit::REFUSED
+                    let v = deliver::failure_json(&deliver::Failure {
+                        code: deliver::exit::REFUSED,
+                        message,
+                        details: Vec::new(),
                     });
                     println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
                 } else {
@@ -1980,6 +1990,7 @@ fn real_main() {
             };
             let read = |file: Option<String>, text: Option<String>| -> Option<String> {
                 match file {
+                    Some(f) if f == "-" => Some(read_stdin_to_string()),
                     Some(f) => match std::fs::read_to_string(&f) {
                         Ok(t) => Some(t),
                         Err(e) => die(format!("could not read {f}: {e}")),
@@ -1987,6 +1998,9 @@ fn real_main() {
                     None => text,
                 }
             };
+            if message_file.as_deref() == Some("-") && body_file.as_deref() == Some("-") {
+                die("--message-file and --body-file cannot both read stdin".into());
+            }
             let message = read(message_file, message);
             let body = read(body_file, body);
             let dir = dir.map(|d| absolute_from_cwd(&d));
@@ -1996,9 +2010,26 @@ fn real_main() {
                 }
             }
             let cwd = std::env::current_dir().unwrap_or_default();
+            if let Some(expected) = &branch {
+                if let Err(why) = common::inline_args::guard(&cwd, expected) {
+                    if json {
+                        let mut v = deliver::failure_json(&deliver::Failure {
+                            code: deliver::exit::REFUSED,
+                            message: why,
+                            details: Vec::new(),
+                        });
+                        v["verdict"] = "WRONG_DIRECTORY".into();
+                        println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+                    } else {
+                        eprintln!("deliver: WRONG_DIRECTORY: {why}");
+                    }
+                    std::process::exit(deliver::exit::REFUSED);
+                }
+            }
             let slug = common::repo_slug();
             let repo_slug = (!slug.is_empty()).then_some(slug.as_str());
             let mut opts = deliver::Options::new(cwd);
+            opts.auto = auto;
             opts.stage = if all {
                 deliver::Stage::All
             } else if update {
@@ -2037,9 +2068,7 @@ fn real_main() {
                 }
                 Err(f) => {
                     if json {
-                        let v = serde_json::json!({
-                            "error": f.message, "details": f.details, "exit_code": f.code
-                        });
+                        let v = deliver::failure_json(&f);
                         println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
                     } else {
                         eprintln!("deliver: {}", f.message);
@@ -2971,6 +3000,49 @@ fn absolute_from_cwd(path: &str) -> String {
     std::env::current_dir()
         .map(|cwd| cwd.join(p).to_string_lossy().into_owned())
         .unwrap_or_else(|_| path.to_string())
+}
+
+/// `pr finish-context`: prints the report and returns the exit code. With
+/// `json` every outcome goes through the envelope and the code is 0.
+fn run_finish_context(pr: u64, json: bool, flag: Option<ModeArg>, dir: Option<&str>) -> i32 {
+    use pr::finish_context as fc;
+    let home = common::home_dir();
+    let mode_flag = flag.map(|arg| match arg {
+        ModeArg::Ask => common::mode::Mode::Ask,
+        ModeArg::Auto => common::mode::Mode::Auto,
+    });
+    let entered = match dir {
+        Some(dir) => pr::shared::enter_dir(dir).map_err(fc::Failure::bad_input),
+        None => Ok(()),
+    };
+    // The repo slug depends on the directory, so read it after entering --dir.
+    let slug = common::repo_slug();
+    let reader = fc::ConfigReader {
+        home: home.clone(),
+        repo_slug: Some(slug).filter(|s| !s.is_empty()),
+    };
+    let result = entered.and_then(|()| {
+        fc::collect(
+            pr,
+            mode::report(mode_flag),
+            &fc::RealGh,
+            &reader,
+            &fc::RealTriager,
+        )
+    });
+    if json {
+        return fc::emit(result);
+    }
+    match result {
+        Ok(report) => {
+            println!("{report:#}");
+            0
+        }
+        Err(failure) => {
+            eprintln!("pr finish-context: {}", failure.error);
+            failure.code
+        }
+    }
 }
 
 /// Moves into `--dir` before any git or gh call, so a shell that resets to

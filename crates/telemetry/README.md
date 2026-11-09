@@ -95,7 +95,7 @@ Settings are playbook's own, from the global tier of its config store (`~/.confi
 | --- | --- | --- |
 | `usage.theme` | `default` | `default`, `spectrum`, `dark`, `light`, `mono` |
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
-| `usage.timeZone` | `local` | `local`, `utc`. Not a `playbook config` key: `playbook config get` and `set` reject it. Pbtop reads it only from the `usage` object of `config.json`, and only when no config store exists |
+| `usage.timeZone` | `local` | `local`, `utc`. Under `playbook`, a `playbook config` key. Pbtop reads it only from the `usage` object of `config.json`, and only when no config store exists |
 | `usage.refreshSeconds` | `5` | number |
 | `usage.telemetry` | `auto` | `auto`, `off` |
 | `usage.telemetryRetentionDays` | `90` | number, 0 keeps all |
