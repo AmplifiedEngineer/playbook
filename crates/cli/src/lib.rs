@@ -1473,7 +1473,7 @@ pub enum PrCommand {
         #[arg(long)]
         issue: Option<String>,
     },
-    /// Read the settings, run mode, PR state and review choice for finishing a PR
+    /// Read what the finish flow needs to know about a PR, in one call
     ///
     /// One call for the finish flow. With `--json` it prints the shared
     /// envelope (`ok`, `code`, `meaning`, `error`) around the report and

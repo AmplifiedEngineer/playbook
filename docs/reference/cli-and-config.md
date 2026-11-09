@@ -1164,7 +1164,7 @@ Example: `playbook pr create --title "fix(x): y" --body-file /tmp/body.md`
 
 ### `playbook pr finish-context`
 
-Read the settings, run mode, PR state and review choice for finishing a PR
+Read what the finish flow needs to know about a PR, in one call
 
 One call for the finish flow. With `--json` it prints the shared envelope (`ok`, `code`, `meaning`, `error`) around the report and exits 0 even on failure: read `ok` and `code`. A usage error still exits 2. Without `--json` it prints the same report as text and exits with the code.
 
