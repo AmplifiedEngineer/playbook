@@ -1,9 +1,9 @@
 {
   "name": "playbook",
   "displayName": "Playbook",
-  "version": "0.41.0",
+  "version": "0.42.0",
   "metadata": {
-    "minBinaryVersion": "0.41.0"
+    "minBinaryVersion": "0.42.0"
   },
   "description": "A pragmatic Claude Code toolkit: opinionated skills, slash commands and subagents for planning, review, memory, and guarded editing.",
   "author": {

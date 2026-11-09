@@ -2,6 +2,85 @@
 
 Release notes for playbook: the binary and the plugin in `plugins/playbook`. From 0.34.0 they ship together as one `vX.Y.Z` release with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). Each release has a section named `## playbook <version>`, newest first, which the release pull request adds from the notes that `scripts/release-notes.sh` builds. The sections from 0.33.0 down are plugin releases from before the two lines joined. The binary skips 0.27 to 0.33: it goes from 0.26 to 0.34.0.
 
+## playbook 0.42.0
+
+### Features
+
+- **brief**: add an optional code-facts block to Work Unit briefs ([#1661](https://github.com/amplifiedengineer/playbook/pull/1661))
+- **doctor**: show the stored schema versions of usage.db and config.db ([#1663](https://github.com/amplifiedengineer/playbook/pull/1663))
+- **code-bench**: add the end-to-end task draw and grader ([#1665](https://github.com/amplifiedengineer/playbook/pull/1665))
+- **code-bench**: run the end-to-end tasks and build the report ([#1666](https://github.com/amplifiedengineer/playbook/pull/1666))
+- **code-bench**: add the acceptance rule for the brief facts default ([#1667](https://github.com/amplifiedengineer/playbook/pull/1667))
+- **code-bench**: add the Claude CLI adapter and the weekly evaluation workflow ([#1669](https://github.com/amplifiedengineer/playbook/pull/1669))
+- **usage**: record the machine on every usage row ([#1668](https://github.com/amplifiedengineer/playbook/pull/1668))
+- **pbtop**: pick a machine with x and scope the panels ([#1671](https://github.com/amplifiedengineer/playbook/pull/1671))
+- **usage**: keep the machine id in usage.db ([#1672](https://github.com/amplifiedengineer/playbook/pull/1672))
+- **usage**: label each event by the account in effect at its time ([#1674](https://github.com/amplifiedengineer/playbook/pull/1674))
+- **usage**: limit an account move to one session ([#1675](https://github.com/amplifiedengineer/playbook/pull/1675))
+- **pbsync**: add the pbsync crate with an HTTP transport ([#1677](https://github.com/amplifiedengineer/playbook/pull/1677))
+- **pbsync**: define the usage table and create the remote schema ([#1678](https://github.com/amplifiedengineer/playbook/pull/1678))
+- **pbsync**: push usage rows with an allowlist and salted hashes ([#1679](https://github.com/amplifiedengineer/playbook/pull/1679))
+- **usage**: add the local tables and the all-machines view for sync ([#1680](https://github.com/amplifiedengineer/playbook/pull/1680))
+- **pbsync**: add the settings file and the enable and disable commands ([#1682](https://github.com/amplifiedengineer/playbook/pull/1682))
+- **pbsync**: pull usage rows from the other machines ([#1681](https://github.com/amplifiedengineer/playbook/pull/1681))
+- **pbsync**: add the push and pull commands ([#1684](https://github.com/amplifiedengineer/playbook/pull/1684))
+- **doctor**: show the sync state when sync is on ([#1685](https://github.com/amplifiedengineer/playbook/pull/1685))
+- **config**: classify which config keys may sync between machines ([#1688](https://github.com/amplifiedengineer/playbook/pull/1688))
+- **update**: install and update pbsync beside the playbook binary ([#1686](https://github.com/amplifiedengineer/playbook/pull/1686))
+- **pbsync**: add the purge command ([#1687](https://github.com/amplifiedengineer/playbook/pull/1687))
+- **config**: apply a synced config proposal after showing the diff ([#1691](https://github.com/amplifiedengineer/playbook/pull/1691))
+- **pbsync**: push and pull the shared config snapshot ([#1689](https://github.com/amplifiedengineer/playbook/pull/1689))
+- **org**: carry settings and state over from the old org name ([#1697](https://github.com/amplifiedengineer/playbook/pull/1697))
+- **plugin**: prefer the amplifiedengineer marketplace id ([#1701](https://github.com/amplifiedengineer/playbook/pull/1701))
+- **commit**: add a deterministic commit all command ([#1702](https://github.com/amplifiedengineer/playbook/pull/1702))
+- **cli**: run doctor check for a bare playbook doctor ([#1704](https://github.com/amplifiedengineer/playbook/pull/1704))
+- **deliver**: refuse merge commits and check commit type ([#1707](https://github.com/amplifiedengineer/playbook/pull/1707))
+- **cli**: add --json and --args-stdin to pr prepare ([#1709](https://github.com/amplifiedengineer/playbook/pull/1709))
+- **sessions**: add the sessions.db store ([#1711](https://github.com/amplifiedengineer/playbook/pull/1711))
+- **pr**: add pr finish-context ([#1713](https://github.com/amplifiedengineer/playbook/pull/1713))
+- **plugin**: install a missing plugin in sync when allowed ([#1712](https://github.com/amplifiedengineer/playbook/pull/1712))
+- **plugin**: turn on marketplace auto-update after install ([#1716](https://github.com/amplifiedengineer/playbook/pull/1716))
+- **cli**: add inline json mode to commit all ([#1710](https://github.com/amplifiedengineer/playbook/pull/1710))
+- **cli**: add rule ids and a branch guard to deliver ([#1717](https://github.com/amplifiedengineer/playbook/pull/1717))
+- **cli**: add pr land to wait for checks and merge a PR ([#1719](https://github.com/amplifiedengineer/playbook/pull/1719))
+- **plugin**: run commit-and-push as one inline call ([#1714](https://github.com/amplifiedengineer/playbook/pull/1714))
+- **deliver**: open pull requests in one deliver call ([#1718](https://github.com/amplifiedengineer/playbook/pull/1718))
+- **setup**: install and update the playbook plugin ([#1720](https://github.com/amplifiedengineer/playbook/pull/1720))
+- **finish**: drive the finish skill with finish-context and pr land ([#1721](https://github.com/amplifiedengineer/playbook/pull/1721))
+- **plugin**: point a behind or missing plugin at playbook setup ([#1722](https://github.com/amplifiedengineer/playbook/pull/1722))
+- **cli**: add playbook plugin update ([#1724](https://github.com/amplifiedengineer/playbook/pull/1724))
+- **cli**: add playbook plugin install and rename plugin update to plugin upgrade ([#1726](https://github.com/amplifiedengineer/playbook/pull/1726))
+- **cli**: make playbook upgrade the primary command and keep update as an alias ([#1734](https://github.com/amplifiedengineer/playbook/pull/1734))
+
+### Fixes
+
+- **install**: use the renamed org and accept older release names ([#1695](https://github.com/amplifiedengineer/playbook/pull/1695))
+- **org**: try the next name when attestation times out ([#1696](https://github.com/amplifiedengineer/playbook/pull/1696))
+- **plugin**: find installs under renamed marketplaces ([#1698](https://github.com/amplifiedengineer/playbook/pull/1698))
+- **cli**: point messages and docs to playbook doctor check ([#1703](https://github.com/amplifiedengineer/playbook/pull/1703))
+- **cli**: refresh the marketplace before updating the plugin ([#1705](https://github.com/amplifiedengineer/playbook/pull/1705))
+- **cli**: check the plugin folder Claude Code loads when updating ([#1706](https://github.com/amplifiedengineer/playbook/pull/1706))
+- **config**: list usage.timeZone as a known config key ([#1715](https://github.com/amplifiedengineer/playbook/pull/1715))
+- **deps**: move rusqlite to 0.41.1 for the libsqlite3-sys advisory ([#1727](https://github.com/amplifiedengineer/playbook/pull/1727))
+
+### Other changes
+
+- refactor(usage): make the machine id without the uuid crate ([#1664](https://github.com/amplifiedengineer/playbook/pull/1664))
+- docs(code-bench): add the code index evaluation page and its numbers test ([#1670](https://github.com/amplifiedengineer/playbook/pull/1670))
+- chore(org): move playbook to the amplifiedengineer org ([#1692](https://github.com/amplifiedengineer/playbook/pull/1692))
+- chore: point docs and metadata at the amplifiedengineer org ([#1694](https://github.com/amplifiedengineer/playbook/pull/1694))
+- docs: add a rename notice and fix drifted docs ([#1699](https://github.com/amplifiedengineer/playbook/pull/1699))
+- docs: point install and update to playbook\@amplifiedengineer ([#1700](https://github.com/amplifiedengineer/playbook/pull/1700))
+- refactor(cli): nest pr finish-context as pr finish context ([#1723](https://github.com/amplifiedengineer/playbook/pull/1723))
+- refactor(cli): rename pr finish context to pr status ([#1725](https://github.com/amplifiedengineer/playbook/pull/1725))
+- refactor(telemetry): write one SVG line per row and take pictures from a shot list ([#1728](https://github.com/amplifiedengineer/playbook/pull/1728))
+- docs: cut the README to a 70 line budget and guard it in CI ([#1729](https://github.com/amplifiedengineer/playbook/pull/1729))
+- test(docs): fail when a guide names a command that does not exist ([#1731](https://github.com/amplifiedengineer/playbook/pull/1731))
+- docs: add a docs map, Get started and Concepts, and move the ADR table ([#1732](https://github.com/amplifiedengineer/playbook/pull/1732))
+- docs(recipes): add seven recipes and a runner that checks them ([#1730](https://github.com/amplifiedengineer/playbook/pull/1730))
+- test(cli): stop load-sensitive test failures ([#1735](https://github.com/amplifiedengineer/playbook/pull/1735))
+- docs: add a code search page and a token benchmark to the guide ([#1733](https://github.com/amplifiedengineer/playbook/pull/1733))
+
 ## playbook 0.41.0
 
 ### Features
