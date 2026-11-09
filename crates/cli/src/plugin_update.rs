@@ -795,6 +795,12 @@ impl Ensured {
         )
     }
 
+    fn auto_unset_line(&self) -> String {
+        format!(
+            "plugin: auto-update not set; {MARKETPLACE} is not listed in ~/.claude/settings.json"
+        )
+    }
+
     /// Whether `claude` is missing or an install step failed.
     pub fn failed(&self) -> bool {
         matches!(self.outcome, Outcome::Failed { .. } | Outcome::NoCli { .. })
@@ -830,16 +836,13 @@ impl Ensured {
             ));
         }
         if self.installed() {
-            lines.push(
-                self.auto
-                    .as_ref()
-                    .and_then(AutoUpdate::line)
-                    .unwrap_or_else(|| {
-                        format!(
-                            "plugin: auto-update not set; {MARKETPLACE} is not listed in ~/.claude/settings.json"
-                        )
-                    }),
-            );
+            lines.push(match (&self.auto, self.marketplace) {
+                (Some(auto), _) => auto.line().unwrap_or_else(|| self.auto_unset_line()),
+                (None, Some(MarketplaceStep::OldName(name))) => format!(
+                    "plugin: auto-update left as it is; the marketplace is registered as {name}, not {MARKETPLACE}"
+                ),
+                (None, _) => self.auto_unset_line(),
+            });
             lines.push(AUTO_UPDATE_NOTE.to_string());
         }
         if self.needs_reload() {

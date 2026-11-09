@@ -240,3 +240,32 @@ fn json_wraps_one_entry_per_step_in_the_envelope_and_exits_zero_on_failure() {
     assert_eq!(v["code"], 1);
     assert_eq!(v["steps"][1]["status"], "no-claude");
 }
+
+#[test]
+fn a_plugin_installed_under_the_old_name_keeps_its_marketplace_and_auto_update_choice() {
+    let f = Fixture::new(0);
+    let plugins = f.home.join(".claude/plugins");
+    fs::create_dir_all(&plugins).unwrap();
+    fs::write(
+        plugins.join("known_marketplaces.json"),
+        r#"{"pragmatic-engineer":{}}"#,
+    )
+    .unwrap();
+    fs::write(
+        plugins.join("installed_plugins.json"),
+        r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{"scope":"user"}]}}"#,
+    )
+    .unwrap();
+    let o = f.run(&[], true);
+    let text = out(&o);
+    assert!(o.status.success(), "{text}");
+    assert_eq!(f.calls(), "", "nothing to add or install");
+    assert!(
+        text.contains("playbook@pragmatic-engineer is already installed"),
+        "{text}"
+    );
+    assert!(
+        text.contains("the marketplace is registered as pragmatic-engineer, not amplifiedengineer"),
+        "{text}"
+    );
+}
