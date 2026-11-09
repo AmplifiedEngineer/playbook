@@ -89,6 +89,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "security.defaults",
     "usage.theme",
     "usage.weekStart",
+    "usage.timeZone",
     "usage.refreshSeconds",
     "usage.telemetry",
     "usage.telemetryRetentionDays",
@@ -254,6 +255,7 @@ pub fn is_user_key(key: &str) -> bool {
 pub const SHARED_KEYS: &[&str] = &[
     "usage.theme",
     "usage.weekStart",
+    "usage.timeZone",
     "usage.budget.monthlyUsd",
     "usage.budget.weeklyUsd",
     "usage.ui.layout",
@@ -446,6 +448,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "security.defaults" => Some(Value::Bool(false)),
         "usage.theme" => Some(Value::String("default".to_string())),
         "usage.weekStart" => Some(Value::String("monday".to_string())),
+        "usage.timeZone" => Some(Value::String("local".to_string())),
         "usage.refreshSeconds" => Some(Value::Number(5.into())),
         "usage.telemetry" => Some(Value::String("auto".to_string())),
         "usage.autoIngest" => Some(Value::Bool(true)),
@@ -504,6 +507,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "routing.escalate" => Some(&["ask", "auto", "deny"]),
         "usage.theme" => Some(&["default", "spectrum", "dark", "light", "mono"]),
         "usage.weekStart" => Some(&["monday", "sunday", "saturday"]),
+        "usage.timeZone" => Some(&["local", "utc"]),
         "usage.telemetry" => Some(&["auto", "off"]),
         "docs.convert" => Some(&["auto", "off"]),
         "sessions.autoClose" => Some(&["off", "propose"]),
@@ -688,6 +692,19 @@ mod tests {
         // Assert
         assert_eq!(default, Some(Value::String("auto".to_string())));
         assert_eq!(allowed, Some(&["ask", "auto", "deny"][..]));
+    }
+
+    #[test]
+    fn the_time_zone_key_is_known_and_accepts_local_and_utc() {
+        // Act
+        let known = KNOWN_KEYS.contains(&"usage.timeZone");
+        let allowed = allowed_enum_values("usage.timeZone");
+        let default = default_value("usage.timeZone");
+
+        // Assert
+        assert!(known);
+        assert_eq!(allowed, Some(&["local", "utc"][..]));
+        assert_eq!(default, Some(Value::String("local".to_string())));
     }
 
     #[test]
