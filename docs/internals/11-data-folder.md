@@ -66,7 +66,7 @@ Version 5 of `usage.db` added the local tables that usage sync reads and writes,
 
 ## Look at it
 
-`playbook doctor` has a row for the folder: path, file count, kilobytes, any `*.migrated` leftovers or `.tmp-` copies, and per-worktree databases that match no worktree of this clone. Those belong to removed worktrees or another clone of the repo. Check before deleting.
+`playbook doctor check` has a row for the folder: path, file count, kilobytes, any `*.migrated` leftovers or `.tmp-` copies, and per-worktree databases that match no worktree of this clone. Those belong to removed worktrees or another clone of the repo. Check before deleting.
 
 A second row, `store schema`, shows the version stored in `usage.db` and `config.db` next to the one this build writes. It reads the files without changing them. A newer database shows as a failure with `run: playbook update`.
 

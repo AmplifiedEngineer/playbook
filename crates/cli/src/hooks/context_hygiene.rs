@@ -79,7 +79,7 @@ fn message(tokens: u64, session: &str) -> String {
         "Context is large (~{}K tokens). Run /playbook:session-handoff now and save it with \
          `playbook handoff save --session {session}`. Then tell the user in one line: the \
          handoff is saved; run /clear, then /playbook:session-start if it did not load on its \
-         own (the automatic load needs the SessionStart hook; check `playbook doctor`).",
+         own (the automatic load needs the SessionStart hook; check `playbook doctor check`).",
         tokens / 1000
     )
 }

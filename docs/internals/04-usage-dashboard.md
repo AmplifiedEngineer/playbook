@@ -552,7 +552,7 @@ Two more views of the projects panel (`4`, then `v` three and four times) read `
 - A collector from another playbook version is asked to stop and replaced. `playbook usage stop` stops it.
 - The collector logs to `collector.log` next to `collector.json`. For a `cc` session with no telemetry setting of yours, `cc` points the session at a collector that already runs.
 
-**After a reboot.** Nothing starts the collector at login. Telemetry from sessions that run before the next playbook command or hook is dropped, and those sessions are read from transcripts. A plain `claude`, the IDE or the desktop app with the hooks part off starts nothing. Earlier setups installed a launchd agent or a systemd user unit for this. The `collector-service-removed` migration removes it, and `playbook doctor` warns while a service file is still installed. See [ADR 0048](../adr/0048-collector-daemon-started-by-commands.md).
+**After a reboot.** Nothing starts the collector at login. Telemetry from sessions that run before the next playbook command or hook is dropped, and those sessions are read from transcripts. A plain `claude`, the IDE or the desktop app with the hooks part off starts nothing. Earlier setups installed a launchd agent or a systemd user unit for this. The `collector-service-removed` migration removes it, and `playbook doctor check` warns while a service file is still installed. See [ADR 0048](../adr/0048-collector-daemon-started-by-commands.md).
 
 To run it yourself, start it in a detached tmux session. On Windows playbook does not start it, so this is the only way there. The idle limit is off here so it does not stop in a quiet hour:
 

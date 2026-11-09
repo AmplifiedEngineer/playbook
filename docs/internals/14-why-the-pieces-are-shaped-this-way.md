@@ -62,7 +62,7 @@ The `Agent` tool takes an `effort` per call when a skill asks for it, and the `d
 |---|---|
 | `playbook effort resolve` | Tells the orchestrator which `effort` to pass, because the user's effort ceilings decide it |
 | `playbook effort choose` | With `effort.auto` on, picks the level from the diff |
-| `agents.variants` | Kept so old configs load. It does nothing, and `playbook doctor` says so |
+| `agents.variants` | Kept so old configs load. It does nothing, and `playbook doctor check` says so |
 
 The orchestrator then picks by diff size and risk, following the `delegating-subagents` skill.
 
@@ -84,7 +84,7 @@ Playbook's ceiling caps:
 
 - the effort an orchestrator passes when it spawns an agent
 - the default effort the launcher adds
-- what `playbook effort` and `playbook doctor` report
+- what `playbook effort` and `playbook doctor check` report
 
 It does not cap a command or skill that ships its own `effort`, and a spawn that skips the resolve step is not capped. It does not cap a level you state for the session (`--effort`, `effortLevel`, `CLAUDE_CODE_EFFORT_LEVEL`, `/effort`). Playbook cannot cap those because the only mechanism for that is Claude Code's `maxEffortLevel` setting, and playbook never writes a Claude Code settings file. A session started without the launcher gets no playbook ceiling. Only Claude Code's own `maxEffortLevel` bounds `/effort` and `--effort`.
 
@@ -104,7 +104,7 @@ Two more rules sit on top of the ceiling:
 
 ## Why hooks are in Rust and wired by `setup`
 
-Hooks are the safety layer. They must be fast, must not depend on a script on disk that an update could break, and must fail safe. They are subcommands of one binary (`playbook hook <name>`). `playbook setup` wires them into `settings.json`, and `playbook doctor` checks they are wired. See [Launcher and hooks](../internals/01-launcher-and-hooks.md).
+Hooks are the safety layer. They must be fast, must not depend on a script on disk that an update could break, and must fail safe. They are subcommands of one binary (`playbook hook <name>`). `playbook setup` wires them into `settings.json`, and `playbook doctor check` checks they are wired. See [Launcher and hooks](../internals/01-launcher-and-hooks.md).
 
 ## Why the docs live in layers
 
