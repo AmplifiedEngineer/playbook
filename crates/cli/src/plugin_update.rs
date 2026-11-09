@@ -530,6 +530,103 @@ fn install(probe: &Probe) -> Outcome {
     Outcome::Installed { id, version }
 }
 
+/// What [`mark_auto_update`] did to the marketplace entry in Claude Code's
+/// user settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AutoUpdate {
+    /// `autoUpdate: true` was written beside `source`.
+    Set,
+    AlreadyOn,
+    /// The user set it to `false`, which is never overridden.
+    UserOff,
+    /// The marketplace has no usable entry in the user settings, so there is
+    /// nothing to mark. It may come from a project or managed scope.
+    NotRegistered,
+    /// `autoUpdate` holds something other than true or false.
+    NotBoolean,
+    Failed(String),
+}
+
+impl AutoUpdate {
+    /// One line for the setup report. `None` when there is nothing to say.
+    pub fn line(&self) -> Option<String> {
+        let name = MARKETPLACE;
+        Some(match self {
+            AutoUpdate::Set => format!("plugin: auto-update on for {name}"),
+            AutoUpdate::AlreadyOn => format!("plugin: auto-update already on for {name}"),
+            AutoUpdate::UserOff => {
+                format!("plugin: auto-update is off for {name} by your choice")
+            }
+            AutoUpdate::NotBoolean => format!(
+                "plugin: the auto-update setting for {name} is not true or false, left as it is"
+            ),
+            AutoUpdate::Failed(why) => {
+                format!("plugin: could not turn on auto-update for {name} ({why})")
+            }
+            AutoUpdate::NotRegistered => return None,
+        })
+    }
+}
+
+/// Turns on auto-update for the `amplifiedengineer` marketplace by writing
+/// `autoUpdate: true` beside `source` in `~/.claude/settings.json`. Only that
+/// entry changes; Claude Code's own marketplace list is never edited. The
+/// file is read right before the write, but a running Claude Code can still
+/// save between the two, so a concurrent edit may be lost.
+pub fn mark_auto_update(home: &Path, marketplace: &str) -> AutoUpdate {
+    if marketplace != MARKETPLACE {
+        return AutoUpdate::NotRegistered;
+    }
+    let path = home.join(".claude/settings.json");
+    if !path.is_file() {
+        return AutoUpdate::NotRegistered;
+    }
+    let Ok(mut root) = crate::init::telemetry::load(&path) else {
+        return AutoUpdate::Failed("settings.json is not a readable JSON object".to_string());
+    };
+    let Some(entry) = root
+        .get_mut("extraKnownMarketplaces")
+        .and_then(serde_json::Value::as_object_mut)
+        .and_then(|marketplaces| marketplaces.get_mut(MARKETPLACE))
+        .and_then(serde_json::Value::as_object_mut)
+        .filter(|entry| entry.contains_key("source"))
+    else {
+        return AutoUpdate::NotRegistered;
+    };
+    match entry.get("autoUpdate") {
+        Some(serde_json::Value::Bool(true)) => return AutoUpdate::AlreadyOn,
+        Some(serde_json::Value::Bool(false)) => return AutoUpdate::UserOff,
+        Some(_) => return AutoUpdate::NotBoolean,
+        None => {}
+    }
+    entry.insert("autoUpdate".to_string(), serde_json::Value::Bool(true));
+    let was_sorted = root.keys().is_sorted();
+    // A symlinked settings.json (stow, chezmoi) stays a symlink.
+    let target = std::fs::canonicalize(&path).unwrap_or(path);
+    match crate::init::telemetry::write_keeping_order(&target, root, was_sorted, now()) {
+        Ok(()) => AutoUpdate::Set,
+        Err(why) => AutoUpdate::Failed(why),
+    }
+}
+
+/// Marks the marketplace auto-update after setup's plugin step, when the plugin
+/// is installed or current under the `playbook@amplifiedengineer` id. Other
+/// ids and outcomes that left no plugin return `None`. Only setup calls this,
+/// since only setup has the user's consent to edit their settings.
+pub fn auto_update_after(outcome: &Outcome, home: &Path) -> Option<AutoUpdate> {
+    match outcome {
+        Outcome::Installed { id, .. }
+        | Outcome::Updated { id, .. }
+        | Outcome::Current { id, .. }
+        | Outcome::Behind { id, .. }
+            if id == PLUGIN_KEY =>
+        {
+            Some(mark_auto_update(home, MARKETPLACE))
+        }
+        _ => None,
+    }
+}
+
 /// [`run`] for a binary at version `running`.
 pub(crate) fn run_for_binary(probe: &Probe, running: &str) -> Outcome {
     sync_at(probe, SyncOpts::default(), running, &|name| {

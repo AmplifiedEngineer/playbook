@@ -13,7 +13,10 @@
 #[path = "support/isolated.rs"]
 mod isolated;
 
-use playbook::plugin_update::{behind, sync, Outcome, Probe, SyncOpts};
+use playbook::plugin_update::{
+    auto_update_after, behind, mark_auto_update, run, sync, AutoUpdate, Outcome, Probe, SyncOpts,
+};
+use serde_json::{json, Value};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -142,6 +145,44 @@ esac
         fs::read_to_string(log).unwrap()
     }
 
+    fn settings_path(&self) -> PathBuf {
+        self.home.join(".claude/settings.json")
+    }
+
+    /// Writes `settings.json` as the exact `text`.
+    fn write_settings(&self, text: &str) {
+        fs::create_dir_all(self.home.join(".claude")).unwrap();
+        fs::write(self.settings_path(), text).unwrap();
+    }
+
+    /// Writes `settings.json` with a `amplifiedengineer` entry holding
+    /// `source` and, when given, `auto_update`.
+    fn write_entry(&self, marketplace: &str, auto_update: Option<Value>) {
+        let mut entry = json!({ "source": source() });
+        if let Some(v) = auto_update {
+            entry["autoUpdate"] = v;
+        }
+        let root = json!({ "theme": "dark", "extraKnownMarketplaces": { marketplace: entry } });
+        self.write_settings(&format!("{root:#}\n"));
+    }
+
+    fn settings_bytes(&self) -> Vec<u8> {
+        fs::read(self.settings_path()).unwrap()
+    }
+
+    fn settings(&self) -> Value {
+        serde_json::from_slice(&self.settings_bytes()).unwrap()
+    }
+
+    /// Any `settings.json.bak.*` left beside the settings file.
+    fn backups(&self) -> Vec<String> {
+        fs::read_dir(self.home.join(".claude"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("settings.json.bak"))
+            .collect()
+    }
+
     fn no_calls(&self) {
         assert!(
             !self.home.join("claude-calls.log").exists(),
@@ -149,6 +190,17 @@ esac
         );
     }
 }
+
+fn source() -> Value {
+    json!({ "source": "github", "repo": "amplifiedengineer/marketplace" })
+}
+
+const MARKETPLACE: &str = "amplifiedengineer";
+const ON_LINE: &str = "plugin: auto-update on for amplifiedengineer";
+const ALREADY_ON_LINE: &str = "plugin: auto-update already on for amplifiedengineer";
+const USER_OFF_LINE: &str = "plugin: auto-update is off for amplifiedengineer by your choice";
+const NOT_BOOLEAN_LINE: &str =
+    "plugin: the auto-update setting for amplifiedengineer is not true or false, left as it is";
 
 fn install_allowed() -> SyncOpts {
     SyncOpts {
@@ -362,4 +414,357 @@ fn behind_compares_the_major_and_minor_line_only() {
         // Assert
         assert_eq!(got, expected, "{installed} vs {running}");
     }
+}
+
+#[test]
+fn a_fresh_install_turns_marketplace_auto_update_on() {
+    // Arrange
+    let f = Fixture::new(0);
+    let outcome = sync(&f.probe(), install_allowed());
+
+    // Act
+    let marked = auto_update_after(&outcome, &f.home);
+
+    // Assert
+    assert_eq!(marked, Some(AutoUpdate::Set));
+    assert_eq!(marked.unwrap().line().as_deref(), Some(ON_LINE));
+    assert_eq!(
+        f.settings(),
+        json!({ "extraKnownMarketplaces": { MARKETPLACE: { "source": source(), "autoUpdate": true } } })
+    );
+}
+
+#[test]
+fn auto_update_is_written_beside_source() {
+    // Arrange
+    let f = Fixture::new(0);
+    f.write_entry(MARKETPLACE, None);
+    let before = f.settings();
+    let before_bytes = f.settings_bytes();
+
+    // Act
+    let marked = mark_auto_update(&f.home, MARKETPLACE);
+
+    // Assert
+    assert_eq!(marked, AutoUpdate::Set);
+    let backups = f.backups();
+    assert_eq!(backups.len(), 1, "a write keeps one backup: {backups:?}");
+    let backup = fs::read(f.home.join(".claude").join(&backups[0])).unwrap();
+    assert_eq!(backup, before_bytes, "the backup holds the old bytes");
+    let after = f.settings();
+    let keys =
+        |v: &serde_json::Value| -> Vec<String> { v.as_object().unwrap().keys().cloned().collect() };
+    assert_eq!(keys(&after), keys(&before), "top level key order is kept");
+    assert_eq!(
+        keys(&after["extraKnownMarketplaces"][MARKETPLACE]),
+        ["source", "autoUpdate"],
+        "autoUpdate follows source"
+    );
+    let entry = &after["extraKnownMarketplaces"][MARKETPLACE];
+    assert_eq!(entry["source"], source());
+    assert_eq!(entry["autoUpdate"], json!(true));
+    assert_eq!(entry.as_object().unwrap().len(), 2);
+    let mut expected = before;
+    expected["extraKnownMarketplaces"][MARKETPLACE]["autoUpdate"] = json!(true);
+    assert_eq!(after, expected, "every other key is kept");
+}
+
+#[test]
+fn an_auto_update_already_on_is_not_rewritten() {
+    // Arrange
+    let f = Fixture::new(0);
+    f.write_entry(MARKETPLACE, Some(json!(true)));
+    let bytes = f.settings_bytes();
+    // Whole seconds, so a file system that rounds stored times still matches.
+    let backdated = std::time::UNIX_EPOCH
+        + std::time::Duration::from_secs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                - 3600,
+        );
+    fs::File::options()
+        .write(true)
+        .open(f.settings_path())
+        .unwrap()
+        .set_modified(backdated)
+        .unwrap();
+
+    // Act
+    let marked = mark_auto_update(&f.home, MARKETPLACE);
+
+    // Assert
+    assert_eq!(marked, AutoUpdate::AlreadyOn);
+    assert_eq!(marked.line().as_deref(), Some(ALREADY_ON_LINE));
+    assert_eq!(f.settings_bytes(), bytes);
+    let mtime = fs::metadata(f.settings_path()).unwrap().modified().unwrap();
+    assert_eq!(mtime, backdated);
+    assert_eq!(f.backups(), Vec::<String>::new());
+}
+
+#[test]
+fn an_explicit_auto_update_false_is_kept() {
+    // Arrange
+    let f = Fixture::new(0);
+    f.write_entry(MARKETPLACE, Some(json!(false)));
+    let bytes = f.settings_bytes();
+
+    // Act
+    let marked = mark_auto_update(&f.home, MARKETPLACE);
+
+    // Assert
+    assert_eq!(marked, AutoUpdate::UserOff);
+    assert_eq!(marked.line().as_deref(), Some(USER_OFF_LINE));
+    assert_eq!(f.settings_bytes(), bytes);
+    assert_eq!(f.backups(), Vec::<String>::new());
+}
+
+#[test]
+fn an_entry_that_is_not_shaped_like_a_marketplace_is_left_as_it_is() {
+    let not_registered = |t: &str| (t.to_string(), AutoUpdate::NotRegistered);
+    let not_boolean = |v: &str| {
+        (
+            format!(
+                r#"{{"extraKnownMarketplaces":{{"amplifiedengineer":{{"source":{{"source":"github"}},"autoUpdate":{v}}}}}}}"#
+            ),
+            AutoUpdate::NotBoolean,
+        )
+    };
+    let cases = [
+        not_registered(r#"{"extraKnownMarketplaces":"x"}"#),
+        not_registered(r#"{"extraKnownMarketplaces":[]}"#),
+        not_registered(r#"{"extraKnownMarketplaces":{"amplifiedengineer":"x"}}"#),
+        not_registered(r#"{"extraKnownMarketplaces":{"amplifiedengineer":{"autoUpdate":true}}}"#),
+        not_boolean(r#""yes""#),
+        not_boolean("1"),
+        not_boolean("null"),
+    ];
+    for (text, expected) in cases {
+        // Arrange
+        let f = Fixture::new(0);
+        f.write_settings(&text);
+
+        // Act
+        let marked = mark_auto_update(&f.home, MARKETPLACE);
+
+        // Assert
+        assert_eq!(marked, expected, "{text}");
+        assert_eq!(f.settings_bytes(), text.as_bytes(), "{text}");
+        assert_eq!(f.backups(), Vec::<String>::new(), "{text}");
+        let line = marked.line();
+        match expected {
+            AutoUpdate::NotBoolean => assert_eq!(line.as_deref(), Some(NOT_BOOLEAN_LINE)),
+            _ => assert_eq!(line, None, "{text}"),
+        }
+    }
+}
+
+#[test]
+fn an_old_id_marketplace_is_left_alone() {
+    for auto_update in [None, Some(json!(true)), Some(json!(false))] {
+        // Arrange
+        let f = Fixture::new(0);
+        f.write_entry("pragmatic-engineer", auto_update.clone());
+        let bytes = f.settings_bytes();
+        let installed = Outcome::Installed {
+            id: "playbook@pragmatic-engineer".to_string(),
+            version: None,
+        };
+
+        // Act
+        let via_outcome = auto_update_after(&installed, &f.home);
+        let direct = mark_auto_update(&f.home, "pragmatic-engineer");
+
+        // Assert
+        assert_eq!(via_outcome, None, "{auto_update:?}");
+        assert_eq!(direct, AutoUpdate::NotRegistered, "{auto_update:?}");
+        assert_eq!(f.settings_bytes(), bytes, "{auto_update:?}");
+        assert_eq!(f.backups(), Vec::<String>::new());
+    }
+}
+
+#[test]
+fn an_outcome_that_installed_nothing_does_not_touch_settings() {
+    let id = || PLUGIN_ID.to_string();
+    let outcomes = [
+        Outcome::NoCli {
+            id: id(),
+            install: true,
+        },
+        Outcome::Failed {
+            id: id(),
+            why: "x".into(),
+            install: true,
+        },
+        Outcome::Skipped("x".into()),
+        Outcome::NotInstalled,
+    ];
+    for outcome in outcomes {
+        // Arrange
+        let f = Fixture::new(0);
+        f.write_entry(MARKETPLACE, None);
+        let bytes = f.settings_bytes();
+
+        // Act
+        let marked = auto_update_after(&outcome, &f.home);
+
+        // Assert
+        assert_eq!(marked, None, "{outcome:?}");
+        assert_eq!(f.settings_bytes(), bytes, "{outcome:?}");
+    }
+}
+
+#[test]
+fn a_marketplace_without_a_settings_entry_is_not_added() {
+    // Arrange
+    let f = Fixture::new(0);
+    let text = r#"{"theme":"dark"}"#;
+    f.write_settings(text);
+
+    // Act
+    let marked = mark_auto_update(&f.home, MARKETPLACE);
+
+    // Assert
+    assert_eq!(marked, AutoUpdate::NotRegistered);
+    assert_eq!(marked.line(), None);
+    assert_eq!(f.settings_bytes(), text.as_bytes());
+    assert_eq!(f.backups(), Vec::<String>::new());
+}
+
+#[test]
+fn a_missing_settings_file_is_not_created() {
+    // Arrange
+    let f = Fixture::new(0);
+
+    // Act
+    let marked = mark_auto_update(&f.home, MARKETPLACE);
+
+    // Assert
+    assert_eq!(marked, AutoUpdate::NotRegistered);
+    assert!(!f.settings_path().exists());
+}
+
+#[test]
+fn an_unreadable_settings_file_is_not_touched() {
+    // Arrange
+    let f = Fixture::new(0);
+    let text = r#"{"extraKnownMarketplaces": {"amplifiedengineer": "#;
+    f.write_settings(text);
+
+    // Act
+    let marked = mark_auto_update(&f.home, MARKETPLACE);
+
+    // Assert
+    assert!(matches!(marked, AutoUpdate::Failed(_)), "{marked:?}");
+    let line = marked.line().expect("a line for the user");
+    assert!(
+        line.starts_with("plugin: could not turn on auto-update for amplifiedengineer ("),
+        "{line}"
+    );
+    assert_eq!(f.settings_bytes(), text.as_bytes());
+    assert_eq!(f.backups(), Vec::<String>::new());
+}
+
+#[test]
+fn auto_update_keeps_a_symlinked_settings_file_a_symlink() {
+    // Arrange
+    let f = Fixture::new(0);
+    f.write_entry(MARKETPLACE, None);
+    let target = f.home.join("dotfiles-settings.json");
+    fs::rename(f.settings_path(), &target).unwrap();
+    std::os::unix::fs::symlink(&target, f.settings_path()).unwrap();
+
+    // Act
+    let marked = mark_auto_update(&f.home, MARKETPLACE);
+
+    // Assert
+    assert_eq!(marked, AutoUpdate::Set);
+    assert!(fs::symlink_metadata(f.settings_path())
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    let written: Value = serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
+    assert_eq!(
+        written["extraKnownMarketplaces"][MARKETPLACE]["autoUpdate"],
+        json!(true)
+    );
+}
+
+#[test]
+fn an_updated_or_current_install_turns_auto_update_on() {
+    // Arrange
+    let f = Fixture::listing(0, VERSION);
+    f.installed_at(VERSION);
+    f.known_marketplace();
+    f.write_entry(MARKETPLACE, None);
+    let current = sync(&f.probe(), SyncOpts::default());
+    assert!(matches!(current, Outcome::Current { .. }), "{current:?}");
+    let updated = Outcome::Updated {
+        id: PLUGIN_ID.to_string(),
+        from: Some(older_minor()),
+        to: Some(VERSION.to_string()),
+    };
+    let behind = Outcome::Behind {
+        id: PLUGIN_ID.to_string(),
+        version: Some(older_minor()),
+        running: VERSION.to_string(),
+        marketplace: None,
+    };
+
+    // Act
+    let after_current = auto_update_after(&current, &f.home);
+    let first_state = f.settings();
+    f.write_entry(MARKETPLACE, None);
+    let after_updated = auto_update_after(&updated, &f.home);
+    f.write_entry(MARKETPLACE, None);
+    let after_behind = auto_update_after(&behind, &f.home);
+
+    // Assert
+    assert_eq!(after_current, Some(AutoUpdate::Set));
+    assert_eq!(after_updated, Some(AutoUpdate::Set));
+    assert_eq!(after_behind, Some(AutoUpdate::Set));
+    assert_eq!(
+        first_state["extraKnownMarketplaces"][MARKETPLACE]["autoUpdate"],
+        json!(true)
+    );
+}
+
+#[test]
+fn setup_twice_is_idempotent() {
+    // Arrange
+    let f = Fixture::new(0);
+    let first = sync(&f.probe(), install_allowed());
+    auto_update_after(&first, &f.home);
+    let bytes = f.settings_bytes();
+
+    // Act
+    let second = sync(&f.probe(), install_allowed());
+    let marked = auto_update_after(&second, &f.home);
+
+    // Assert
+    assert_eq!(
+        f.calls(),
+        format!("{MARKETPLACE_ADD}{INSTALL}{MARKETPLACE_UPDATE}{UPDATE}")
+    );
+    assert_eq!(marked, Some(AutoUpdate::AlreadyOn));
+    assert_eq!(f.settings_bytes(), bytes);
+}
+
+#[test]
+fn the_upgrade_path_never_writes_auto_update() {
+    // Arrange
+    let f = Fixture::listing(0, VERSION);
+    f.installed_at(VERSION);
+    f.known_marketplace();
+    f.write_entry(MARKETPLACE, None);
+    let bytes = f.settings_bytes();
+
+    // Act
+    let outcome = run(&f.probe());
+
+    // Assert
+    assert!(matches!(outcome, Outcome::Current { .. }), "{outcome:?}");
+    assert_eq!(f.settings_bytes(), bytes);
+    assert_eq!(f.backups(), Vec::<String>::new());
 }
