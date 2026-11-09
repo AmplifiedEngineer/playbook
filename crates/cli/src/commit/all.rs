@@ -255,14 +255,19 @@ pub fn run_inline(
         stage_update: parsed.tracked,
         amend: parsed.amend,
     };
-    // Before the commit: afterwards nothing is staged to look at.
-    let stage_flags = |args: &[&str]| git_text(root, args).is_some();
-    if parsed.stage_all {
-        stage_flags(&["add", "-A"]);
-    } else if parsed.tracked {
-        stage_flags(&["add", "-u"]);
-    }
-    let warnings = crate::hooks::precommit_check::findings_in(Some(root));
+    // Before the commit: afterwards nothing is staged to look at. A protected
+    // branch is refused by `run` without touching the index.
+    let on_protected = prepare::is_protected(&current_branch(root), &prepare::default_branch(root));
+    let warnings = if on_protected {
+        Vec::new()
+    } else {
+        if parsed.stage_all {
+            let _ = git_text(root, &["add", "-A"]);
+        } else if parsed.tracked {
+            let _ = git_text(root, &["add", "-u"]);
+        }
+        crate::hooks::precommit_check::findings_in(Some(root))
+    };
     let result = run(root, opts, config_signoff);
     let branch = current_branch(root);
     let sha = git_text(root, &["rev-parse", "--short", "HEAD"]).unwrap_or_default();
@@ -271,6 +276,14 @@ pub fn run_inline(
         Ok(text) if text.trim() == NOTHING_STAGED => {
             (NOTHING_STAGED, 0, String::new(), String::new())
         }
+        // An aborted rebase still pushes the branch as it was, but the caller
+        // must know it is not on the base yet.
+        Ok(text) if text.contains("Rebase conflict") => (
+            "CONFLICT",
+            4,
+            text.clone(),
+            "rebase conflict: the branch was pushed without the rebase; run the git rebase it names by hand".to_string(),
+        ),
         Ok(text) => ("PUSHED", 0, text.clone(), String::new()),
         Err(text) if text.contains("PARKED") => ("PARKED", 1, text.clone(), text.clone()),
         Err(text)
@@ -280,13 +293,10 @@ pub fn run_inline(
         {
             ("REFUSED", 1, text.clone(), text.clone())
         }
-        Err(text) if text.to_lowercase().contains("conflict") => {
-            ("CONFLICT", 4, text.clone(), text.clone())
-        }
         Err(text) => ("FAILED", 1, text.clone(), text.clone()),
     };
-    let pushed = verdict == "PUSHED";
-    let rebased = log.contains("Rebasing");
+    let pushed = verdict == "PUSHED" || verdict == "CONFLICT";
+    let rebased = log.contains("Rebasing") && !log.contains("Rebase conflict");
     let forced = pushed && !auto && (parsed.amend || rebased);
     // After a refusal the HEAD commit is not ours, so it is not reported.
     let (commit, message) = if pushed {

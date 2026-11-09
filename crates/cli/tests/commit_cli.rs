@@ -824,6 +824,26 @@ fn parity_default_branch_inline_refuses_main_with_exit_0() {
     assert_eq!(v["verdict"], "REFUSED", "{v}");
     assert_eq!(v["ok"], false);
     assert_eq!(v["code"], 1);
+    assert!(
+        git(&r.work, &["diff", "--cached", "--name-only"]).is_empty(),
+        "a refused run must not stage anything"
+    );
+}
+
+#[test]
+fn inline_long_flags_stage_and_amend_like_the_short_ones() {
+    let r = Repo::new("inline-long");
+    put(&r, "docs/a.md", "a\n");
+    assert_eq!(inline(&r, &r.work, "--all")["verdict"], "PUSHED");
+    let first = git(&r.work, &["rev-parse", "HEAD"]);
+    put(&r, "docs/b.md", "b\n");
+
+    let v = inline(&r, &r.work, "--all --amend");
+
+    assert_eq!(v["verdict"], "PUSHED", "{v}");
+    assert_eq!(v["forced"], true);
+    assert_ne!(git(&r.work, &["rev-parse", "HEAD"]), first);
+    assert_eq!(git(&r.work, &["rev-list", "--count", "main..HEAD"]), "1");
 }
 
 #[test]
