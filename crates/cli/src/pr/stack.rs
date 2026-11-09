@@ -344,9 +344,11 @@ fn pick(mut found: Vec<StackPr>, what: &str, warnings: &mut Vec<String>) -> Opti
 }
 
 /// Follow the chain of PRs below and above `start` by branch name.
+/// `first_above` holds the list the first step up needs, when the caller read it already.
 fn branch_chain(
     run: Gh,
     start: StackPr,
+    first_above: Option<Vec<StackPr>>,
     default_branch: &str,
     warnings: &mut Vec<String>,
 ) -> Vec<StackPr> {
@@ -369,12 +371,12 @@ fn branch_chain(
         }
     }
     let mut head = start.head;
+    let mut first_above = first_above;
     while chain.len() < MAX_CHAIN {
-        let above = pick(
-            list_prs(run, "--base", &head),
-            &format!("base '{head}'"),
-            warnings,
-        );
+        let listed = first_above
+            .take()
+            .unwrap_or_else(|| list_prs(run, "--base", &head));
+        let above = pick(listed, &format!("base '{head}'"), warnings);
         match above {
             Some(p) if !seen.contains(&p.number) => {
                 seen.push(p.number);
@@ -387,65 +389,105 @@ fn branch_chain(
     chain
 }
 
-/// Detect the stack around `pr` (or the PR of the current branch).
-pub fn detect(run: Gh, pr: Option<u64>) -> Result<Stack, String> {
-    let repo_json = run(&["repo", "view", "--json", "nameWithOwner,defaultBranchRef"])?;
-    let repo_v = json_of(&repo_json, "the repository")?;
-    let repo = repo_v["nameWithOwner"].as_str().unwrap_or("").to_string();
-    let default_branch = repo_v["defaultBranchRef"]["name"]
-        .as_str()
-        .unwrap_or("main")
-        .to_string();
-    let (owner, name) = repo
-        .split_once('/')
-        .ok_or_else(|| format!("unexpected repo name: {repo}"))?;
-    let number = match pr {
-        Some(n) => n,
-        None => run(&["pr", "view", "--json", "number", "-q", ".number"])
-            .ok()
-            .and_then(|s| s.trim().parse().ok())
-            .ok_or("error: no PR for current branch; pass a PR number")?,
-    };
+/// What the branch-chain fallback needs first: the start PR, and the PRs
+/// that target its head branch (the first step up the chain).
+struct Start {
+    pr: Result<StackPr, String>,
+    above: Vec<StackPr>,
+}
 
-    let mut warnings = Vec::new();
-    let mut source = Source::Api;
-    let mut prs = match api_stack(run, owner, name, number) {
-        Ok(Some(prs)) if prs.iter().any(|p| p.number == number) => prs,
-        Ok(_) => Vec::new(),
-        Err(e) => {
-            warnings.push(format!("stack API unavailable, using branch names: {e}"));
-            Vec::new()
+fn read_start(run: Gh, number: u64) -> Start {
+    let pr = run(&["pr", "view", &number.to_string(), "--json", PR_FIELDS]).and_then(|raw| {
+        parse_pr(&json_of(&raw, "the PR")?)
+            .ok_or_else(|| "gh returned a PR without a number".to_string())
+    });
+    let above = pr
+        .as_ref()
+        .map(|start| list_prs(run, "--base", &start.head))
+        .unwrap_or_default();
+    Start { pr, above }
+}
+
+/// Detect the stack around `pr` (or the PR of the current branch).
+///
+/// The start PR and the PRs above it depend only on the PR number, not on the
+/// repository read or the stack API, so one extra thread reads them while the
+/// main thread asks the API. The fallback uses them when the API has no stack.
+/// When the API has the stack, `detect` drops them and shows no failure from
+/// them. A panic in that thread still prints its message to standard error.
+pub fn detect(run: Gh, pr: Option<u64>) -> Result<Stack, String> {
+    std::thread::scope(|scope| {
+        let read_ahead = |number: u64| {
+            scope.spawn(move || {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_start(run, number)))
+                    .ok()
+            })
+        };
+        let ahead = pr.map(read_ahead);
+        let repo_json = run(&["repo", "view", "--json", "nameWithOwner,defaultBranchRef"])?;
+        let repo_v = json_of(&repo_json, "the repository")?;
+        let repo = repo_v["nameWithOwner"].as_str().unwrap_or("").to_string();
+        let default_branch = repo_v["defaultBranchRef"]["name"]
+            .as_str()
+            .unwrap_or("main")
+            .to_string();
+        let (owner, name) = repo
+            .split_once('/')
+            .ok_or_else(|| format!("unexpected repo name: {repo}"))?;
+        let number = match pr {
+            Some(n) => n,
+            None => run(&["pr", "view", "--json", "number", "-q", ".number"])
+                .ok()
+                .and_then(|s| s.trim().parse().ok())
+                .ok_or("error: no PR for current branch; pass a PR number")?,
+        };
+        let ahead = ahead.unwrap_or_else(|| read_ahead(number));
+
+        let mut warnings = Vec::new();
+        let mut source = Source::Api;
+        let mut prs = match api_stack(run, owner, name, number) {
+            Ok(Some(prs)) if prs.iter().any(|p| p.number == number) => prs,
+            Ok(_) => Vec::new(),
+            Err(e) => {
+                warnings.push(format!("stack API unavailable, using branch names: {e}"));
+                Vec::new()
+            }
+        };
+        if prs.len() < 2 {
+            let Start { pr: start, above } = match ahead.join() {
+                Ok(Some(start)) => start,
+                _ => read_start(run, number),
+            };
+            prs = branch_chain(run, start?, Some(above), &default_branch, &mut warnings);
+            source = Source::BranchChain;
         }
-    };
-    if prs.len() < 2 {
-        let raw = run(&["pr", "view", &number.to_string(), "--json", PR_FIELDS])?;
-        let start =
-            parse_pr(&json_of(&raw, "the PR")?).ok_or("gh returned a PR without a number")?;
-        prs = branch_chain(run, start, &default_branch, &mut warnings);
-        source = Source::BranchChain;
-    }
-    if prs.len() < 2 {
-        source = Source::None;
-    }
-    if let Some(p) = prs.iter().find(|p| p.number == number) {
-        match p.state {
-            State::Merged => warnings.push(format!("#{number} is merged and will not be reviewed")),
-            State::Closed => warnings.push(format!("#{number} is closed and will not be reviewed")),
-            State::Open => {}
+        if prs.len() < 2 {
+            source = Source::None;
         }
-    }
-    for p in prs.iter().filter(|p| p.state == State::Closed) {
-        warnings.push(format!(
-            "#{} is closed without merging; it is skipped",
-            p.number
-        ));
-    }
-    Ok(Stack {
-        source,
-        repo,
-        current: number,
-        prs,
-        warnings,
+        if let Some(p) = prs.iter().find(|p| p.number == number) {
+            match p.state {
+                State::Merged => {
+                    warnings.push(format!("#{number} is merged and will not be reviewed"))
+                }
+                State::Closed => {
+                    warnings.push(format!("#{number} is closed and will not be reviewed"))
+                }
+                State::Open => {}
+            }
+        }
+        for p in prs.iter().filter(|p| p.state == State::Closed) {
+            warnings.push(format!(
+                "#{} is closed without merging; it is skipped",
+                p.number
+            ));
+        }
+        Ok(Stack {
+            source,
+            repo,
+            current: number,
+            prs,
+            warnings,
+        })
     })
 }
 
@@ -705,5 +747,199 @@ mod tests {
         assert!(p.json);
         assert_eq!((p.max_prs, p.max_lines), (Some(3), Some(99)));
         assert_eq!(p.warnings.len(), 1);
+    }
+
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Condvar, Mutex};
+    use std::time::Duration;
+
+    /// Longest a fake call waits for another call before it gives up.
+    const OVERLAP_LIMIT: Duration = Duration::from_secs(10);
+
+    /// A one-shot flag one fake call sets and another waits on.
+    #[derive(Default)]
+    struct Latch {
+        set: Mutex<bool>,
+        changed: Condvar,
+    }
+
+    impl Latch {
+        fn raise(&self) {
+            *self.set.lock().unwrap() = true;
+            self.changed.notify_all();
+        }
+
+        fn wait(&self) -> bool {
+            let set = self.set.lock().unwrap();
+            *self
+                .changed
+                .wait_timeout_while(set, OVERLAP_LIMIT, |s| !*s)
+                .unwrap()
+                .0
+        }
+    }
+
+    /// Counts a call as live until it drops, even when the call panics.
+    struct Leave<'a>(&'a AtomicUsize);
+
+    impl Drop for Leave<'_> {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    /// The fixture `gh`. It records how many calls run at once and has
+    /// switches that fail or panic the start PR read.
+    struct Probe {
+        api: Option<&'static str>,
+        /// The stack API call and the start PR read each wait for the other
+        /// to start, so a run that makes them one after another never ends.
+        calls_wait_for_each_other: bool,
+        api_started: Latch,
+        view_started: Latch,
+        repo_fails: bool,
+        fail_view: bool,
+        panic_view_once: AtomicBool,
+        live: AtomicUsize,
+        peak: AtomicUsize,
+    }
+
+    impl Probe {
+        fn new(api: Option<&'static str>) -> Probe {
+            Probe {
+                api,
+                calls_wait_for_each_other: false,
+                api_started: Latch::default(),
+                view_started: Latch::default(),
+                repo_fails: false,
+                fail_view: false,
+                panic_view_once: AtomicBool::new(false),
+                live: AtomicUsize::new(0),
+                peak: AtomicUsize::new(0),
+            }
+        }
+
+        fn call(&self, args: &[&str]) -> Result<String, String> {
+            let now = self.live.fetch_add(1, Ordering::SeqCst) + 1;
+            self.peak.fetch_max(now, Ordering::SeqCst);
+            let _leave = Leave(&self.live);
+            self.answer(args)
+        }
+
+        fn answer(&self, args: &[&str]) -> Result<String, String> {
+            let is_view = args[..2] == ["pr", "view"] && args[2] != "--json";
+            if is_view {
+                assert!(
+                    !self.panic_view_once.swap(false, Ordering::SeqCst),
+                    "start read exploded"
+                );
+                self.view_started.raise();
+                if self.calls_wait_for_each_other && !self.api_started.wait() {
+                    return Err("the start PR read never overlapped the API call".to_string());
+                }
+                if self.fail_view {
+                    return Err("gh is down".to_string());
+                }
+            }
+            if args[..2] == ["api", "graphql"] {
+                self.api_started.raise();
+                if self.calls_wait_for_each_other && !self.view_started.wait() {
+                    return Err("the API call never overlapped the start PR read".to_string());
+                }
+            }
+            if args[..2] == ["repo", "view"] && self.repo_fails {
+                return Err("repo is down".to_string());
+            }
+            if args[..3] == ["pr", "view", "--json"] {
+                return Ok("2".to_string());
+            }
+            fake(self.api)(args)
+        }
+
+        fn detect(&self, pr: Option<u64>) -> Result<Stack, String> {
+            detect(&|a| self.call(a), pr)
+        }
+    }
+
+    #[test]
+    fn the_start_pr_is_read_while_the_stack_api_answers() {
+        // Arrange: each call waits for the other, so only overlapping calls
+        // get past.
+        let mut probe = Probe::new(Some("api-none"));
+        probe.calls_wait_for_each_other = true;
+
+        // Act
+        let s = probe.detect(Some(2)).unwrap();
+
+        // Assert
+        assert_eq!(s.source, Source::BranchChain);
+        assert_eq!(numbers(&s), [1, 2, 3]);
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        assert_eq!(probe.peak.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_failed_read_ahead_is_not_shown_when_the_api_has_the_stack() {
+        let mut probe = Probe::new(Some("api-2"));
+        probe.fail_view = true;
+
+        let s = probe.detect(Some(2)).unwrap();
+
+        assert_eq!(s.source, Source::Api);
+        assert_eq!(numbers(&s), [1, 2]);
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+    }
+
+    #[test]
+    fn a_failed_start_read_is_the_error_when_the_branch_chain_needs_it() {
+        let mut probe = Probe::new(Some("api-none"));
+        probe.fail_view = true;
+
+        let result = probe.detect(Some(2));
+
+        assert_eq!(result.unwrap_err(), "gh is down");
+    }
+
+    #[test]
+    fn a_panic_in_the_read_ahead_is_read_again_in_the_caller() {
+        let probe = Probe::new(Some("api-none"));
+        probe.panic_view_once.store(true, Ordering::SeqCst);
+
+        let s = probe.detect(Some(2)).unwrap();
+
+        assert_eq!(numbers(&s), [1, 2, 3]);
+    }
+
+    #[test]
+    fn a_panic_the_fallback_never_needs_does_not_reach_the_caller() {
+        let probe = Probe::new(Some("api-2"));
+        probe.panic_view_once.store(true, Ordering::SeqCst);
+
+        let s = probe.detect(Some(2)).unwrap();
+
+        assert_eq!(s.source, Source::Api);
+    }
+
+    #[test]
+    fn a_branch_with_no_number_asks_gh_and_then_reads_ahead() {
+        let mut probe = Probe::new(Some("api-none"));
+        probe.calls_wait_for_each_other = true;
+
+        let s = probe.detect(None).unwrap();
+
+        assert_eq!(probe.peak.load(Ordering::SeqCst), 2);
+        assert_eq!(s.current, 2);
+        assert_eq!(numbers(&s), [1, 2, 3]);
+    }
+
+    #[test]
+    fn a_repo_failure_returns_its_error_while_the_read_ahead_panics() {
+        let mut probe = Probe::new(Some("api-none"));
+        probe.repo_fails = true;
+        probe.panic_view_once.store(true, Ordering::SeqCst);
+
+        let result = probe.detect(Some(2));
+
+        assert_eq!(result.unwrap_err(), "repo is down");
     }
 }
