@@ -516,6 +516,12 @@ jobs:
         continue-on-error: true
         run: ./target/debug/playbook prose check docs/adr/*.md
 
+      # Strict, and only for the pages with a size budget. A docs-only change
+      # takes the docs-checks lane instead, which runs the same line.
+      - name: Check the budgeted pages
+        if: env.LANE == 'true' && runner.os == 'Linux'
+        run: ./target/debug/playbook prose check --strict README.md
+
       # cargo-audit's own `cargo install --locked` compiles it from source
       # every run, ~2 minutes on ubuntu-latest, the single most expensive
       # step in this job by far (measured: musl-tools + rustup target add
@@ -669,14 +675,15 @@ jobs:
 
   # Cheap lane for docs-only changes: the only cargo tests that read docs
   # (generated reference page drift, config-key coverage, README and index
-  # links, the policy table, the PR-flow wording). Runs only when the heavy
-  # lanes are skipped.
+  # links, ADR numbering, the page size budgets, command names, the policy
+  # table, the PR-flow wording) and the strict prose check on the pages with
+  # a budget. Runs only when the heavy lanes are skipped.
   docs-checks:
     name: docs-checks
     needs: changes
     if: needs.changes.outputs.docs_only == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -711,8 +718,20 @@ jobs:
           restore-keys: |
             cargo-docs-checks-v2-${{ runner.os }}-
 
+      # `--test` takes a quoted glob, so each `docs_*` test a later change adds
+      # runs here without another edit.
       - name: cargo test (doc-reading tests only)
-        run: cargo test -p playbook --test reference_docs
+        run: >
+          cargo test -p playbook
+          --test reference_docs --test init_docs --test adr_numbering --test 'docs_*'
+
+      - name: cargo test (setup command name in the docs)
+        run: cargo test -p playbook-plugin-checks --test setup_command_name
+
+      # Strict: a hard finding fails the job. Only the pages with a size
+      # budget are listed. Add each new budgeted page here and in the justfile.
+      - name: Check the budgeted pages
+        run: cargo run -q -p playbook -- prose check --strict README.md
 
       # Warn-only, like the same check in the build lane: an ADR-only change
       # takes this lane, so it needs the check too.
