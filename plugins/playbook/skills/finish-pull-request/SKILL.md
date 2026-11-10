@@ -6,7 +6,7 @@ user-invocable: false
 
 # Finish Pull Request
 
-Run this in the main session or in an agent that holds the `Agent` tool, right after `/playbook:create-pull-request` returns a PR URL. The git agent cannot spawn review swarms, so the review, fix, promote and merge work lives here.
+Run this in the main session or in an agent that holds the `Agent` tool, right after `/playbook:create-pull-request` returns a PR URL. The review, fix, promote and merge work lives here because it spawns review swarms.
 
 Inputs: the PR number, its branch, whether `--ready` was passed, and an optional worktree path. With a worktree, run git as `git -C <worktree>`, pass the PR number to every tool, and never leave the worktree. If an input is missing, read it with `gh pr view`.
 

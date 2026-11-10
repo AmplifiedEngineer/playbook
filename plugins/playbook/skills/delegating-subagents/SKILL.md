@@ -33,7 +33,6 @@ File delivery needs `Write` or `Bash`. The read-only agents have neither on purp
 | `implementer` | `playbook:implementer` | File (has `Write` and `Bash`) |
 | `collector` | `playbook:collector` | File (has `Bash`) |
 | `auditor` | `playbook:auditor` | File (has `Bash`) |
-| `git` | `playbook:git` | File (has `Bash`) |
 | `reviewer` | `playbook:reviewer` | **Return value only** (Read, Grep, Glob, Skill) |
 | `critic` | `playbook:critic` | **Return value only** (Read, Grep, Glob, Skill) |
 | `fact-checker` | `playbook:fact-checker` | **Return value only** (Read, Grep, Glob, Skill) |
@@ -92,7 +91,7 @@ The strong model decides and the cheap model writes. For a review comment on a d
 2. Write the text to a file and the facts to `<file>.facts` with a first line `kind: <kind>`. Run `playbook prose check <file>`. If it prints a hard finding, a passive voice hit or an unknown token, send those lines back to the writer once.
 3. If it fails again, or the writer returns a `NEED:` line you cannot fill, write the text yourself from the template in the brief builder. Do not ask the user and do not pass `--failures` to the route: a text never needs approval.
 
-Kinds that stay with the orchestrator: a reply to a PR comment. The pilot showed that a decision record (action, reference, reason) costs more output tokens than the one or two sentences it replaces. The PR body and the commit message already run on Haiku through the delivery agent that `/playbook:create-pull-request` and `/playbook:commit-and-push` fork into, so they need no writer.
+Kinds that stay with the orchestrator: a reply to a PR comment. The pilot showed that a decision record (action, reference, reason) costs more output tokens than the one or two sentences it replaces. The binary drafts the commit message and the PR title, so they need no writer.
 
 ## Pick the effort
 
@@ -114,7 +113,7 @@ Narrow `cheap-check` lenses go to `cheap-checker`, already pinned low. A verifie
 
 ## Worktree guard
 
-A forked git command (`/playbook:commit-and-push`, `/playbook:create-pull-request`) can start in the wrong checkout. Its first step is the guard in [references/worktree-guard.md](references/worktree-guard.md); the caller passes "Worktree root: <path>, branch: <name>" in the prompt.
+A commit or PR command (`/playbook:commit-and-push`, `/playbook:create-pull-request`) run by a subagent can start in the wrong checkout. Its first step is the guard in [references/worktree-guard.md](references/worktree-guard.md); the caller passes "Worktree root: <path>, branch: <name>" in the prompt.
 
 **Shell agents after `EnterWorktree`.** Claude Code 2.1.318 refuses every shell command whose directory is the shared checkout once a session has entered a worktree. An agent spawned without `isolation: worktree` inherits that guard and cannot run shell commands there. When the session entered a worktree, spawn a shell agent (`collector`, `general-purpose`) with `isolation: worktree`, or call `ExitWorktree` with action `keep` first. An isolated agent works in its own checkout, so its brief names the branch to base on and where to deliver. For the `implementer`, and for forked skills (`git`, `auditor`), call `ExitWorktree` with `keep` first: they work in the session's checkout. Read-only agents have no Bash and need nothing. If a call is refused with the worktree isolation message, do not retry it: call `ExitWorktree` with `keep` and continue from the original directory.
 

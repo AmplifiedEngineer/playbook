@@ -573,7 +573,7 @@ pub fn run(
 mod tests {
     use super::*;
 
-    const BASES: [&str; 3] = ["reviewer", "test-reviewer", "git"];
+    const BASES: [&str; 3] = ["reviewer", "test-reviewer", "critic"];
 
     #[test]
     fn dispatch_names_map_to_an_agent_and_a_tier() {
@@ -587,8 +587,8 @@ mod tests {
             Some(("reviewer", Some("xhigh")))
         );
         assert_eq!(
-            parse_dispatch("git-low", &BASES),
-            Some(("git", Some("low")))
+            parse_dispatch("critic-low", &BASES),
+            Some(("critic", Some("low")))
         );
         // A longer agent name is not mistaken for a variant of a shorter one.
         assert_eq!(

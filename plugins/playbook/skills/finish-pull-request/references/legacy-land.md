@@ -3,7 +3,7 @@
 Read only when `playbook pr status` or `playbook pr land` is missing from the session tool map (an older binary). This is the step by step flow that the finish skill ran before those two commands existed.
 
 
-Run this in the main session or in a delegated or forked agent that holds the `Agent` tool, right after `/playbook:create-pull-request` returns a PR URL. That command forks into the `git` agent, which has no `Agent` tool and cannot spawn review swarms, so the self-review, fix, promote and merge work lives here, in the session that can.
+Run this in the main session or in a delegated agent that holds the `Agent` tool, right after `/playbook:create-pull-request` returns a PR URL. The self-review, fix, promote and merge work lives here because it spawns review swarms.
 
 Inputs from the create-pull-request report: the PR number or URL, its branch, and whether `--ready` was passed. If any is missing, read it with `gh pr view`.
 

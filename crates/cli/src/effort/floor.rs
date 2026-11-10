@@ -37,7 +37,7 @@ pub struct Floor {
 const DOC: &str = "docs/internals/02-model-routing-and-memory.md";
 
 /// Every agent, sorted by name.
-pub const FLOORS: [Floor; 12] = [
+pub const FLOORS: [Floor; 11] = [
     Floor {
         agent: "analyst",
         floor: "medium",
@@ -79,13 +79,6 @@ pub const FLOORS: [Floor; 12] = [
         costly_to_miss: false,
         fan_out: false,
         source: "bench campaign 2026-10-10 (#714): Haiku medium 134/138 and high 137/138 (low 86/90, over 3 points under high); see the policy table in docs/internals/02-model-routing-and-memory.md",
-    },
-    Floor {
-        agent: "git",
-        floor: "xhigh",
-        costly_to_miss: false,
-        fan_out: false,
-        source: "Haiku 5.5 evaluation (#576): commit type right 42% at low and 100% at xhigh; the one Haiku opt-in (src/effort/model_cap.rs)",
     },
     Floor {
         agent: "implementer",

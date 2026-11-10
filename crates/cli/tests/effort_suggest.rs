@@ -219,13 +219,13 @@ fn many_repeats_inside_a_session_hold_a_lowering_back_without_proposing_a_change
 fn too_few_dispatches_is_insufficient_and_no_dispatch_is_unused() {
     let env = Env::new(
         "few",
-        &[("critic", "sonnet", "high"), ("git", "haiku", "xhigh")],
+        &[("critic", "sonnet", "high"), ("analyst", "haiku", "medium")],
     );
     messages(&env, "old", "claude-sonnet-5", "high", 5, 40);
     dispatches(&env, "playbook:critic", 5, 5);
     let report = env.json(&["effort", "suggest", "--json"]);
     assert_eq!(agent(&report, "critic")["status"], "insufficient-data");
-    assert_eq!(agent(&report, "git")["status"], "unused");
+    assert_eq!(agent(&report, "analyst")["status"], "unused");
 }
 
 #[test]

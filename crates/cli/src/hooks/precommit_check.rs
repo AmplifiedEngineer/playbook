@@ -4,8 +4,8 @@
 //! Ports the retired shell original: a mechanical sanity pass over the staged
 //! diff before a commit.
 //!
-//! `/playbook:commit-and-push` forks the git agent, so nothing in that flow
-//! ever reads the diff it is about to commit. This covers the half that needs
+//! `/playbook:commit-and-push` drafts the message from the staged diff with no
+//! model, so nothing in that flow judges the diff it is about to commit. This covers the half that needs
 //! no judgement: debug leftovers, secret-shaped filenames, an oversized commit.
 //!
 //! Warn, never block. A debug statement can be deliberate and a large commit

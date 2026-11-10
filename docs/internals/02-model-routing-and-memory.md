@@ -9,7 +9,7 @@ The policy lives in each file's frontmatter (`agents/*.md` and `commands/*.md`) 
 | Tier | Takes |
 |---|---|
 | **Sonnet** (session default) | Most coding: `/playbook:implement`, `/playbook:fix`, the `implementer` and the `critic`. |
-| **Haiku** | Mechanical, formatting and search work: `git`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, `writer`, and the `doctor`, `session-handoff`, `session-start` and `setup` commands. |
+| **Haiku** | Mechanical, formatting and search work: `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, `writer`, and the `doctor`, `session-handoff`, `session-start` and `setup` commands. |
 | **Opus** | Design (`/playbook:plan`, `/playbook:adr`), every `reviewer` (`/playbook:quick-review`, `/playbook:deep-review` and `/playbook:implement` Step 9, all at the reviewer's own medium effort unless a variant is picked), the `auditor` behind `/playbook:repo-audit`, `/playbook:address-pr-comments` and `/playbook:learn-project`. |
 
 Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mode.
@@ -59,7 +59,6 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 
 | File | Model | Effort | Why |
 | --- | --- | --- | --- |
-| `agents/git` | haiku | `medium` (was `xhigh`) | Drafts the commit message and PR title and body, runs fixed git and `gh` steps. See below. |
 | `agents/collector` | haiku | `low` (was medium) | Gathers and compacts raw history. The analyst thinks later. |
 | `agents/cheap-checker` | haiku | `low` (was medium) | One narrow concern from a named reference file. A full lens covers the rest. |
 | `agents/review-triage` | haiku | `low` (was medium) | A three-way classifier. Any bad or missing answer falls back to `full-lens`, so a wrong call fails safe. |
@@ -73,14 +72,13 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 | `agents/implementer` | sonnet | `medium` (was high) | See the implementer bench below. |
 | `agents/auditor` | opus | `high` (kept) | A whole repository audit whose findings people act on. No headless bench exists for it. The maintainer kept it at `high` on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). |
 | `commands/deep-review`, `implement`, `plan`, `adr`, `learn-project`, `fix`, `address-pr-comments` | opus, except implement and fix (sonnet) | `medium` (was high) | Lowered by the maintainer on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). No bench exists for the design commands. The evidence is the reviewer, implementer and critic results. Watch rework and missed findings. |
-| `commands/commit-and-push`, `create-pull-request`, `repo-audit` | fork into git (haiku) and auditor (opus) | none | They fork into `playbook:git` (`medium`) and `playbook:auditor` (`high`), which set the effort. |
+| `commands/repo-audit` | fork into auditor (opus) | none | It forks into `playbook:auditor` (`high`), which sets the effort. |
 | `commands/doctor`, `session-start`, `setup` | haiku (was sonnet) | `low` (kept) | Run compiled helpers and print the result, or load a saved handoff. Mechanical, so the cheapest tier fits (about 95% less per call, 20x cheaper per token). Checked live (see PR). |
 | the `effort` parameter of the `Agent` call | the agent file's own effort | any level up to every ceiling | Passed by the orchestrator, from `playbook effort resolve` or `playbook effort choose`. The orchestrator picks by ceiling, then diff size and risk; see `playbook:delegating-subagents`. |
 | `skills/*` | none | none | A skill is knowledge loaded into whoever uses it. An `effort` key would override the caller's choice, so none sets one. |
 
 Evidence for the rows marked "See below":
 
-- **`agents/git`.** The Haiku evaluation found the conventional commit type right 42% of the time at `low` and 100% at `xhigh`. At about $0.0006 a call the extra effort costs less than a cent. It is the one Haiku role allowed above `medium` (see the effort cap below). It now ships at `medium`, because `playbook commit run` refuses a type that contradicts the files, so a weaker draft cannot land a wrong type. `playbook commit all` drafts the message with no model at all.
 - **`commands/quick-review`.** One pass over a diff the user chose not to deep review; `/playbook:deep-review` is the thorough path. The reviewer's base is now `medium` too. It is spawned through `playbook effort resolve agents reviewer --cap medium`, which returns the effort to pass on the `Agent` call: `medium`, or lower when the user's ceiling is lower. See [ADR-0021](../adr/0021-reviewer-at-opus-medium.md).
 - **`agents/reviewer`.** Benched on 10 real diffs (7 with a seeded real finding, 3 clean), 20 runs per cell (200 calls):
   - Opus high 200/200. Opus medium 199/200 (the one miss was `rd-lower`, a seeded finding, 139/140 recall). Sonnet medium and high 200/200. Opus low 49/50 in a 5 run round.
@@ -127,7 +125,7 @@ The Haiku 5.5 evaluation (#576) found `xhigh` costs 2x `medium` for the same pas
 
 - `max` is never used on Haiku, whatever a role or a spawn asks for.
 - Haiku roles stop at `medium` by default.
-- A role may go up to `xhigh` only when it has an entry in `OPT_INS` with a recorded reason. Today that is the `git` agent (evidence above), so the `git` agent could go up to `xhigh`, and ships at `medium`. Because the fork skills `commit-and-push` and `create-pull-request` name `agent: playbook:git` (the prefix is required, a bare `git` forks a general purpose agent on the session model), the base file is the simple place for it. A cheaper `git-low` variant stays available for a session that wants it.
+- A role may go up to `xhigh` only when it has an entry in `OPT_INS` with a recorded reason. No role has one today.
 
 The cap is a ceiling like the others. The lowest ceiling wins, your `maxEffortLevel` still beats it when lower, and it never raises anything. It applies in `playbook effort resolve`, in the variants `playbook cc` and `playbook ccd` render, and it shows in `playbook effort list` and `playbook doctor models`.
 
