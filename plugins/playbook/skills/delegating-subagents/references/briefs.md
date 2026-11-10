@@ -24,7 +24,6 @@ An `Agent` call that omits `subagent_type` forks the parent: the child inherits 
 
 | Site | Needs parent history? | Mechanism |
 |---|---|---|
-| `commit-and-push`, `create-pull-request` | No, the staged diff is read from git | `context: fork`, `agent: playbook:git` (fresh) |
 | `repo-audit` | No | `context: fork`, `agent: auditor` (fresh) |
 | `deep-review`, `quick-review`, `implement` Step 9 reviewers, `review-triage`, `cheap-checker` | No, diff and excerpts go in the brief | `subagent_type: playbook:<agent>` |
 | `implement` implementers | No, the Work Unit brief is self-contained | `subagent_type: playbook:implementer` |

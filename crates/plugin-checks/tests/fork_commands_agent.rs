@@ -3,8 +3,7 @@
 
 //! A forked command picks its agent with `agent:` in its frontmatter. A plugin
 //! agent only resolves with the `playbook:` prefix; a bare name falls back to a
-//! general purpose agent on the session model, which ran every commit and pull
-//! request on Sonnet or Opus instead of the Haiku `git` agent.
+//! general purpose agent on the session model instead of the named agent.
 
 use std::fs;
 use std::path::PathBuf;
@@ -20,14 +19,6 @@ fn frontmatter_value(file: &str, key: &str) -> Option<String> {
         .take_while(|line| *line != "---")
         .find_map(|line| line.strip_prefix(&format!("{key}: ")))
         .map(|value| value.trim().to_string())
-}
-
-#[test]
-fn the_git_agent_runs_on_haiku() {
-    assert_eq!(
-        frontmatter_value("agents/git.md", "model").as_deref(),
-        Some("haiku")
-    );
 }
 
 #[test]

@@ -44,7 +44,7 @@ description: Lists /playbook:* commands and when to use each, and points to the 
 
 ## Delivery pattern
 
-`/playbook:commit-and-push`, `/playbook:create-pull-request` and `/playbook:repo-audit` run in an isolated forked context (`context: fork`). `/playbook:implement` delegates each Work Unit to `implementer` subagents, some in isolated git worktrees. A subagent's return value alone is not a reliable signal of what it did. See `playbook:delegating-subagents` for the file-based handoff discipline.
+`/playbook:repo-audit` runs in an isolated forked context (`context: fork`). `/playbook:implement` delegates each Work Unit to `implementer` subagents, some in isolated git worktrees. A subagent's return value alone is not a reliable signal of what it did. See `playbook:delegating-subagents` for the file-based handoff discipline.
 
 The memory store, its scopes and its edge types are described in `docs/guides/03-decisions-and-memory.md`.
 

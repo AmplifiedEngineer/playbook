@@ -20,7 +20,7 @@ Every agent file opens with five keys:
 | `model` | One of `haiku`, `sonnet`, `opus`. |
 | `effort` | One of `low`, `medium`, `high`, `xhigh`, `max`. |
 
-`agents/auditor.md`, `agents/git.md`, and `agents/reviewer.md` are real, filled-in examples of this shape.
+`agents/auditor.md`, `agents/implementer.md`, and `agents/reviewer.md` are real, filled-in examples of this shape.
 
 ## Fresh agents, not forks
 
@@ -39,7 +39,7 @@ context: fork
 agent: playbook:auditor
 ```
 
-That is what `commands/repo-audit.md` adds to its frontmatter to route to `playbook:auditor`. `commands/commit-and-push.md` and `commands/create-pull-request.md` both add the same two lines, pointing at `agent: playbook:git`. A plugin agent needs its `playbook:` prefix here, as it does for `subagent_type`: a bare `agent: git` or `agent: auditor` does not resolve, and the fork silently runs as a general purpose agent on the session's own model (measured: Sonnet at $0.117 a commit against $0.007 on the Haiku `git` agent).
+That is what `commands/repo-audit.md` adds to its frontmatter to route to `playbook:auditor`. A plugin agent needs its `playbook:` prefix here, as it does for `subagent_type`: a bare `agent: critic` or `agent: auditor` does not resolve, and the fork silently runs as a general purpose agent on the session's own model (measured: Sonnet at $0.117 a commit against $0.007 on a Haiku agent).
 
 **Inline spawn.** The command keeps `Agent` in its `allowed-tools` and spawns the agent directly with `subagent_type: <name>`, often several at once. Pick this when the command orchestrates and the agent does one scoped piece of the work, or when you need a swarm.
 

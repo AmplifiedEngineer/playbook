@@ -376,7 +376,6 @@ fn language_standards_name_every_reference_and_only_their_own() {
 #[test]
 fn forked_files_point_at_the_existing_worktree_guard() {
     let root = Path::new(env!("PLAYBOOK_PLUGIN_ROOT"));
-    let mut users = Vec::new();
     for dir in ["commands", "agents"] {
         for entry in fs::read_dir(root.join(dir)).unwrap().filter_map(Result::ok) {
             let path = entry.path();
@@ -397,12 +396,7 @@ fn forked_files_point_at_the_existing_worktree_guard() {
                     "{} points at skill `{skill}`, which has no references/worktree-guard.md",
                     path.display()
                 );
-                users.push(path.file_name().unwrap().to_string_lossy().to_string());
             }
         }
     }
-    assert!(
-        users.iter().any(|u| u == "git.md"),
-        "git.md must use the guard"
-    );
 }

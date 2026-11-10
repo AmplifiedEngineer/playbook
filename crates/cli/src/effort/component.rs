@@ -355,7 +355,7 @@ mod tests {
         let agent =
             |effort: &str| format!("---\nname: x\ndescription: d\neffort: {effort}\n---\nBody\n");
         fs::write(root.join("agents/reviewer.md"), agent("high")).unwrap();
-        fs::write(root.join("agents/git.md"), agent("low")).unwrap();
+        fs::write(root.join("agents/critic.md"), agent("low")).unwrap();
         fs::write(root.join("commands/deep-review.md"), agent("high")).unwrap();
         fs::write(
             root.join("skills/writing/SKILL.md"),
@@ -384,17 +384,17 @@ mod tests {
     }
 
     #[test]
-    fn the_git_agent_may_reach_xhigh_on_haiku() {
-        let (home, root) = plugin("cmp-git-optin");
+    fn a_haiku_agent_stops_at_medium() {
+        let (home, root) = plugin("cmp-haiku-cap");
         fs::write(
-            root.join("agents/git.md"),
+            root.join("agents/critic.md"),
             "---\nname: g\ndescription: d\nmodel: haiku\neffort: low\n---\nBody\n",
         )
         .unwrap();
-        let r = resolve(Kind::Agent, "git", &home, None, Some(&root));
-        assert_eq!(r.model_cap.as_deref(), Some("xhigh"));
+        let r = resolve(Kind::Agent, "critic", &home, None, Some(&root));
+        assert_eq!(r.model_cap.as_deref(), Some("medium"));
         set(&home, "maxEffortLevel", "medium");
-        let r = resolve(Kind::Agent, "git", &home, None, Some(&root));
+        let r = resolve(Kind::Agent, "critic", &home, None, Some(&root));
         assert_eq!(
             r.ceiling.as_deref(),
             Some("medium"),
@@ -415,8 +415,8 @@ mod tests {
     #[test]
     fn a_ceiling_never_raises_the_shipped_effort() {
         let (home, root) = plugin("cmp-never-raise");
-        set(&home, "effort.agents.git", "xhigh");
-        let r = resolve(Kind::Agent, "git", &home, None, Some(&root));
+        set(&home, "effort.agents.critic", "xhigh");
+        let r = resolve(Kind::Agent, "critic", &home, None, Some(&root));
         assert_eq!(r.effective.as_deref(), Some("low"));
     }
 
@@ -582,7 +582,7 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                "agents/git",
+                "agents/critic",
                 "agents/reviewer",
                 "commands/deep-review",
                 "skills/writing"

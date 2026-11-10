@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! A guard on the conventional commit type, so the type does not rest on the
-//! drafting model's effort alone. The Haiku 5.5 evaluation (#576) saw the
-//! `git` agent at low effort write docs as `feat`, a refactor as `fix` and a
+//! drafting model's effort alone. The Haiku 5.5 evaluation (#576) saw a
+//! drafting agent at low effort write docs as `feat`, a refactor as `fix` and a
 //! dependency bump as `fix`. The first and last are decidable from the files.
 //!
 //! Only clear mismatches are refused: a change that touches nothing but docs

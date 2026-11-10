@@ -11,8 +11,7 @@
 //! - `max` is never used on Haiku, whatever a role asks for.
 //! - Haiku roles stop at `medium` by default.
 //! - A role may opt in to a higher level, up to `xhigh`, only with a recorded
-//!   reason in `OPT_INS`. The `git` agent does: its commit type was right 42%
-//!   of the time at `low` and 100% at `xhigh`.
+//!   reason in `OPT_INS`. No role has one today.
 //!
 //! The cap is a ceiling like the others: the lowest one wins, and it never
 //! raises anything.
@@ -27,11 +26,7 @@ pub const HAIKU_DEFAULT_CAP: &str = "medium";
 
 /// Roles that may run Haiku above the default cap: (component name, level,
 /// reason). The level is itself held to `HAIKU_HARD_CEILING`.
-pub const OPT_INS: [(&str, &str, &str); 1] = [(
-    "git",
-    "xhigh",
-    "commit and PR drafting picked the right conventional type 42% of the time at low and 100% at xhigh",
-)];
+pub const OPT_INS: [(&str, &str, &str); 0] = [];
 
 /// Whether `model` (an alias such as `haiku` or an id such as
 /// `claude-haiku-5-5`) is a Haiku model.
@@ -42,21 +37,31 @@ fn is_haiku(model: &str) -> bool {
         .contains("haiku")
 }
 
-/// The opt-in for `component`, if it has one.
-pub fn opt_in(component: &str) -> Option<(&'static str, &'static str)> {
-    OPT_INS
+/// The level `component` opted in to in `table`, if it has an entry.
+fn opt_in_level<'a>(table: &[(&'a str, &'a str, &'a str)], component: &str) -> Option<&'a str> {
+    table
         .iter()
         .find(|(name, _, _)| *name == component)
-        .map(|(_, level, reason)| (*level, *reason))
+        .map(|(_, level, _)| *level)
+}
+
+/// The ceiling `model` puts on `component` given the opt-in `table`, `None`
+/// when the model has none.
+fn cap_in<'a>(
+    table: &[(&'a str, &'a str, &'a str)],
+    model: Option<&str>,
+    component: &str,
+) -> Option<&'a str> {
+    if !model.is_some_and(is_haiku) {
+        return None;
+    }
+    let wanted = opt_in_level(table, component).unwrap_or(HAIKU_DEFAULT_CAP);
+    lower(Some(wanted), Some(HAIKU_HARD_CEILING))
 }
 
 /// The ceiling `model` puts on `component`, `None` when the model has none.
 pub fn cap_for(model: Option<&str>, component: &str) -> Option<&'static str> {
-    if !model.is_some_and(is_haiku) {
-        return None;
-    }
-    let wanted = opt_in(component).map_or(HAIKU_DEFAULT_CAP, |(level, _)| level);
-    lower(Some(wanted), Some(HAIKU_HARD_CEILING))
+    cap_in(&OPT_INS, model, component)
 }
 
 /// `level` held to what `model` allows for `component`.
@@ -83,14 +88,13 @@ mod tests {
     #[test]
     fn max_is_never_allowed_on_haiku() {
         assert_eq!(clamp(Some("haiku"), "cheap-checker", "max"), "medium");
-        assert_eq!(clamp(Some("haiku"), "git", "max"), "xhigh");
     }
 
     #[test]
     fn an_opted_in_role_may_use_xhigh() {
-        assert_eq!(cap_for(Some("haiku"), "git"), Some("xhigh"));
-        assert_eq!(clamp(Some("haiku"), "git", "xhigh"), "xhigh");
-        assert_eq!(clamp(Some("haiku"), "git", "low"), "low");
+        let table = [("drafter", "xhigh", "a reason that is long enough to count")];
+        assert_eq!(cap_in(&table, Some("haiku"), "drafter"), Some("xhigh"));
+        assert_eq!(cap_in(&table, Some("haiku"), "critic"), Some("medium"));
     }
 
     #[test]

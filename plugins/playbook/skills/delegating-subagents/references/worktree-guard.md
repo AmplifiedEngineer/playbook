@@ -1,8 +1,8 @@
 # Worktree guard
 
-A forked git skill (`/playbook:commit-and-push`, `/playbook:create-pull-request`) starts in the session's checkout. That is not always the worktree of the agent that called it. Run this guard as the first step, before any other command, and again by `cd` at the top of every later bash block (each block is a new shell).
+A commit or PR skill (`/playbook:commit-and-push`, `/playbook:create-pull-request`) run by a subagent starts in the session's checkout. That is not always the worktree of the agent that called it. Run this guard as the first step, before any other command, and again by `cd` at the top of every later bash block (each block is a new shell).
 
-The caller passes two values in the fork's prompt as "Worktree root: <path>, branch: <name>": the absolute worktree root (its `git rev-parse --show-toplevel`) and the expected branch (its `git branch --show-current`, or `(detached)` when that prints nothing). Call them `root` and `branch`.
+The caller passes two values in the subagent's prompt as "Worktree root: <path>, branch: <name>": the absolute worktree root (its `git rev-parse --show-toplevel`) and the expected branch (its `git branch --show-current`, or `(detached)` when that prints nothing). Call them `root` and `branch`.
 
 1. `cd -- "<root>"`, quoted. If `root` is not an absolute path, or the `cd` fails, stop as in step 4 with `<toplevel>` and `<found-branch>` both `none`. When the caller gave `--dir <path>` (create-pull-request), that path is the root.
 2. Run `git rev-parse --show-toplevel`.
