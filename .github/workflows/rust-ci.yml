@@ -254,7 +254,7 @@ jobs:
           bash "$guard" ${args[@]+"${args[@]}"}
 
       # Same rule as the help lint step: the copy on main judges the change.
-      - name: Check the plugin size list only shrinks
+      - name: Check the plugin size and call graph lists only shrink
         if: env.LANE == 'true' && runner.os == 'Linux' && github.event_name == 'pull_request' && (inputs.ref || '') == ''
         run: |
           guard="$RUNNER_TEMP/check-size-budget-shrink.sh"
@@ -264,6 +264,7 @@ jobs:
             cp scripts/check-size-budget-shrink.sh "$guard"
           fi
           bash "$guard" crates/plugin-checks/tests/size_budget_allowlist.txt
+          bash "$guard" crates/plugin-checks/tests/call_graph_allowlist.txt
 
       - name: Cache cargo registry and build output (build-test)
         id: cargo

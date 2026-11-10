@@ -22,7 +22,7 @@ Runs once per Segment, immediately after Step 9 opened that Segment's PR, and MU
 gh pr ready "$BRANCH"
 ```
 
-**Do NOT invoke `playbook:finish-pull-request` (it runs `/playbook:review --self --deep`), and do NOT pass `--ready` to `/playbook:pr-create`.** That step exists to guarantee a human is never the first reviewer of unreviewed code; Steps 8 and 9 above already satisfied that invariant for this Segment, more strongly, with a 5-lens swarm whose reviewers ran in fresh contexts that never saw the implementation. Reviewers are dispatched subagents, so they are fresh by construction. Record in the ledger which review satisfied the gate: `review: implement-step9 (5 lenses, <n> findings fixed)`.
+**Skip `playbook:finish-pull-request` here (it runs `/playbook:review --self --deep`), and pass no `--ready` to `/playbook:pr-create`.** That step exists to guarantee a human is never the first reviewer of unreviewed code; Steps 8 and 9 above already satisfied that invariant for this Segment, more strongly, with a 5-lens swarm whose reviewers ran in fresh contexts that never saw the implementation. Reviewers are dispatched subagents, so they are fresh by construction. Record in the ledger which review satisfied the gate: `review: implement-step9 (5 lenses, <n> findings fixed)`.
 
 **2. Gate on required checks.** Poll with a deadline; never `--watch` unbounded. Intent: pr-ci-wait. If the session's tool map (printed at session start) lists it, use that command with `"$PR" --settle 120 --timeout 300 --interval 30` and the Bash `timeout` set to 600000. Otherwise do this: wait 120 seconds, then read `gh pr checks "$PR" --required --json name,bucket` every 30 seconds for up to 300 seconds, each read its own Bash call. Ignore the exit code of `gh pr checks` (it is non-zero while checks are pending or failing) and read the JSON; a "no required checks reported" error counts as an empty list. `CI_VERDICT` is `NONE` for an empty list, `FAIL` when any bucket is `fail`, `CANCELLED` when none is `pending` and any is `cancel`, `PASS` when none is `pending`, and `TIMEOUT` when time runs out.
 
@@ -44,7 +44,7 @@ gh api "repos/{owner}/{repo}/actions/runs/<id>/jobs" \
 
 Either case: `gh run rerun <id> --failed`, then return to step 2. Max 2 reruns; a third consecutive transient parks the Segment as `CI_UNSTABLE` rather than burning turns.
 
-**Genuine failure:** apply `playbook:systematic-debugging` to find the root cause before touching code, dispatch an `implementer` scoped to the failing check's diagnosis on the Segment branch, then `/playbook:commit` (with the worktree root and branch in its prompt ("Worktree root: <path>, branch: <name>") from a worktree), then return to step 2. **A formatter failure MUST be fixed by running the project's own formatter** (`cargo fmt`, `prettier --write`, `ruff format`, per the Step 3 stack detection), never by hand-editing lines to satisfy it: a hand-edit burns a fix attempt and usually trips the next wrapping rule. Capture `<pre-fix-sha>` before the fix; step 4 needs it.
+**Genuine failure:** apply `playbook:systematic-debugging` to find the root cause before touching code, dispatch an `implementer` scoped to the failing check's diagnosis on the Segment branch, then invoke `/playbook:commit` (with the worktree root and branch in its prompt ("Worktree root: <path>, branch: <name>") from a worktree), then return to step 2. **A formatter failure MUST be fixed by running the project's own formatter** (`cargo fmt`, `prettier --write`, `ruff format`, per the Step 3 stack detection), never by hand-editing lines to satisfy it: a hand-edit burns a fix attempt and usually trips the next wrapping rule. Capture `<pre-fix-sha>` before the fix; step 4 needs it.
 
 **4. Re-review the fix, tiered by what the fix actually is.** Re-running the full 5-lens swarm for a one-line format fix is waste; skipping review for a logic change is not. Classify the fix diff mechanically, do not judge:
 
@@ -130,7 +130,7 @@ That last diff MUST be empty. A squash-merge collapses the branch's internal sha
 
 | Situation | Action |
 |---|---|
-| `land`: Segment's PR just opened | `gh pr ready <branch>` directly; do NOT invoke `playbook:finish-pull-request` (`/playbook:review --self --deep`) and do NOT pass `--ready`: Steps 8-9 already reviewed this diff (Step 10) |
+| `land`: Segment's PR just opened | `gh pr ready <branch>` directly; skip `playbook:finish-pull-request` (`/playbook:review --self --deep`) and pass no `--ready`: Steps 8-9 already reviewed this diff (Step 10) |
 | `land`: required checks green (or none required) | Attempt `gh pr merge <n> --auto`; re-read `state`/`autoMergeRequest` before believing the exit code, in either direction (Step 10) |
 | `land`: `mergeable: CONFLICTING` / `mergeStateStatus: DIRTY` | Conflict, not permissions: rebase on the fetched default branch, push `&&`-chained, re-run CI. Never `--admin`; it cannot bypass a conflict (Step 10) |
 | `land`: `mergeStateStatus: BEHIND` | Rebase onto `origin/<default>` and push; don't merge, don't park (Step 10) |

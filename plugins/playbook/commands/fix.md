@@ -8,7 +8,7 @@ effort: medium
 
 # Fix
 
-Fix one small bug end to end: a failing test, the smallest change that makes it pass, one pull request. If the fix turns out not to be small, stop and hand off to `/playbook:plan` instead of growing the change.
+Fix one small bug end to end: a failing test, the smallest change that makes it pass, one pull request. If the fix turns out not to be small, stop and tell the user to run `/playbook:plan` instead of growing the change.
 
 ## Step 0: Read the run mode
 
@@ -61,10 +61,10 @@ Escalate when any one of these is true:
 
 Check rules 1 and 2 against `git diff --stat` before you commit. Check rule 3 during Step 3, rule 4 as soon as you see it, and rule 5 in Step 2.
 
-To escalate, stop making changes. Hand off to `/playbook:plan` and say which rule fired, with the numbers or the evidence behind it. Pass along the one-sentence bug, what you tested, and what you learned. Leave the working tree as it is, or revert your half-made fix if it would mislead the plan. Do not open a pull request.
+To escalate, stop making changes. Tell the user to run `/playbook:plan` and say which rule fired, with the numbers or the evidence behind it. Pass along the one-sentence bug, what you tested, and what you learned. Leave the working tree as it is, or revert your half-made fix if it would mislead the plan. Do not open a pull request.
 
 - If mode is ask, ask the user whether to start `/playbook:plan` now or stop.
-- If mode is auto, start `/playbook:plan` with the same hand-off and add the rule that fired to the Assumptions list. It stops at the design approval unless you pass `--auto-design`.
+- If mode is auto, invoke `/playbook:plan` with the Skill tool and the same hand-off, and add the rule that fired to the Assumptions list. It stops at the design approval unless you pass `--auto-design`.
 
 ## Step 5: Commit
 

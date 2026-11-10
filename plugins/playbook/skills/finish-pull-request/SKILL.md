@@ -32,7 +32,7 @@ In auto mode, skip the self-review below when `/playbook:implement` opened this 
 
 Check the PR text: the body follows the short template, and the title and commits carry the ticket key in the scope. Fix a title or body miss with `gh pr edit`. A commit miss is reworded only in ask mode with `git push --force-with-lease`; in auto mode report it.
 
-Fix the review findings. With `autoReview.fix` true, fix every finding that survived the sweep and commit through `/playbook:commit` (worktree root and branch in its prompt). A push updates the draft.
+Fix the review findings. With `autoReview.fix` true, fix every finding that survived the sweep and commit by invoking `/playbook:commit` (worktree root and branch in its prompt). A push updates the draft.
 
 ## 4. Promote and land
 
