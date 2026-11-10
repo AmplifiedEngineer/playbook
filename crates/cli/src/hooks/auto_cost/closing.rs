@@ -19,7 +19,8 @@ use std::path::Path;
 /// depend on. A renamed skill is listed under both names until 1.0.0, so a new
 /// binary still parks a caller that runs a plugin not yet updated. The old
 /// names go at 1.0.0.
-const CLOSING_SKILLS: [&str; 5] = [
+const CLOSING_SKILLS: [&str; 6] = [
+    "playbook:pr-create",
     "playbook:create-pull-request",
     "playbook:commit",
     "playbook:commit-and-push",
@@ -628,6 +629,7 @@ mod tests {
     #[test]
     fn only_the_delivery_skills_and_their_dependencies_are_closing_skills() {
         for skill in [
+            "playbook:pr-create",
             "playbook:create-pull-request",
             "playbook:commit",
             "playbook:commit-and-push",
@@ -636,7 +638,13 @@ mod tests {
         ] {
             assert!(is_closing_skill(skill), "{skill}");
         }
-        for skill in ["playbook:implement", "playbook:fix", "commit", ""] {
+        for skill in [
+            "playbook:implement",
+            "playbook:fix",
+            "commit",
+            "pr-create",
+            "",
+        ] {
             assert!(!is_closing_skill(skill), "{skill}");
         }
     }

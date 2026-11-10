@@ -25,7 +25,6 @@ pub(crate) const GROUPS: &[&str] = &["pr", "handoff"];
 /// a docs list: the docs name an old slash name only in `docs/renamed.md`.
 pub(crate) const LEGACY_NAMES: &[&str] = &[
     "address-pr-comments",
-    "create-pull-request",
     "deep-review",
     "quick-review",
     "learn-project",

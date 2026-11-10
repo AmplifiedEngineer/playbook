@@ -33,7 +33,7 @@ Some keys may sync between your own machines: `usage.theme`, `usage.weekStart`, 
 | `autoMerge.enabled` | `false` | `true`, `false` | After the review and fixes, marks the PR ready, waits for green checks, then merges with `gh pr merge --auto`. |
 | `commit.signOff` | `true` | `true`, `false` | Commits made through `/playbook:commit` carry a `Signed-off-by` trailer. |
 | `handoff.onClear` | `false` | `true`, `false` | When `/clear` ends a session that saved no handoff in the last 10 minutes, the `handoff-on-clear` hook resumes it as a fork on Haiku with no tools and saves the handoff, so the next session loads it. It adds up to 50 seconds to the `/clear`, skips a transcript over 8 MiB, and never blocks the clear. |
-| `pr.draft` | `true` | `true`, `false` | `/playbook:create-pull-request` opens the PR as a draft. |
+| `pr.draft` | `true` | `true`, `false` | `/playbook:pr-create` opens the PR as a draft. |
 | `pr.rules.template` | `block` | `off`, `warn`, `block` | The PR body must follow the template: optional ticket line, `## Summary`, optional `## Notes for reviewers`, optional `## Related work`, in that order, with no empty section. The old `## What Changed` section only warns. |
 | `pr.rules.length` | `warn` | `off`, `warn`, `block` | The PR body stays under `pr.bodyMaxChars`. |
 | `pr.rules.issue` | `warn` | `off`, `warn`, `block` | When `--issue` or the branch names a GitHub issue, the body needs `Closes #N` or `Refs #N`. |

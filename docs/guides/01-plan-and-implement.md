@@ -87,7 +87,7 @@ It runs on Sonnet and never edits files itself. It hands each Work Unit to a sub
 
 **Savepoints.** Each step checkpoints with a `wip` commit. When a unit passes review, its checkpoints squash into one commit. A subagent that dies resumes from its last `wip` commit.
 
-**Finish.** After all Segments, a refinement pass runs a simplify analysis, then an adversarial review of the full diff: one reviewer when the diff is 150 changed lines or fewer, a lens swarm when it is larger. Blocking findings are fixed on the Segment branch that owns the file. Then one PR per Segment opens through `/playbook:create-pull-request`. In `ask` mode a single-PR plan leaves PR creation to you.
+**Finish.** After all Segments, a refinement pass runs a simplify analysis, then an adversarial review of the full diff: one reviewer when the diff is 150 changed lines or fewer, a lens swarm when it is larger. Blocking findings are fixed on the Segment branch that owns the file. Then one PR per Segment opens through `/playbook:pr-create`. In `ask` mode a single-PR plan leaves PR creation to you.
 
 ### Auto
 

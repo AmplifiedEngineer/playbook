@@ -349,7 +349,7 @@ fn every_closing_step_stays_allowed_at_every_cap() {
             assert!(!outcome.is_denied(), "{agent:?} {command:?}: {outcome:?}");
         }
         for skill in [
-            "playbook:create-pull-request",
+            "playbook:pr-create",
             "playbook:commit",
             "playbook:writing-style",
             "playbook:engineering-standards",

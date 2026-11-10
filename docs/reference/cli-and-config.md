@@ -1159,7 +1159,7 @@ Example: `playbook plugin upgrade`
 
 Prepare and open PRs, and pick a review depth
 
-These are the mechanical steps behind `/playbook:create-pull-request`.
+These are the mechanical steps behind `/playbook:pr-create`.
 
 Example: `playbook pr prepare --base main`
 

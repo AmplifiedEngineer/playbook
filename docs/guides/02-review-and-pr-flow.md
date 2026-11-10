@@ -1,6 +1,6 @@
 # Review and PR Flow
 
-Four commands take a ready branch to a merged PR: `/playbook:commit`, `/playbook:create-pull-request`, `/playbook:review`, and `/playbook:address-pr-comments`.
+Four commands take a ready branch to a merged PR: `/playbook:commit`, `/playbook:pr-create`, `/playbook:review`, and `/playbook:address-pr-comments`.
 
 ## Commit and push
 
@@ -28,7 +28,7 @@ Flags combine (`-Au`). After a rebase or amend it pushes with `--force-with-leas
 
 ## Create a pull request
 
-`/playbook:create-pull-request` runs pre-flight checks, drafts a conventional-commit title and the team template body, then opens the PR. It opens a draft unless `pr.draft` is `false`.
+`/playbook:pr-create` runs pre-flight checks, drafts a conventional-commit title and the team template body, then opens the PR. It opens a draft unless `pr.draft` is `false`.
 
 ## Review
 
@@ -144,7 +144,7 @@ Six keys shape the PR flow and the commit trailer. Read one with `playbook confi
 | `autoReview.fix` | `false` | After the self-review, fixes every finding that survived the review's verification, pushes the fixes to the PR branch, and re-runs the scoped checks. |
 | `autoMerge.enabled` | `false` | After the review and fixes, marks the PR ready, waits until every check on the PR head is green, runs `gh pr merge <n> --auto`, then re-reads the PR and reports whether it merged, is queued, was rejected, or was closed. |
 | `commit.signOff` | `true` | Commits made through `/playbook:commit` carry a `Signed-off-by` trailer. |
-| `pr.draft` | `true` | `/playbook:create-pull-request` opens the PR as a draft. Set it to `false` to open PRs ready for review. |
+| `pr.draft` | `true` | `/playbook:pr-create` opens the PR as a draft. Set it to `false` to open PRs ready for review. |
 
 ```bash
 playbook config set --global autoReview.fix true
@@ -169,7 +169,7 @@ A stacked PR whose base is another open PR is not merged before its base. In aut
 
 ```bash
 /playbook:commit -A                   # commit and push
-/playbook:create-pull-request         # open the PR
+/playbook:pr-create                   # open the PR
 /playbook:review --self               # self-review; it picks quick or deep
 /playbook:address-pr-comments         # after a reviewer leaves comments
 ```

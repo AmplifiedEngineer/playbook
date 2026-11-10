@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook pr rules`: Step 0 of `/playbook:create-pull-request`. It cuts the
+//! `playbook pr rules`: Step 0 of `/playbook:pr-create`. It cuts the
 //! few sections of the writing-style and engineering-standards skills that a
 //! PR needs into four files, and checks each cut with marker strings, so a
 //! renamed heading fails loudly instead of pulling in half a skill.

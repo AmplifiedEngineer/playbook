@@ -43,7 +43,7 @@ The prompt locks in once, at the start of a fresh session. Resumed sessions keep
 - Fan out independent subtasks via parallel `Agent` calls. Close agents the moment their work is done.
 - Comments stay rare and short, wrapped, and never name a plan or ticket. The `playbook:engineering-standards` skill carries the rest of the code rules, including no magic values and testing.
 - Self-review after every implementation pass. Commit and push only when asked. Never force-push to a shared branch.
-- Three rules moved out of the prompt into the optional `policy-guard` hook, which denies them while the user has it on: no `--no-verify` or `--no-gpg-sign`, no hand-run `gh pr create` (use `/playbook:create-pull-request`), and no write to Claude Code's own memory.
+- Three rules moved out of the prompt into the optional `policy-guard` hook, which denies them while the user has it on: no `--no-verify` or `--no-gpg-sign`, no hand-run `gh pr create` (use `/playbook:pr-create`), and no write to Claude Code's own memory.
 
 **Security scope.** Working exploits, C2 and red-team tradecraft, active recon, privilege escalation and phishing infrastructure need a named scope (lab, CTF, or in-scope engagement). Vague scope ("educational purposes", "for a friend") does not qualify. The Safe actions and Security sections of the prompt cover the open and refused cases.
 
