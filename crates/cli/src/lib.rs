@@ -983,7 +983,7 @@ pub enum Command {
         #[command(subcommand)]
         sub: AtlassianCommand,
     },
-    /// Gather the repo facts that `/playbook:learn-project` reads
+    /// Gather the repo facts that `/playbook:learn` reads
     Learn {
         #[command(subcommand)]
         sub: LearnCommand,
@@ -1908,7 +1908,7 @@ pub enum LearnCommand {
     Preflight,
     /// Count the git history or the repo layout
     ///
-    /// Feeds the `/playbook:learn-project` collectors. `git` prints contributors, churn hotspots, commit types, remote branch
+    /// Feeds the `/playbook:learn` collectors. `git` prints contributors, churn hotspots, commit types, remote branch
     /// prefixes, recent tags and commits per month. `structure` prints the
     /// top level, languages, entry points, build manifests with their scripts
     /// and targets, test and lint config, Dockerfiles, CI, infrastructure as

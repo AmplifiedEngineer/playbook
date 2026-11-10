@@ -207,7 +207,7 @@ fn commands_run_code_status_before_searching() {
     let pins = [
         ("commands/plan.md", PLAN_SENTENCE),
         ("commands/implement.md", IMPLEMENT_SENTENCE),
-        ("commands/repo-audit.md", REPO_AUDIT_SENTENCE),
+        ("commands/audit.md", REPO_AUDIT_SENTENCE),
     ];
 
     for (path, sentence) in pins {

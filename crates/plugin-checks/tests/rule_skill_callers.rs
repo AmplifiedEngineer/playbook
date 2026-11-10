@@ -53,7 +53,7 @@ const CALLERS: &[Caller] = &[
         loads: &["writing-style"],
     },
     Caller {
-        file: "commands/learn-project.md",
+        file: "commands/learn.md",
         section: None,
         loads: &["atlassian", "writing-style"],
     },

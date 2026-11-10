@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook adr next`, `learn preflight` and `pr comments`: the helpers that
-//! replaced bash blocks in `adr.md`, `learn-project.md` and
+//! replaced bash blocks in `adr.md`, `learn.md` and
 //! `pr-comments.md`.
 
 use std::fs;

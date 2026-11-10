@@ -1640,7 +1640,7 @@ fn rust_writer_matches_the_frozen_python_golden() {
 
 /// `playbook memory rebuild` rebuilds with NO payload at all.
 ///
-/// This is the `--graph-only` path of `/playbook:learn-project`. It used to
+/// This is the `--graph-only` path of `/playbook:learn`. It used to
 /// run `python3 the retired shell original < /dev/null`, because that
 /// script treated empty stdin as "rebuild everything". The Rust port dropped
 /// that branch deliberately (`should_skip` in
@@ -2030,7 +2030,7 @@ fn empty_body_pair_does_not_count_as_a_jaccard_hit_and_does_not_crash() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// `/playbook:learn-project --stage` writes unapproved candidates under
+/// `/playbook:learn --stage` writes unapproved candidates under
 /// `<owner>/<repo>/staging/`; they must not become nodes, while sibling
 /// facts still do.
 #[test]

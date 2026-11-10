@@ -925,7 +925,7 @@ Lists the hooks setup adds to settings.json, grouped by purpose. Changes nothing
 
 ### `playbook learn`
 
-Gather the repo facts that `/playbook:learn-project` reads
+Gather the repo facts that `/playbook:learn` reads
 
 Subcommands: `collect`, `preflight`
 
@@ -933,7 +933,7 @@ Subcommands: `collect`, `preflight`
 
 Count the git history or the repo layout
 
-Feeds the `/playbook:learn-project` collectors. `git` prints contributors, churn hotspots, commit types, remote branch prefixes, recent tags and commits per month. `structure` prints the top level, languages, entry points, build manifests with their scripts and targets, test and lint config, Dockerfiles, CI, infrastructure as code, migrations, model files and `scripts/`. Both print one JSON object, read only through `git`, with every count capped.
+Feeds the `/playbook:learn` collectors. `git` prints contributors, churn hotspots, commit types, remote branch prefixes, recent tags and commits per month. `structure` prints the top level, languages, entry points, build manifests with their scripts and targets, test and lint config, Dockerfiles, CI, infrastructure as code, migrations, model files and `scripts/`. Both print one JSON object, read only through `git`, with every count capped.
 
 Example: `playbook learn collect git structure`
 

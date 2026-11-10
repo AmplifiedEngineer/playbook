@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook learn preflight`: Phase 0 of `/playbook:learn-project`. Names the
+//! `playbook learn preflight`: Phase 0 of `/playbook:learn`. Names the
 //! repo, the memory store and the commit count, probes which tools are
 //! reachable, and tallies the JIRA keys in recent history.
 

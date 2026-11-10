@@ -23,7 +23,7 @@ fn frontmatter_value(file: &str, key: &str) -> Option<String> {
 
 #[test]
 fn repo_audit_forks_into_the_prefixed_auditor_agent() {
-    let file = "commands/repo-audit.md";
+    let file = "commands/audit.md";
     assert_eq!(
         frontmatter_value(file, "context").as_deref(),
         Some("fork"),

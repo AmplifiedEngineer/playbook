@@ -536,7 +536,7 @@ fn append_auto_learn_nudge(extra_context: &mut String, repo_root: &str) {
     let edits = learn_flag_edits(&learn_flag);
     let nudge = format!(
         "A previous session in this repo made {edits} edits, so project memory may be stale. \
-        Consider running /playbook:learn-project to refresh it, or /playbook:learn-project --stage to queue \
+        Consider running /playbook:learn to refresh it, or /playbook:learn --stage to queue \
         candidate facts for review."
     );
     push_context(extra_context, &nudge);

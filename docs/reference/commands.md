@@ -14,8 +14,8 @@ Every `/playbook:*` command in one table. For the binary's own commands, run `pl
 | `/playbook:pr-create` | Opens a PR with pre-flight checks and the team template. |
 | `/playbook:review` | The one review command. Picks a quick or a deep review (or takes `--quick` or `--deep`), says why in one line, then runs it. `--quick` is a one-pass review posted as a pending GitHub review. `--deep` is parallel specialist reviewers, consolidated and fact-checked. |
 | `/playbook:pr-comments` | Walks unresolved review threads, fixes or drafts replies. |
-| `/playbook:learn-project` | Reads the repo, PRs and tickets, then writes distilled facts to memory. |
-| `/playbook:repo-audit` | Read-only audit with severity-rated findings and a task plan. |
+| `/playbook:learn` | Reads the repo, PRs and tickets, then writes distilled facts to memory. |
+| `/playbook:audit` | Read-only audit with severity-rated findings and a task plan. |
 | `/playbook:handoff-save` | Writes a handoff note (state, decisions, next steps, open questions) and saves it for the next session. Use it before `/clear` or when you stop. |
 | `/playbook:handoff-show` | Loads the last handoff for this directory. |
 

@@ -95,8 +95,8 @@ These commands read the mode first and take the recommended answer instead of as
 - `/playbook:implement` and `/playbook:fix`: pick the recommended delivery options and run to a pull request.
 - `/playbook:commit` and `/playbook:pr-create`: run end to end.
 - `/playbook:review` reviews this PR only when the PR sits in a stack, takes its own recommendation for that scope, and passes `--auto` on to `/playbook:review --quick` or `/playbook:review --deep`. Those reviews still ask what to post unless the caller passes `--self` or `--no-post`.
-- `/playbook:learn-project`: runs as `--stage`, so candidates go to the staging area and nothing reaches the live memory store.
-- `/playbook:repo-audit`, `/playbook:doctor`, and `/playbook:handoff-show`: behave the same in either mode.
+- `/playbook:learn`: runs as `--stage`, so candidates go to the staging area and nothing reaches the live memory store.
+- `/playbook:audit`, `/playbook:doctor`, and `/playbook:handoff-show`: behave the same in either mode.
 
 ### Refused in auto
 
@@ -123,10 +123,10 @@ In ask mode, these commands still ask a person:
 | `review` | the scope when the PR is in a stack (unless `--this-pr` or `--whole-stack` is passed), then quick or deep (unless `--quick` or `--deep` is passed) |
 | `review --quick` | how to submit |
 | `review --deep` | which findings to post |
-| `learn-project` | if the Jira or Confluence target is ambiguous |
+| `learn` | if the Jira or Confluence target is ambiguous |
 | `fix` | confirms before commit |
 
-These run without questions: `commit`, `pr-create`, `handoff-show`, `doctor`, `repo-audit`.
+These run without questions: `commit`, `pr-create`, `handoff-show`, `doctor`, `audit`.
 
 ## GitHub Actions
 
