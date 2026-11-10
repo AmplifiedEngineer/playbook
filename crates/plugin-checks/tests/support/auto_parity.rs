@@ -97,7 +97,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         auto: Auto::Refuses,
     },
     CommandSpec {
-        name: "address-pr-comments",
+        name: "pr-comments",
         asks: true,
         auto: Auto::Refuses,
     },

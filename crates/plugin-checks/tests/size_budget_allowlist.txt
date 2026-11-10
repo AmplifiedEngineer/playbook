@@ -5,14 +5,14 @@
 #
 #   size <path> <max lines> <max bytes>
 #   fallbacks <path> <max blocks>
-size commands/address-pr-comments.md 212 15867
+size commands/pr-comments.md 212 15867
 size commands/adr.md 299 24222
 size commands/deep-review.md 314 32224
 size commands/implement.md 483 79042
 size commands/plan.md 541 60095
 size commands/quick-review.md 253 23363
 size commands/setup.md 181 20215
-fallbacks commands/address-pr-comments.md 3
+fallbacks commands/pr-comments.md 3
 fallbacks commands/adr.md 5
 fallbacks commands/deep-review.md 6
 fallbacks commands/implement.md 11

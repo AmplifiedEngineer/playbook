@@ -21,7 +21,8 @@ and ADR 0021, 0022 and 0023).
 | agent | `reviewer` | `opus` | `medium` | Opus medium 199/200 against high 200/200 on the reviewer bench, 19% cheaper. The orchestrator passes a higher or lower `effort` on the spawn for a risky or small diff (ADR-0021). |
 | agent | `test-reviewer` | `haiku` | `low` | Pilot (18 calls per cell): Haiku low, medium and high 18/18, Sonnet high 18/18, Sonnet low 16/18. |
 | agent | `writer` | `haiku` | `medium` | Writes the final text of one kind from facts the orchestrator decided. Pilot on 18 cases: no invented fact and no hard prose finding. It decides nothing. |
-| command | `address-pr-comments` | `opus` | `medium` | Judgment on review threads and replies that go public. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
+| command | `address-pr-comments` | `opus` | `medium` | Deprecated stub of `pr-comments` until 1.0.0. It copies the settings of `pr-comments`. |
+| command | `pr-comments` | `opus` | `medium` | Judgment on review threads and replies that go public. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
 | command | `adr` | `opus` | `medium` | A hard-to-reverse decision record. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
 | command | `commit-and-push` | - | - | Deprecated stub of `commit` until 1.0.0. It sets neither model nor effort, as `commit` does not. |
 | command | `commit` | - | - | Runs in the session; the binary drafts the message. |

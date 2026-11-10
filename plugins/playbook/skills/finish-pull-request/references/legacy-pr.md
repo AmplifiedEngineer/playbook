@@ -16,7 +16,7 @@ These are the steps `/playbook:pr-create` followed before it ran `playbook pr pr
 
 Push the current branch and open a pull request. The title is a conventional-commit summary, the body follows the team template, and both obey `playbook:engineering-standards` (readiness, size) and `playbook:writing-style` (voice, banned words, no dashes). A PR opens as a **draft** by default, controlled by the `pr.draft` setting (`true`, the default, or `false`): `--ready` does not publish it immediately, it marks it for promotion to ready once `/playbook:finish-pull-request`'s self-review passes, since a human should never be the first reviewer of unreviewed code. With `pr.draft` set to `false`, the PR opens ready for review instead.
 
-This creates a **new** PR. If one already exists for the branch, this stops and points you at `/playbook:address-pr-comments` or `/playbook:quick-review`.
+This creates a **new** PR. If one already exists for the branch, this stops and points you at `/playbook:pr-comments` or `/playbook:quick-review`.
 
 ## Run this now
 
@@ -82,7 +82,7 @@ If it prints `A PR already exists: <url>` it exited 0: report that and stop. Any
 
 Otherwise do this, and print the same lines yourself:
 
-1. Branch: `git branch --show-current`. If `gh pr view <branch> --json url,state` shows an `OPEN` PR, print "A PR already exists: <url>. Use /playbook:address-pr-comments or /playbook:quick-review instead." and stop.
+1. Branch: `git branch --show-current`. If `gh pr view <branch> --json url,state` shows an `OPEN` PR, print "A PR already exists: <url>. Use /playbook:pr-comments or /playbook:quick-review instead." and stop.
 2. Base: `--base`, else `gh repo view --json defaultBranchRef -q .defaultBranchRef.name`, else `git symbolic-ref refs/remotes/origin/HEAD` without `refs/remotes/origin/`, else `main`. If the branch is the base, stop: "on the base branch (<base>); create a feature branch first".
 3. Run `git fetch origin <base> --quiet`. If it fails, say the results use the local ref.
 4. `git rev-list --count origin/<base>..HEAD` is the commits ahead. At 0, stop: "nothing ahead of <base>; there is nothing to open a PR for".

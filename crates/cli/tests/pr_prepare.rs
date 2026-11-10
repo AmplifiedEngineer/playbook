@@ -72,7 +72,7 @@ fn an_open_pr_returns_ok_with_the_redirect_and_runs_no_further_checks() {
     assert_eq!(
         got,
         "A PR already exists: https://example.test/pr/9\n\
-         Use /playbook:address-pr-comments or /playbook:quick-review instead."
+         Use /playbook:pr-comments or /playbook:quick-review instead."
     );
     assert!(
         gh.count("repo_default_branch") == 0,

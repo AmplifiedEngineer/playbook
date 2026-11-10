@@ -19,7 +19,7 @@ const BASH_RUNNERS: [&str; 7] = [
     "commands/quick-review.md",
     "commands/deep-review.md",
     "commands/learn-project.md",
-    "commands/address-pr-comments.md",
+    "commands/pr-comments.md",
     "commands/adr.md",
 ];
 

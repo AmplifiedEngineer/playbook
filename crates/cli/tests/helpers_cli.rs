@@ -3,7 +3,7 @@
 
 //! `playbook adr next`, `learn preflight` and `pr comments`: the helpers that
 //! replaced bash blocks in `adr.md`, `learn-project.md` and
-//! `address-pr-comments.md`.
+//! `pr-comments.md`.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

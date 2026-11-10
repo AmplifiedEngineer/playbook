@@ -24,7 +24,6 @@ pub(crate) const GROUPS: &[&str] = &["pr", "handoff"];
 /// The list empties as the renames land. It is an allowlist for the rule, not
 /// a docs list: the docs name an old slash name only in `docs/renamed.md`.
 pub(crate) const LEGACY_NAMES: &[&str] = &[
-    "address-pr-comments",
     "deep-review",
     "quick-review",
     "learn-project",

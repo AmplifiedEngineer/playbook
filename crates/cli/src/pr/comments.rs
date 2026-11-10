@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook pr comments`: Steps 1 and 2 of `/playbook:address-pr-comments`.
+//! `playbook pr comments`: Steps 1 and 2 of `/playbook:pr-comments`.
 //! It parses the flags, resolves the PR, and fetches the review threads and
 //! the PR-level comments to two files, leaving the filtering to the model.
 

@@ -100,7 +100,7 @@ These commands read the mode first and take the recommended answer instead of as
 
 ### Refused in auto
 
-`/playbook:setup`, `/playbook:adr`, and `/playbook:address-pr-comments` stop with one line. Each needs a person: setup changes your global settings and shell files, an ADR records a decision someone has to own, and replies on GitHub speak in your name.
+`/playbook:setup`, `/playbook:adr`, and `/playbook:pr-comments` stop with one line. Each needs a person: setup changes your global settings and shell files, an ADR records a decision someone has to own, and replies on GitHub speak in your name.
 
 ### Never done in auto
 
@@ -119,7 +119,7 @@ In ask mode, these commands still ask a person:
 |---|---|
 | `implement` | delivery questions unless flags preset them |
 | `plan` | the divergent phase |
-| `adr`, `setup`, `address-pr-comments` | still ask a person |
+| `adr`, `setup`, `pr-comments` | still ask a person |
 | `review` | the scope when the PR is in a stack (unless `--this-pr` or `--whole-stack` is passed), then quick or deep (unless `--quick` or `--deep` is passed) |
 | `quick-review` | how to submit |
 | `deep-review` | which findings to post |

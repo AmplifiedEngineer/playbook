@@ -1,6 +1,6 @@
 # Review and PR Flow
 
-Four commands take a ready branch to a merged PR: `/playbook:commit`, `/playbook:pr-create`, `/playbook:review`, and `/playbook:address-pr-comments`.
+Four commands take a ready branch to a merged PR: `/playbook:commit`, `/playbook:pr-create`, `/playbook:review`, and `/playbook:pr-comments`.
 
 ## Commit and push
 
@@ -113,14 +113,14 @@ Every review ends with a **Verification Summary**: each file, whether it was rea
 
 ## Address review comments
 
-`/playbook:address-pr-comments` walks unresolved threads one at a time. It reads the code, proposes a fix or reply, waits for your approval, then applies it.
+`/playbook:pr-comments` walks unresolved threads one at a time. It reads the code, proposes a fix or reply, waits for your approval, then applies it.
 
 ```bash
-/playbook:address-pr-comments           # current branch's PR
-/playbook:address-pr-comments 123       # PR #123
-/playbook:address-pr-comments --bots    # include bot comments (CodeRabbit, Copilot, etc.)
-/playbook:address-pr-comments --dry-run # preview everything, no edits or posts
-/playbook:address-pr-comments -y        # skip the final commit confirmation
+/playbook:pr-comments           # current branch's PR
+/playbook:pr-comments 123       # PR #123
+/playbook:pr-comments --bots    # include bot comments (CodeRabbit, Copilot, etc.)
+/playbook:pr-comments --dry-run # preview everything, no edits or posts
+/playbook:pr-comments -y        # skip the final commit confirmation
 ```
 
 It first asks which comments to work on with the same checkbox picker, and falls back to a numbered list with the same reply forms where the picker is not available. A comment you leave out is skipped and named in the final summary. With one comment it does not ask. For each comment you then choose `[F]ix`, `[R]eply`, `[B]oth`, `[S]kip`, `[Q]uit` or `[E]dit-then-fix`. Replies queue until after the commit. At the end it runs `commit -A`, then posts the replies. It never resolves threads. Bot authors are skipped unless you pass `--bots`.
@@ -131,7 +131,7 @@ In `ask` mode, the default, nothing changes. Pass `--auto` or `--ask` to overrid
 
 - `/playbook:commit` commits and pushes without asking. It never force-pushes. A push that would need a force is left on the local branch and reported, so you decide how to publish it.
 - `/playbook:review`, `/playbook:quick-review` and `/playbook:deep-review` take the recommended depth without asking. A review still asks what to post unless you pass `--self` or `--no-post`, because a posted review speaks as you.
-- `/playbook:address-pr-comments` refuses to run. It replies on GitHub in your name, so each reply needs your approval.
+- `/playbook:pr-comments` refuses to run. It replies on GitHub in your name, so each reply needs your approval.
 
 ## PR and commit settings
 
@@ -171,7 +171,7 @@ A stacked PR whose base is another open PR is not merged before its base. In aut
 /playbook:commit -A                   # commit and push
 /playbook:pr-create                   # open the PR
 /playbook:review --self               # self-review; it picks quick or deep
-/playbook:address-pr-comments         # after a reviewer leaves comments
+/playbook:pr-comments         # after a reviewer leaves comments
 ```
 
 ## Deliver from any worktree

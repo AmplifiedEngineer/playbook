@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook pr reply`: post one reply on a pull request, the step
-//! `/playbook:address-pr-comments` used to hand to a `patch-applier` agent
+//! `/playbook:pr-comments` used to hand to a `patch-applier` agent
 //! with a paragraph about shell quoting. The body goes to GitHub from a file,
 //! so quotes, backticks and newlines in a reply need no escaping.
 
