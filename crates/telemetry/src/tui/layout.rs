@@ -186,8 +186,10 @@ pub const MAX_TABS: usize = 12;
 pub const MAX_ROW_PANELS: usize = 2;
 /// The most rows in an arranged tab.
 pub const MAX_ROWS: usize = 4;
-/// The most panels in an arranged tab.
-pub const MAX_ARRANGED_PANELS: usize = 8;
+/// The most panels the editor puts on one tab, automatic or arranged. An
+/// automatic tab read from the config may hold more; the editor then only
+/// removes panels from it.
+pub const MAX_TAB_PANELS: usize = 8;
 /// Separates the rows of an arranged tab in the config value.
 const ROW_SEPARATOR: char = '|';
 /// The longest tab name, in characters.
@@ -317,11 +319,20 @@ fn parse_rows(name: &str, list: &str) -> Result<(Vec<PanelId>, Option<Vec<u8>>),
     if !arranged {
         return Ok((panels, None));
     }
-    if rows.len() > MAX_ROWS || panels.len() > MAX_ARRANGED_PANELS {
+    // The budget strip takes no cell, so it counts toward neither limit.
+    let strip = usize::from(panels.contains(&PanelId::Budget));
+    let mut rest = panels.as_slice();
+    let mut strip_rows = 0;
+    for n in &rows {
+        let (row, tail) = rest.split_at(usize::from(*n));
+        strip_rows += usize::from(row.iter().all(|p| *p == PanelId::Budget));
+        rest = tail;
+    }
+    if rows.len() - strip_rows > MAX_ROWS || panels.len() - strip > MAX_TAB_PANELS {
         return Err(format!(
-            "`{name}` has {} panels in {} rows, use at most {MAX_ARRANGED_PANELS} panels in {MAX_ROWS} rows",
-            panels.len(),
-            rows.len()
+            "`{name}` has {} panels in {} rows, use at most {MAX_TAB_PANELS} panels in {MAX_ROWS} rows",
+            panels.len() - strip,
+            rows.len() - strip_rows
         ));
     }
     Ok((panels, Some(rows)))
@@ -689,5 +700,55 @@ mod tests {
 
         assert_eq!(layout, Layout::default());
         assert!(warning.unwrap().contains("bogus"));
+    }
+
+    #[test]
+    fn the_automatic_grid_has_the_rows_for_each_count_from_one_to_eight() {
+        let expected: [&[u8]; 8] = [
+            &[1],
+            &[1, 1],
+            &[2, 1],
+            &[2, 2],
+            &[2, 2, 1],
+            &[2, 2, 2],
+            &[2, 2, 2, 1],
+            &[2, 2, 2, 2],
+        ];
+        for (i, rows) in expected.iter().enumerate() {
+            assert_eq!(auto_rows(i + 1), *rows, "{} panels", i + 1);
+        }
+        assert!(auto_rows(0).is_empty());
+    }
+
+    #[test]
+    fn stored_tabs_with_the_old_limits_still_load_and_round_trip() {
+        for old in [
+            "A=spend,tokens|burnup|models,live",
+            "A=spend,tokens|models,live|sessions,budget|projection,burnup",
+            "Charts=spend.total,spend.model|tokens|burnup;Numbers=models,breakdown,budget,projection;Sessions=live,sessions",
+            "A=spend,tokens,models,breakdown,live,sessions,projection,burnup,budget",
+            "A=spend,tokens,models,breakdown,live,sessions,burnup,projection,budget,spend.total",
+            "A=models,budget,breakdown",
+            "A=spend,tokens|",
+        ] {
+            let layout = Layout::parse(old).unwrap();
+
+            assert_eq!(layout.to_text(), old);
+            assert_eq!(Layout::parse(&layout.to_text()).unwrap(), layout);
+        }
+    }
+
+    #[test]
+    fn the_budget_strip_counts_toward_neither_the_panel_limit_nor_the_row_limit() {
+        let strip_and_eight =
+            "A=budget|spend,tokens|models,live|sessions,projection|burnup,breakdown";
+        let nine =
+            "A=budget|spend,tokens|models,live|sessions,projection|burnup,breakdown|spend.total";
+
+        let layout = Layout::parse(strip_and_eight).unwrap();
+
+        assert_eq!(layout.tabs[0].panels.len(), 9);
+        assert_eq!(layout.to_text(), strip_and_eight);
+        assert!(Layout::parse(nine).unwrap_err().contains("4 rows"));
     }
 }

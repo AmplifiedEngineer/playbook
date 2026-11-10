@@ -212,7 +212,7 @@ impl Editor {
             KeyCode::Enter => {
                 self.picker = None;
                 if let Some(panel) = choices.get(at).copied() {
-                    self.arrange(|t, s| arrange::insert_after(t, s, panel));
+                    self.arrange(|t, _| arrange::add(t, panel));
                 }
             }
             _ => {}
@@ -313,6 +313,7 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::layout::MAX_TAB_PANELS;
 
     /// The three tabs and eight panels of the layout before the burn-up
     /// panel, so these tests do not move with the default.
@@ -343,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn enter_in_the_picker_adds_the_chosen_panel_after_the_cursor_and_closes_it() {
+    fn enter_in_the_picker_adds_the_chosen_panel_at_the_end_and_closes_it() {
         // Arrange
         let mut e = editor();
         let second = e.available()[1];
@@ -356,10 +357,10 @@ mod tests {
         // Assert
         assert_eq!(
             e.layout.tabs[0].panels,
-            [PanelId::Spend, second, PanelId::Tokens]
+            [PanelId::Spend, PanelId::Tokens, second]
         );
         assert_eq!(e.picker, None);
-        assert_eq!(e.slot, 1);
+        assert_eq!(e.slot, 2);
     }
 
     #[test]
@@ -442,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn a_panel_added_to_an_arranged_tab_gets_a_row_of_its_own() {
+    fn a_panel_added_to_an_arranged_tab_fills_the_last_row() {
         // Arrange
         let mut e = editor();
         e.layout = Layout::parse("A=spend,tokens|models").unwrap();
@@ -453,7 +454,7 @@ mod tests {
         e.key(KeyCode::Enter);
 
         // Assert
-        assert_eq!(e.layout.tabs[0].rows, Some(vec![2, 1, 1]));
+        assert_eq!(e.layout.tabs[0].rows, Some(vec![2, 2]));
         assert_eq!(e.layout.tabs[0].panels.len(), 4);
     }
 
@@ -874,5 +875,83 @@ mod tests {
 
         assert_eq!(e.layout.tabs[0].panels, [PanelId::Tokens, PanelId::Spend]);
         assert!(e.message.is_none());
+    }
+
+    fn add_a_grid_panel(e: &mut Editor) {
+        let at = e.available().iter().position(|p| *p != PanelId::Budget);
+        e.key(KeyCode::Char('a'));
+        for _ in 0..at.unwrap_or(0) {
+            e.key(KeyCode::Char('j'));
+        }
+        e.key(KeyCode::Enter);
+    }
+
+    #[test]
+    fn one_add_per_panel_fills_a_tab_to_eight_and_the_ninth_is_refused_with_a_message() {
+        for text in ["A=spend", "A=spend|"] {
+            // Arrange
+            let mut e = Editor::new(&Layout::parse(text).unwrap(), 0);
+
+            // Act
+            for _ in 1..MAX_TAB_PANELS {
+                add_a_grid_panel(&mut e);
+            }
+            let eight = e.layout.tabs[0].panels.len();
+            add_a_grid_panel(&mut e);
+
+            // Assert
+            assert_eq!(eight, MAX_TAB_PANELS, "{text}");
+            assert_eq!(e.layout.tabs[0].panels.len(), MAX_TAB_PANELS, "{text}");
+            assert_eq!(
+                e.message.as_deref(),
+                Some("A tab holds at most 8 panels besides the budget strip"),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_tab_with_the_default_charts_rows_takes_eight_panels_one_action_each() {
+        // Arrange
+        let mut e = Editor::new(&Layout::default(), 0);
+
+        // Act
+        for _ in 4..MAX_TAB_PANELS {
+            add_a_grid_panel(&mut e);
+        }
+
+        // Assert
+        assert_eq!(e.layout.tabs[0].panels.len(), MAX_TAB_PANELS);
+        assert!(e.message.is_none());
+    }
+
+    #[test]
+    fn adding_the_budget_strip_puts_it_first_beside_eight_panels_and_it_does_not_move() {
+        // Arrange
+        let text = "A=spend,tokens,models,breakdown,live,sessions,burnup,projection";
+        let mut e = Editor::new(&Layout::parse(text).unwrap(), 0);
+        let at = e
+            .available()
+            .iter()
+            .position(|p| *p == PanelId::Budget)
+            .unwrap();
+
+        // Act
+        e.key(KeyCode::Char('a'));
+        for _ in 0..at {
+            e.key(KeyCode::Char('j'));
+        }
+        e.key(KeyCode::Enter);
+        let slot = e.slot;
+        press_all(&mut e, "L");
+        press_all(&mut e, "J");
+        press_all(&mut e, "f");
+
+        // Assert
+        assert_eq!(e.layout.tabs[0].panels[0], PanelId::Budget);
+        assert_eq!(e.layout.tabs[0].panels.len(), 9);
+        assert_eq!(slot, 0);
+        assert_eq!(e.layout.tabs[0].rows, None);
+        assert!(e.message.as_deref().unwrap().contains("budget strip"));
     }
 }
