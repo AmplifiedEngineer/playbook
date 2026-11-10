@@ -144,6 +144,7 @@ Regenerate with: UPDATE_REFERENCE=1 cargo test -p playbook --test docs_pbtop_key
 | `p` | Open the full screen Sessions list | all panels |
 | `e` | Edit the tabs and the panels on each | all panels |
 | `?` | Show this help | all panels |
+| `i` | Toggle every limit's figures and notes | budget strip |
 
 **Sorting**
 
@@ -226,15 +227,46 @@ The cost is an estimate at API prices. It is not what a subscription plan bills.
 
 ## Limits
 
-The Budget strip compares your use with a limit. A limit comes from one of these, and the strip tags it so you can tell them apart:
+The Budget strip compares your use with a limit. It is six rows tall and sits at the top of a tab.
 
-- `measured`: the 5 hour and weekly windows of a Pro or Max plan, from the `rate_limits` data that Claude Code passes to the Playbook statusline. Behind a Claude apps gateway it can also hold a dollar limit.
-- `cached`: usage numbers that Claude Code keeps in its own config file, with how old they are. Only a few plan and usage fields are read.
-- `manual`: the dollars you set in `usage.budget.monthlyUsd` or `usage.budget.weeklyUsd`.
+```
+Monthly  c ████│█████████░░░░░░░░░░░░░░░░░░░   24%  $120 of $500  ▲ hits it in 6d 13h  resets in 27d (Thu 10-01)
+Monthly    left $380   pace +17pt   allow $0.57/h $13.61/d   proj $1,736   resets Thu 10-01 00:00 UTC   cached 10m ago
+Spend    h this week $3.05 █████░░░░░  last week $6.21 ██████████  -51%  avg $0.04/h $0.99/d
+```
 
-A limit that Claude Code reports wins over a manual budget. A manual monthly budget covers the calendar month in your chosen time zone, and the spend is the estimated cost from your history. A weekly budget starts on the day in `usage.weekStart`. With no limit at all, the panels say so and print how to set one.
+Each limit is one row: its name, a letter for its source, a bar that grows with the screen, the percent used, the amount, a verdict and the time left. The bar reddens as it fills. The `│` mark on the bar (`|` without UTF-8) is where you should be by now, the share of the period that has passed. A bar that runs past the mark is ahead of pace and a bar that stops short of it is behind. When the screen is narrow, pieces drop in this order: the date, the amount, the countdown, the time to the limit. The bar, the percent and the verdict stay.
 
-The clause that says when a limit is reached needs at least one hour of elapsed time in the period. The [internals page](internals/04-usage-dashboard.md#the-math) has the math, and `playbook usage doctor` lists which limit sources exist on this machine.
+The verdict is a mark and a word, colored by state. The marks are `▲`, `◆`, `●` and `○`, and `!`, `~`, `+` and `?` without UTF-8, so the state reads without color.
+
+| Verdict | Meaning |
+|---|---|
+| `reached` | The limit is used up. |
+| `hits it` | At the average pace the limit is reached before the period ends. The time follows, as in `hits it in 2d 4h`. |
+| `close` | The projected total lands between 80 percent and the limit. |
+| `ok` | The projected total stays under 80 percent. |
+| `too early` | Under one hour of the period has passed, so there is no projection. |
+
+After the verdict, `safe` means neither pace reaches the limit before it resets. `hits it in 7d (24h)` means the pace of the last 24 hours reaches it even though the average does not. `stale 7h` says the reading is old.
+
+The line under the worst limit holds the figures that need a table, in columns: `left`, `pace` (the points ahead or behind the mark), `allow` per hour and per day, `proj` (the projected total), `avg` per hour and per day, the full reset time with its time zone, and where the number comes from. Press `i` to show that line for every limit, with the full text of any notes where the spend line was.
+
+The spend line compares the spend of the period with the previous one over the same elapsed span, as two bars on one scale, the change in percent and the average rate.
+
+The letter after the name says where the limit comes from:
+
+- `m`, measured: the 5 hour and weekly windows of a Pro or Max plan, from the `rate_limits` data that Claude Code passes to the Playbook statusline. Behind a Claude apps gateway it can also hold a dollar limit.
+- `c`, cached: usage numbers that Claude Code keeps in its own config file, with how old they are. Only a few plan and usage fields are read.
+- `u`, manual: the dollars you set in `usage.budget.monthlyUsd` or `usage.budget.weeklyUsd`.
+- `h`, local history: the spend line, estimated from your session transcripts.
+
+The figures line spells the source out, for example `manual, local` or `cached 1d 22h ago, plus this machine since`.
+
+A limit that Claude Code reports wins over a manual budget. A manual monthly budget covers the calendar month in your chosen time zone, and the spend is the estimated cost from your history. A weekly budget starts on the day in `usage.weekStart`. With no limit at all, the strip shows an empty bar and says to press `b`.
+
+Notes about the numbers go in one dim line, or in the strip title as a count when there is no room for the line. They are a missing 5 hour or weekly window, a manual budget beside a detected one, and the figure Claude Code last reported. Press `i` to read each in full. `--json` carries the same text.
+
+The time to the limit needs at least one hour of elapsed time in the period. The [internals page](internals/04-usage-dashboard.md#the-math) has the math, and `playbook usage doctor` lists which limit sources exist on this machine.
 
 ## Refresh
 

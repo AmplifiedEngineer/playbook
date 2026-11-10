@@ -10,9 +10,11 @@
 
 use super::fmt::money;
 use crate::limits::{Limit, Unit, MIN_PROJECTION_SECONDS};
-use crate::period::elapsed_text;
 
 const DAY: f64 = 86_400.0;
+
+/// The short name of the pace over the last 24 hours.
+const RECENT_SHORT: &str = "24h pace";
 
 /// The trailing window the recent pace is measured over.
 pub const RECENT_SECONDS: i64 = 24 * 3600;
@@ -80,7 +82,7 @@ fn clause(label: &str, pace: Option<f64>, unit: Unit, o: Outcome) -> String {
 struct Pace {
     /// The label of the long clause: `last 24h`, `period average`.
     label: &'static str,
-    /// The label of the short clause on the budget strip.
+    /// The short name of the pace.
     short: &'static str,
     pace: Option<f64>,
     outcome: Outcome,
@@ -122,7 +124,7 @@ fn paces(l: &Limit, recent_cost: f64, now: i64) -> Vec<Pace> {
     let recent = (span >= MIN_PROJECTION_SECONDS).then(|| spent / (span as f64 / DAY));
     let recent = Pace {
         label: "last 24h",
-        short: "24h pace",
+        short: RECENT_SHORT,
         pace: recent,
         outcome: outcome(remaining, recent.unwrap_or(0.0), now, l.end),
     };
@@ -152,28 +154,37 @@ pub fn lines(limits: &[Limit], recent_cost: f64, now: i64) -> Vec<String> {
     limits.iter().map(|l| line(l, recent_cost, now)).collect()
 }
 
-/// The short clause the budget strip shows beside a limit's meter: when the
-/// limit is reached, by the sooner of the paces, or that the period or window
-/// ends first. `None` when the limit is reached already or no pace is known.
-pub fn reach(l: &Limit, recent_cost: f64, now: i64) -> Option<String> {
+/// What the budget strip says about a limit's future: when it is reached, by
+/// the sooner of the paces, or that the period or window ends first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reach {
+    /// The limit is reached after this many seconds, at the named pace.
+    In { seconds: i64, recent: bool },
+    /// The period or window ends before either pace reaches the limit.
+    Safe,
+}
+
+/// The reach of a limit. `None` when the limit is reached already or no pace
+/// is known.
+pub fn reach(l: &Limit, recent_cost: f64, now: i64) -> Option<Reach> {
     let paces = paces(l, recent_cost, now);
     let sooner = paces
         .iter()
         .filter_map(|p| match p.outcome {
-            Outcome::At(at) => Some((at, p.short)),
+            Outcome::At(at) => Some((at, p.short == RECENT_SHORT)),
             _ => None,
         })
         .min_by_key(|(at, _)| *at);
-    if let Some((at, short)) = sooner {
-        return Some(format!(
-            "reaches the limit in {} at the {short}",
-            elapsed_text(at - now)
-        ));
+    if let Some((at, recent)) = sooner {
+        return Some(Reach::In {
+            seconds: at - now,
+            recent,
+        });
     }
     paces
         .iter()
         .any(|p| p.outcome == Outcome::Safe)
-        .then(|| "will not reach the limit before it resets".to_string())
+        .then_some(Reach::Safe)
 }
 
 #[cfg(test)]
@@ -303,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn the_strip_clause_names_the_sooner_pace_and_the_time_to_the_limit() {
+    fn the_reach_names_the_sooner_pace_and_the_seconds_to_the_limit() {
         // Arrange
         let l = budget(300.0, 1000.0, NOW - 15 * DAYS, NOW + 15 * DAYS);
 
@@ -312,25 +323,25 @@ mod tests {
 
         // Assert
         assert_eq!(
-            text.as_deref(),
-            Some("reaches the limit in 7d 0h at the 24h pace")
+            text,
+            Some(Reach::In {
+                seconds: 7 * DAYS,
+                recent: true
+            })
         );
     }
 
     #[test]
-    fn the_strip_clause_says_the_limit_holds_when_both_paces_stay_under() {
+    fn the_reach_is_safe_when_both_paces_stay_under() {
         let l = budget(300.0, 1000.0, NOW - 15 * DAYS, NOW + 15 * DAYS);
 
         let text = reach(&l, 10.0, NOW);
 
-        assert_eq!(
-            text.as_deref(),
-            Some("will not reach the limit before it resets")
-        );
+        assert_eq!(text, Some(Reach::Safe));
     }
 
     #[test]
-    fn the_strip_clause_is_absent_for_a_reached_limit_and_for_no_pace() {
+    fn the_reach_is_absent_for_a_reached_limit_and_for_no_pace() {
         let spent = budget(1000.0, 1000.0, NOW - 15 * DAYS, NOW + 15 * DAYS);
         let young = budget(5.0, 1000.0, NOW - 600, NOW + 30 * DAYS);
 
@@ -339,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn a_usage_window_has_only_the_average_pace_in_its_clause() {
+    fn a_usage_window_has_only_the_average_pace_in_its_reach() {
         let l = Limit {
             unit: Unit::Percent,
             period: LimitPeriod::FiveHour,
@@ -353,8 +364,11 @@ mod tests {
         let text = reach(&l, 0.0, NOW);
 
         assert_eq!(
-            text.as_deref(),
-            Some("reaches the limit in 2h 0m at the average pace")
+            text,
+            Some(Reach::In {
+                seconds: 2 * 3600,
+                recent: false
+            })
         );
     }
 }

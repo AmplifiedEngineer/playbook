@@ -297,7 +297,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     match (&app.data, notice::body(app)) {
         (Some(data), None) => {
             if p.budget.height > 0 {
-                budget::render(frame, p.budget, data, &pal, app.icon);
+                budget::render(frame, p.budget, data, &pal, app.icon, app.budget_detail);
             }
             for (id, rect) in &p.panels {
                 match id {
@@ -326,7 +326,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         (data, Some(n)) => {
             if let Some(data) = data {
                 if p.budget.height > 0 {
-                    budget::render(frame, p.budget, data, &pal, app.icon);
+                    budget::render(frame, p.budget, data, &pal, app.icon, app.budget_detail);
                 }
             }
             render_notice(frame, body, &n, &pal);

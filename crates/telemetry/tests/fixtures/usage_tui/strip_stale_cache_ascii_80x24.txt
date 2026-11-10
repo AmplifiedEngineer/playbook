@@ -1,0 +1,6 @@
+╭─┤Budget├─────────────────────────────────────────────────┤UTC  all projects├─╮
+│Monthly  c |##--------   24%  ! hits it in 6d 10h  stale 1d 22h  resets in 27d│
+│Monthly    left $378     cached 1d 22h ago, plus this machine since           │
+│Spend    h this week $3.05 #####-----  last week $6.21 ##########  -51%       │
+│5 hour and weekly windows: not on this plan  (i: details)                     │
+╰──────────────────────────────────────────────────────────────────────────────╯

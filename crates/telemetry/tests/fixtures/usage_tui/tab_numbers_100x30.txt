@@ -6,16 +6,16 @@
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  F1 Charts  F2 Numbers  F3 Sessions
 ╭─┤Budget├─────────────────────────────────────────────────────────────────────┤UTC  all projects├─╮
-│Limit unknown: playbook config set --global usage.budget.monthlyUsd <usd> (or weeklyUsd),         │
-│or use Claude Code on Pro or Max with the playbook statusline for the 5 hour and weekly limits.   │
-│this week spend [local history]  $0.00 so far  avg n/a  last week n/a                             │
+│No limit   ------------------------------------------------------  press b to set a monthly budget│
+│Spend    h this week $0.00 ----------  last week $0.00 ----------  new  avg n/a                   │
+│                                                                                                  │
+│                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─┤³Models├────────────────────────────────────────────────────────────────────────────────────────╮
 │name                                                               msgs  tokens     cost▼ share   │
 │■ opus-5                                                             10  238.0K    $14.25 ■■■■■■··│
 │■ sonnet-5                                                            9  214.2K     $5.85 ■■······│
 │■ haiku-5                                                             7  166.6K     $0.17 ········│
-│                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
