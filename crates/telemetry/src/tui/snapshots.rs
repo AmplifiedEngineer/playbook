@@ -1201,7 +1201,7 @@ fn the_layout_editor_picker_at_100x30() {
 }
 
 #[test]
-fn the_projection_panel_shows_both_paces_for_a_budget_and_the_window_average() {
+fn the_budget_strip_says_when_each_limit_is_reached_at_the_current_pace() {
     let mut a = with_limits(
         tabbed(1),
         Some(&plan_snapshot()),
@@ -1213,11 +1213,13 @@ fn the_projection_panel_shows_both_paces_for_a_budget_and_the_window_average() {
 
     let text = draw(&a, 140, 40);
 
-    assert!(text.contains("Projection"), "{text}");
-    assert!(text.contains("Monthly budget"), "{text}");
-    assert!(text.contains("last 24h"), "{text}");
-    assert!(text.contains("window average"), "{text}");
-    check("projection_140x40", &text);
+    assert!(!text.contains("Projection"), "{text}");
+    assert!(text.contains("reaches the limit in 2h 0m"), "{text}");
+    assert!(
+        text.contains("will not reach the limit before it resets"),
+        "{text}"
+    );
+    check("budget_reach_140x40", &text);
 }
 
 fn enterprise_sources(cache_age: i64) -> Sources {
@@ -1346,7 +1348,7 @@ fn a_fresh_reported_figure_is_the_bar_itself_and_adds_no_line() {
 }
 
 #[test]
-fn with_no_limit_and_no_windows_both_panels_say_what_is_missing() {
+fn with_no_limit_and_no_windows_the_budget_strip_says_what_is_missing() {
     let a = with_sources(tabbed(1), &Sources::default(), Range::LastDays(30));
 
     let text = draw(&a, 140, 40);
@@ -1355,7 +1357,7 @@ fn with_no_limit_and_no_windows_both_panels_say_what_is_missing() {
     assert_eq!(
         text.matches("5 hour and weekly windows: not available for this plan")
             .count(),
-        2,
+        1,
         "{text}"
     );
 }

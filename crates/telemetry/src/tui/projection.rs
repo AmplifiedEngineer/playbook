@@ -1,22 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The Projection panel: for each known limit, one plain line saying when it
-//! will be reached at the current pace, or that it will not be reached in
-//! this period. A spending budget shows two paces side by side, the last 24
+//! The projection of each limit, which the Budget strip shows: one plain line
+//! saying when it will be reached at the current pace, or that it will not be
+//! reached in this period. A spending budget shows two paces side by side, the last 24
 //! hours and the average of the period, so a recent spike and a steady month
 //! can be told apart. A usage window (5 hour, weekly) only has its average,
 //! because Claude Code reports a percentage and not a history.
 
-use super::data::Data;
-use super::fmt::{fit, money};
-use super::theme::Palette;
+use super::fmt::money;
 use crate::limits::{Limit, Unit, MIN_PROJECTION_SECONDS};
-use ratatui::layout::Rect;
-use ratatui::style::Style;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Paragraph};
-use ratatui::Frame;
+use crate::period::elapsed_text;
 
 const DAY: f64 = 86_400.0;
 
@@ -82,34 +76,39 @@ fn clause(label: &str, pace: Option<f64>, unit: Unit, o: Outcome) -> String {
     }
 }
 
-/// The plain line for one limit. `recent_cost` is the spend of the last
-/// 24 hours, all projects, used for dollar budgets that are older than a day.
-pub fn line(l: &Limit, recent_cost: f64, now: i64) -> String {
-    let used = match l.unit {
-        Unit::Dollars => format!("{} of {}", money(l.used), money(l.limit)),
-        Unit::Percent => format!("{:.0}% used", l.used),
-    };
-    let head = format!("{}, {used}.", heading(l));
+/// One pace a limit is measured at and what it leads to.
+struct Pace {
+    /// The label of the long clause: `last 24h`, `period average`.
+    label: &'static str,
+    /// The label of the short clause on the budget strip.
+    short: &'static str,
+    pace: Option<f64>,
+    outcome: Outcome,
+}
+
+/// The paces of a limit: the last 24 hours for a dollar budget, and the
+/// average of the period or window. Empty when the limit has no headroom yet.
+fn paces(l: &Limit, recent_cost: f64, now: i64) -> Vec<Pace> {
     let Some(h) = l.headroom(now) else {
-        return head;
+        return Vec::new();
     };
     let remaining = h.remaining;
     // Like the Budget panel, wait for an hour of the period before projecting.
     let avg = h
         .avg_per_day
         .filter(|_| h.elapsed_seconds >= MIN_PROJECTION_SECONDS);
-    let avg_label = match l.unit {
-        Unit::Dollars => "period average",
-        Unit::Percent => "window average",
+    let (label, short) = match l.unit {
+        Unit::Dollars => ("period average", "average pace"),
+        Unit::Percent => ("window average", "average pace"),
     };
-    let avg_clause = clause(
-        avg_label,
-        avg,
-        l.unit,
-        outcome(remaining, avg.unwrap_or(0.0), now, l.end),
-    );
+    let average = Pace {
+        label,
+        short,
+        pace: avg,
+        outcome: outcome(remaining, avg.unwrap_or(0.0), now, l.end),
+    };
     if l.unit == Unit::Percent {
-        return format!("{head} {avg_clause}.");
+        return vec![average];
     }
     // The recent pace covers the last 24 hours. A period younger than that
     // uses its own spend over its own age, so spend from before the period
@@ -121,13 +120,31 @@ pub fn line(l: &Limit, recent_cost: f64, now: i64) -> String {
         (recent_cost, RECENT_SECONDS)
     };
     let recent = (span >= MIN_PROJECTION_SECONDS).then(|| spent / (span as f64 / DAY));
-    let recent_clause = clause(
-        "last 24h",
-        recent,
-        l.unit,
-        outcome(remaining, recent.unwrap_or(0.0), now, l.end),
-    );
-    format!("{head} {recent_clause}. {avg_clause}.")
+    let recent = Pace {
+        label: "last 24h",
+        short: "24h pace",
+        pace: recent,
+        outcome: outcome(remaining, recent.unwrap_or(0.0), now, l.end),
+    };
+    vec![recent, average]
+}
+
+/// The plain line for one limit. `recent_cost` is the spend of the last
+/// 24 hours, all projects, used for dollar budgets that are older than a day.
+pub fn line(l: &Limit, recent_cost: f64, now: i64) -> String {
+    let used = match l.unit {
+        Unit::Dollars => format!("{} of {}", money(l.used), money(l.limit)),
+        Unit::Percent => format!("{:.0}% used", l.used),
+    };
+    let head = format!("{}, {used}.", heading(l));
+    let clauses: Vec<String> = paces(l, recent_cost, now)
+        .iter()
+        .map(|p| clause(p.label, p.pace, l.unit, p.outcome))
+        .collect();
+    if clauses.is_empty() {
+        return head;
+    }
+    format!("{head} {}.", clauses.join(". "))
 }
 
 /// Every limit's line, worst first as the limits are sorted.
@@ -135,53 +152,28 @@ pub fn lines(limits: &[Limit], recent_cost: f64, now: i64) -> Vec<String> {
     limits.iter().map(|l| line(l, recent_cost, now)).collect()
 }
 
-pub const EMPTY: [&str; 2] = [
-    "No limit is known, so there is nothing to project.",
-    "Set one: playbook config set --global usage.budget.monthlyUsd <usd>",
-];
-
-pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette) {
-    if area.height == 0 {
-        return;
+/// The short clause the budget strip shows beside a limit's meter: when the
+/// limit is reached, by the sooner of the paces, or that the period or window
+/// ends first. `None` when the limit is reached already or no pace is known.
+pub fn reach(l: &Limit, recent_cost: f64, now: i64) -> Option<String> {
+    let paces = paces(l, recent_cost, now);
+    let sooner = paces
+        .iter()
+        .filter_map(|p| match p.outcome {
+            Outcome::At(at) => Some((at, p.short)),
+            _ => None,
+        })
+        .min_by_key(|(at, _)| *at);
+    if let Some((at, short)) = sooner {
+        return Some(format!(
+            "reaches the limit in {} at the {short}",
+            elapsed_text(at - now)
+        ));
     }
-    let edge = Style::default().fg(pal.color(pal.box_cpu));
-    let block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(edge)
-        .title(Line::from(vec![
-            Span::styled("\u{2500}\u{2524}", edge),
-            Span::styled("Projection", Style::default().fg(pal.color(pal.title))),
-            Span::styled("\u{251c}", edge),
-        ]))
-        .title(
-            Line::from(vec![
-                Span::styled("\u{2524}", edge),
-                Span::styled(
-                    format!("at the current pace, {}", crate::tz::label()),
-                    Style::default().fg(pal.color(pal.fg)),
-                ),
-                Span::styled("\u{251c}\u{2500}", edge),
-            ])
-            .right_aligned(),
-        );
-    let width = usize::from(area.width.saturating_sub(2));
-    let v = &data.limits;
-    let dim = Style::default().fg(pal.color(pal.inactive));
-    let mut text: Vec<Line> = if v.limits.is_empty() {
-        EMPTY
-            .iter()
-            .map(|t| Line::styled(fit(t, width), dim))
-            .collect()
-    } else {
-        lines(&v.limits, v.recent_cost_24h, data.now)
-            .into_iter()
-            .map(|t| Line::styled(fit(&t, width), Style::default().fg(pal.color(pal.fg))))
-            .collect()
-    };
-    if let Some(note) = v.windows_note {
-        text.push(Line::styled(fit(note, width), dim));
-    }
-    frame.render_widget(Paragraph::new(text).block(block), area);
+    paces
+        .iter()
+        .any(|p| p.outcome == Outcome::Safe)
+        .then(|| "will not reach the limit before it resets".to_string())
 }
 
 #[cfg(test)]
@@ -308,5 +300,61 @@ mod tests {
     #[test]
     fn no_limits_give_no_lines() {
         assert!(lines(&[], 0.0, NOW).is_empty());
+    }
+
+    #[test]
+    fn the_strip_clause_names_the_sooner_pace_and_the_time_to_the_limit() {
+        // Arrange
+        let l = budget(300.0, 1000.0, NOW - 15 * DAYS, NOW + 15 * DAYS);
+
+        // Act
+        let text = reach(&l, 100.0, NOW);
+
+        // Assert
+        assert_eq!(
+            text.as_deref(),
+            Some("reaches the limit in 7d 0h at the 24h pace")
+        );
+    }
+
+    #[test]
+    fn the_strip_clause_says_the_limit_holds_when_both_paces_stay_under() {
+        let l = budget(300.0, 1000.0, NOW - 15 * DAYS, NOW + 15 * DAYS);
+
+        let text = reach(&l, 10.0, NOW);
+
+        assert_eq!(
+            text.as_deref(),
+            Some("will not reach the limit before it resets")
+        );
+    }
+
+    #[test]
+    fn the_strip_clause_is_absent_for_a_reached_limit_and_for_no_pace() {
+        let spent = budget(1000.0, 1000.0, NOW - 15 * DAYS, NOW + 15 * DAYS);
+        let young = budget(5.0, 1000.0, NOW - 600, NOW + 30 * DAYS);
+
+        assert_eq!(reach(&spent, 10.0, NOW), None);
+        assert_eq!(reach(&young, 5.0, NOW), None);
+    }
+
+    #[test]
+    fn a_usage_window_has_only_the_average_pace_in_its_clause() {
+        let l = Limit {
+            unit: Unit::Percent,
+            period: LimitPeriod::FiveHour,
+            origin: Origin::Measured,
+            used: 50.0,
+            limit: 100.0,
+            start: NOW - 2 * 3600,
+            end: NOW + 3 * 3600,
+        };
+
+        let text = reach(&l, 0.0, NOW);
+
+        assert_eq!(
+            text.as_deref(),
+            Some("reaches the limit in 2h 0m at the average pace")
+        );
     }
 }

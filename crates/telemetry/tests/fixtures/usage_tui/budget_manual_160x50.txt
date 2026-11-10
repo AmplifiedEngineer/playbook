@@ -5,8 +5,8 @@
 │messages           4   vs          0          +4      new                                                                                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─┤Budget├─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤UTC  all projects├─╮
-│monthly budget [manual, local]  ■········· $3.05/$40.00  ! will exceed ~09-28 04:49 UTC  left $36.95  allow $0.06/h $1.32/d  avg $0.06/h $1.47/d  proj $44.12 │
-│weekly budget [manual, local]  ■■■■■■···· $3.05/$5.00  ! will exceed ~09-05 00:56 UTC  left $1.95  allow $0.02/h $0.50/d  avg $0.04/h $0.99/d  proj $6.95     │
+│monthly budget [manual, local]  ■········· $3.05/$40.00  ! will exceed ~09-28 04:49 UTC  reaches the limit in 25d 3h at the average pace  left $36.95         │
+│weekly budget [manual, local]  ■■■■■■···· $3.05/$5.00  ! will exceed ~09-05 00:56 UTC  reaches the limit in 1d 13h at the 24h pace  left $1.95                │
 │this month spend [local history]  $3.05 so far  avg $0.06/h $1.47/day  last month $0.00/h $0.00/day                                                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─┤¹Spend per day, USD├─┤v view: total├────────────────────────────────────────╮╭─┤²Tokens per day├────────────────────────────────────────────────────────────╮

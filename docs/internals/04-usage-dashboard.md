@@ -213,7 +213,7 @@ Cache rules:
 
 - A cached window is used only while the cache is under six hours old and only when the statusline has no reading for that window.
 - The cap of a cached limit holds across months. Only its `used` amount is ignored when it was fetched before the month began.
-- A fresh cached `used` replaces this machine's estimate, because it can cover every machine on the account (it is ignored when it was fetched before the month began). The "last 24h" pace in the Projection panel always comes from this machine.
+- A fresh cached `used` replaces this machine's estimate, because it can cover every machine on the account (it is ignored when it was fetched before the month began). The "last 24h" pace of a limit always comes from this machine.
 - The cache is read again only when the file changes, and a half written file keeps the last good reading.
 - The period of the cached limit is assumed to be the calendar month.
 
@@ -299,7 +299,7 @@ For the period on screen (today, this week or this month, this week for other ra
 
 ### The statusline budget line
 
-When the 7 day or 5 hour window is reached, or its pace reaches the cap before it resets, the statusline prints a fourth line. It uses the same pace maths as the Projection panel and reads only the `rate_limits` the statusline already receives on stdin, so it adds no network call and no database scan.
+When the 7 day or 5 hour window is reached, or its pace reaches the cap before it resets, the statusline prints a fourth line. It uses the same pace maths as the Budget strip and reads only the `rate_limits` the statusline already receives on stdin, so it adds no network call and no database scan.
 
 | Window | Reached | On pace to reach it |
 |---|---|---|
@@ -335,14 +335,14 @@ A seat billed by usage has no 5 hour or 7 day window. It has a monthly dollar li
 
 `playbook usage doctor` prints the same decision under "What the statusline budget line will show": where the figure comes from and how old it is, the limit in force and why, and the order the sources are tried. `--raw` adds the numbers behind each choice. The plain output stays short.
 
-### The Projection panel
+### When a limit is reached
 
-The Projection panel says when each limit is reached at your current pace, in the time zone shown in the panel title (UTC or local). Each limit gets one plain line. A dollar limit has two paces on it:
+The Budget strip says when each limit is reached at your current pace, in the time zone shown in its title (UTC or local). It was a separate Projection panel before, and the math is the same. The strip shows the sooner of the two paces below as `reaches the limit in 2d 4h at the 24h pace`, or `will not reach the limit before it resets`. The older layout word `projection` still loads and draws nothing. A dollar limit has two paces:
 
 1. The last 24 hours, which follows what you are doing now. When the period started less than 24 hours ago, it uses the spend of the period over the age of the period, so spend from before the period never counts (under one hour of data it says "no pace yet").
 2. The period average since the period began, which is steadier and shows the long view.
 
-A limit that is a percentage of a window (the 5 hour and weekly windows of a plan) has the window average only, because the window has no per day cost. Each pace ends with "hit" and a time, "won't hit before it resets", "no hit" (nothing was used in that span) or "limit reached". With no limit known, the panel says how to set one.
+A limit that is a percentage of a window (the 5 hour and weekly windows of a plan) has the window average only, because the window has no per day cost. The strip shows no clause for a limit that is reached already (its state says so) or when no pace is known yet. With no limit known, the strip says how to set one.
 
 ### The burn-up panel
 

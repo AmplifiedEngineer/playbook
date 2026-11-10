@@ -186,7 +186,10 @@ impl Editor {
             .tabs
             .get(self.tab)
             .map_or(&[][..], |t| &t.panels);
-        ALL.iter().copied().filter(|p| !shown.contains(p)).collect()
+        ALL.iter()
+            .copied()
+            .filter(|p| !p.is_retired() && !shown.contains(p))
+            .collect()
     }
 
     fn open_picker(&mut self) {
@@ -340,7 +343,9 @@ mod tests {
         let choices = e.available();
         assert_eq!(e.picker, Some(0));
         assert!(!choices.contains(&PanelId::Spend) && !choices.contains(&PanelId::Tokens));
-        assert_eq!(choices.len(), ALL.len() - 2);
+        assert!(!choices.contains(&PanelId::Projection));
+        assert!(choices.contains(&PanelId::Hourly));
+        assert_eq!(choices.len(), ALL.len() - 3);
     }
 
     #[test]
@@ -953,5 +958,36 @@ mod tests {
         assert_eq!(slot, 0);
         assert_eq!(e.layout.tabs[0].rows, None);
         assert!(e.message.as_deref().unwrap().contains("budget strip"));
+    }
+
+    #[test]
+    fn the_picker_offers_hourly_and_never_the_retired_projection_word() {
+        // Arrange
+        let e = editor();
+
+        // Act
+        let choices = e.available();
+
+        // Assert
+        assert!(choices.contains(&PanelId::Hourly));
+        assert!(!choices.contains(&PanelId::Projection));
+    }
+
+    #[test]
+    fn a_tab_that_holds_projection_still_shows_it_in_the_editor_and_d_removes_it() {
+        // Arrange
+        let mut e = Editor::new(&Layout::parse(THREE_TABS).unwrap(), 1);
+        let at = e.layout.tabs[1]
+            .panels
+            .iter()
+            .position(|p| *p == PanelId::Projection)
+            .unwrap();
+        e.slot = at;
+
+        // Act
+        e.key(KeyCode::Char('d'));
+
+        // Assert
+        assert!(!e.layout.tabs[1].panels.contains(&PanelId::Projection));
     }
 }

@@ -34,6 +34,8 @@ const MIN_PLOT: u16 = 3;
 const MAX_CELL: usize = 16;
 /// The narrowest inner width that keeps a y axis.
 const MIN_AXIS_WIDTH: u16 = 16;
+/// Seconds in the hour one bar of an hour chart spans.
+const HOUR_SECONDS: i64 = 3600;
 
 /// What a chart plots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -187,6 +189,12 @@ impl Geometry {
     /// The layout for `days` days in a panel, with y labels `label_width`
     /// columns wide.
     pub fn new(panel: Rect, days: usize, label_width: u16) -> Geometry {
+        Geometry::build(panel, days, label_width, true)
+    }
+
+    /// The layout for `days` bars. A chart of hours has no weekday row, so it
+    /// passes `weekdays` false.
+    fn build(panel: Rect, days: usize, label_width: u16, weekdays: bool) -> Geometry {
         let inner = Rect::new(
             panel.x + 1,
             panel.y + 1,
@@ -225,7 +233,7 @@ impl Geometry {
         // A weekday label needs its own column and a gap, so crowded bars
         // (a month in a narrow panel) go without the row.
         let roomy = cells.iter().all(|c| c.1 >= 2);
-        let rows = Rows::for_height(inner.height, per == 1 && bars > 0 && roomy);
+        let rows = Rows::for_height(inner.height, weekdays && per == 1 && bars > 0 && roomy);
         let mut y = inner.y;
         let mut take = |rows: u16| {
             y += rows;
@@ -283,17 +291,35 @@ pub struct Plot {
     pub bars: Vec<Bar>,
     pub axis: Axis,
     pub metric: Metric,
+    pub scale: Scale,
+}
+
+/// What one point of a series is: a day, or an hour whose `day` holds the
+/// second it starts at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scale {
+    Days,
+    Hours,
 }
 
 impl Plot {
     pub fn new(panel: Rect, series: &[DayPoint], metric: Metric) -> Plot {
+        Plot::laid_out(panel, series, metric, Scale::Days)
+    }
+
+    /// The cost per hour of a series of hours.
+    pub fn hourly(panel: Rect, series: &[DayPoint]) -> Plot {
+        Plot::laid_out(panel, series, Metric::Cost, Scale::Hours)
+    }
+
+    fn laid_out(panel: Rect, series: &[DayPoint], metric: Metric, scale: Scale) -> Plot {
         // The label width depends on the scale, which depends on how many
         // days a bar holds, which depends on the label width. It settles in a
         // pass or two; a third pass is the last.
         let mut label_width = 2;
         let mut plot = None;
         for _ in 0..3 {
-            let geo = Geometry::new(panel, series.len(), label_width);
+            let geo = Geometry::build(panel, series.len(), label_width, scale == Scale::Days);
             let bars = bars(series, geo.per);
             let peak = bars.iter().map(|b| b.value(metric)).fold(0.0, f64::max);
             let axis = Axis::of(peak);
@@ -310,12 +336,13 @@ impl Plot {
                 bars,
                 axis,
                 metric,
+                scale,
             });
             if settled {
                 break;
             }
         }
-        plot.unwrap_or_else(|| unreachable_plot(panel, metric))
+        plot.unwrap_or_else(|| unreachable_plot(panel, metric, scale))
     }
 
     /// The index of the bar holding `day`.
@@ -345,12 +372,13 @@ impl Plot {
 
 /// `Plot::new` always runs its loop at least once; this is the same plot for
 /// an empty series, so no code path needs an `unwrap`.
-fn unreachable_plot(panel: Rect, metric: Metric) -> Plot {
+fn unreachable_plot(panel: Rect, metric: Metric, scale: Scale) -> Plot {
     Plot {
         geo: Geometry::new(panel, 0, 2),
         bars: Vec::new(),
         axis: Axis::of(0.0),
         metric,
+        scale,
     }
 }
 
@@ -564,6 +592,93 @@ fn day_number(day: i64) -> String {
     date_key(day)[8..].trim_start_matches('0').to_string()
 }
 
+/// The hour of the clock a second falls in, `0` to `23`.
+fn hour_number(at: i64) -> String {
+    crate::tz::clock(at)[..2]
+        .trim_start_matches('0')
+        .to_string()
+}
+
+/// `14:00`, the whole hour a second starts.
+fn hour_label(at: i64) -> String {
+    format!("{}:00", &crate::tz::clock(at)[..2])
+}
+
+/// The label under bar `i`: its day of the month, or its hour of the clock.
+fn tick_label(plot: &Plot, i: usize) -> String {
+    let first = plot.bars[i].first;
+    match plot.scale {
+        Scale::Days => day_number(first),
+        Scale::Hours => match hour_number(first).as_str() {
+            "" => "0".to_string(),
+            h => h.to_string(),
+        },
+    }
+}
+
+/// The readout line for an hour bar: the hour, then its numbers, each added
+/// only while it fits.
+fn hour_readout(bar: &Bar, now_hour: bool, peak: bool, width: usize) -> String {
+    let mut head = format!(
+        "{} to {}",
+        hour_label(bar.first),
+        hour_label(bar.last + HOUR_SECONDS)
+    );
+    if now_hour {
+        head.push_str(" now");
+    }
+    if peak {
+        head.push_str(" peak");
+    }
+    let mut parts = vec![
+        head,
+        money(bar.cost),
+        format!("{} msgs", bar.messages),
+        format!("{} tok", compact(bar.tokens)),
+    ];
+    if let Some((model, share)) = bar.top_model() {
+        let name = model.strip_prefix("claude-").unwrap_or(model);
+        parts.push(format!("{name} {:.0}%", share * 100.0));
+    }
+    let mut out = String::new();
+    for part in parts {
+        let next = if out.is_empty() {
+            part
+        } else {
+            format!("{out}  {part}")
+        };
+        if next.chars().count() > width {
+            if out.is_empty() {
+                return fit(&next, width);
+            }
+            break;
+        }
+        out = next;
+    }
+    out
+}
+
+/// The totals line of an hour chart, the longest form that fits.
+fn hour_stats(series: &[DayPoint], width: usize) -> String {
+    let total: f64 = series.iter().map(|d| d.cost_usd).sum();
+    let peak = series.iter().map(|d| d.cost_usd).fold(0.0, f64::max);
+    let at = series
+        .iter()
+        .find(|d| d.cost_usd == peak && peak > 0.0)
+        .map_or(String::new(), |d| format!(" at {}", hour_label(d.day)));
+    let forms = [
+        format!("total {}  peak {}{at}", money(total), money(peak)),
+        format!("total {}  peak {}", money(total), money(peak)),
+        format!("total {}", money(total)),
+    ];
+    for form in &forms {
+        if form.chars().count() <= width {
+            return form.clone();
+        }
+    }
+    fit(&forms[2], width)
+}
+
 /// Whether bar `i` carries a day number when every `step` bars do. The first
 /// and the last bar always do.
 fn shows_number(i: usize, last: usize, step: usize) -> bool {
@@ -573,7 +688,7 @@ fn shows_number(i: usize, last: usize, step: usize) -> bool {
 /// Whether the number of bar `i` leaves a column free before the next number
 /// that is shown, so two numbers never touch.
 fn number_fits(plot: &Plot, i: usize, last: usize, step: usize) -> bool {
-    let end = usize::from(plot.geo.cells[i].0) + day_number(plot.bars[i].first).len();
+    let end = usize::from(plot.geo.cells[i].0) + tick_label(plot, i).len();
     match (i + 1..=last).find(|j| shows_number(*j, last, step)) {
         Some(j) => end < usize::from(plot.geo.cells[j].0) || i == last,
         None => true,
@@ -590,7 +705,7 @@ fn number_step(plot: &Plot) -> usize {
     for step in [1, 2, 3, 7] {
         let shown: Vec<usize> = (0..=last).filter(|i| i.is_multiple_of(step)).collect();
         let clear = shown.windows(2).all(|w| {
-            let end = usize::from(plot.geo.cells[w[0]].0) + day_number(plot.bars[w[0]].first).len();
+            let end = usize::from(plot.geo.cells[w[0]].0) + tick_label(plot, w[0]).len();
             end < usize::from(plot.geo.cells[w[1]].0)
         });
         if clear {
@@ -626,7 +741,10 @@ pub fn render(buf: &mut Buffer, plot: &Plot, series: &[DayPoint], view: &View, p
     };
     let peak = plot.peak_index();
     if let Some(y) = geo.stats_y {
-        let line = stats(plot, series, view.today, width);
+        let line = match plot.scale {
+            Scale::Days => stats(plot, series, view.today, width),
+            Scale::Hours => hour_stats(series, width),
+        };
         buf.set_stringn(geo.inner.x, y, line, width, text(pal));
     }
     if let Some(y) = geo.readout_y {
@@ -634,7 +752,10 @@ pub fn render(buf: &mut Buffer, plot: &Plot, series: &[DayPoint], view: &View, p
         let shown = view.cursor.or_else(|| plot.default_index(view.today));
         if let Some(i) = shown {
             let bar = &plot.bars[i];
-            let line = readout(plot, bar, bar.contains(view.today), peak == Some(i), width);
+            let line = match plot.scale {
+                Scale::Days => readout(plot, bar, bar.contains(view.today), peak == Some(i), width),
+                Scale::Hours => hour_readout(bar, i + 1 == plot.bars.len(), peak == Some(i), width),
+            };
             let style = if view.cursor.is_some() {
                 text(pal).add_modifier(Modifier::BOLD)
             } else {
@@ -677,9 +798,9 @@ pub fn render(buf: &mut Buffer, plot: &Plot, series: &[DayPoint], view: &View, p
             );
             let x = geo.x_of(i);
             let room = usize::from(geo.plot.right().saturating_sub(x));
-            buf.set_stringn(x, y, day_number(bar.first), room, style);
+            buf.set_stringn(x, y, tick_label(plot, i), room, style);
         }
-    } else if let Some(y) = geo.dates_y {
+    } else if let (Some(y), Scale::Days) = (geo.dates_y, plot.scale) {
         for (at, label) in date_labels(plot, usize::from(geo.plot.width)) {
             buf.set_stringn(
                 geo.plot.x + at as u16,
@@ -1481,5 +1602,102 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn hours(costs: &[f64]) -> Vec<DayPoint> {
+        const START: i64 = 1_788_393_600;
+        costs
+            .iter()
+            .enumerate()
+            .map(|(i, c)| DayPoint {
+                day: START + i as i64 * HOUR_SECONDS,
+                cost_usd: *c,
+                tokens: 10,
+                messages: usize::from(*c > 0.0),
+                models: vec![("opus".to_string(), *c)],
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_hour_chart_has_a_bar_per_hour_and_no_weekday_row() {
+        // Arrange
+        crate::tz::set(crate::tz::Zone::Utc);
+        let series = hours(&[0.0; 24]);
+
+        // Act
+        let plot = Plot::hourly(Rect::new(0, 0, 80, 14), &series);
+
+        // Assert
+        assert_eq!(plot.bars.len(), 24);
+        assert_eq!(plot.geo.per, 1);
+        assert_eq!(plot.scale, Scale::Hours);
+        assert!(plot.geo.weekdays_y.is_none());
+        assert!(plot.geo.dates_y.is_some());
+    }
+
+    #[test]
+    fn the_hour_labels_read_the_clock_of_the_zone() {
+        crate::tz::set(crate::tz::Zone::Utc);
+
+        assert_eq!(hour_label(1_788_393_600), "00:00");
+        assert_eq!(hour_label(1_788_393_600 + 14 * 3_600), "14:00");
+        assert_eq!(hour_number(1_788_393_600), "");
+        assert_eq!(hour_number(1_788_393_600 + 9 * 3_600), "9");
+    }
+
+    #[test]
+    fn the_hour_readout_and_totals_name_the_hour_and_the_peak() {
+        // Arrange
+        crate::tz::set(crate::tz::Zone::Utc);
+        let mut costs = [0.0; 24];
+        costs[14] = 3.0;
+        costs[23] = 1.0;
+        let series = hours(&costs);
+        let plot = Plot::hourly(Rect::new(0, 0, 100, 14), &series);
+
+        // Act
+        let stats = hour_stats(&series, 80);
+        let readout = hour_readout(&plot.bars[14], false, true, 80);
+        let last = hour_readout(&plot.bars[23], true, false, 80);
+        let narrow = hour_stats(&series, 10);
+
+        // Assert
+        assert_eq!(stats, "total $4.00  peak $3.00 at 14:00");
+        assert!(
+            readout.starts_with("14:00 to 15:00 peak  $3.00"),
+            "{readout}"
+        );
+        assert!(last.starts_with("23:00 to 00:00 now  $1.00"), "{last}");
+        assert_eq!(narrow.chars().count(), 10);
+    }
+
+    #[test]
+    fn an_hour_chart_draws_the_hour_numbers_under_the_bars() {
+        // Arrange
+        crate::tz::set(crate::tz::Zone::Utc);
+        let mut costs = [0.0; 24];
+        costs[5] = 2.0;
+        let series = hours(&costs);
+        let area = Rect::new(0, 0, 100, 14);
+        let plot = Plot::hourly(area, &series);
+        let mut buf = Buffer::empty(area);
+        let pal = Theme::Standard.palette(ColorDepth::True);
+        let view = View {
+            fill: pal.cpu,
+            stack: None,
+            cursor: None,
+            today: -1,
+        };
+
+        // Act
+        render(&mut buf, &plot, &series, &view, &pal);
+
+        // Assert
+        let y = plot.geo.dates_y.unwrap();
+        let row: String = (0..area.width)
+            .map(|x| buf[(x, y)].symbol().to_string())
+            .collect();
+        assert!(row.contains('0') && row.contains("23"), "{row}");
     }
 }

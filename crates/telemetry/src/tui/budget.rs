@@ -30,6 +30,10 @@ pub const HEIGHT: u16 = 5;
 /// The most limits drawn. The rest are counted in the title.
 const MAX_LIMITS: usize = 2;
 const BAR: usize = 10;
+/// The drop rank of the clause that says when a limit is reached. The state
+/// outranks it, and it outranks the figures after it, which it makes
+/// redundant: left, allowed, average, projected and the reset time.
+const REACH_DROP: u8 = 3;
 
 fn fg(pal: &Palette, ink: Ink) -> Style {
     Style::default().fg(pal.color(ink))
@@ -231,15 +235,18 @@ fn limit_line(
     });
     let (state, _) = state_seg(pal, icon, l, now);
     segs.push(state);
+    let plain = fg(pal, pal.fg);
+    if let Some(reach) = super::projection::reach(l, v.recent_cost_24h, now) {
+        segs.push(Seg::text(REACH_DROP, reach, plain));
+    }
     if let Some(h) = l.headroom(now) {
-        let plain = fg(pal, pal.fg);
         segs.push(Seg::text(
-            3,
+            REACH_DROP + 1,
             format!("left {}", amount(l.unit, h.remaining)),
             plain,
         ));
         segs.push(Seg::text(
-            4,
+            REACH_DROP + 2,
             format!(
                 "allow {}/h {}/d",
                 rate(l.unit, h.allowed_per_hour),
@@ -248,7 +255,7 @@ fn limit_line(
             plain,
         ));
         segs.push(Seg::text(
-            5,
+            REACH_DROP + 3,
             format!(
                 "avg {}/h {}/d",
                 rate(l.unit, h.avg_per_hour),
@@ -257,13 +264,13 @@ fn limit_line(
             plain,
         ));
         segs.push(Seg::text(
-            6,
+            REACH_DROP + 4,
             format!("proj {}", rate(l.unit, h.projected)),
             plain,
         ));
     }
     segs.push(Seg::text(
-        7,
+        REACH_DROP + 5,
         format!("resets {} {}", stamp(l.end), crate::tz::label()),
         fg(pal, pal.fg),
     ));

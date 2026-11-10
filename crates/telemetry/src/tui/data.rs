@@ -285,6 +285,9 @@ pub struct Data {
     pub unpriced: usize,
     /// Every day from the start of the range to today, idle days at zero.
     pub series: Vec<DayPoint>,
+    /// The last `HOURS` hours of the zone's clock, the current hour last, idle
+    /// hours at zero. A point's `day` holds the second its hour starts at.
+    pub hours: Vec<DayPoint>,
     pub live: LiveView,
     /// Today, the week and the month so far against the previous period over
     /// the same elapsed span. `None` for the other ranges.
@@ -311,6 +314,46 @@ pub struct Data {
 
 /// Days charted for today, since a single bar says nothing.
 const TREND_DAYS: i64 = 7;
+
+/// Hours the Hourly panel charts: a rolling day ending with the current hour.
+pub const HOURS: usize = 24;
+const SECONDS_PER_HOUR: i64 = 3600;
+
+/// One point per hour of the last `HOURS`, from the events that match
+/// `filter`. An hour starts on the whole hour of the chosen zone, so a zone
+/// with a half hour offset still reads hours on its own clock.
+fn hour_series(
+    window: &[UsageEvent],
+    now: i64,
+    filter: &str,
+    zone: crate::tz::Zone,
+) -> Vec<DayPoint> {
+    let offset = zone.offset_at(now);
+    let current = now - (now + offset).rem_euclid(SECONDS_PER_HOUR);
+    let first = current - (HOURS as i64 - 1) * SECONDS_PER_HOUR;
+    let mut acc: Vec<DayAcc> = (0..HOURS).map(|_| DayAcc::default()).collect();
+    for e in window {
+        if e.timestamp < first || e.timestamp > now || !matches(e, filter) {
+            continue;
+        }
+        let at = ((e.timestamp - first) / SECONDS_PER_HOUR) as usize;
+        let slot = &mut acc[at.min(HOURS - 1)];
+        slot.cost_usd += e.cost_usd;
+        slot.tokens += query::total_tokens(e);
+        slot.messages += 1;
+        *slot.models.entry(e.model.clone()).or_default() += e.cost_usd;
+    }
+    acc.into_iter()
+        .enumerate()
+        .map(|(i, a)| DayPoint {
+            day: first + i as i64 * SECONDS_PER_HOUR,
+            cost_usd: a.cost_usd,
+            tokens: a.tokens,
+            messages: a.messages,
+            models: a.models.into_iter().collect(),
+        })
+        .collect()
+}
 
 /// One point per day from the range start (or the first event, for all time)
 /// to the end of the range (today for all time), so the graph axis is a real calendar.
@@ -424,6 +467,7 @@ impl Data {
             sessions: query::session_days(&inside),
             unpriced: unpriced_models(&inside).0,
             series,
+            hours: hour_series(window, now, filter, zone),
             live,
             comparison,
             agents: query::AgentView::default(),
@@ -450,7 +494,8 @@ fn window_start(range: Range, now: i64) -> Option<i64> {
     if range == Range::Today {
         start = start.min(crate::tz::day_start(first_day - TREND_DAYS + 1));
     }
-    Some(start)
+    // The Hourly panel charts the last day whatever the range.
+    Some(start.min(now - HOURS as i64 * SECONDS_PER_HOUR))
 }
 
 impl Data {
@@ -1051,5 +1096,89 @@ mod tests {
             vec![("opus".to_string(), 2.5), ("sonnet".to_string(), 1.0)]
         );
         assert_eq!(d.slots.order, ["opus", "sonnet"]);
+    }
+
+    #[test]
+    fn the_hours_are_the_last_24_of_the_clock_with_the_current_hour_last() {
+        // Arrange
+        let events = vec![
+            event(NOW, "opus", "a", 4.0),
+            event(NOW - 3_600, "sonnet", "a", 2.0),
+            event(NOW - 23 * 3_600, "opus", "a", 1.0),
+            event(NOW - 25 * 3_600, "opus", "a", 100.0),
+            event(NOW + 1, "opus", "a", 100.0),
+        ];
+
+        // Act
+        let hours = hour_series(&events, NOW, "", crate::tz::Zone::Utc);
+
+        // Assert
+        assert_eq!(hours.len(), HOURS);
+        let current = NOW - NOW % 3_600;
+        assert_eq!(hours[HOURS - 1].day, current);
+        assert_eq!(hours[0].day, current - 23 * 3_600);
+        assert!(hours.windows(2).all(|w| w[1].day - w[0].day == 3_600));
+        let costs: Vec<f64> = hours.iter().map(|h| h.cost_usd).collect();
+        assert_eq!(costs.iter().sum::<f64>(), 4.0 + 2.0 + 1.0);
+        assert_eq!(costs[HOURS - 1], 4.0);
+        assert_eq!(hours[HOURS - 1].messages, 1);
+    }
+
+    #[test]
+    fn an_hour_starts_on_the_whole_hour_of_a_zone_with_a_half_hour_offset() {
+        // Arrange
+        let india = crate::tz::Zone::Fixed(5 * 3_600 + 1_800);
+        let events = vec![event(NOW, "opus", "a", 1.0)];
+
+        // Act
+        let hours = hour_series(&events, NOW, "", india);
+
+        // Assert
+        let start = hours[HOURS - 1].day;
+        assert_eq!((start + 5 * 3_600 + 1_800) % 3_600, 0);
+        assert!(start <= NOW && NOW < start + 3_600);
+        assert_eq!(hours[HOURS - 1].cost_usd, 1.0);
+    }
+
+    #[test]
+    fn the_hours_follow_the_filter_and_idle_hours_are_zero() {
+        // Arrange
+        let events = vec![
+            event(NOW, "opus", "keep", 4.0),
+            event(NOW, "opus", "drop", 8.0),
+        ];
+
+        // Act
+        let hours = hour_series(&events, NOW, "keep", crate::tz::Zone::Utc);
+
+        // Assert
+        assert_eq!(hours.iter().map(|h| h.cost_usd).sum::<f64>(), 4.0);
+        assert_eq!(hours.iter().filter(|h| h.messages == 0).count(), HOURS - 1);
+    }
+
+    #[test]
+    fn the_hours_ignore_the_range_and_the_snapshot_carries_them() {
+        // Arrange
+        let events = vec![event(NOW - 3_600, "opus", "a", 2.0)];
+
+        // Act
+        let week = Data::build(&events, LiveView::default(), NOW, Range::LastDays(7), "");
+        let today = Data::build(&events, LiveView::default(), NOW, Range::Today, "");
+
+        // Assert
+        assert_eq!(week.hours, today.hours);
+        assert_eq!(week.hours.iter().map(|h| h.cost_usd).sum::<f64>(), 2.0);
+    }
+
+    #[test]
+    fn the_window_reaches_back_a_day_for_the_hours_whatever_the_range() {
+        // Arrange
+        let past = Range::LastDays(1);
+
+        // Act
+        let since = window_start(past, NOW);
+
+        // Assert
+        assert!(since.is_some_and(|s| s <= NOW - HOURS as i64 * 3_600));
     }
 }
