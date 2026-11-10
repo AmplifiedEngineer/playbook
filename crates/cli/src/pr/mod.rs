@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook pr`: the mechanical half of `/playbook:create-pull-request`.
+//! `playbook pr`: the mechanical half of `/playbook:pr-create`.
 
 pub mod body_rules;
 pub mod comments;

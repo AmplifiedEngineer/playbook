@@ -3,9 +3,9 @@
 Read only when `playbook pr status` or `playbook pr land` is missing from the session tool map (an older binary). This is the step by step flow that the finish skill ran before those two commands existed.
 
 
-Run this in the main session or in a delegated agent that holds the `Agent` tool, right after `/playbook:create-pull-request` returns a PR URL. The self-review, fix, promote and merge work lives here because it spawns review swarms.
+Run this in the main session or in a delegated agent that holds the `Agent` tool, right after `/playbook:pr-create` returns a PR URL. The self-review, fix, promote and merge work lives here because it spawns review swarms.
 
-Inputs from the create-pull-request report: the PR number or URL, its branch, and whether `--ready` was passed. If any is missing, read it with `gh pr view`.
+Inputs from the pr-create report: the PR number or URL, its branch, and whether `--ready` was passed. If any is missing, read it with `gh pr view`.
 
 An optional worktree path may also be given, for a caller whose working directory is not the PR's checkout. When it is, run every git command as `git -C <worktree>`, run `gh` and any tool from the tool map with the PR number so they do not depend on the current directory, pass the path on to the review commands, and put it with the branch in the prompt of `/playbook:commit` as "Worktree root: <path>, branch: <name>", and never change directory or touch files outside the worktree.
 

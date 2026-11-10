@@ -125,7 +125,10 @@ fn level_of(home: &Path, key: &str) -> String {
 /// set under the old key keeps applying while the new key is unset, so a user's
 /// config is not lost with the name. The rows go when `KEY_RENAMES` takes the
 /// one-to-one renames.
-const RENAMED_COMPONENTS: &[(Kind, &str, &str)] = &[(Kind::Command, "commit-and-push", "commit")];
+const RENAMED_COMPONENTS: &[(Kind, &str, &str)] = &[
+    (Kind::Command, "commit-and-push", "commit"),
+    (Kind::Command, "create-pull-request", "pr-create"),
+];
 
 /// What a ceiling key holds.
 #[derive(Debug, PartialEq, Eq)]
@@ -684,5 +687,35 @@ mod tests {
             matches!(&invalid, Setting::Invalid(w) if w.contains("bogus")),
             "{invalid:?}"
         );
+    }
+
+    #[test]
+    fn every_renamed_component_keeps_its_old_ceiling_until_the_new_key_is_set() {
+        // Arrange
+        let mut problems = Vec::new();
+
+        // Act
+        for (index, (kind, old, new)) in RENAMED_COMPONENTS.iter().enumerate() {
+            let (home, root) = plugin(&format!("cmp-renamed-row-{index}"));
+            let file = kind.file(&root, new);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(&file, "---\neffort: high\n---\n").unwrap();
+            let old_key = config_key(*kind, old);
+            let new_key = config_key(*kind, new);
+            write_raw(&home, &[(old_key.as_str(), "low")]);
+            let old_only = resolve(*kind, new, &home, None, Some(&root)).configured;
+            let (both_home, _) = plugin(&format!("cmp-renamed-both-{index}"));
+            write_raw(
+                &both_home,
+                &[(old_key.as_str(), "low"), (new_key.as_str(), "medium")],
+            );
+            let both = resolve(*kind, new, &both_home, None, Some(&root)).configured;
+            if old_only != "low" || both != "medium" {
+                problems.push(format!("{old} to {new}: old only {old_only}, both {both}"));
+            }
+        }
+
+        // Assert
+        assert!(problems.is_empty(), "{problems:#?}");
     }
 }

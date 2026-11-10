@@ -164,7 +164,7 @@ fn command(name: &str) -> String {
 
 #[test]
 fn create_pull_request_makes_one_deliver_call_with_one_retry_and_no_draft_flag() {
-    let text = command("create-pull-request.md");
+    let text = command("pr-create.md");
 
     let delivers = text.matches("playbook deliver --json").count();
     assert_eq!(delivers, 1, "exactly one deliver call");

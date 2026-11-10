@@ -78,7 +78,7 @@ fn a_hand_run_gh_pr_create_is_routed_to_the_skill() {
     let (out, _, _) = run(&bash("gh pr create --title t --body b"), &[]);
 
     let reason = denial(&out).expect("denied");
-    assert!(reason.contains("/playbook:create-pull-request"), "{reason}");
+    assert!(reason.contains("/playbook:pr-create"), "{reason}");
 }
 
 #[test]

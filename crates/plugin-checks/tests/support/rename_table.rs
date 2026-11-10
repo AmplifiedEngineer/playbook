@@ -20,8 +20,15 @@ pub(crate) struct Rename {
 }
 
 /// Renames that have landed. Each rename PR adds its row.
-pub(crate) const RENAMES: &[Rename] = &[Rename {
-    kind: Kind::Command,
-    old: "commit-and-push",
-    new: "commit",
-}];
+pub(crate) const RENAMES: &[Rename] = &[
+    Rename {
+        kind: Kind::Command,
+        old: "commit-and-push",
+        new: "commit",
+    },
+    Rename {
+        kind: Kind::Command,
+        old: "create-pull-request",
+        new: "pr-create",
+    },
+];

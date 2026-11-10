@@ -1,4 +1,4 @@
-# Legacy create-pull-request steps
+# Legacy pr-create steps
 
 ## Contents
 
@@ -8,7 +8,7 @@
 - Steps 2 and 3: title and body
 - Step 4: push and create
 
-These are the steps `/playbook:create-pull-request` followed before it ran `playbook pr prepare --json` inline and one `playbook deliver` call. The command points here only when shell execution is disabled by policy (the inline block prints `[shell command execution disabled by policy]`). Tell the user once to upgrade (`brew upgrade playbook` or `playbook upgrade`), then follow the steps below with normal `Bash` calls.
+These are the steps `/playbook:pr-create` followed before it ran `playbook pr prepare --json` inline and one `playbook deliver` call. The command points here only when shell execution is disabled by policy (the inline block prints `[shell command execution disabled by policy]`). Tell the user once to upgrade (`brew upgrade playbook` or `playbook upgrade`), then follow the steps below with normal `Bash` calls.
 
 # Create Pull Request
 

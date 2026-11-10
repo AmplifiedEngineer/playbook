@@ -5,3 +5,4 @@ Deprecated: a renamed command keeps its old name as a stub until 1.0.0. The stub
 | Old name | New name | Removed in |
 | --- | --- | --- |
 | `/playbook:commit-and-push` | `/playbook:commit` | 1.0.0 |
+| `/playbook:create-pull-request` | `/playbook:pr-create` | 1.0.0 |

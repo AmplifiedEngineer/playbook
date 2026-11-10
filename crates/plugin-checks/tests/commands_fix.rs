@@ -232,7 +232,7 @@ fn fix_opens_its_pull_request_through_the_create_pull_request_skill() {
     // Act
     let names_skill = file.lines[file.body_start..]
         .iter()
-        .any(|l| l.contains("/playbook:create-pull-request"));
+        .any(|l| l.contains("/playbook:pr-create"));
     let raw_calls: Vec<usize> = (file.body_start..file.lines.len())
         .filter(|&i| fenced[i] && file.lines[i].contains("gh pr create"))
         .map(|i| i + 1)
@@ -241,7 +241,7 @@ fn fix_opens_its_pull_request_through_the_create_pull_request_skill() {
     // Assert
     assert!(
         names_skill,
-        "fix must open its PR through `/playbook:create-pull-request`"
+        "fix must open its PR through `/playbook:pr-create`"
     );
     assert!(
         tools.iter().any(|t| t == "Skill"),

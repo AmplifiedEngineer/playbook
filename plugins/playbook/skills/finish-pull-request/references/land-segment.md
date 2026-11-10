@@ -16,13 +16,13 @@ Runs once per Segment, immediately after Step 9 opened that Segment's PR, and MU
 
 **Never pass `--delete-branch`.** It is redundant where the repo sets `delete_branch_on_merge`, and it deletes the LOCAL branch even when the merge itself fails (seen during a 503), which is the one state this loop must not land in.
 
-**1. Promote to ready.** `/playbook:create-pull-request` opens a draft unless `pr.draft` is `false`, and a draft cannot enqueue (`Pull request is a draft`). Promote it directly (a no-op when the PR already opened ready):
+**1. Promote to ready.** `/playbook:pr-create` opens a draft unless `pr.draft` is `false`, and a draft cannot enqueue (`Pull request is a draft`). Promote it directly (a no-op when the PR already opened ready):
 
 ```bash
 gh pr ready "$BRANCH"
 ```
 
-**Do NOT invoke `playbook:finish-pull-request` (it runs `/playbook:deep-review --self`), and do NOT pass `--ready` to `/playbook:create-pull-request`.** That step exists to guarantee a human is never the first reviewer of unreviewed code; Steps 8 and 9 above already satisfied that invariant for this Segment, more strongly, with a 5-lens swarm whose reviewers ran in fresh contexts that never saw the implementation. Reviewers are dispatched subagents, so they are fresh by construction. Record in the ledger which review satisfied the gate: `review: implement-step9 (5 lenses, <n> findings fixed)`.
+**Do NOT invoke `playbook:finish-pull-request` (it runs `/playbook:deep-review --self`), and do NOT pass `--ready` to `/playbook:pr-create`.** That step exists to guarantee a human is never the first reviewer of unreviewed code; Steps 8 and 9 above already satisfied that invariant for this Segment, more strongly, with a 5-lens swarm whose reviewers ran in fresh contexts that never saw the implementation. Reviewers are dispatched subagents, so they are fresh by construction. Record in the ledger which review satisfied the gate: `review: implement-step9 (5 lenses, <n> findings fixed)`.
 
 **2. Gate on required checks.** Poll with a deadline; never `--watch` unbounded. Intent: pr-ci-wait. If the session's tool map (printed at session start) lists it, use that command with `"$PR" --settle 120 --timeout 300 --interval 30` and the Bash `timeout` set to 600000. Otherwise do this: wait 120 seconds, then read `gh pr checks "$PR" --required --json name,bucket` every 30 seconds for up to 300 seconds, each read its own Bash call. Ignore the exit code of `gh pr checks` (it is non-zero while checks are pending or failing) and read the JSON; a "no required checks reported" error counts as an empty list. `CI_VERDICT` is `NONE` for an empty list, `FAIL` when any bucket is `fail`, `CANCELLED` when none is `pending` and any is `cancel`, `PASS` when none is `pending`, and `TIMEOUT` when time runs out.
 

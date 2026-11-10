@@ -81,7 +81,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         auto: Auto::Unchanged,
     },
     CommandSpec {
-        name: "create-pull-request",
+        name: "pr-create",
         asks: false,
         // The binary reports the mode; the finish skill skips the review.
         auto: Auto::Unchanged,

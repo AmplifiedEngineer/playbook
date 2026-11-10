@@ -1,10 +1,10 @@
 # Worktree guard
 
-A commit or PR skill (`/playbook:commit`, `/playbook:create-pull-request`) run by a subagent starts in the session's checkout. That is not always the worktree of the agent that called it. Run this guard as the first step, before any other command, and again by `cd` at the top of every later bash block (each block is a new shell).
+A commit or PR skill (`/playbook:commit`, `/playbook:pr-create`) run by a subagent starts in the session's checkout. That is not always the worktree of the agent that called it. Run this guard as the first step, before any other command, and again by `cd` at the top of every later bash block (each block is a new shell).
 
 The caller passes two values in the subagent's prompt as "Worktree root: <path>, branch: <name>": the absolute worktree root (its `git rev-parse --show-toplevel`) and the expected branch (its `git branch --show-current`, or `(detached)` when that prints nothing). Call them `root` and `branch`.
 
-1. `cd -- "<root>"`, quoted. If `root` is not an absolute path, or the `cd` fails, stop as in step 4 with `<toplevel>` and `<found-branch>` both `none`. When the caller gave `--dir <path>` (create-pull-request), that path is the root.
+1. `cd -- "<root>"`, quoted. If `root` is not an absolute path, or the `cd` fails, stop as in step 4 with `<toplevel>` and `<found-branch>` both `none`. When the caller gave `--dir <path>` (pr-create), that path is the root.
 2. Run `git rev-parse --show-toplevel`.
 3. Run `git branch --show-current`. It prints the name on an unborn branch too, and prints nothing only on a detached HEAD, which counts as `(detached)`. Callers use the same rule, so both sides compare equal. Never use `git rev-parse --abbrev-ref HEAD`, which fails on an unborn branch and is ambiguous for a branch named like a tag.
 4. Compare both values to what the caller passed. On any mismatch stop with one line and nothing else:

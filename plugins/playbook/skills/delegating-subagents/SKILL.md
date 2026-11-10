@@ -113,7 +113,7 @@ Narrow `cheap-check` lenses go to `cheap-checker`, already pinned low. A verifie
 
 ## Worktree guard
 
-A commit or PR command (`/playbook:commit`, `/playbook:create-pull-request`) run by a subagent can start in the wrong checkout. Its first step is the guard in [references/worktree-guard.md](references/worktree-guard.md); the caller passes "Worktree root: <path>, branch: <name>" in the prompt.
+A commit or PR command (`/playbook:commit`, `/playbook:pr-create`) run by a subagent can start in the wrong checkout. Its first step is the guard in [references/worktree-guard.md](references/worktree-guard.md); the caller passes "Worktree root: <path>, branch: <name>" in the prompt.
 
 **Shell agents after `EnterWorktree`.** Claude Code 2.1.318 refuses every shell command whose directory is the shared checkout once a session has entered a worktree. An agent spawned without `isolation: worktree` inherits that guard and cannot run shell commands there. When the session entered a worktree, spawn a shell agent (`collector`, `general-purpose`) with `isolation: worktree`, or call `ExitWorktree` with action `keep` first. An isolated agent works in its own checkout, so its brief names the branch to base on and where to deliver. For the `implementer`, and for forked skills (`git`, `auditor`), call `ExitWorktree` with `keep` first: they work in the session's checkout. Read-only agents have no Bash and need nothing. If a call is refused with the worktree isolation message, do not retry it: call `ExitWorktree` with `keep` and continue from the original directory.
 
