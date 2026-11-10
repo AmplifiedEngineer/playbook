@@ -23,6 +23,7 @@ and ADR 0021, 0022 and 0023).
 | agent | `writer` | `haiku` | `medium` | Writes the final text of one kind from facts the orchestrator decided. Pilot on 18 cases: no invented fact and no hard prose finding. It decides nothing. |
 | command | `address-pr-comments` | `opus` | `medium` | Judgment on review threads and replies that go public. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
 | command | `adr` | `opus` | `medium` | A hard-to-reverse decision record. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
+| command | `commit-and-push` | - | - | Deprecated stub of `commit` until 1.0.0. It sets neither model nor effort, as `commit` does not. |
 | command | `commit` | - | - | Runs in the session; the binary drafts the message. |
 | command | `create-pull-request` | - | - | Runs in the session; the binary drafts the PR text. |
 | command | `deep-review` | `opus` | `medium` | Orchestrates the reviewer swarm. A missed finding is the cost. Maintainer choice on 2026-10-11, no bench (ADR-0023). |

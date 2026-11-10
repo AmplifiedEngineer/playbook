@@ -92,11 +92,11 @@ Names are flat. Claude Code turns `commands/pr/create.md` into a name with a sec
 
 Hidden skills (`user-invocable: false`) are ids that the model and other prompts read, not names a user types. They follow the skill name rule in `skills_lint.rs` (lowercase letters, digits and hyphens, 64 characters at most) and keep their names unless a name misleads.
 
-Plugin names get no alias before 1.0.0. A renamed or removed command has no stub: the old name disappears, because Claude Code has no redirect and a stub costs every session a listing entry. To rename or remove one:
+A renamed command or skill keeps its old name as a deprecated stub until 1.0.0. The stub sets `description: Deprecated, use /playbook:<new>. Removed in 1.0.0.`, sets `disable-model-invocation: true` so the model never picks it, copies the new file's `allowed-tools`, `argument-hint`, `model` and `effort`, prints one line that names the new command, then reads the new file and follows it with the same arguments. It stays under 12 lines. A removal with no replacement, such as the two review commands that became flags, has no stub. To rename or remove one:
 
-1. Add a `RENAMES` row or a `REMOVED` entry in `crates/plugin-checks/tests/support/renames.rs`, and a row in `docs/renamed.md`.
-2. Change every caller. The leftover check fails on the old name anywhere in `plugins/`, `seed/`, `README.md`, `CONTRIBUTING.md`, `docs/` and `crates/*/src`, except in `CHANGELOG.md`, `docs/adr/` and `docs/renamed.md`. Name those files as code spans, not links.
-3. Open a breaking PR: the title starts `feat(plugin)!:` and a `BREAKING CHANGE:` footer lists the old and new names.
+1. Add a `RENAMES` row (with its stub) or a `REMOVED` entry in `crates/plugin-checks/tests/support/renames.rs`, and a row in `docs/renamed.md` with the release that removes the stub.
+2. Change every caller to the new name. A recipe never calls the old name. The leftover check fails on the old name anywhere in `plugins/`, `seed/`, `README.md`, `CONTRIBUTING.md`, `docs/` and `crates/*/src`, except in its own stub, `CHANGELOG.md`, `docs/adr/` and `docs/renamed.md`. Name those files as code spans, not links.
+3. Open the PR as `feat(plugin):` with a `Deprecated:` footer that lists the old and new names. The old name still works, so the PR is not breaking. The 1.0.0 removal of the stubs is `feat(plugin)!:` with a `BREAKING CHANGE:` footer. A removal with no stub is breaking at once.
 
 ## Hooks
 
