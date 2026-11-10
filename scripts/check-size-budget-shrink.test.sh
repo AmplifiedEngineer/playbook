@@ -29,7 +29,7 @@ fail() { echo "FAIL $*" >&2; exit 1; }
 
 # check <label> <base text> <head text> <exit code> [stderr text]
 check() {
-  local label="$1" base_text="$2" head_text="$3" want="$4" text="${5:-}"
+  local label="$1" base_text="$2" head_text="$3" want="$4" text="${5:-}" page="${6:-}"
   local repo="$TMP/repo-$pass"
   mkdir -p "$repo"
   (
@@ -40,6 +40,10 @@ check() {
     git add -A
     git commit -q -m base
     printf '%s' "$head_text" >"$LIST"
+    if [ -n "$page" ]; then
+      mkdir -p docs
+      printf '%s' "$page" >docs/renamed.md
+    fi
     git add -A
     git commit -q -m head --allow-empty
   )
@@ -75,8 +79,11 @@ graph_base=$'invoke commands/fix.md pr-create\nmention commands/x.md plan\n'
 check "call graph list: an unchanged file passes" "$graph_base" "$graph_base" 0
 check "call graph list: a removed row passes" "$graph_base" $'invoke commands/fix.md pr-create\n' 0
 check "call graph list: an added row fails" "$graph_base" "${graph_base}invoke commands/y.md review"$'\n' 1 "a row was added"
-check "call graph list: a renamed file passes" "$graph_base" $'invoke commands/fix2.md pr-create\nmention commands/x.md plan\n' 0
-check "call graph list: a renamed target passes" "$graph_base" $'invoke commands/fix.md pr-open\nmention commands/x.md plan\n' 0
+check "call graph list: a renamed file passes" "$graph_base" $'invoke commands/fix2.md pr-create\nmention commands/x.md plan\n' 0 "" $'| `/playbook:fix` | `/playbook:fix2` | 1.0.0 |\n'
+check "call graph list: a renamed target passes" "$graph_base" $'invoke commands/fix.md pr-open\nmention commands/x.md plan\n' 0 "" $'| `/playbook:pr-create` | `/playbook:pr-open` | 1.0.0 |\n'
+check "call graph list: a renamed file and target pass together" "$graph_base" $'invoke commands/fix2.md pr-open\nmention commands/x.md plan\n' 0 "" $'| `/playbook:fix` | `/playbook:fix2` | 1.0.0 |\n| `/playbook:pr-create` | `/playbook:pr-open` | 1.0.0 |\n'
+check "call graph list: a renamed skill folder passes" $'rule-load skills/old/SKILL.md x\n' $'rule-load skills/new/SKILL.md x\n' 0 "" $'| `/playbook:old` | `/playbook:new` | 1.0.0 |\n'
+check "call graph list: a change no renamed page explains fails" "$graph_base" $'invoke commands/fix2.md pr-create\nmention commands/x.md plan\n' 1 "a row was added"
 check "call graph list: a new file and a new target fail" "$graph_base" $'invoke commands/y.md review\nmention commands/x.md plan\n' 1 "a row was added"
 check "call graph list: a row of another kind fails" "$graph_base" $'mention commands/fix.md pr-create\nmention commands/x.md plan\n' 1 "a row was added"
 
