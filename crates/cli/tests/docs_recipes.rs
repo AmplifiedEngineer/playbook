@@ -572,22 +572,26 @@ fn the_parent_environment_does_not_reach_the_child() {
 fn the_sandbox_links_the_binaries_it_is_given() {
     // A script, not /bin/echo: on some systems echo is a multicall binary
     // that refuses to run under another name.
-    let target = std::env::temp_dir().join(format!("docs-recipes-tool-{}", std::process::id()));
-    fs::write(&target, "#!/bin/sh\necho linked\n").expect("script");
-    fs::set_permissions(&target, std::os::unix::fs::PermissionsExt::from_mode(0o755))
-        .expect("chmod");
+    // The stub goes in a folder of its own: on macOS the first run of an
+    // executable placed directly in the temp root waits about 50 s for the
+    // system to scan it, and the same file one folder down starts at once.
+    let folder = std::env::temp_dir().join(format!("docs-recipes-tool-{}", std::process::id()));
+    fs::create_dir_all(&folder).expect("stub folder");
+    let target = folder.join("tool");
+    playbook::testing::write_stub(&target, "#!/bin/sh\necho linked\n");
     let parent = parent_env();
     let page =
         format!("# How to test\n\n{MARKER_RUN}\n\n```bash\ntool linked\n# expect: linked\n```\n");
     let setup = Setup {
         links: &[("tool", &target)],
-        // The first run of a new file can be slow while the OS scans it.
-        timeout: Duration::from_secs(20),
+        // The stub is warmed above, so the run is quick. The limit stays
+        // generous because this test measures nothing about time.
+        timeout: playbook::testing::FIRST_LAUNCH_LIMIT,
         parent_env: &parent,
         template: None,
     };
     let result = run_page("links", "links.md", &page, &setup);
-    let _ = fs::remove_file(&target);
+    let _ = fs::remove_dir_all(&folder);
     assert_eq!(result, Ok(()));
 }
 

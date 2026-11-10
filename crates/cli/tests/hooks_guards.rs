@@ -394,10 +394,34 @@ mod precommit_check {
 
     /// Outside a repo the guard has no diff to read, and it must stay quiet
     /// rather than surfacing git's error.
+    ///
+    /// The scratch folder sits inside this checkout, so git would find the
+    /// checkout's own index and read whatever the developer has staged. The
+    /// ceiling stops git's search at the scratch root, which makes the folder
+    /// a place with no repo above it.
     #[test]
     fn outside_a_git_repo_it_is_quiet() {
         let dir = scratch("no-repo");
-        assert!(!warns_in(&dir, "git commit -m x"));
+        let ceiling = fs::canonicalize(dir.parent().expect("scratch root")).expect("canonical");
+        let payload =
+            serde_json::json!({ "tool_input": { "command": "git commit -m x" } }).to_string();
+
+        let out = isolated::playbook()
+            .env_remove("CI")
+            .env_remove("PLAYBOOK_HEADLESS")
+            .env("GIT_CEILING_DIRECTORIES", &ceiling)
+            .args(["hook", "precommit-check"])
+            .current_dir(&dir)
+            .env("HOOK_INPUT", payload)
+            .output()
+            .expect("playbook binary should spawn");
+
+        assert!(out.status.success(), "a guard must exit 0");
+        assert!(
+            String::from_utf8_lossy(&out.stdout).trim().is_empty(),
+            "no repo, no warning: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
     }
 }
 

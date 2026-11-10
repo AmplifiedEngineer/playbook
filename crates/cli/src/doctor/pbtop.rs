@@ -300,13 +300,13 @@ mod tests {
     }
 
     /// A PATH whose `pbtop` script prints `version` the way the binary does.
+    /// The helper writes, flushes and runs the script once before the caller's
+    /// timed probe, so a slow first launch cannot eat the probe's short limit.
     #[cfg(unix)]
     fn path_with_script(name: &str, version: &str) -> OsString {
-        use std::os::unix::fs::PermissionsExt;
         let dir = scratch_dir(name);
         let script = dir.join(PBTOP_PROGRAM);
-        std::fs::write(&script, format!("#!/bin/sh\necho \"pbtop {version}\"\n")).unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::testing::write_stub(&script, &format!("#!/bin/sh\necho \"pbtop {version}\"\n"));
         dir.into_os_string()
     }
 

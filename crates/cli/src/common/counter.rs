@@ -15,9 +15,22 @@ use std::time::Duration;
 /// failure along the way leaves the counter unresolved and best-effort, the
 /// same fail-soft contract common.py's `incr_counter` has.
 pub fn incr_counter(file: &str) -> i64 {
+    incr_counter_waiting(file, LOCK_TRIES)
+}
+
+/// How many times a caller tries the lock before it runs unguarded, and the
+/// pause between tries. Together they give a contended caller about half a
+/// second.
+const LOCK_TRIES: u32 = 50;
+const LOCK_PAUSE: Duration = Duration::from_millis(10);
+
+/// [`incr_counter`] with the number of lock tries chosen by the caller, so a
+/// test of the lock can wait out a busy machine instead of hitting the
+/// fail-open path.
+fn incr_counter_waiting(file: &str, tries: u32) -> i64 {
     let path = Path::new(file);
     let lock_path = Path::new(&format!("{file}.lock")).to_path_buf();
-    let (acquired, next) = with_dir_lock(&lock_path, 50, Duration::from_millis(10), || {
+    let (acquired, next) = with_dir_lock(&lock_path, tries, LOCK_PAUSE, || {
         let current = fs::read_to_string(path)
             .ok()
             .and_then(|contents| contents.trim().parse::<i64>().ok())
@@ -48,6 +61,9 @@ fn write_atomically(path: &Path, contents: &str) {
 mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
+
+    /// Tries a contended test caller makes: 60 seconds at [`LOCK_PAUSE`].
+    const PATIENT_LOCK_TRIES: u32 = 6_000;
 
     #[test]
     fn missing_file_starts_at_one() {
@@ -170,11 +186,12 @@ mod tests {
         let file_str = file.to_str().unwrap().to_string();
         let thread_count = 20i64;
 
-        // Act
+        // Act: the lock waits far longer than a loaded machine needs, so no
+        // thread falls through to the unguarded path the real wait allows.
         let handles: Vec<_> = (0..thread_count)
             .map(|_| {
                 let f = file_str.clone();
-                std::thread::spawn(move || incr_counter(&f))
+                std::thread::spawn(move || incr_counter_waiting(&f, PATIENT_LOCK_TRIES))
             })
             .collect();
         let mut results: Vec<i64> = handles.into_iter().map(|h| h.join().unwrap()).collect();
