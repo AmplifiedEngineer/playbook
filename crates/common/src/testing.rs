@@ -40,9 +40,12 @@ pub fn run_id() -> &'static str {
 /// Runs `path` once with no arguments and drops the result, so the system
 /// scans it now and the timed call that follows starts it at once. The run
 /// is bounded by [`FIRST_LAUNCH_LIMIT`] and its outcome does not matter: a
-/// stub that exits non-zero without arguments still gets scanned.
+/// stub that exits non-zero without arguments still gets scanned. The run
+/// has an empty environment and an empty `PATH`, so a stub that forwards to
+/// another program, such as `exec claude`, cannot start the real one.
 pub fn warm_executable(path: &Path) {
     let mut command = std::process::Command::new(path);
+    command.env_clear().env("PATH", "");
     let _ = crate::proc::run_with_timeout(&mut command, FIRST_LAUNCH_LIMIT);
 }
 
