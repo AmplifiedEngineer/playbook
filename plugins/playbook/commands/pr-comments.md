@@ -12,7 +12,7 @@ Iterate through unresolved review-thread comments and PR-level comments on a pul
 
 ## Step 0: Read the run mode
 
-Do this first. Read the run mode. Intent: run-mode. If the session's tool map (printed at session start) lists it, use that command with this command's arguments, and follow the `run-context` reference of the `playbook:delegating-subagents` skill for its warning, exit 2 and failures. Otherwise do this: if `$ARGUMENTS` has both `--auto` and `--ask`, stop with one line: "--auto and --ask conflict; pass one." If it has `--auto`, the mode is `auto`. In every other case the mode is `ask`, the default.
+Do this first. Read the run mode. Intent: run-mode. If the session's tool map (printed at session start) lists it, use that command with this command's arguments, and follow the `run-context` reference of the `playbook:delegating-subagents` skill for its warning, exit 2 and failures. If the tool map lacks it, follow `without-binary.md#run-mode` in `skills/delegating-subagents/references/without-binary.md` in this plugin.
 
 If the mode is `auto`, stop here. Print one line and nothing else: "/playbook:pr-comments needs a person to run it, because it replies on GitHub in your name and each reply needs your approval." Do not run any later step.
 
@@ -42,8 +42,6 @@ Forbidden internal monologue and forbidden in draft reply text:
 
 Invoke the `playbook:writing-style` skill before drafting any reply. It governs voice, banned words, banned openers, reply brevity (`LEN-REPLY`: one sentence ideal, two max, a paragraph is never acceptable), active voice only, and the GitHub-specific rules (no commit hashes in reply text, no markdown emphasis in inline comments, no em or en dashes). The GitHub-specific rules live in its references: read `github-review-comments`, `github-prohibited`, `review-examples`, `phrases` and `structures` (each is `references/<name>.md` in that skill's folder). Load them once at the start of Step 4 and apply it to every reply in the loop; do not re-derive these rules from memory.
 
-Shell-quoting gotcha for `gh api -f body=`: apostrophes in double quotes are literal (`"I don't"` is correct, NEVER escape to `"I don\'t"` which posts as `don'''t`). If the body contains complex quoting, write it to a temp file and use `-F body=@/tmp/reply.txt`.
-
 ## Argument parsing
 
 Parse `$ARGUMENTS` token-by-token:
@@ -67,31 +65,7 @@ Parse `$ARGUMENTS` token-by-token:
 
 ## Step 1: Resolve PR and capture context
 
-Resolve the PR and fetch its review threads and PR-level comments. Intent: pr-comments. If the session's tool map lists it, use that command with `"$ARGUMENTS"`. It parses the flags and the PR number, resolves the PR from the current branch when none is given, and prints `PR: owner/name#N`, `Head SHA:`, `Me:` and `Flags: bots=... dry-run=... auto-commit=...`. It exits 1 with `error: no PR for current branch; pass a PR number` when it cannot resolve a PR. It writes both sources to `/tmp/pr-comments-<PR>-threads.json` and `/tmp/pr-comments-<PR>-issues.json`. Otherwise do this:
-
-1. `PR_NUMBER`: the number from the arguments, else `gh pr view --json number -q .number`. If neither gives one, stop with `error: no PR for current branch; pass a PR number`.
-2. `OWNER/NAME`: `gh repo view --json nameWithOwner -q .nameWithOwner`. `HEAD_SHA`: `gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid`. `ME`: `gh api /user -q .login`.
-3. Write the review threads to `/tmp/pr-comments-<PR>-threads.json`:
-
-   ```bash
-   gh api graphql -F owner="$OWNER" -F name="$NAME" -F pr="$PR_NUMBER" -f query='
-     query($owner: String!, $name: String!, $pr: Int!) {
-       repository(owner: $owner, name: $name) {
-         pullRequest(number: $pr) {
-           reviewThreads(first: 100) {
-             nodes {
-               id isResolved isOutdated path line originalLine
-               comments(first: 50) {
-                 nodes { id databaseId author { login } body url createdAt }
-               }
-             }
-           }
-         }
-       }
-     }' > "/tmp/pr-comments-$PR_NUMBER-threads.json"
-   ```
-
-4. Write the PR-level comments to `/tmp/pr-comments-<PR>-issues.json` with `gh api "/repos/$OWNER/$NAME/issues/$PR_NUMBER/comments" --paginate`.
+Resolve the PR and fetch its review threads and PR-level comments. Intent: pr-comments. If the session's tool map lists it, use that command with `"$ARGUMENTS"`. It parses the flags and the PR number, resolves the PR from the current branch when none is given, and prints `PR: owner/name#N`, `Head SHA:`, `Me:` and `Flags: bots=... dry-run=... auto-commit=...`. It exits 1 with `error: no PR for current branch; pass a PR number` when it cannot resolve a PR. It writes both sources to `/tmp/pr-comments-<PR>-threads.json` and `/tmp/pr-comments-<PR>-issues.json`. If the tool map lacks it, follow `without-binary.md#pr-comments` in `skills/delegating-subagents/references/without-binary.md` in this plugin.
 
 Capture `PR_NUMBER`, `OWNER`, `NAME`, `HEAD_SHA`, `ME`, and the three flag values. You need them for every later step.
 
@@ -163,13 +137,7 @@ For each item picked in Step 3b (every item when that step was skipped), do this
    - **For Both, apply the fix half now and queue the reply text for Step 6.** The reply half of a **Both** action is NEVER posted here: only its content is decided now. Step 6 posts it after the commit, once the push has succeeded.
    - For **Fix**, or the fix half of **Both**: apply the approved diff with `Edit`. Read the changed lines back and print the applied hunk to the user immediately, before advancing to the next indexed item.
    - For **Reply only** (no fix): write the approved reply text to a file with `Write` (for example `/tmp/<repo>/pr-comments-<PR_NUMBER>-item-<N>.md`) and post it:
-     Intent: pr-reply. If the session's tool map lists it, use that command with the PR number, the file, and either the thread's first-comment `databaseId` or the PR-level option. It posts the file verbatim, refuses an empty body, an em or en dash and AI attribution, and prints `Posted: <url>` and the body. Otherwise do this: check the file yourself for those three problems, then post it from the file, which needs no shell quoting:
-     ```bash
-     # Inline review-thread reply (the databaseId of the thread's first comment)
-     gh api -X POST "/repos/$OWNER/$NAME/pulls/$PR_NUMBER/comments/$DATABASE_ID/replies" -F body=@<that file> -q .html_url
-     # PR-level comment reply
-     gh api -X POST "/repos/$OWNER/$NAME/issues/$PR_NUMBER/comments" -F body=@<that file> -q .html_url
-     ```
+     Intent: pr-reply. If the session's tool map lists it, use that command with the PR number, the file, and either the thread's first-comment `databaseId` or the PR-level option. It posts the file verbatim, refuses an empty body, an em or en dash and AI attribution, and prints `Posted: <url>` and the body. If the tool map lacks it, follow `without-binary.md#pr-reply` in `skills/delegating-subagents/references/without-binary.md` in this plugin.
      Print the posted body to the user before advancing to the next indexed item.
    - If an edit does not apply or the post fails, surface the error to the user plainly and mark the item `failed` in the tracked state below, never `fixed`/`replied`.
 

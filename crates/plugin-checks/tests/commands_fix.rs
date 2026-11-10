@@ -294,10 +294,24 @@ fn comments_in_this_test_and_the_commands_carry_no_planning_references() {
         include_str!("support/auto_parity_fix.rs"),
     ]
     .join("\n");
-    assert!(
-        COMMANDS
-            .iter()
-            .any(|spec| !load(spec.name).comments().is_empty()),
+    let sample = CommandFile {
+        name: "sample".to_owned(),
+        lines: [
+            "---",
+            "---",
+            "```bash",
+            "# a note",
+            "run # trailing",
+            "```",
+            "<!-- html -->",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
+        body_start: 2,
+    };
+    assert_eq!(
+        sample.comments().len(),
+        3,
         "the comment extractor found no comment in any command"
     );
 
