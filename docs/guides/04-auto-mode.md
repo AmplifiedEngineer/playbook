@@ -25,7 +25,7 @@ Only you should run these. If auto comes from `PLAYBOOK_MODE`, unset the variabl
 
 ## What auto will not do
 
-- `/playbook:setup`, `/playbook:adr` and `/playbook:address-pr-comments` refuse to run in auto and say why.
+- `/playbook:setup`, `/playbook:adr` and `/playbook:pr-comments` refuse to run in auto and say why.
 - Reviews still ask what to post. `/playbook:review`, `/playbook:quick-review` and `/playbook:deep-review` skip the question only with `--self` or `--no-post`, so pipelines must pass one of them. For a PR in a stack, `/playbook:review` picks this PR only without asking the scope and logs `Assumed: this PR only (auto mode).`; pass `--whole-stack` to review the stack.
 - `/playbook:learn-project` stages its candidates and writes nothing to live memory.
 - Auto never force-pushes.

@@ -128,6 +128,7 @@ fn level_of(home: &Path, key: &str) -> String {
 const RENAMED_COMPONENTS: &[(Kind, &str, &str)] = &[
     (Kind::Command, "commit-and-push", "commit"),
     (Kind::Command, "create-pull-request", "pr-create"),
+    (Kind::Command, "address-pr-comments", "pr-comments"),
 ];
 
 /// What a ceiling key holds.

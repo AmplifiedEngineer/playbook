@@ -31,4 +31,9 @@ pub(crate) const RENAMES: &[Rename] = &[
         old: "create-pull-request",
         new: "pr-create",
     },
+    Rename {
+        kind: Kind::Command,
+        old: "address-pr-comments",
+        new: "pr-comments",
+    },
 ];

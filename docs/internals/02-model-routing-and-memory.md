@@ -10,7 +10,7 @@ The policy lives in each file's frontmatter (`agents/*.md` and `commands/*.md`) 
 |---|---|
 | **Sonnet** (session default) | Most coding: `/playbook:implement`, `/playbook:fix`, the `implementer` and the `critic`. |
 | **Haiku** | Mechanical, formatting and search work: `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, `writer`, and the `doctor`, `session-handoff`, `session-start` and `setup` commands. |
-| **Opus** | Design (`/playbook:plan`, `/playbook:adr`), every `reviewer` (`/playbook:quick-review`, `/playbook:deep-review` and `/playbook:implement` Step 9, all at the reviewer's own medium effort unless a variant is picked), the `auditor` behind `/playbook:repo-audit`, `/playbook:address-pr-comments` and `/playbook:learn-project`. |
+| **Opus** | Design (`/playbook:plan`, `/playbook:adr`), every `reviewer` (`/playbook:quick-review`, `/playbook:deep-review` and `/playbook:implement` Step 9, all at the reviewer's own medium effort unless a variant is picked), the `auditor` behind `/playbook:repo-audit`, `/playbook:pr-comments` and `/playbook:learn-project`. |
 
 Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mode.
 
@@ -71,7 +71,7 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 | `agents/analyst` | haiku (was sonnet) | `medium` (was high) | See below. |
 | `agents/implementer` | sonnet | `medium` (was high) | See the implementer bench below. |
 | `agents/auditor` | opus | `high` (kept) | A whole repository audit whose findings people act on. No headless bench exists for it. The maintainer kept it at `high` on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). |
-| `commands/deep-review`, `implement`, `plan`, `adr`, `learn-project`, `fix`, `address-pr-comments` | opus, except implement and fix (sonnet) | `medium` (was high) | Lowered by the maintainer on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). No bench exists for the design commands. The evidence is the reviewer, implementer and critic results. Watch rework and missed findings. |
+| `commands/deep-review`, `implement`, `plan`, `adr`, `learn-project`, `fix`, `pr-comments` | opus, except implement and fix (sonnet) | `medium` (was high) | Lowered by the maintainer on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). No bench exists for the design commands. The evidence is the reviewer, implementer and critic results. Watch rework and missed findings. |
 | `commands/repo-audit` | fork into auditor (opus) | none | It forks into `playbook:auditor` (`high`), which sets the effort. |
 | `commands/doctor`, `session-start`, `setup` | haiku (was sonnet) | `low` (kept) | Run compiled helpers and print the result, or load a saved handoff. Mechanical, so the cheapest tier fits (about 95% less per call, 20x cheaper per token). Checked live (see PR). |
 | the `effort` parameter of the `Agent` call | the agent file's own effort | any level up to every ceiling | Passed by the orchestrator, from `playbook effort resolve` or `playbook effort choose`. The orchestrator picks by ceiling, then diff size and risk; see `playbook:delegating-subagents`. |

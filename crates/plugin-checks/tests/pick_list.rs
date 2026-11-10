@@ -5,7 +5,7 @@
 //! from `AskUserQuestion` (`multiSelect`), in groups of at most four. Where the
 //! tool is not available, a numbered typed list with replies such as `1,3,5-7`
 //! or `all except 4` is the fallback. The rules live in one reference that the
-//! review commands and `address-pr-comments` all point at.
+//! review commands and `pr-comments` all point at.
 
 use std::fs;
 use std::path::PathBuf;
@@ -58,7 +58,7 @@ fn the_reference_uses_checkbox_questions_with_a_typed_fallback() {
 
 #[test]
 fn commands_that_pick_allow_ask_user_question() {
-    for name in ["quick-review", "deep-review", "address-pr-comments"] {
+    for name in ["quick-review", "deep-review", "pr-comments"] {
         let text = read(&format!("commands/{name}.md"));
         let tools = text
             .lines()
@@ -106,17 +106,17 @@ fn both_review_commands_use_the_pick_list_and_keep_the_post_question() {
 
 #[test]
 fn address_pr_comments_picks_the_items_from_a_list() {
-    let text = read("commands/address-pr-comments.md");
+    let text = read("commands/pr-comments.md");
     assert!(
         text.contains(REFERENCE_POINTER),
-        "address-pr-comments: does not read the pick list"
+        "pr-comments: does not read the pick list"
     );
     assert!(
         text.contains("Which comments to work on?"),
-        "address-pr-comments: lost the pick question"
+        "pr-comments: lost the pick question"
     );
     assert!(
         text.contains("--dry-run"),
-        "address-pr-comments: lost the flag that skips the question"
+        "pr-comments: lost the flag that skips the question"
     );
 }
