@@ -223,7 +223,12 @@ fn playbook_usage_names_every_command() {
     let commands = Path::new(env!("PLAYBOOK_PLUGIN_ROOT")).join("commands");
     for entry in fs::read_dir(commands).unwrap().filter_map(Result::ok) {
         let path = entry.path();
-        if path.extension().is_some_and(|e| e == "md") {
+        // The catalog does not advertise a deprecated stub; docs/renamed.md does.
+        let is_stub = fs::read_to_string(&path)
+            .unwrap_or_default()
+            .lines()
+            .any(|l| l == "disable-model-invocation: true");
+        if path.extension().is_some_and(|e| e == "md") && !is_stub {
             let name = path.file_stem().unwrap().to_string_lossy().to_string();
             assert!(
                 usage.contains(&format!("/playbook:{name}")),

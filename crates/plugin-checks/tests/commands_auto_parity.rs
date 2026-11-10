@@ -22,6 +22,13 @@ fn every_command_file_has_a_row_in_the_table_and_the_reverse() {
         .expect("commands/ is readable")
         .map(|e| e.expect("directory entry").path())
         .filter(|p| p.extension().is_some_and(|x| x == "md"))
+        // A deprecated stub has no steps to check; plugin_names.rs guards it.
+        .filter(|p| {
+            !fs::read_to_string(p)
+                .unwrap_or_default()
+                .lines()
+                .any(|l| l == "disable-model-invocation: true")
+        })
         .filter_map(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
         .collect();
     let mut in_table: Vec<String> = COMMANDS.iter().map(|c| c.name.to_owned()).collect();

@@ -4,9 +4,10 @@
 //! The registry and the pure checks behind the plugin name guard.
 //!
 //! A command file or a visible skill folder gets one name: one lowercase word,
-//! or a group and a word joined by one hyphen. A rename or a removal adds a row
-//! here, and the checks then fail on the old name anywhere outside the places
-//! that keep history. Every function takes its inputs as arguments (names,
+//! or a group and a word joined by one hyphen. A rename adds a row here and
+//! leaves the old name as a deprecated stub until 1.0.0; a removal adds a name
+//! to `REMOVED` and leaves nothing. The checks fail on the old name anywhere
+//! outside the places that keep history and the stub itself. Every function takes its inputs as arguments (names,
 //! file texts, file lists), so a test runs it on literals before any real
 //! rename exists.
 
@@ -34,6 +35,12 @@ pub(crate) const LEGACY_NAMES: &[&str] = &[
     "playbook-usage",
 ];
 
+/// The release that removes every deprecated stub.
+pub(crate) const STUB_REMOVED_IN: &str = "1.0.0";
+
+/// The most lines a deprecated stub may have.
+pub(crate) const STUB_MAX_LINES: usize = 12;
+
 /// The longest a skill name may be (`skills_lint.rs` holds the same limit).
 pub(crate) const SKILL_NAME_MAX: usize = 64;
 
@@ -51,13 +58,13 @@ pub(crate) enum Keeps {
 
 /// A path (a folder when it ends with `/`) where an old name may stay.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Allowed {
-    pub(crate) path: &'static str,
+pub(crate) struct Allowed<'a> {
+    pub(crate) path: &'a str,
     pub(crate) keeps: Keeps,
 }
 
 /// Where an old or removed name may stay.
-pub(crate) const OLD_NAME_ALLOWED: &[Allowed] = &[
+pub(crate) const OLD_NAME_ALLOWED: &[Allowed<'static>] = &[
     Allowed {
         path: "crates/plugin-checks/tests/support/renames.rs",
         keeps: Keeps::Any,
@@ -135,11 +142,16 @@ pub(crate) fn check_skill_name(name: &str) -> Option<String> {
     })
 }
 
-/// The names that break the rule and are not on the legacy list.
-pub(crate) fn check_visible_names(names: &[String], legacy: &[&str]) -> Vec<String> {
+/// The names that break the rule and are on neither the legacy list nor the
+/// list of deprecated stubs.
+pub(crate) fn check_visible_names(
+    names: &[String],
+    legacy: &[&str],
+    stubs: &[String],
+) -> Vec<String> {
     names
         .iter()
-        .filter(|n| !legacy.contains(&n.as_str()))
+        .filter(|n| !legacy.contains(&n.as_str()) && !stubs.contains(n))
         .filter_map(|n| check_name(n))
         .collect()
 }
@@ -157,7 +169,7 @@ pub(crate) fn check_legacy_exist(
         .collect()
 }
 
-/// The renames whose new name is missing or whose old name still exists.
+/// The renames whose new name is missing or whose old name has no stub left.
 pub(crate) fn check_renames(
     renames: &[Rename],
     commands: &[String],
@@ -176,9 +188,9 @@ pub(crate) fn check_renames(
                 r.old, r.new
             ));
         }
-        if existing.iter().any(|e| e == r.old) {
+        if !existing.iter().any(|e| e == r.old) {
             problems.push(format!(
-                "rename `{}` to `{}`: the old name still exists",
+                "rename `{}` to `{}`: the old name has no deprecated stub",
                 r.old, r.new
             ));
         }
@@ -289,8 +301,30 @@ pub(crate) fn renamed_page_old_names(page: &str) -> Vec<String> {
         .collect()
 }
 
-/// The problems with `docs/renamed.md`: a row for every rename and removal, and
-/// no row for a name that is live or was never renamed. `page` is `None` when
+/// The rows of the renamed page table: (old name, third cell).
+pub(crate) fn renamed_page_rows(page: &str) -> Vec<(String, String)> {
+    const PREFIX: &str = "/playbook:";
+    page.lines()
+        .filter_map(|line| line.trim().strip_prefix('|'))
+        .filter_map(|row| {
+            let cells: Vec<&str> = row.split('|').map(str::trim).collect();
+            let old = cells
+                .first()?
+                .strip_prefix('`')?
+                .strip_suffix('`')?
+                .strip_prefix(PREFIX)?;
+            Some((
+                old.to_owned(),
+                cells.get(2).copied().unwrap_or_default().to_owned(),
+            ))
+        })
+        .collect()
+}
+
+/// The problems with `docs/renamed.md`: a row for every rename and removal, a
+/// removal release of 1.0.0 on every renamed row, a deprecation note, and no
+/// row for a name that is live or was never renamed. `live` holds the real
+/// commands and skills, so a stub is not in it. `page` is `None` when
 /// the file does not exist, which only passes while there is nothing to list.
 pub(crate) fn check_renamed_page(
     renames: &[(&str, &str)],
@@ -312,6 +346,20 @@ pub(crate) fn check_renamed_page(
     };
     let listed = renamed_page_old_names(page);
     let mut problems = Vec::new();
+    if !renames.is_empty() && !page.to_lowercase().contains("deprecated") {
+        problems.push("docs/renamed.md has no deprecation note".to_owned());
+    }
+    for (old, _) in renames {
+        let cell = renamed_page_rows(page)
+            .into_iter()
+            .find(|(name, _)| name == old)
+            .map(|(_, c)| c);
+        if cell.is_some_and(|c| c != STUB_REMOVED_IN) {
+            problems.push(format!(
+                "docs/renamed.md: the row for /playbook:{old} must say it is removed in {STUB_REMOVED_IN}"
+            ));
+        }
+    }
     for old in &expected {
         if !listed.iter().any(|l| l == old) {
             problems.push(format!("docs/renamed.md has no row for /playbook:{old}"));
@@ -325,6 +373,115 @@ pub(crate) fn check_renamed_page(
         } else if !expected.contains(&name.as_str()) {
             problems.push(format!(
                 "/playbook:{name} is listed but was never renamed or removed"
+            ));
+        }
+    }
+    problems
+}
+
+/// The paths, from the repository root, of the stubs of `renames`. An old name
+/// may stay in its own stub.
+pub(crate) fn stub_paths(renames: &[Rename]) -> Vec<String> {
+    renames
+        .iter()
+        .map(|r| match r.kind {
+            Kind::Command => format!("plugins/playbook/commands/{}.md", r.old),
+            Kind::Skill => format!("plugins/playbook/skills/{}/", r.old),
+        })
+        .collect()
+}
+
+/// `base` plus an entry that keeps any form for each of `stubs`.
+pub(crate) fn with_stubs<'a>(base: &[Allowed<'a>], stubs: &'a [String]) -> Vec<Allowed<'a>> {
+    base.iter()
+        .copied()
+        .chain(stubs.iter().map(|path| Allowed {
+            path,
+            keeps: Keeps::Any,
+        }))
+        .collect()
+}
+
+/// The value of `key` in the frontmatter of `text`, `None` when absent.
+pub(crate) fn frontmatter_value(text: &str, key: &str) -> Option<String> {
+    let rest = text.strip_prefix("---\n")?;
+    let front = rest.split_once("\n---\n")?.0;
+    front
+        .lines()
+        .find_map(|l| l.strip_prefix(key)?.strip_prefix(": "))
+        .map(|v| v.trim().to_owned())
+}
+
+/// Whether `text` is a deprecated stub: it hides itself from the model.
+pub(crate) fn is_stub(text: &str) -> bool {
+    frontmatter_value(text, "disable-model-invocation").is_some_and(|v| v == "true")
+}
+
+/// The problems with the stub of a rename, read against the new file: the
+/// deprecation wording and removal release, a hidden-from-the-model flag, the
+/// new file's tools, argument hint, model and effort, the one-line notice, a
+/// pointer to the new file and a small size.
+pub(crate) fn check_stub(
+    kind: Kind,
+    old: &str,
+    new: &str,
+    stub_text: &str,
+    new_text: &str,
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    let want = format!("Deprecated, use /playbook:{new}. Removed in {STUB_REMOVED_IN}.");
+    if frontmatter_value(stub_text, "description").as_deref() != Some(want.as_str()) {
+        problems.push(format!("stub `{old}`: the description must be `{want}`"));
+    }
+    if !is_stub(stub_text) {
+        problems.push(format!(
+            "stub `{old}`: it must set `disable-model-invocation: true`"
+        ));
+    }
+    for key in ["allowed-tools", "argument-hint", "model", "effort"] {
+        if frontmatter_value(stub_text, key) != frontmatter_value(new_text, key) {
+            problems.push(format!("stub `{old}`: `{key}` must match `{new}`"));
+        }
+    }
+    let notice = format!(
+        "/playbook:{old} is deprecated and will be removed in {STUB_REMOVED_IN}. Use /playbook:{new}."
+    );
+    if !stub_text.contains(&notice) {
+        problems.push(format!("stub `{old}`: it must print `{notice}`"));
+    }
+    let target = match kind {
+        Kind::Command => format!("commands/{new}.md"),
+        Kind::Skill => format!("skills/{new}/SKILL.md"),
+    };
+    if !stub_text.contains(&target) {
+        problems.push(format!("stub `{old}`: it must point at `{target}`"));
+    }
+    if stub_text.lines().count() > STUB_MAX_LINES {
+        problems.push(format!("stub `{old}`: it is over {STUB_MAX_LINES} lines"));
+    }
+    problems
+}
+
+/// The problems with the set of stubs on disk: it equals the renames of `kind`.
+pub(crate) fn check_stub_list(kind: Kind, on_disk: &[String], renames: &[Rename]) -> Vec<String> {
+    let mut want: Vec<&str> = renames
+        .iter()
+        .filter(|r| r.kind == kind)
+        .map(|r| r.old)
+        .collect();
+    let mut have: Vec<&str> = on_disk.iter().map(String::as_str).collect();
+    want.sort_unstable();
+    have.sort_unstable();
+    let mut problems = Vec::new();
+    for name in &want {
+        if !have.contains(name) {
+            problems.push(format!("`{name}` is renamed but is not a deprecated stub"));
+        }
+    }
+    for name in &have {
+        if !want.contains(name) {
+            problems.push(format!(
+                "`{name}` is a deprecated stub but has no RENAMES row"
             ));
         }
     }

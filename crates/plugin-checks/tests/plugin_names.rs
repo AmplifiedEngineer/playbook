@@ -67,6 +67,41 @@ fn skill_folders() -> Vec<(String, bool)> {
     out
 }
 
+/// The command names whose file is a deprecated stub.
+fn stub_command_names() -> Vec<String> {
+    command_names()
+        .into_iter()
+        .filter(|n| {
+            fs::read_to_string(plugin_root().join(format!("commands/{n}.md")))
+                .is_ok_and(|t| is_stub(&t))
+        })
+        .collect()
+}
+
+/// The skill names whose `SKILL.md` is a deprecated stub.
+fn stub_skill_names() -> Vec<String> {
+    skill_names()
+        .into_iter()
+        .filter(|n| {
+            fs::read_to_string(plugin_root().join(format!("skills/{n}/SKILL.md")))
+                .is_ok_and(|t| is_stub(&t))
+        })
+        .collect()
+}
+
+/// Every command and skill name that is not a stub.
+fn live_names() -> Vec<String> {
+    let stubs: Vec<String> = stub_command_names()
+        .into_iter()
+        .chain(stub_skill_names())
+        .collect();
+    command_names()
+        .into_iter()
+        .chain(skill_names())
+        .filter(|n| !stubs.contains(n))
+        .collect()
+}
+
 fn skill_names() -> Vec<String> {
     skill_folders().into_iter().map(|(n, _)| n).collect()
 }
@@ -170,7 +205,11 @@ fn every_visible_command_and_public_skill_follows_the_rule_or_is_listed() {
         .map(|(n, _)| n.clone())
         .collect();
     let visible: Vec<String> = commands.iter().chain(&visible_skills).cloned().collect();
-    let problems = check_visible_names(&visible, LEGACY_NAMES);
+    let stubs: Vec<String> = stub_command_names()
+        .into_iter()
+        .chain(stub_skill_names())
+        .collect();
+    let problems = check_visible_names(&visible, LEGACY_NAMES, &stubs);
 
     // Assert
     assert!(
@@ -209,7 +248,7 @@ fn every_legacy_name_still_exists() {
 }
 
 #[test]
-fn a_rename_needs_its_new_name_and_no_old_file() {
+fn a_rename_needs_its_new_name_and_an_old_stub() {
     // Arrange
     let commands = names(&["commit", "plan", "old-name"]);
     let skills = names(&["help"]);
@@ -218,20 +257,20 @@ fn a_rename_needs_its_new_name_and_no_old_file() {
         old: "x",
         new: "absent",
     }];
-    let old_remains = [Rename {
+    let no_stub = [Rename {
+        kind: Kind::Command,
+        old: "gone-name",
+        new: "commit",
+    }];
+    let good = [Rename {
         kind: Kind::Command,
         old: "old-name",
         new: "commit",
     }];
-    let good = [Rename {
-        kind: Kind::Skill,
-        old: "playbook-usage",
-        new: "help",
-    }];
 
     // Act
     let a = check_renames(&missing_new, &commands, &skills);
-    let b = check_renames(&old_remains, &commands, &skills);
+    let b = check_renames(&no_stub, &commands, &skills);
     let c = check_renames(&good, &commands, &skills);
     let real = check_renames(RENAMES, &command_names(), &skill_names());
 
@@ -241,7 +280,8 @@ fn a_rename_needs_its_new_name_and_no_old_file() {
         "{a:?}"
     );
     assert!(
-        b.iter().any(|p| p.contains("old name still exists")),
+        b.iter()
+            .any(|p| p.contains("old name has no deprecated stub")),
         "{b:?}"
     );
     assert!(c.is_empty(), "{c:?}");
@@ -317,7 +357,13 @@ fn removed_names_appear_nowhere() {
     );
     let folder = check_removed_files(&removed, &names(&["plan"]), &names(&["deep-review"]));
     let files = scanned_files();
-    let real = find_old_names(&[], REMOVED, &as_scanned(&files), OLD_NAME_ALLOWED);
+    let stubs = stub_paths(RENAMES);
+    let real = find_old_names(
+        &[],
+        REMOVED,
+        &as_scanned(&files),
+        &with_stubs(OLD_NAME_ALLOWED, &stubs),
+    );
     let real_files = check_removed_files(REMOVED, &command_names(), &skill_names());
 
     // Assert
@@ -402,15 +448,39 @@ fn old_names_appear_only_in_allowed_places() {
     );
     let wrong_form = find_old_names(&renamed, &[], &[closing_path], OLD_NAME_ALLOWED);
     let files = scanned_files();
+    let stubs = stub_paths(RENAMES);
     let real = find_old_names(
         &RENAMES.iter().map(|r| r.old).collect::<Vec<_>>(),
         REMOVED,
         &as_scanned(&files),
-        OLD_NAME_ALLOWED,
+        &with_stubs(OLD_NAME_ALLOWED, &stubs),
+    );
+    let own_stub = vec!["plugins/playbook/commands/commit-and-push.md".to_owned()];
+    let stub_file = ScannedFile {
+        path: "plugins/playbook/commands/commit-and-push.md",
+        text: "/playbook:commit-and-push is deprecated. Use /playbook:commit.",
+    };
+    let other_file = ScannedFile {
+        path: "plugins/playbook/commands/fix.md",
+        text: "/playbook:commit-and-push is deprecated. Use /playbook:commit.",
+    };
+    let in_stub = find_old_names(
+        &renamed,
+        &[],
+        &[stub_file],
+        &with_stubs(OLD_NAME_ALLOWED, &own_stub),
+    );
+    let beside_stub = find_old_names(
+        &renamed,
+        &[],
+        &[other_file],
+        &with_stubs(OLD_NAME_ALLOWED, &own_stub),
     );
 
     // Assert
     assert_eq!(in_doc.len(), 1, "{in_doc:?}");
+    assert!(in_stub.is_empty(), "{in_stub:?}");
+    assert_eq!(beside_stub.len(), 1, "{beside_stub:?}");
     assert!(kept.is_empty(), "{kept:?}");
     assert_eq!(wrong_form.len(), 1, "{wrong_form:?}");
     for known in [
@@ -474,12 +544,14 @@ fn renamed_page_lists_every_old_slash_name() {
     let renames = [("commit-and-push", "commit")];
     let removed = ["finish-pull-request"];
     let live = names(&["review", "pr-create", "commit"]);
-    let good = "| Old name | New name |\n| --- | --- |\n\
-        | `/playbook:commit-and-push` | `/playbook:commit` |\n\
-        | `/playbook:finish-pull-request` | removed, use `/playbook:pr-create` |\n";
-    let missing_row = "| `/playbook:commit-and-push` | `/playbook:commit` |\n";
-    let reverted = format!("{good}| `/playbook:review` | `/playbook:plan` |\n");
-    let stray = format!("{good}| `/playbook:never-was` | `/playbook:plan` |\n");
+    let good = "Deprecated names are removed in 1.0.0.\n\n| Old name | New name | Removed in |\n| --- | --- | --- |\n\
+        | `/playbook:commit-and-push` | `/playbook:commit` | 1.0.0 |\n\
+        | `/playbook:finish-pull-request` | removed, use `/playbook:pr-create` | removed |\n";
+    let missing_row = "Deprecated.\n| `/playbook:commit-and-push` | `/playbook:commit` | 1.0.0 |\n";
+    let wrong_release = good.replace("| 1.0.0 |", "| 0.9.0 |");
+    let no_note = good.replace("Deprecated names are removed in 1.0.0.", "Names change.");
+    let reverted = format!("{good}| `/playbook:review` | `/playbook:plan` | 1.0.0 |\n");
+    let stray = format!("{good}| `/playbook:never-was` | `/playbook:plan` | 1.0.0 |\n");
     let case = |label, page, renames, removed, expected| PageCase {
         label,
         page,
@@ -510,6 +582,20 @@ fn renamed_page_lists_every_old_slash_name() {
             &removed[..],
             Some("/playbook:never-was is listed but was never renamed or removed"),
         ),
+        case(
+            "a wrong removal release",
+            Some(wrong_release.as_str()),
+            &renames[..],
+            &removed[..],
+            Some("the row for /playbook:commit-and-push must say it is removed in 1.0.0"),
+        ),
+        case(
+            "no deprecation note",
+            Some(no_note.as_str()),
+            &renames[..],
+            &removed[..],
+            Some("has no deprecation note"),
+        ),
         case("no names and no page", None, &[], &[], None),
         case(
             "names and no page",
@@ -536,9 +622,7 @@ fn renamed_page_lists_every_old_slash_name() {
     }
     let pairs: Vec<(&str, &str)> = RENAMES.iter().map(|r| (r.old, r.new)).collect();
     let page = fs::read_to_string(repo_root().join("docs/renamed.md")).ok();
-    let mut live_now = command_names();
-    live_now.extend(skill_names());
-    let real = check_renamed_page(&pairs, REMOVED, page.as_deref(), &live_now);
+    let real = check_renamed_page(&pairs, REMOVED, page.as_deref(), &live_names());
 
     // Assert
     assert!(problems.is_empty(), "{problems:#?}");
@@ -547,4 +631,120 @@ fn renamed_page_lists_every_old_slash_name() {
         "docs/renamed.md is required"
     );
     assert!(real.is_empty(), "{real:#?}");
+}
+
+#[test]
+fn a_stub_carries_the_deprecation_wording_the_removal_release_and_the_new_commands_settings() {
+    // Arrange
+    let new_text =
+        "---\ndescription: d\nallowed-tools: Bash(x:*), Read\nargument-hint: \"[-A]\"\n---\nbody\n";
+    let good = "---\ndescription: Deprecated, use /playbook:commit. Removed in 1.0.0.\ndisable-model-invocation: true\nallowed-tools: Bash(x:*), Read\nargument-hint: \"[-A]\"\n---\n\nPrint `/playbook:old is deprecated and will be removed in 1.0.0. Use /playbook:commit.`\n\nThen read `${CLAUDE_PLUGIN_ROOT}/commands/commit.md` and follow it with `$ARGUMENTS`.\n";
+    let cases: [(&str, String, &str); 7] = [
+        ("a good stub", good.to_owned(), ""),
+        (
+            "a wrong description",
+            good.replace("Removed in 1.0.0.", "Removed soon."),
+            "the description must be",
+        ),
+        (
+            "no hidden flag",
+            good.replace("disable-model-invocation: true\n", ""),
+            "disable-model-invocation: true",
+        ),
+        (
+            "other tools",
+            good.replace("Bash(x:*), Read", "Read"),
+            "`allowed-tools` must match",
+        ),
+        (
+            "no notice",
+            good.replace("is deprecated and will be removed in 1.0.0.", "moved."),
+            "it must print",
+        ),
+        (
+            "no pointer",
+            good.replace("commands/commit.md", "commands/other.md"),
+            "it must point at",
+        ),
+        (
+            "too long",
+            format!("{good}{}", "line\n".repeat(STUB_MAX_LINES)),
+            "lines",
+        ),
+    ];
+    let mut problems = Vec::new();
+
+    // Act
+    for (label, stub, fragment) in &cases {
+        let found = check_stub(Kind::Command, "old", "commit", stub, new_text);
+        let ok = if fragment.is_empty() {
+            found.is_empty()
+        } else {
+            found.iter().any(|f| f.contains(fragment))
+        };
+        if !ok {
+            problems.push(format!("{label}: want {fragment:?}, got {found:?}"));
+        }
+    }
+    let mut real = Vec::new();
+    for r in RENAMES {
+        let (stub_rel, new_rel) = match r.kind {
+            Kind::Command => (
+                format!("commands/{}.md", r.old),
+                format!("commands/{}.md", r.new),
+            ),
+            Kind::Skill => (
+                format!("skills/{}/SKILL.md", r.old),
+                format!("skills/{}/SKILL.md", r.new),
+            ),
+        };
+        let stub = fs::read_to_string(plugin_root().join(&stub_rel)).unwrap_or_default();
+        let new = fs::read_to_string(plugin_root().join(&new_rel)).unwrap_or_default();
+        real.extend(check_stub(r.kind, r.old, r.new, &stub, &new));
+    }
+
+    // Assert
+    assert!(problems.is_empty(), "{problems:#?}");
+    assert!(real.is_empty(), "{real:#?}");
+}
+
+#[test]
+fn the_stubs_on_disk_match_the_renamed_table() {
+    // Arrange
+    let renames = [
+        Rename {
+            kind: Kind::Command,
+            old: "a",
+            new: "b",
+        },
+        Rename {
+            kind: Kind::Skill,
+            old: "c",
+            new: "d",
+        },
+    ];
+
+    // Act
+    let matching = check_stub_list(Kind::Command, &names(&["a"]), &renames);
+    let missing = check_stub_list(Kind::Command, &[], &renames);
+    let extra = check_stub_list(Kind::Command, &names(&["a", "z"]), &renames);
+    let real_commands = check_stub_list(Kind::Command, &stub_command_names(), RENAMES);
+    let real_skills = check_stub_list(Kind::Skill, &stub_skill_names(), RENAMES);
+
+    // Assert
+    assert!(matching.is_empty(), "{matching:?}");
+    assert!(
+        missing
+            .iter()
+            .any(|p| p.contains("`a` is renamed but is not a deprecated stub")),
+        "{missing:?}"
+    );
+    assert!(
+        extra
+            .iter()
+            .any(|p| p.contains("`z` is a deprecated stub but has no RENAMES row")),
+        "{extra:?}"
+    );
+    assert!(real_commands.is_empty(), "{real_commands:#?}");
+    assert!(real_skills.is_empty(), "{real_skills:#?}");
 }
