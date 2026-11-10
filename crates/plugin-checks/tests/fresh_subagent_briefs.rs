@@ -57,11 +57,15 @@ fn review_brief_builder_keeps_its_four_parts() {
 
 #[test]
 fn dispatching_commands_name_the_brief_builder() {
-    for cmd in ["deep-review", "quick-review", "implement"] {
-        let s = read(&format!("commands/{cmd}.md"));
+    for rel in [
+        "skills/grounding-review/references/deep-pass.md",
+        "skills/grounding-review/references/quick-pass.md",
+        "commands/implement.md",
+    ] {
+        let s = read(rel);
         assert!(
             s.contains("Review brief builder"),
-            "commands/{cmd}.md does not point at the review brief builder"
+            "{rel} does not point at the review brief builder"
         );
     }
     let imp = read("commands/implement.md");

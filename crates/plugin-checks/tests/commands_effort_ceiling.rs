@@ -76,7 +76,7 @@ fn every_command_that_spawns_agents_reads_the_effort_ceiling_in_step_zero() {
         checked += 1;
     }
     assert!(
-        checked >= 6,
+        checked >= 5,
         "found only {checked} commands that spawn agents"
     );
 }
@@ -84,14 +84,7 @@ fn every_command_that_spawns_agents_reads_the_effort_ceiling_in_step_zero() {
 #[test]
 fn the_resolved_names_are_real_components() {
     let root = PathBuf::from(env!("PLAYBOOK_PLUGIN_ROOT"));
-    for name in [
-        "adr",
-        "deep-review",
-        "implement",
-        "learn-project",
-        "plan",
-        "quick-review",
-    ] {
+    for name in ["adr", "implement", "learn-project", "plan", "review"] {
         assert!(
             root.join("commands").join(format!("{name}.md")).is_file(),
             "{name}"
@@ -100,17 +93,42 @@ fn the_resolved_names_are_real_components() {
 }
 
 #[test]
-fn quick_review_holds_its_reviewer_to_medium() {
-    let text = fs::read_to_string(commands_dir().join("quick-review.md")).unwrap();
+fn the_quick_pass_holds_its_reviewer_to_medium() {
+    let text = fs::read_to_string(
+        PathBuf::from(env!("PLAYBOOK_PLUGIN_ROOT"))
+            .join("skills/grounding-review/references/quick-pass.md"),
+    )
+    .unwrap();
     assert!(
         (text.contains("Intent: effort-resolve") && text.contains("--cap medium"))
             || text.contains("playbook effort resolve agents reviewer --cap medium --json"),
-        "quick-review must resolve its reviewer with a medium cap"
+        "the quick pass must resolve its reviewer with a medium cap"
     );
     assert!(
         text.contains("`playbook:reviewer`"),
-        "quick-review must name the base reviewer, which ships at medium"
+        "the quick pass must name the base reviewer, which ships at medium"
     );
+}
+
+#[test]
+fn review_runs_at_medium_and_holds_the_union_of_the_pass_tools() {
+    let text = fs::read_to_string(commands_dir().join("review.md")).unwrap();
+    let tools: Vec<&str> = allowed_tools(&text).split(',').map(str::trim).collect();
+    let want = [
+        "Bash",
+        "Read",
+        "Grep",
+        "Glob",
+        "Write",
+        "Agent",
+        "SendMessage",
+        "TaskStop",
+        "Skill",
+        "AskUserQuestion",
+    ];
+    assert_eq!(tools, want, "review.md allowed-tools");
+    assert!(text.contains("\nmodel: sonnet\n"), "review.md model");
+    assert!(text.contains("\neffort: medium\n"), "review.md effort");
 }
 
 const ROUTE_KINDS: [&str; 6] = [
@@ -155,7 +173,7 @@ fn every_command_that_spawns_agents_calls_route_and_names_the_gate() {
         checked += 1;
     }
     assert!(
-        checked >= 6,
+        checked >= 5,
         "found only {checked} commands that spawn agents"
     );
 }

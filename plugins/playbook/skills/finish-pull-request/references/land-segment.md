@@ -22,7 +22,7 @@ Runs once per Segment, immediately after Step 9 opened that Segment's PR, and MU
 gh pr ready "$BRANCH"
 ```
 
-**Do NOT invoke `playbook:finish-pull-request` (it runs `/playbook:deep-review --self`), and do NOT pass `--ready` to `/playbook:pr-create`.** That step exists to guarantee a human is never the first reviewer of unreviewed code; Steps 8 and 9 above already satisfied that invariant for this Segment, more strongly, with a 5-lens swarm whose reviewers ran in fresh contexts that never saw the implementation. Reviewers are dispatched subagents, so they are fresh by construction. Record in the ledger which review satisfied the gate: `review: implement-step9 (5 lenses, <n> findings fixed)`.
+**Do NOT invoke `playbook:finish-pull-request` (it runs `/playbook:review --self --deep`), and do NOT pass `--ready` to `/playbook:pr-create`.** That step exists to guarantee a human is never the first reviewer of unreviewed code; Steps 8 and 9 above already satisfied that invariant for this Segment, more strongly, with a 5-lens swarm whose reviewers ran in fresh contexts that never saw the implementation. Reviewers are dispatched subagents, so they are fresh by construction. Record in the ledger which review satisfied the gate: `review: implement-step9 (5 lenses, <n> findings fixed)`.
 
 **2. Gate on required checks.** Poll with a deadline; never `--watch` unbounded. Intent: pr-ci-wait. If the session's tool map (printed at session start) lists it, use that command with `"$PR" --settle 120 --timeout 300 --interval 30` and the Bash `timeout` set to 600000. Otherwise do this: wait 120 seconds, then read `gh pr checks "$PR" --required --json name,bucket` every 30 seconds for up to 300 seconds, each read its own Bash call. Ignore the exit code of `gh pr checks` (it is non-zero while checks are pending or failing) and read the JSON; a "no required checks reported" error counts as an empty list. `CI_VERDICT` is `NONE` for an empty list, `FAIL` when any bucket is `fail`, `CANCELLED` when none is `pending` and any is `cancel`, `PASS` when none is `pending`, and `TIMEOUT` when time runs out.
 
@@ -130,7 +130,7 @@ That last diff MUST be empty. A squash-merge collapses the branch's internal sha
 
 | Situation | Action |
 |---|---|
-| `land`: Segment's PR just opened | `gh pr ready <branch>` directly; do NOT invoke `playbook:finish-pull-request` (`deep-review --self`) and do NOT pass `--ready`: Steps 8-9 already reviewed this diff (Step 10) |
+| `land`: Segment's PR just opened | `gh pr ready <branch>` directly; do NOT invoke `playbook:finish-pull-request` (`/playbook:review --self --deep`) and do NOT pass `--ready`: Steps 8-9 already reviewed this diff (Step 10) |
 | `land`: required checks green (or none required) | Attempt `gh pr merge <n> --auto`; re-read `state`/`autoMergeRequest` before believing the exit code, in either direction (Step 10) |
 | `land`: `mergeable: CONFLICTING` / `mergeStateStatus: DIRTY` | Conflict, not permissions: rebase on the fetched default branch, push `&&`-chained, re-run CI. Never `--admin`; it cannot bypass a conflict (Step 10) |
 | `land`: `mergeStateStatus: BEHIND` | Rebase onto `origin/<default>` and push; don't merge, don't park (Step 10) |

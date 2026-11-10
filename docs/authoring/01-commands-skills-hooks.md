@@ -82,7 +82,7 @@ The `description` field does all the targeting. Write it as a "use when..." sent
 
 Typing `/playbook` lists every skill. Only entry points a user would type belong there, such as `playbook-usage`. A helper that commands and subagents load, such as `grounding-review` or `engineering-standards`, sets `user-invocable: false`. Claude Code documents this field for skills: the skill leaves the `/` menu and the model can still load it. `crates/plugin-checks/tests/slash_menu_visibility.rs` fails when a skill is neither on its public list nor hidden, so a new helper does not leak into the menu.
 
-Commands stay visible. The Claude Code docs state `user-invocable` for skills only, and `/playbook:review` runs `quick-review` and `deep-review` as commands, so a hidden command could break that path. The test also fails if a command sets the field. Hide commands only after a live session confirms the field works there.
+Commands stay visible. The Claude Code docs state `user-invocable` for skills only, and hiding a command could break a path that runs one. The test also fails if a command sets the field. Hide commands only after a live session confirms the field works there.
 
 ## Names
 

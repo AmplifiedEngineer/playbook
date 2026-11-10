@@ -53,7 +53,16 @@ pub(crate) const SLIMMED_TARGETS: &[&str] = &[
 ];
 
 /// Text that moved from a main file to a reference file: (old path, new path).
-pub(crate) const MOVED: &[(&str, &str)] = &[];
+pub(crate) const MOVED: &[(&str, &str)] = &[
+    (
+        "commands/deep-review.md",
+        "skills/grounding-review/references/deep-pass.md",
+    ),
+    (
+        "commands/quick-review.md",
+        "skills/grounding-review/references/quick-pass.md",
+    ),
+];
 
 /// Which budget a file gets.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

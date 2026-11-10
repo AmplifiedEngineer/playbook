@@ -10,7 +10,7 @@ The policy lives in each file's frontmatter (`agents/*.md` and `commands/*.md`) 
 |---|---|
 | **Sonnet** (session default) | Most coding: `/playbook:implement`, `/playbook:fix`, the `implementer` and the `critic`. |
 | **Haiku** | Mechanical, formatting and search work: `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, `writer`, and the `doctor`, `session-handoff`, `session-start` and `setup` commands. |
-| **Opus** | Design (`/playbook:plan`, `/playbook:adr`), every `reviewer` (`/playbook:quick-review`, `/playbook:deep-review` and `/playbook:implement` Step 9, all at the reviewer's own medium effort unless a variant is picked), the `auditor` behind `/playbook:repo-audit`, `/playbook:pr-comments` and `/playbook:learn-project`. |
+| **Opus** | Design (`/playbook:plan`, `/playbook:adr`), every `reviewer` (`/playbook:review --quick`, `/playbook:review --deep` and `/playbook:implement` Step 9, all at the reviewer's own medium effort unless a variant is picked), the `auditor` behind `/playbook:repo-audit`, `/playbook:pr-comments` and `/playbook:learn-project`. |
 
 Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mode.
 
@@ -62,7 +62,7 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 | `agents/collector` | haiku | `low` (was medium) | Gathers and compacts raw history. The analyst thinks later. |
 | `agents/cheap-checker` | haiku | `low` (was medium) | One narrow concern from a named reference file. A full lens covers the rest. |
 | `agents/review-triage` | haiku | `low` (was medium) | A three-way classifier. Any bad or missing answer falls back to `full-lens`, so a wrong call fails safe. |
-| `commands/quick-review` | sonnet (orchestrator); its reviewer runs on opus | `medium` for the command and its reviewer | See below. |
+| `commands/review` | sonnet (orchestrator); its reviewer runs on opus | `medium` for the command and its reviewer | See below. |
 | `agents/reviewer` | opus | `medium` (was high) | Lowered by [ADR-0021](../adr/0021-reviewer-at-opus-medium.md). See below. |
 | `agents/critic` | sonnet | `medium` (was high) | See below. |
 | `agents/fact-checker` | haiku | `medium` (was high) | See below. |
@@ -71,7 +71,7 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 | `agents/analyst` | haiku (was sonnet) | `medium` (was high) | See below. |
 | `agents/implementer` | sonnet | `medium` (was high) | See the implementer bench below. |
 | `agents/auditor` | opus | `high` (kept) | A whole repository audit whose findings people act on. No headless bench exists for it. The maintainer kept it at `high` on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). |
-| `commands/deep-review`, `implement`, `plan`, `adr`, `learn-project`, `fix`, `pr-comments` | opus, except implement and fix (sonnet) | `medium` (was high) | Lowered by the maintainer on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). No bench exists for the design commands. The evidence is the reviewer, implementer and critic results. Watch rework and missed findings. |
+| `implement`, `plan`, `adr`, `learn-project`, `fix`, `pr-comments` | opus, except implement and fix (sonnet) | `medium` (was high) | Lowered by the maintainer on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). No bench exists for the design commands. The evidence is the reviewer, implementer and critic results. Watch rework and missed findings. |
 | `commands/repo-audit` | fork into auditor (opus) | none | It forks into `playbook:auditor` (`high`), which sets the effort. |
 | `commands/doctor`, `session-start`, `setup` | haiku (was sonnet) | `low` (kept) | Run compiled helpers and print the result, or load a saved handoff. Mechanical, so the cheapest tier fits (about 95% less per call, 20x cheaper per token). Checked live (see PR). |
 | the `effort` parameter of the `Agent` call | the agent file's own effort | any level up to every ceiling | Passed by the orchestrator, from `playbook effort resolve` or `playbook effort choose`. The orchestrator picks by ceiling, then diff size and risk; see `playbook:delegating-subagents`. |
@@ -79,7 +79,7 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 
 Evidence for the rows marked "See below":
 
-- **`commands/quick-review`.** One pass over a diff the user chose not to deep review; `/playbook:deep-review` is the thorough path. The reviewer's base is now `medium` too. It is spawned through `playbook effort resolve agents reviewer --cap medium`, which returns the effort to pass on the `Agent` call: `medium`, or lower when the user's ceiling is lower. See [ADR-0021](../adr/0021-reviewer-at-opus-medium.md).
+- **`commands/review`.** It runs one pass over a diff the user chose not to deep review, or the deep swarm, on Sonnet either way; `/playbook:review --deep` is the thorough path. The reviewer's base is now `medium` too. It is spawned through `playbook effort resolve agents reviewer --cap medium`, which returns the effort to pass on the `Agent` call: `medium`, or lower when the user's ceiling is lower. See [ADR-0021](../adr/0021-reviewer-at-opus-medium.md).
 - **`agents/reviewer`.** Benched on 10 real diffs (7 with a seeded real finding, 3 clean), 20 runs per cell (200 calls):
   - Opus high 200/200. Opus medium 199/200 (the one miss was `rd-lower`, a seeded finding, 139/140 recall). Sonnet medium and high 200/200. Opus low 49/50 in a 5 run round.
   - Cost per call: Opus high $0.0155 to $0.0168, Opus medium $0.0125 to $0.0136 (19% less), Sonnet high $0.0066 to $0.0072, Sonnet medium $0.0050 to $0.0054.
@@ -273,7 +273,7 @@ An omitted `subagent_type` forks the parent conversation and bills its full hist
 
 ### Inline briefs for reviewers and implementers
 
-`/playbook:deep-review`, `/playbook:quick-review` and `/playbook:implement` build the brief once per run: diff, numbered excerpts, test command, and the limit to read beyond them only when needed. On the seeded-defect reviewer fixture (7 seeded bugs, 3 clean, 3 repeats, Opus medium) recall stayed 21 of 21 and clean cases 9 of 9. Turns fell from 3.4 to 2.2 per run and cost from $0.0447 to $0.0395.
+`/playbook:review` and `/playbook:implement` build the brief once per run: diff, numbered excerpts, test command, and the limit to read beyond them only when needed. On the seeded-defect reviewer fixture (7 seeded bugs, 3 clean, 3 repeats, Opus medium) recall stayed 21 of 21 and clean cases 9 of 9. Turns fell from 3.4 to 2.2 per run and cost from $0.0447 to $0.0395.
 
 ### Return cap
 

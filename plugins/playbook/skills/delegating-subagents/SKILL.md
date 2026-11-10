@@ -103,7 +103,7 @@ A spawn sets its effort with the `effort` parameter of the `Agent` call, on the 
 
 | Diff | `effort` | Why |
 |---|---|---|
-| At most 300 changed lines (the `dedup` trigger in `/playbook:deep-review`), and no security-sensitive path | `low`, except for the `reviewer` and `auditor`, which stay at the level from step 1 | Little to reason about, so extra effort is spend with no extra findings. |
+| At most 300 changed lines (the `dedup` trigger in `/playbook:review --deep`), and no security-sensitive path | `low`, except for the `reviewer` and `auditor`, which stay at the level from step 1 | Little to reason about, so extra effort is spend with no extra findings. |
 | Anything between, or when unsure | the level from step 1 | The default, tuned for ordinary diffs. |
 | Over 60 KB (`MAX_DIFF_BYTES` in `crates/cli/src/pr/triage.rs`, the size past which `review-triage` never calls a PR quick), or the lens is `security`, or the diff touches auth, secrets, crypto, or untrusted input | `high`, and never `xhigh`: `high` is the top for the reviewer and the gate reviewers (`critic`, `fact-checker`, `test-reviewer`) | A missed finding here is expensive and the diff is big enough to hide one. `xhigh` finds no more here and costs more. |
 

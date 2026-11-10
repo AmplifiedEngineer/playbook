@@ -785,7 +785,7 @@ mod tests {
     #[test]
     fn effort_component_keys_are_a_validated_family() {
         assert!(is_effort_component_key("effort.agents.fact-checker"));
-        assert!(is_effort_component_key("effort.commands.deep-review"));
+        assert!(is_effort_component_key("effort.commands.review"));
         assert!(is_effort_component_key("effort.skills.writing-style"));
         assert!(!is_effort_component_key("effort.agent.reviewer"));
         assert!(!is_effort_component_key("effort.agents."));

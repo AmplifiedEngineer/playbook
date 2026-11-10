@@ -12,9 +12,7 @@ Every `/playbook:*` command in one table. For the binary's own commands, run `pl
 | `/playbook:adr` | Writes a fact-checked Architecture Decision Record to `docs/adr/`. |
 | `/playbook:commit` | Writes the message from the staged diff, commits signed, pushes. |
 | `/playbook:pr-create` | Opens a PR with pre-flight checks and the team template. |
-| `/playbook:review` | The review entry point. Recommends a quick or a deep review from the diff, asks you to pick, then runs it. `--quick` and `--deep` skip the question. |
-| `/playbook:quick-review` | One-pass PR review, posted as a pending GitHub review. `/playbook:review` runs it, and you can call it directly. |
-| `/playbook:deep-review` | Parallel specialist reviewers, consolidated and fact-checked. `/playbook:review` runs it, and you can call it directly. |
+| `/playbook:review` | The one review command. Picks a quick or a deep review (or takes `--quick` or `--deep`), says why in one line, then runs it. `--quick` is a one-pass review posted as a pending GitHub review. `--deep` is parallel specialist reviewers, consolidated and fact-checked. |
 | `/playbook:pr-comments` | Walks unresolved review threads, fixes or drafts replies. |
 | `/playbook:learn-project` | Reads the repo, PRs and tickets, then writes distilled facts to memory. |
 | `/playbook:repo-audit` | Read-only audit with severity-rated findings and a task plan. |

@@ -6,18 +6,17 @@
 #   size <path> <max lines> <max bytes>
 #   fallbacks <path> <max blocks>
 size commands/adr.md 299 24222
-size commands/deep-review.md 314 32224
 size commands/implement.md 483 79042
 size commands/plan.md 541 60095
-size commands/quick-review.md 253 23363
 size commands/setup.md 181 20215
+size skills/grounding-review/references/deep-pass.md 306 31365
 fallbacks commands/adr.md 5
-fallbacks commands/deep-review.md 6
 fallbacks commands/implement.md 11
 fallbacks commands/learn-project.md 4
 fallbacks commands/plan.md 9
-fallbacks commands/quick-review.md 5
 fallbacks commands/repo-audit.md 1
 fallbacks commands/session-handoff.md 4
 fallbacks commands/session-start.md 1
 fallbacks commands/setup.md 1
+fallbacks skills/grounding-review/references/deep-pass.md 6
+fallbacks skills/grounding-review/references/quick-pass.md 5

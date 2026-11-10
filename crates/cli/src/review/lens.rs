@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Lens helpers shared by `/playbook:deep-review` and `/playbook:implement`
+//! Lens helpers shared by `/playbook:review --deep` and `/playbook:implement`
 //! Step 9. They hold what those commands used to spell out in prose: how a
 //! review-triage tier map is completed so a missing or malformed answer
 //! always fails open to `full-lens`.

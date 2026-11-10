@@ -16,8 +16,8 @@ fn read(rel: &str) -> String {
 const BASH_RUNNERS: [&str; 7] = [
     "commands/implement.md",
     "commands/commit.md",
-    "commands/quick-review.md",
-    "commands/deep-review.md",
+    "skills/grounding-review/references/quick-pass.md",
+    "skills/grounding-review/references/deep-pass.md",
     "commands/learn-project.md",
     "commands/pr-comments.md",
     "commands/adr.md",
@@ -26,8 +26,14 @@ const BASH_RUNNERS: [&str; 7] = [
 #[test]
 fn findings_are_printed_before_the_publish_question() {
     for (file, question) in [
-        ("commands/quick-review.md", "**Q1**: \"Post which findings"),
-        ("commands/deep-review.md", "- **Q1:** \"Post which findings"),
+        (
+            "skills/grounding-review/references/quick-pass.md",
+            "**Q1**: \"Post which findings",
+        ),
+        (
+            "skills/grounding-review/references/deep-pass.md",
+            "- **Q1:** \"Post which findings",
+        ),
     ] {
         let text = read(file).to_ascii_lowercase();
         let question = question.to_ascii_lowercase();
@@ -43,7 +49,10 @@ fn findings_are_printed_before_the_publish_question() {
 
 #[test]
 fn the_print_rule_covers_codes_location_and_zero_findings() {
-    for file in ["commands/quick-review.md", "commands/deep-review.md"] {
+    for file in [
+        "skills/grounding-review/references/quick-pass.md",
+        "skills/grounding-review/references/deep-pass.md",
+    ] {
         let text = read(file);
         let at = text
             .to_ascii_lowercase()

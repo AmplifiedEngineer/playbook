@@ -130,11 +130,11 @@ fn teardown_removes_a_normally_unlocked_review_worktree() {
 fn teardown_removes_a_dirty_worktree_left_by_an_aborted_review() {
     // Arrange: a review-convention worktree with an untracked file left
     // behind, standing in for build artifacts a check suite run during
-    // review can leave uncommitted (deep-review always runs the full check
+    // review can leave uncommitted (the deep pass always runs the full check
     // suite in the worktree). `playbook worktree remove` alone would refuse
     // this (its uncommitted-work guard), so this pins the unconditional
-    // fallback `cmd_teardown` needs: commands/quick-review.md and
-    // commands/deep-review.md both depend on teardown removing the worktree
+    // fallback `cmd_teardown` needs: quick-pass.md and
+    // deep-pass.md both depend on teardown removing the worktree
     // even after an aborted or dirty review, never leaving it behind.
     let repo_root = repo();
     let common_dir = git_stdout(

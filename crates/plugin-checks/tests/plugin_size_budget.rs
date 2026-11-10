@@ -327,7 +327,7 @@ fn the_allowlist_parses_and_rejects_a_bad_row() {
             .iter()
             .filter(|r| matches!(r, Row::Size { .. }))
             .count(),
-        6
+        5
     );
 }
 

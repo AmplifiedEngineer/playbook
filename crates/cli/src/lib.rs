@@ -189,14 +189,14 @@ pub enum EffortCommand {
     /// under the ceiling.
     ///
     /// `--cap <level>` adds a ceiling from the calling command, for example
-    /// `quick-review` holding its reviewer to `medium`. The lowest of the cap
+    /// `review` holding its reviewer to `medium`. The lowest of the cap
     /// and the user's ceilings applies.
     ///
     /// Example: `playbook effort resolve agents reviewer --cap medium --json`
     Resolve {
         /// One of agents, commands or skills
         kind: String,
-        /// Component name, such as `reviewer` or `deep-review`
+        /// Component name, such as `reviewer` or `review`
         name: String,
         /// Extra ceiling from the caller: low, medium, high, xhigh or max
         #[arg(long)]
@@ -2542,7 +2542,7 @@ pub enum WorktreeCommand {
     },
     /// Create or remove the locked review worktrees
     ///
-    /// `/playbook:quick-review` and `/playbook:deep-review` run in them.
+    /// `/playbook:review --quick` and `/playbook:review --deep` run in them.
     Review {
         #[command(subcommand)]
         sub: ReviewWorktreeCommand,

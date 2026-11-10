@@ -16,7 +16,7 @@ The block above is the pre-flight report, one JSON object. It exits 0 whatever h
 
 ## Read the report
 
-- `PR_EXISTS`: say "A PR already exists: <existing_pr>. Use /playbook:pr-comments or /playbook:quick-review." and stop.
+- `PR_EXISTS`: say "A PR already exists: <existing_pr>. Use /playbook:pr-comments or /playbook:review." and stop.
 - `WRONG_DIRECTORY` or `REFUSED`: print `reason` and stop. Nothing was pushed.
 - `READY`: continue. Print `checks` (dirty, size, tests) as warnings and never pause on them. Print `fetch_warning` when it is set.
 - `[shell command execution disabled by policy]` or no JSON at all: tell the user to run `brew upgrade playbook` or `playbook upgrade`, then follow `${CLAUDE_PLUGIN_ROOT}/skills/finish-pull-request/references/legacy-pr.md`.

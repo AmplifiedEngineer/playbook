@@ -32,7 +32,7 @@ Flags combine (`-Au`). After a rebase or amend it pushes with `--force-with-leas
 
 ## Review
 
-`/playbook:review` is the one command to use. When the PR sits in a stack it first asks whether to review this PR only or the whole stack. It then reads the diff of that scope, recommends a quick or a deep review, and asks which you want. The recommendation comes first and is marked `(Recommended)`, with the reasons in one line. In ask mode you always decide.
+`/playbook:review` is the one command to use. When the PR sits in a stack it first asks whether to review this PR only or the whole stack. It then picks a quick or a deep review: a flag wins, then the `autoReview.type` setting, then a triage of the diff. It prints the depth and the reason in one line. In ask mode you can type the other depth before it runs.
 
 ```bash
 /playbook:review                # the PR for the current branch
@@ -43,19 +43,19 @@ playbook review suggest 4265    # the recommendation alone, with its reasons
 playbook review suggest 4265 --scope stack   # measure every open PR in the stack together
 ```
 
-The recommendation is a fixed rule list, so the same diff gets the same answer. The full list is in the [review routing reference](../../plugins/playbook/skills/grounding-review/references/review-routing.md). `review.suggest.*` config keys move the cuts, see [config keys](../reference/config-keys.md). When no rule is decisive the answer has low confidence and one cheap Haiku pass gives a second opinion. In auto mode the command takes the recommendation.
+The triage is `playbook pr review-triage`. It says quick only when three small model reads agree the change cannot break behavior, and deep otherwise, so a failed triage never lightens a review. The rule list that `playbook review suggest` uses is in the [review routing reference](../../plugins/playbook/skills/grounding-review/references/review-routing.md), and `review.suggest.*` config keys move its cuts, see [config keys](../reference/config-keys.md). In auto mode the command never waits.
 
 With `--scope stack` the files of every open PR in the stack are measured together, so a stack of small PRs can be recommended deep when the whole is large. Merged PRs never count and are never reviewed or commented on, and closed PRs are skipped. A stack with more open PRs than `review.stackMaxPrs` is answered deep without reading their files.
 
-`/playbook:quick-review` and `/playbook:deep-review` do the work and stay available as direct entry points. The two sections below describe them.
+`/playbook:review --quick` and `/playbook:review --deep` run the two passes directly. The two sections below describe them.
 
 ## Quick review
 
 A single-pass review under the `grounding-review` discipline, posted as a pending GitHub review for you to submit.
 
 ```bash
-/playbook:quick-review              # the PR for the current branch
-/playbook:quick-review 4265         # PR #4265
+/playbook:review --quick              # the PR for the current branch
+/playbook:review --quick 4265         # PR #4265
 ```
 
 It shows a report with a drafted comment under each finding. Then it asks which to post with a real checkbox picker. The first question offers must-fix and questions (the default), all findings, pick individually, or none. Pick individually shows checkboxes grouped by label tier, and an unchecked finding is not posted. Where the picker is not available (auto mode, headless `-p`, Codex), it prints a numbered list instead and you reply with numbers (`1,3,5-7`), `all except 4`, `all`, `none`, or a tier name such as `only blockers`. Auto mode takes the default: the blocking ones, issues and questions. After that it asks which verb to use (`approve`, `comment`, `request-changes` or `skip`). It never submits on its own. A PR you authored gets a local report only.
@@ -65,10 +65,10 @@ It shows a report with a drafted comment under each finding. Then it asks which 
 A swarm of specialist reviewers runs in parallel (logic, test, security, data, types and perf by default). The command consolidates, deduplicates and fact-checks the findings, then posts the way quick review does.
 
 ```bash
-/playbook:deep-review                     # the current branch's PR, reviewers picked from the diff
-/playbook:deep-review 123 --all           # every reviewer
-/playbook:deep-review --preset security   # security + data + types + logic
-/playbook:deep-review --self              # local report, never posts
+/playbook:review --deep                     # the current branch's PR, reviewers picked from the diff
+/playbook:review --deep 123 --all           # every reviewer
+/playbook:review --deep --preset security   # security + data + types + logic
+/playbook:review --self --deep              # local report, never posts
 ```
 
 Presets are `security`, `architecture`, `data` and `docs`. Conditional reviewers (architecture, migration, docs, complexity) switch on from what the diff contains. Full reviewers run on Opus. A lens that triage marks narrow gets a cheap Haiku checker. See [Model routing](../internals/02-model-routing-and-memory.md).
@@ -79,7 +79,7 @@ Use quick review for everyday PRs. Use deep review for large, risky or cross-lay
 
 A stack is a series of PRs where each one targets the branch of the PR below it. Playbook finds GitHub native stacks, and stacks made with Graphite, ghstack, git-town or by hand, by following the branch chain. Design: [ADR-0019](../adr/0019-pr-stack-review.md).
 
-A PR outside a stack is reviewed with no extra question. When the PR sits in a stack, even with a single open PR, `/playbook:review` prints the size and asks the scope first, then recommends a depth for that scope and passes the scope on, so the review it runs does not ask again. When you call `/playbook:quick-review` or `/playbook:deep-review` directly, they print the size and always ask:
+A PR outside a stack is reviewed with no extra question. When the PR sits in a stack, even with a single open PR, `/playbook:review` prints the size and asks the scope first, then decides a depth and passes the scope on, so the pass it runs does not ask again. When you pass `--quick` or `--deep`, it still prints the size and asks the scope:
 
 1. This PR only. This is the default.
 2. Whole stack, quick review.
@@ -88,8 +88,8 @@ A PR outside a stack is reviewed with no extra question. When the PR sits in a s
 Pass `--this-pr` or `--whole-stack` to skip the question, to any of the three commands. In auto mode the command takes option 1 and logs the assumption. With option 1 the PR gets its own size budget and a short digest of what the PRs above change, so the review skips code that is rewritten higher up. Either way it first says which PRs are below and above and which branch the PR's own diff is taken against.
 
 ```bash
-/playbook:quick-review 123 --whole-stack   # quick review of the stack PR #123 belongs to
-/playbook:deep-review 123 --this-pr        # only PR #123, even if it is stacked
+/playbook:review --quick 123 --whole-stack   # quick review of the stack PR #123 belongs to
+/playbook:review --deep 123 --this-pr        # only PR #123, even if it is stacked
 playbook pr stack 123 --json               # what the commands read: the PRs, their state and size
 playbook pr stack 123 --digest             # what the open PRs above #123 change, per file
 ```
@@ -130,7 +130,7 @@ It first asks which comments to work on with the same checkbox picker, and falls
 In `ask` mode, the default, nothing changes. Pass `--auto` or `--ask` to override the mode for one run. See [Auto mode](../guides/04-auto-mode.md).
 
 - `/playbook:commit` commits and pushes without asking. It never force-pushes. A push that would need a force is left on the local branch and reported, so you decide how to publish it.
-- `/playbook:review`, `/playbook:quick-review` and `/playbook:deep-review` take the recommended depth without asking. A review still asks what to post unless you pass `--self` or `--no-post`, because a posted review speaks as you.
+- `/playbook:review`, `/playbook:review --quick` and `/playbook:review --deep` take the decided depth without asking. A review still asks what to post unless you pass `--self` or `--no-post`, because a posted review speaks as you.
 - `/playbook:pr-comments` refuses to run. It replies on GitHub in your name, so each reply needs your approval.
 
 ## PR and commit settings
@@ -191,5 +191,5 @@ playbook deliver --dir ../.worktrees/repo/feature -A \
 ## See also
 
 - [Plan and Implement](01-plan-and-implement.md): producing the branch that this flow starts from.
-- [Internals: Model Routing and Memory](../internals/02-model-routing-and-memory.md): why deep-review's subagents run on a different model than the orchestrating session.
+- [Internals: Model Routing and Memory](../internals/02-model-routing-and-memory.md): why the deep review's subagents run on a different model than the orchestrating session.
 - [Docs index](../README.md)

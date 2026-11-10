@@ -15,8 +15,8 @@ fn read(rel: &str) -> String {
 
 #[test]
 fn both_commands_run_the_stack_check() {
-    for name in ["quick-review", "deep-review"] {
-        let text = read(&format!("commands/{name}.md"));
+    for name in ["quick-pass", "deep-pass"] {
+        let text = read(&format!("skills/grounding-review/references/{name}.md"));
         assert!(
             text.contains("## Step 1b: Stack check"),
             "{name}: no stack step"

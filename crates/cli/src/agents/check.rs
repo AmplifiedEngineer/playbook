@@ -530,8 +530,8 @@ mod tests {
         assert!(unquoted[0].contains("colon-space"));
 
         assert!(check_yaml_scalars("f.md", "description: \"a prompt: a lens\"").is_empty());
-        // "/playbook:deep-review" has a colon but no colon-SPACE.
-        assert!(check_yaml_scalars("f.md", "description: see /playbook:deep-review").is_empty());
+        // "/playbook:review" has a colon but no colon-SPACE.
+        assert!(check_yaml_scalars("f.md", "description: see /playbook:review").is_empty());
     }
 
     #[test]

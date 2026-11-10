@@ -131,6 +131,13 @@ const RENAMED_COMPONENTS: &[(Kind, &str, &str)] = &[
     (Kind::Command, "address-pr-comments", "pr-comments"),
 ];
 
+/// Plugin components that merged into one: (kind, old names, new name). While
+/// the new key is unset, the lower of the old keys that are set applies. A
+/// ceiling caps spend, so the lower one is the safe reading; a user who wants
+/// more sets the new key. This row stays until 1.0.0.
+const MERGED_COMPONENTS: &[(Kind, &[&str], &str)] =
+    &[(Kind::Command, &["quick-review", "deep-review"], "review")];
+
 /// What a ceiling key holds.
 #[derive(Debug, PartialEq, Eq)]
 enum Setting {
@@ -160,11 +167,21 @@ fn configured_level(home: &Path, kind: Kind, name: &str) -> String {
         Setting::Level(level) => Some(level),
         Setting::Invalid(_) | Setting::Unset => None,
     };
+    let merged = || {
+        let olds = MERGED_COMPONENTS
+            .iter()
+            .find(|(k, _, new)| *k == kind && *new == name)
+            .map_or(&[][..], |(_, olds, _)| *olds);
+        olds.iter()
+            .filter_map(|old| level(setting_of(home, &config_key(kind, old))))
+            .reduce(|a, b| lower(Some(&a), Some(&b)).unwrap_or("auto").to_string())
+    };
     match setting_of(home, &config_key(kind, name)) {
         Setting::Unset => RENAMED_COMPONENTS
             .iter()
             .find(|(k, _, new)| *k == kind && *new == name)
             .and_then(|(_, old, _)| level(setting_of(home, &config_key(kind, old))))
+            .or_else(merged)
             .unwrap_or_else(|| "auto".to_string()),
         set => level(set).unwrap_or_else(|| "auto".to_string()),
     }
@@ -188,7 +205,7 @@ pub fn resolve(
 }
 
 /// `resolve` with an extra ceiling `cap` from the calling command, such as
-/// `quick-review` holding its reviewer to `medium`. The lowest of the cap and
+/// `review` holding its reviewer to `medium`. The lowest of the cap and
 /// the user's ceilings applies, and a cap never raises anything.
 pub fn resolve_capped(
     kind: Kind,
@@ -405,7 +422,7 @@ mod tests {
             |effort: &str| format!("---\nname: x\ndescription: d\neffort: {effort}\n---\nBody\n");
         fs::write(root.join("agents/reviewer.md"), agent("high")).unwrap();
         fs::write(root.join("agents/critic.md"), agent("low")).unwrap();
-        fs::write(root.join("commands/deep-review.md"), agent("high")).unwrap();
+        fs::write(root.join("commands/review.md"), agent("high")).unwrap();
         fs::write(
             root.join("skills/writing/SKILL.md"),
             "---\nname: w\n---\nBody\n",
@@ -454,8 +471,8 @@ mod tests {
     #[test]
     fn a_component_ceiling_lowers_the_effective_effort() {
         let (home, root) = plugin("cmp-lower");
-        set(&home, "effort.commands.deep-review", "medium");
-        let r = resolve(Kind::Command, "deep-review", &home, None, Some(&root));
+        set(&home, "effort.commands.review", "medium");
+        let r = resolve(Kind::Command, "review", &home, None, Some(&root));
         assert_eq!(r.shipped.as_deref(), Some("high"));
         assert_eq!(r.ceiling.as_deref(), Some("medium"));
         assert_eq!(r.effective.as_deref(), Some("medium"));
@@ -472,19 +489,13 @@ mod tests {
     #[test]
     fn claude_code_is_the_top_ceiling_and_auto_adds_none() {
         let (home, root) = plugin("cmp-claude");
-        set(&home, "effort.commands.deep-review", "xhigh");
-        let r = resolve(
-            Kind::Command,
-            "deep-review",
-            &home,
-            Some("low"),
-            Some(&root),
-        );
+        set(&home, "effort.commands.review", "xhigh");
+        let r = resolve(Kind::Command, "review", &home, Some("low"), Some(&root));
         assert_eq!(r.ceiling.as_deref(), Some("low"));
         assert_eq!(r.effective.as_deref(), Some("low"));
-        let auto = resolve(Kind::Command, "deep-review", &home, None, Some(&root));
-        set(&home, "effort.commands.deep-review", "auto");
-        let auto2 = resolve(Kind::Command, "deep-review", &home, None, Some(&root));
+        let auto = resolve(Kind::Command, "review", &home, None, Some(&root));
+        set(&home, "effort.commands.review", "auto");
+        let auto2 = resolve(Kind::Command, "review", &home, None, Some(&root));
         assert_eq!(auto2.ceiling, None);
         assert_eq!(auto2.effective.as_deref(), Some("high"));
         assert_eq!(auto.ceiling.as_deref(), Some("xhigh"));
@@ -501,7 +512,7 @@ mod tests {
             None,
         )
         .unwrap();
-        let r = resolve(Kind::Command, "deep-review", &home, None, Some(&root));
+        let r = resolve(Kind::Command, "review", &home, None, Some(&root));
         assert_eq!(r.effective.as_deref(), Some("medium"));
     }
 
@@ -633,7 +644,7 @@ mod tests {
             vec![
                 "agents/critic",
                 "agents/reviewer",
-                "commands/deep-review",
+                "commands/review",
                 "skills/writing"
             ]
         );
@@ -713,6 +724,52 @@ mod tests {
             let both = resolve(*kind, new, &both_home, None, Some(&root)).configured;
             if old_only != "low" || both != "medium" {
                 problems.push(format!("{old} to {new}: old only {old_only}, both {both}"));
+            }
+        }
+
+        // Assert
+        assert!(problems.is_empty(), "{problems:#?}");
+    }
+
+    #[test]
+    fn a_merged_component_takes_the_lower_old_ceiling_until_the_new_key_is_set() {
+        // Arrange
+        let new = "effort.commands.review";
+        let cases: [(&[(&str, &str)], &str); 6] = [
+            (
+                &[
+                    ("effort.commands.deep-review", "xhigh"),
+                    ("effort.commands.quick-review", "low"),
+                ],
+                "low",
+            ),
+            (&[("effort.commands.deep-review", "medium")], "medium"),
+            (
+                &[
+                    ("effort.commands.quick-review", "high"),
+                    ("effort.commands.deep-review", "auto"),
+                ],
+                "high",
+            ),
+            (
+                &[("effort.commands.quick-review", "low"), (new, "high")],
+                "high",
+            ),
+            (
+                &[("effort.commands.quick-review", "low"), (new, "bogus")],
+                "auto",
+            ),
+            (&[], "auto"),
+        ];
+        let mut problems = Vec::new();
+
+        // Act
+        for (index, (pairs, want)) in cases.iter().enumerate() {
+            let (home, root) = plugin(&format!("cmp-merged-{index}"));
+            write_raw(&home, pairs);
+            let got = resolve(Kind::Command, "review", &home, None, Some(&root)).configured;
+            if got != *want {
+                problems.push(format!("case {index}: want {want}, got {got}"));
             }
         }
 

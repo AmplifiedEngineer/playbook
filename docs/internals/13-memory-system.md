@@ -80,7 +80,7 @@ Resolution checks the source's own scope first, then falls back to global. This 
 
 Facts get written two ways.
 
-**Ad-hoc during work.** When `/playbook:plan`, `/playbook:adr`, or `/playbook:implement` meets a durable convention, a decision, a rejected alternative, or an error fix, it writes a fact immediately. `/playbook:deep-review` writes findings from a review pass. These are narrow, targeted writes tied to the work at hand.
+**Ad-hoc during work.** When `/playbook:plan`, `/playbook:adr`, or `/playbook:implement` meets a durable convention, a decision, a rejected alternative, or an error fix, it writes a fact immediately. `/playbook:review --deep` writes findings from a review pass. These are narrow, targeted writes tied to the work at hand.
 
 **Bulk analysis via `/playbook:learn-project`.** This command reads the repo broadly (git history, code structure, PRs, and JIRA/Confluence when reachable), clusters what it finds into topics, and writes one fact file per topic. Before writing anything, it shows a candidate table and asks once. It won't write without your confirmation.
 
@@ -120,7 +120,7 @@ Commands differ in how they use memory:
 | Commands | Memory use |
 |---|---|
 | `/playbook:plan`, `/playbook:adr`, `/playbook:implement` | Read all three scopes before planning or executing. Project facts override org, which overrides global, for that repo. Conflicts between scopes surface rather than resolve silently. |
-| `/playbook:commit`, `/playbook:quick-review`, `/playbook:pr-comments` | Don't touch memory. |
+| `/playbook:commit`, `/playbook:review --quick`, `/playbook:pr-comments` | Don't touch memory. |
 
 ## memory.db
 

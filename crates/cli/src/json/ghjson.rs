@@ -47,7 +47,7 @@ pub fn array_length(json: &str) -> usize {
 
 /// Reads one field from a top-level JSON object as display text: a string
 /// value as-is, a number in its literal form (`42`, not `"42"`), matching
-/// the two real call sites in `commands/quick-review.md` (`.number`, a
+/// the two real call sites in `skills/grounding-review/references/quick-pass.md` (`.number`, a
 /// number, and `.headRefOid`, a string). Empty on any failure: malformed
 /// JSON, a non-object top-level value, a missing key, or a value of any
 /// other type, the same empty-on-mismatch convention [`bucket_counts`] and

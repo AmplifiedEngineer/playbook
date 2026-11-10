@@ -73,7 +73,7 @@ Review the result:
 /playbook:review
 ```
 
-Review sizes the diff, recommends a quick or a deep review and runs the one you pick.
+Review picks quick or deep, says why, and runs it.
 
 For a small bug, `/playbook:fix` goes from a failing test to one pull request. For a decision that is hard to undo, `/playbook:adr` records it.
 

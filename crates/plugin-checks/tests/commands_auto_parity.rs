@@ -113,7 +113,7 @@ fn step0_comes_before_the_first_ask_outside_it() {
 fn positive_control_every_asking_command_has_an_ask_outside_step0() {
     // Arrange
     let asking: Vec<&CommandSpec> = COMMANDS.iter().filter(|c| c.asks).collect();
-    for required in ["plan", "implement", "deep-review"] {
+    for required in ["plan", "implement", "review"] {
         assert!(
             asking.iter().any(|c| c.name == required),
             "the control table must include {required}"
@@ -342,21 +342,18 @@ fn review_step0_says_auto_does_not_skip_the_post_question() {
     let old = Regex::new(r"(?i)auto[^.]*implies[^.]*--self").expect("old pattern");
     let mut failures = Vec::new();
 
-    for spec in rows(Auto::ReportsOnly) {
-        let file = load(spec.name);
+    for name in PASSES {
+        let file = load_pass(name);
 
         // Act
         let text = file.text_of(&file.step0().expect("Step 0"));
 
         // Assert
         if !rule.is_match(&text) {
-            failures.push(format!("{}: Step 0 lacks the auto posting rule", spec.name));
+            failures.push(format!("{name}: Step 0 lacks the auto posting rule"));
         }
         if old.is_match(&text) {
-            failures.push(format!(
-                "{}: Step 0 still says auto implies --self",
-                spec.name
-            ));
+            failures.push(format!("{name}: Step 0 still says auto implies --self"));
         }
     }
 
@@ -368,8 +365,8 @@ fn review_posting_section_is_gated_on_not_self_and_holds_every_post_call() {
     // Arrange
     let mut failures = Vec::new();
 
-    for spec in rows(Auto::ReportsOnly) {
-        let file = load(spec.name);
+    for name in PASSES {
+        let file = load_pass(name);
         let posting = posting_section(&file);
 
         // Act
@@ -386,7 +383,7 @@ fn review_posting_section_is_gated_on_not_self_and_holds_every_post_call() {
         match gate {
             None => failures.push(format!(
                 "{}: `{}` has no `SELF_MODE` ... stop gate",
-                spec.name, posting.title
+                name, posting.title
             )),
             Some((gate_line, _)) => {
                 let reached_first = (posting.start..gate_line)
@@ -394,7 +391,7 @@ fn review_posting_section_is_gated_on_not_self_and_holds_every_post_call() {
                 if let Some(i) = reached_first {
                     failures.push(format!(
                         "{}: line {} posts or asks before the `SELF_MODE` gate (line {})",
-                        spec.name,
+                        name,
                         i + 1,
                         gate_line + 1
                     ));
@@ -404,7 +401,7 @@ fn review_posting_section_is_gated_on_not_self_and_holds_every_post_call() {
         if !outside.is_empty() {
             failures.push(format!(
                 "{}: review post calls outside `{}` on lines {:?}",
-                spec.name,
+                name,
                 posting.title,
                 outside.iter().map(|i| i + 1).collect::<Vec<_>>()
             ));
@@ -423,13 +420,12 @@ fn review_auto_path_text_never_posts_a_review() {
     // Arrange
     let mut failures = Vec::new();
 
-    for spec in rows(Auto::ReportsOnly) {
-        let file = load(spec.name);
+    for name in PASSES {
+        let file = load_pass(name);
         let posting = posting_section(&file);
         let Some(step0) = file.step0() else {
             failures.push(format!(
-                "{}: no `Step 0` section, so no auto path to inspect",
-                spec.name
+                "{name}: no `Step 0` section, so no auto path to inspect"
             ));
             continue;
         };
@@ -447,13 +443,13 @@ fn review_auto_path_text_never_posts_a_review() {
             if overlaps {
                 failures.push(format!(
                     "{}: `{}` overlaps the posting section",
-                    spec.name, section.title
+                    name, section.title
                 ));
             }
             if posts {
                 failures.push(format!(
                     "{}: `{}` contains a call that posts a review",
-                    spec.name, section.title
+                    name, section.title
                 ));
             }
         }
@@ -541,7 +537,7 @@ fn review_picks_an_engine_and_takes_its_own_recommendation_in_auto() {
         // Act
         let auto_text = file.text_of(&file.auto_path().expect("an `Auto path` section"));
         let step = |n: &str| file.step(n).map(|s| file.text_of(&s)).unwrap_or_default();
-        let (step1, step4, step5) = (step("1"), step("4"), step("5"));
+        let (step1, step3, step4) = (step("1"), step("3"), step("4"));
 
         // Assert
         for flag in ["--quick", "--deep", "--auto", "--self"] {
@@ -557,17 +553,17 @@ fn review_picks_an_engine_and_takes_its_own_recommendation_in_auto() {
                 failures.push(format!("{}: Step 1 lacks the stop `{stop}`", spec.name));
             }
         }
-        if !step4.contains("Ask in ask mode only") {
+        if !step3.contains("only in ask mode") {
             failures.push(format!(
-                "{}: Step 4 must limit the question to ask mode",
+                "{}: Step 3 must limit the confirm to ask mode",
                 spec.name
             ));
         }
-        if !auto_text.contains("take the recommendation without asking")
+        if !auto_text.contains("takes the decided depth without asking")
             || !auto_text.contains("--auto")
         {
             failures.push(format!(
-                "{}: the auto path must take the recommendation and pass --auto on",
+                "{}: the auto path must take the decided depth and pass --auto on",
                 spec.name
             ));
         }
@@ -578,17 +574,17 @@ fn review_picks_an_engine_and_takes_its_own_recommendation_in_auto() {
             ));
         }
         let engine = |label: &str| {
-            step5
+            step4
                 .lines()
                 .find(|l| l.trim_start().starts_with(label))
                 .unwrap_or_default()
                 .to_owned()
         };
-        if !engine("- Quick:").contains("/playbook:quick-review")
-            || !engine("- Deep:").contains("/playbook:deep-review")
+        if !engine("- Quick:").contains("references/quick-pass.md")
+            || !engine("- Deep:").contains("references/deep-pass.md")
         {
             failures.push(format!(
-                "{}: Step 5 must map quick to quick-review and deep to deep-review",
+                "{}: Step 4 must map quick to quick-pass.md and deep to deep-pass.md",
                 spec.name
             ));
         }

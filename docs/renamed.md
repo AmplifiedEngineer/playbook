@@ -7,3 +7,5 @@ Deprecated: a renamed command keeps its old name as a stub until 1.0.0. The stub
 | `/playbook:commit-and-push` | `/playbook:commit` | 1.0.0 |
 | `/playbook:create-pull-request` | `/playbook:pr-create` | 1.0.0 |
 | `/playbook:address-pr-comments` | `/playbook:pr-comments` | 1.0.0 |
+| `/playbook:quick-review` | Removed, use `/playbook:review --quick` | Removed, no stub |
+| `/playbook:deep-review` | Removed, use `/playbook:review --deep` | Removed, no stub |

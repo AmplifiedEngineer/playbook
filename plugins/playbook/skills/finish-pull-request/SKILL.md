@@ -23,8 +23,7 @@ Run `playbook pr status <n> --json` (add `--flag auto` or `--flag ask` if the se
 
 ## 2. Review
 
-- `deep`: run `/playbook:deep-review <n> --self`.
-- `quick`: run `/playbook:quick-review <n> --self`.
+- `quick` or `deep`: run `/playbook:review <n> --self --<review>`, with the `review` value as the flag.
 - `skip`: say "auto-review is disabled for this repo, review skipped" in the final report.
 
 In auto mode, skip the self-review below when `/playbook:implement` opened this PR, because its review covered the code. Any other caller gets no review here, and the final report says that no self-review ran. This skill never merges a PR whose code no review covered. Never issue `/clear`.

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook plan checkpoint` and `glossary add`: the helpers
-//! that replaced bash blocks in `plan.md`, `implement.md` and `deep-review.md`.
+//! that replaced bash blocks in `plan.md`, `implement.md` and `deep-pass.md`.
 
 use std::fs;
 use std::io::Write;

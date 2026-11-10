@@ -15,7 +15,7 @@ use crate::rename_table::{Kind, Rename};
 use std::collections::BTreeSet;
 
 /// Names removed with no replacement. Each removal PR adds its entry.
-pub(crate) const REMOVED: &[&str] = &[];
+pub(crate) const REMOVED: &[&str] = &["deep-review", "quick-review"];
 
 /// The binary command groups a visible name may start with.
 pub(crate) const GROUPS: &[&str] = &["pr", "handoff"];
@@ -24,8 +24,6 @@ pub(crate) const GROUPS: &[&str] = &["pr", "handoff"];
 /// The list empties as the renames land. It is an allowlist for the rule, not
 /// a docs list: the docs name an old slash name only in `docs/renamed.md`.
 pub(crate) const LEGACY_NAMES: &[&str] = &[
-    "deep-review",
-    "quick-review",
     "learn-project",
     "repo-audit",
     "session-handoff",
