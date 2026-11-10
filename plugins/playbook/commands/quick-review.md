@@ -1,6 +1,6 @@
 ---
 description: Use for a routine PR review or a quick check of your own branch. Single pass; asks which findings to post as a pending review; skips posting only with --self or --no-post.
-allowed-tools: Bash, Read, Grep, Glob, Write, Agent, SendMessage, TaskStop, Skill
+allowed-tools: Bash, Read, Grep, Glob, Write, Agent, SendMessage, TaskStop, Skill, AskUserQuestion
 argument-hint: "[--help] [PR number] [--self] [--no-post] [--this-pr] [--whole-stack] [--auto] [--ask]"
 model: sonnet
 effort: medium
@@ -174,7 +174,7 @@ Relay the swept report with each draft shown under its finding as a `Draft:` blo
 
 **Ask the user, one question at a time** (memory rule):
 
-**Q1**: "Post which findings as a pending review?" Read `skills/grounding-review/references/pick-list.md` in this plugin and follow it: the numbered list with `[x]` and `[ ]` marks, the default selection, the reply forms (`1,3,5-7`, `all except 4`, a tier name) and the one-line confirm. Number the findings in the order of the list above, so a number and its code (F1, F2) match. `--self` and `--no-post` still skip the question. If the choice is `none`, stop here.
+**Q1**: "Post which findings as a pending review?" Read `skills/grounding-review/references/pick-list.md` in this plugin and follow it: ask with `AskUserQuestion` checkboxes, or its typed list when the tool is not available. Number the findings in the order of the list above, so a number and its code (F1, F2) match. `--self` and `--no-post` still skip the question. If the choice is `none`, stop here.
 
 Build each inline comment from that finding's previewed `Draft:` block verbatim as the comment `body`, anchored to the finding's `file:line`. Post the previewed bodies as they are, never a rewording. Skip any finding marked `Report-only`.
 

@@ -1,6 +1,6 @@
 ---
 description: Use for substantial, risky, or cross-cutting PRs. Parallel specialist reviewers, fact-checked, asks which findings to post as a pending GitHub review. Heavier than quick-review.
-allowed-tools: Bash, Read, Grep, Glob, Write, Agent, SendMessage, TaskStop, Skill
+allowed-tools: Bash, Read, Grep, Glob, Write, Agent, SendMessage, TaskStop, Skill, AskUserQuestion
 argument-hint: "[PR number] [--all] [--preset <name>] [--self] [--no-post] [--this-pr] [--whole-stack] [--auto] [--ask] [--help]"
 model: opus
 effort: medium
@@ -265,7 +265,7 @@ Otherwise, **print every finding first (MUST).** Before asking anything, print a
 
 Then ask **one question at a time**:
 
-- **Q1:** "Post which findings as a pending review?" Read `skills/grounding-review/references/pick-list.md` in this plugin and follow it: the numbered list with `[x]` and `[ ]` marks, the default selection, the reply forms (`1,3,5-7`, `all except 4`, a tier name) and the one-line confirm. Number the findings in the order of the list above, so a number and its code (F1, F2) match. `--self` and `--no-post` still skip the question. If the choice is `none`, stop.
+- **Q1:** "Post which findings as a pending review?" Read `skills/grounding-review/references/pick-list.md` in this plugin and follow it: ask with `AskUserQuestion` checkboxes, or its typed list when the tool is not available. Number the findings in the order of the list above, so a number and its code (F1, F2) match. `--self` and `--no-post` still skip the question. If the choice is `none`, stop.
 - Build the payload at `$REVIEW_JSON` (`{"commit_id": "<HEAD_SHA>", "comments": [{"path","line","side","body"}, ...]}`, no review `body`). Build each inline comment's `body` from that finding's previewed `Draft:` block verbatim, anchored to the finding's `file:line`. Post the previewed bodies as they are, never a rewording. Skip any finding marked `Report-only`. Then create the pending review:
 
 ```bash
