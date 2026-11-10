@@ -69,8 +69,10 @@ git show "$base:$list" | rows >"$base_file"
 rows <"$list" >"$head_file"
 
 # A row whose key is new passes only as a move: a base row of the same kind
-# that is gone from the head and has numbers at least as high. A rename of a
-# file moves its rows this way. A row without numbers is never a move.
+# that is gone from the head. A row with numbers needs numbers at least as
+# high. A row without numbers (the call graph list: kind, file, target) needs
+# the same file or the same target, so a renamed file or a renamed recipe moves
+# its rows and a row with a new file and a new target is an added row.
 awk -F'\t' -v list="$list" '
   FNR == NR { base[$1] = $2; order[++n] = $1; next }
   { head[$1] = $2; hkeys[++m] = $1 }
@@ -89,7 +91,15 @@ awk -F'\t' -v list="$list" '
         continue
       }
       moved = 0
-      if (nums != "") {
+      if (nums == "") {
+        split(key, kw, " ")
+        for (i = 1; i <= n && !moved; i++) {
+          bk = order[i]
+          if ((bk in head) || (bk in used) || base[bk] != "") continue
+          split(bk, bw, " ")
+          if (bw[1] == kw[1] && (bw[2] == kw[2] || bw[3] == kw[3])) { used[bk] = 1; moved = 1 }
+        }
+      } else {
         split(key, kw, " ")
         for (i = 1; i <= n && !moved; i++) {
           bk = order[i]

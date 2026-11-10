@@ -75,7 +75,10 @@ graph_base=$'invoke commands/fix.md pr-create\nmention commands/x.md plan\n'
 check "call graph list: an unchanged file passes" "$graph_base" "$graph_base" 0
 check "call graph list: a removed row passes" "$graph_base" $'invoke commands/fix.md pr-create\n' 0
 check "call graph list: an added row fails" "$graph_base" "${graph_base}invoke commands/y.md review"$'\n' 1 "a row was added"
-check "call graph list: a changed row fails" "$graph_base" $'invoke commands/fix.md review\nmention commands/x.md plan\n' 1 "a row was added"
+check "call graph list: a renamed file passes" "$graph_base" $'invoke commands/fix2.md pr-create\nmention commands/x.md plan\n' 0
+check "call graph list: a renamed target passes" "$graph_base" $'invoke commands/fix.md pr-open\nmention commands/x.md plan\n' 0
+check "call graph list: a new file and a new target fail" "$graph_base" $'invoke commands/y.md review\nmention commands/x.md plan\n' 1 "a row was added"
+check "call graph list: a row of another kind fails" "$graph_base" $'mention commands/fix.md pr-create\nmention commands/x.md plan\n' 1 "a row was added"
 
 # A list that is new in the change has no base and passes.
 repo="$TMP/repo-new"
