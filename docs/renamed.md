@@ -9,3 +9,5 @@ Deprecated: a renamed command keeps its old name as a stub until 1.0.0. The stub
 | `/playbook:address-pr-comments` | `/playbook:pr-comments` | 1.0.0 |
 | `/playbook:quick-review` | Removed, use `/playbook:review --quick` | Removed, no stub |
 | `/playbook:deep-review` | Removed, use `/playbook:review --deep` | Removed, no stub |
+| `/playbook:session-handoff` | `/playbook:handoff-save` | 1.0.0 |
+| `/playbook:session-start` | `/playbook:handoff-show` | 1.0.0 |

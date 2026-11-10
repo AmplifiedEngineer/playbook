@@ -55,7 +55,7 @@ Other facts:
 ## Plugin and hooks under `-p`
 
 - `--plugin-dir <checkout>` loads playbook with no marketplace install. The binary finds plugin files through `playbook path plugin-root`, which prefers the installed plugin. Set `PLAYBOOK_PLUGIN_DIR=<checkout>/plugins/playbook` when a marketplace install is also present. `system/init` in `stream-json` listed it as `playbook@inline`, version 0.16.0, with 23 playbook slash commands.
-- `claude -p "/playbook:session-start"` ran the command: it called `playbook handoff show`, read the log, and checked git (4 turns, 14 cents).
+- `claude -p "/playbook:handoff-show"` ran the command: it called `playbook handoff show`, read the log, and checked git (4 turns, 14 cents).
 - Hooks that fired: SessionStart (`session-init`, source `startup`), UserPromptSubmit (`auto-model-detect`, `memory-anchors`), PreToolUse (`preread-*`, `bg-await-guard`, `memory-anchors`), PostToolUse (`search-counter`, `post-edit-track`), Stop (`memory-capture`, `session-clean-exit`). The `statusLine` never renders.
 - Folder trust: runs happened in a fresh scratch directory with no trust entry, and the project hooks and plugin still ran. `playbook trust` is not needed for CI.
 
@@ -96,7 +96,7 @@ These commands read the mode first and take the recommended answer instead of as
 - `/playbook:commit` and `/playbook:pr-create`: run end to end.
 - `/playbook:review` reviews this PR only when the PR sits in a stack, takes its own recommendation for that scope, and passes `--auto` on to `/playbook:review --quick` or `/playbook:review --deep`. Those reviews still ask what to post unless the caller passes `--self` or `--no-post`.
 - `/playbook:learn-project`: runs as `--stage`, so candidates go to the staging area and nothing reaches the live memory store.
-- `/playbook:repo-audit`, `/playbook:doctor`, and `/playbook:session-start`: behave the same in either mode.
+- `/playbook:repo-audit`, `/playbook:doctor`, and `/playbook:handoff-show`: behave the same in either mode.
 
 ### Refused in auto
 
@@ -126,7 +126,7 @@ In ask mode, these commands still ask a person:
 | `learn-project` | if the Jira or Confluence target is ambiguous |
 | `fix` | confirms before commit |
 
-These run without questions: `commit`, `pr-create`, `session-start`, `doctor`, `repo-audit`.
+These run without questions: `commit`, `pr-create`, `handoff-show`, `doctor`, `repo-audit`.
 
 ## GitHub Actions
 

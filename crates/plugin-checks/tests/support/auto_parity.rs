@@ -114,12 +114,12 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         auto: Auto::Unchanged,
     },
     CommandSpec {
-        name: "session-handoff",
+        name: "handoff-save",
         asks: false,
         auto: Auto::Unchanged,
     },
     CommandSpec {
-        name: "session-start",
+        name: "handoff-show",
         asks: false,
         auto: Auto::Unchanged,
     },

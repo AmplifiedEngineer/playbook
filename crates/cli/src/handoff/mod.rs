@@ -821,7 +821,7 @@ fn status_in(dir: &Path, index: &Path, log: &Path, slug: &str) -> String {
         loaded(dir, slug, index).len()
     ));
     out.push_str(
-        "If you ran /clear and no `clear` row appears above, Claude Code did not run the hook: run /playbook:session-start to load the handoff on demand.",
+        "If you ran /clear and no `clear` row appears above, Claude Code did not run the hook: run /playbook:handoff-show to load the handoff on demand.",
     );
     out
 }

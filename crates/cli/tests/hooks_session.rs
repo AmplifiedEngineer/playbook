@@ -845,7 +845,7 @@ fn project_slug(path: &str) -> String {
 
 static HANDOFF_SUFFIX_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// Write a handoff file the way `commands/session-handoff.md` does:
+/// Write a handoff file the way `commands/handoff-save.md` does:
 /// `<slug>-<unique-suffix>.md`, never a single fixed path, so two sessions
 /// in the same directory get distinct files. The counter (rather than a
 /// real timestamp+pid) keeps this deterministic and collision-free across
@@ -1034,7 +1034,7 @@ fn session_init_never_reads_a_handoff_written_under_a_different_worktree() {
 #[test]
 fn session_init_injects_both_handoffs_from_two_concurrent_sessions_in_the_same_directory() {
     // Arrange: two `cc` sessions working the same directory both ran
-    // /playbook:session-handoff close together. Each writes its own
+    // /playbook:handoff-save close together. Each writes its own
     // uniquely-suffixed file (the `playbook handoff save` design),
     // so neither overwrites the other the way a single fixed path would.
     let work = scratch_dir("handoff-concurrent");

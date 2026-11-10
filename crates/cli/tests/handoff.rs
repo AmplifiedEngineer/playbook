@@ -256,7 +256,7 @@ fn status_shows_the_clear_event_and_the_counts() {
     assert_eq!(code, 0);
     assert!(out.contains("clear"), "{out}");
     assert!(out.contains("1 unread, 1 already loaded"), "{out}");
-    assert!(out.contains("/playbook:session-start"), "{out}");
+    assert!(out.contains("/playbook:handoff-show"), "{out}");
 }
 
 #[cfg(unix)]
@@ -364,7 +364,7 @@ fn a_crossing_fires_once_with_a_short_message_naming_the_save_command() {
         "{msg}"
     );
     assert!(msg.contains("/clear"), "{msg}");
-    assert!(msg.contains("/playbook:session-start"), "{msg}");
+    assert!(msg.contains("/playbook:handoff-show"), "{msg}");
     assert!(msg.contains("needs the SessionStart hook"), "{msg}");
     assert!(!msg.contains("to resume from the handoff"), "{msg}");
     assert_eq!(second.trim(), "", "must not fire again at the same level");

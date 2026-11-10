@@ -875,7 +875,7 @@ Example: `playbook glossary add "WU: Work Unit"`
 
 Save and show notes that carry over to the next session
 
-A handoff is a markdown note for one directory. The next session started there loads it when the SessionStart hook is installed and runs, and `/playbook:session-start` loads it on demand.
+A handoff is a markdown note for one directory. The next session started there loads it when the SessionStart hook is installed and runs, and `/playbook:handoff-show` loads it on demand.
 
 Subcommands: `check`, `facts`, `save`, `show`, `status`, `template`
 

@@ -35,8 +35,10 @@ and ADR 0021, 0022 and 0023).
 | command | `plan` | `opus` | `medium` | Design work. A weak plan is expensive. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
 | command | `repo-audit` | - | - | Forks into the auditor agent, which sets the model and effort. |
 | command | `review` | `sonnet` | `medium` | Decides a quick or a deep review (a flag, the repo setting or the triage), then runs that pass. The deep pass moved from Opus to Sonnet, as the review rule says: reviews do not run on Opus. Its reviewer subagents keep their own tiers. |
-| command | `session-handoff` | `haiku` | `low` | Writes and saves a handoff using binary-supplied rules and facts. |
-| command | `session-start` | `haiku` | `low` | Loads a saved handoff. Mechanical. |
+| command | `session-handoff` | `haiku` | `low` | Deprecated stub of `handoff-save` until 1.0.0. It copies the settings of `handoff-save`. |
+| command | `handoff-save` | `haiku` | `low` | Writes and saves a handoff using binary-supplied rules and facts. |
+| command | `session-start` | `haiku` | `low` | Deprecated stub of `handoff-show` until 1.0.0. It copies the settings of `handoff-show`. |
+| command | `handoff-show` | `haiku` | `low` | Loads a saved handoff. Mechanical. |
 | command | `setup` | `haiku` | `low` | Runs compiled helpers and asks questions. Mechanical. |
 | skill | `atlassian` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
 | skill | `delegating-subagents` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
