@@ -1852,7 +1852,7 @@ mod tests {
         assert_eq!(
             effect,
             crate::tui::app::Effect::SaveLayout(
-                "Numbers=models,breakdown,budget,hourly;Sessions=live,sessions".into()
+                "Numbers=models,breakdown,budget;Sessions=live,sessions".into()
             )
         );
         assert_eq!(app.layout.tabs.len(), 2);
@@ -2364,7 +2364,7 @@ mod tests {
     }
 
     #[test]
-    fn the_numbers_tab_draws_hourly_under_the_pair_and_the_strip_on_top() {
+    fn the_numbers_tab_stacks_models_over_breakdown_under_the_strip() {
         // Arrange
         let area = Rect::new(0, 0, 100, 30);
         let ids = Layout::default().tabs[1].panels.clone();
@@ -2374,17 +2374,12 @@ mod tests {
 
         // Assert
         let rect = |id| placed.panels.iter().find(|(p, _)| *p == id).unwrap().1;
-        let (models, breakdown, hourly) = (
-            rect(PanelId::Models),
-            rect(PanelId::Breakdown),
-            rect(PanelId::Hourly),
-        );
+        let (models, breakdown) = (rect(PanelId::Models), rect(PanelId::Breakdown));
         assert_eq!(placed.budget.height, budget::HEIGHT);
-        assert_eq!(models.y, breakdown.y);
-        assert_eq!(models.width + breakdown.width, 100);
-        assert_eq!(hourly.y, models.bottom());
-        assert_eq!(hourly.width, 100);
-        assert_eq!(placed.panels.len(), 3);
+        assert_eq!(models.y, placed.budget.bottom());
+        assert_eq!(breakdown.y, models.bottom());
+        assert_eq!((models.width, breakdown.width), (100, 100));
+        assert_eq!(placed.panels.len(), 2);
     }
 
     #[test]

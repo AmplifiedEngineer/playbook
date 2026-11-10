@@ -6,7 +6,7 @@ Plan and ship with Claude Code, and see what it costs.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/pbtop/charts-dark.svg">
-  <img src="docs/images/pbtop/charts-light.svg" alt="pbtop Charts tab: spend per day, spend per day by model, tokens per day and a burn-up panel, sample data">
+  <img src="docs/images/pbtop/charts-light.svg" alt="pbtop Charts tab: spend per day, spend per day by model, tokens per day, spend per hour and a burn-up panel, sample data">
 </picture>
 
 For developers who use Claude Code every day and want a repeatable workflow, safety guards and a clear view of their spend.

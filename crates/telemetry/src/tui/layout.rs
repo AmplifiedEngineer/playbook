@@ -224,15 +224,16 @@ impl Default for Layout {
             rows: None,
         };
         // Cost per day and cost per model side by side, tokens and the
-        // burn-up each across the full width.
+        // hourly cost side by side, the burn-up across the full width.
         let charts = Tab {
-            rows: Some(vec![2, 1, 1]),
+            rows: Some(vec![2, 2, 1]),
             ..tab(
                 "Charts",
                 &[
                     PanelId::SpendTotal,
                     PanelId::SpendModel,
                     PanelId::Tokens,
+                    PanelId::Hourly,
                     PanelId::Burnup,
                 ],
             )
@@ -242,12 +243,7 @@ impl Default for Layout {
                 charts,
                 tab(
                     "Numbers",
-                    &[
-                        PanelId::Models,
-                        PanelId::Breakdown,
-                        PanelId::Budget,
-                        PanelId::Hourly,
-                    ],
+                    &[PanelId::Models, PanelId::Breakdown, PanelId::Budget],
                 ),
                 tab("Sessions", &[PanelId::Live, PanelId::Sessions]),
             ],
@@ -689,13 +685,19 @@ mod tests {
         let text = layout.to_text();
 
         // Assert
-        assert_eq!(charts.rows, Some(vec![2, 1, 1]));
+        assert_eq!(charts.rows, Some(vec![2, 2, 1]));
         assert_eq!(
-            charts.panels[..2],
-            [PanelId::SpendTotal, PanelId::SpendModel]
+            charts.panels,
+            [
+                PanelId::SpendTotal,
+                PanelId::SpendModel,
+                PanelId::Tokens,
+                PanelId::Hourly,
+                PanelId::Burnup
+            ]
         );
         assert!(
-            text.starts_with("Charts=spend.total,spend.model|tokens|burnup;"),
+            text.starts_with("Charts=spend.total,spend.model|tokens,hourly|burnup;"),
             "{text}"
         );
         assert_eq!(Layout::parse(&text).unwrap(), layout);
@@ -775,24 +777,19 @@ mod tests {
     }
 
     #[test]
-    fn the_default_numbers_tab_is_models_breakdown_budget_and_hourly() {
+    fn the_default_numbers_tab_is_models_breakdown_and_budget() {
         let layout = Layout::default();
 
         let numbers = &layout.tabs[1];
 
         assert_eq!(
             numbers.panels,
-            [
-                PanelId::Models,
-                PanelId::Breakdown,
-                PanelId::Budget,
-                PanelId::Hourly
-            ]
+            [PanelId::Models, PanelId::Breakdown, PanelId::Budget]
         );
         assert_eq!(numbers.rows, None);
         assert!(layout
             .to_text()
-            .contains("Numbers=models,breakdown,budget,hourly;"));
+            .contains("Numbers=models,breakdown,budget;"));
     }
 
     #[test]

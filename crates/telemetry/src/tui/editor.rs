@@ -918,10 +918,11 @@ mod tests {
     #[test]
     fn a_tab_with_the_default_charts_rows_takes_eight_panels_one_action_each() {
         // Arrange
-        let mut e = Editor::new(&Layout::default(), 0);
+        let layout = Layout::default();
+        let mut e = Editor::new(&layout, 0);
 
         // Act
-        for _ in 4..MAX_TAB_PANELS {
+        for _ in layout.tabs[0].panels.len()..MAX_TAB_PANELS {
             add_a_grid_panel(&mut e);
         }
 
