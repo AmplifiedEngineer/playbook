@@ -10,25 +10,8 @@
 //! file texts, file lists), so a test runs it on literals before any real
 //! rename exists.
 
+use crate::rename_table::{Kind, Rename};
 use std::collections::BTreeSet;
-
-/// What a rename applies to.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Kind {
-    Command,
-    Skill,
-}
-
-/// One rename: the old name stops existing and the new one takes its place.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Rename {
-    pub(crate) kind: Kind,
-    pub(crate) old: &'static str,
-    pub(crate) new: &'static str,
-}
-
-/// Renames that have landed. Each rename PR adds its row.
-pub(crate) const RENAMES: &[Rename] = &[];
 
 /// Names removed with no replacement. Each removal PR adds its entry.
 pub(crate) const REMOVED: &[&str] = &[];

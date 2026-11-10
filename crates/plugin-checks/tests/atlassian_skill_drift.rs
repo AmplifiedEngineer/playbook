@@ -5,6 +5,9 @@
 //! Confluence, Atlassian, acli or twg must point at `playbook:atlassian`, so
 //! the access order and the tool quirks live in one place.
 
+#[path = "support/markdown_refs.rs"]
+mod markdown_refs;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -71,7 +74,7 @@ fn atlassian_mentions_point_at_the_atlassian_skill() {
         if ALLOWLIST.contains(&r.as_str()) {
             continue;
         }
-        let text = fs::read_to_string(&p).expect("read");
+        let text = markdown_refs::command_text_with_refs(&r);
         if mentions_term(&text) && !text.contains("playbook:atlassian") {
             missing.push(r);
         }

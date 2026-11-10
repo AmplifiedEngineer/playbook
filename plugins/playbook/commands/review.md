@@ -30,7 +30,7 @@ If the arguments contain `--help`, print the argument-hint line and these lines,
 
 Do this first, before Step 1. Read the run mode and the effort ceiling for `review` with `$ARGUMENTS`: read `skills/delegating-subagents/references/run-context.md` in this plugin and follow it. It covers the tool, the plain steps without it, the warning, the ceiling, the flag conflict and any failure.
 
-**Routing.** Where you choose what to spawn, route the `classify` kind. Intent: route-model. If the session's tool map (printed at session start) lists it, use that command and follow its `action` under the `routing.escalate` gate: on `ask` stop and ask the user, on `downgraded` (`deny`) use the lower tier it names, and in auto mode (`auto`) proceed and log the assumption. If the command fails, carry on. Otherwise do this: spawn the agent this file names, with the model its agent file pins.
+**Routing.** Where you choose what to spawn, route the `classify` kind. Intent: route-model. If the session's tool map (printed at session start) lists it, use that command and follow its `action` under the `routing.escalate` gate: on `ask` stop and ask the user, on `downgraded` (`deny`) use the lower tier it names, and in auto mode (`auto`) proceed and log the assumption. If the command fails, carry on. If the tool map lacks it, follow `without-binary.md#route-model` in `skills/delegating-subagents/references/without-binary.md` in this plugin.
 
 - **`ask` mode:** behave exactly as this file describes.
 - **`auto` mode:** follow the Auto path below.
@@ -51,7 +51,7 @@ A depth from `--quick`, `--deep`, `--all` or `--preset` is the user's choice: ru
 
 Only for a PR target. A local branch with no PR skips this step.
 
-Intent: pr-stack. If the session's tool map lists it, use that command with the arguments as one quoted string: `"<PR> --json"`. Otherwise do this: detect the stack by hand as `skills/grounding-review/references/stack-review.md` section 1 describes. If both fail, or the JSON has `in_stack: false`, say nothing about stacks. The scope is `not a stack`. Go on as Step 1 says: to Step 5 with a depth flag, else to Step 2.
+Intent: pr-stack. If the session's tool map lists it, use that command with the arguments as one quoted string: `"<PR> --json"`. If the tool map lacks it, follow `without-binary.md#pr-stack` in `skills/delegating-subagents/references/without-binary.md` in this plugin. If both fail, or the JSON has `in_stack: false`, say nothing about stacks. The scope is `not a stack`. Go on as Step 1 says: to Step 5 with a depth flag, else to Step 2.
 
 If the given PR's `role` is `context` or `skip`, say so in one line and stop: there is nothing to review on it.
 
@@ -65,7 +65,7 @@ Merged PRs never count toward the recommendation and are never reviewed or comme
 
 ## Step 2: Recommend a depth
 
-Intent: review-suggest. If the session's tool map lists it, use that command with the PR number from Step 1 (omit it only for a local branch with no PR), `--json`, and `--scope stack` when Step 1b chose the whole stack. It reads git, and `gh` only for a PR number, then prints `recommendation` (`quick` or `deep`), `confidence` (`high` or `low`), up to four `reasons` and the `signals` it used. Otherwise do this: read `skills/grounding-review/references/review-routing.md` in this plugin and apply Part 1 by hand with plain `git` and `gh`. If the command fails (for example an older binary without `--scope` exits 2), do the same by hand; for the whole stack, Part 1 runs on the union of the open PRs' files.
+Intent: review-suggest. If the session's tool map lists it, use that command with the PR number from Step 1 (omit it only for a local branch with no PR), `--json`, and `--scope stack` when Step 1b chose the whole stack. It reads git, and `gh` only for a PR number, then prints `recommendation` (`quick` or `deep`), `confidence` (`high` or `low`), up to four `reasons` and the `signals` it used. If the tool map lacks it, or the command fails, follow `without-binary.md#review-suggest` in `skills/delegating-subagents/references/without-binary.md` in this plugin.
 
 With `high` confidence, go to Step 4.
 

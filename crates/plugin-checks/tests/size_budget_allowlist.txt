@@ -1,0 +1,25 @@
+# Plugin files over the size budget, and main files that still hold fallback
+# blocks. Paths start at plugins/playbook. A row is a ceiling that only goes
+# down: scripts/check-size-budget-shrink.sh fails a PR that adds a row or
+# raises a number. A row for a file that is within budget fails the check.
+#
+#   size <path> <max lines> <max bytes>
+#   fallbacks <path> <max blocks>
+size commands/address-pr-comments.md 212 15867
+size commands/adr.md 299 24222
+size commands/deep-review.md 314 32224
+size commands/implement.md 483 79042
+size commands/plan.md 541 60095
+size commands/quick-review.md 253 23363
+size commands/setup.md 181 20215
+fallbacks commands/address-pr-comments.md 3
+fallbacks commands/adr.md 5
+fallbacks commands/deep-review.md 6
+fallbacks commands/implement.md 11
+fallbacks commands/learn-project.md 4
+fallbacks commands/plan.md 9
+fallbacks commands/quick-review.md 5
+fallbacks commands/repo-audit.md 1
+fallbacks commands/session-handoff.md 4
+fallbacks commands/session-start.md 1
+fallbacks commands/setup.md 1
