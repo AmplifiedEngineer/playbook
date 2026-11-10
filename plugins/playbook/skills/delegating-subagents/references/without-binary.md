@@ -33,3 +33,44 @@ Skip the automatic choice and use the effort table in the `playbook:delegating-s
 ## atlassian-check
 
 The `playbook:atlassian` skill needs `acli` 1.3.39 or newer. Run `acli --version` and compare the `X.Y.Z` in `acli version X.Y.Z-stable` with 1.3.39. No output or no `X.Y.Z` means unreadable; a lower version means too old. Run `command -v twg` to see whether `twg` is present.
+
+## pr-comments
+
+Resolve the PR and fetch its comments by hand. The steps need `gh`.
+
+1. `PR_NUMBER`: the number from the arguments, else `gh pr view --json number -q .number`. If neither gives one, stop with `error: no PR for current branch; pass a PR number`.
+2. `OWNER/NAME`: `gh repo view --json nameWithOwner -q .nameWithOwner`. `HEAD_SHA`: `gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid`. `ME`: `gh api /user -q .login`.
+3. Write the review threads to `/tmp/pr-comments-<PR>-threads.json`:
+
+   ```bash
+   gh api graphql -F owner="$OWNER" -F name="$NAME" -F pr="$PR_NUMBER" -f query='
+     query($owner: String!, $name: String!, $pr: Int!) {
+       repository(owner: $owner, name: $name) {
+         pullRequest(number: $pr) {
+           reviewThreads(first: 100) {
+             nodes {
+               id isResolved isOutdated path line originalLine
+               comments(first: 50) {
+                 nodes { id databaseId author { login } body url createdAt }
+               }
+             }
+           }
+         }
+       }
+     }' > "/tmp/pr-comments-$PR_NUMBER-threads.json"
+   ```
+
+4. Write the PR-level comments to `/tmp/pr-comments-<PR>-issues.json` with `gh api "/repos/$OWNER/$NAME/issues/$PR_NUMBER/comments" --paginate`.
+
+## pr-reply
+
+Check the file yourself: it must not be empty, hold an em or en dash, or carry AI attribution. Then post it from the file, which needs no shell quoting:
+
+```bash
+# Inline review-thread reply (the databaseId of the thread's first comment)
+gh api -X POST "/repos/$OWNER/$NAME/pulls/$PR_NUMBER/comments/$DATABASE_ID/replies" -F body=@<that file> -q .html_url
+# PR-level comment reply
+gh api -X POST "/repos/$OWNER/$NAME/issues/$PR_NUMBER/comments" -F body=@<that file> -q .html_url
+```
+
+Shell-quoting gotcha for `gh api -f body=`: apostrophes in double quotes are literal (`"I don't"` is correct, NEVER escape to `"I don\'t"` which posts as `don'''t`). If the body contains complex quoting, write it to a temp file and use `-F body=@/tmp/reply.txt`.
