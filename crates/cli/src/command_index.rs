@@ -201,7 +201,7 @@ pub(crate) const META: &[Meta] = &[
     ro("code symbol"),
     ro("commands").for_users(),
     free("commit")
-        .purpose("Prepare and run the signed commit of `/playbook:commit-and-push`")
+        .purpose("Prepare and run the signed commit of `/playbook:commit`")
         .for_agents(),
     free("commit all"),
     free("commit prepare"),

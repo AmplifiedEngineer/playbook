@@ -370,7 +370,7 @@ Example: `playbook commands pr`
 
 ### `playbook commit`
 
-Run the git steps of `/playbook:commit-and-push`
+Run the git steps of `/playbook:commit`
 
 Subcommands: `all`, `prepare`, `run`
 

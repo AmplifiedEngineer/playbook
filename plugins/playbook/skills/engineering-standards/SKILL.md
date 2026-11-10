@@ -45,7 +45,7 @@ Team engineering standards for code design, commits, pull requests, testing, and
 
 ### Self-review before committing
 
-`/playbook:commit-and-push` never judges the change. Read `git diff --cached` first and ask the two things no hook can: does it belong in one commit (if the message needs an "and", split it), and can you say why in one line. `playbook hook precommit-check` already warns on secret-shaped filenames, debug leftovers and oversized commits.
+`/playbook:commit` never judges the change. Read `git diff --cached` first and ask the two things no hook can: does it belong in one commit (if the message needs an "and", split it), and can you say why in one line. `playbook hook precommit-check` already warns on secret-shaped filenames, debug leftovers and oversized commits.
 
 ## Pull Requests
 

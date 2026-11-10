@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The text a plugin command passes to `--args-stdin`: the flags of
-//! `/playbook:commit-and-push` and `/playbook:create-pull-request` plus the
+//! `/playbook:commit` and `/playbook:create-pull-request` plus the
 //! phrase "Worktree root: <path>, branch: <name>" that callers add.
 //!
 //! The text is split into words with plain quote handling and no shell

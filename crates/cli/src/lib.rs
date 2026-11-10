@@ -988,7 +988,7 @@ pub enum Command {
         #[command(subcommand)]
         sub: LearnCommand,
     },
-    /// Run the git steps of `/playbook:commit-and-push`
+    /// Run the git steps of `/playbook:commit`
     Commit {
         #[command(subcommand)]
         sub: CommitCommand,

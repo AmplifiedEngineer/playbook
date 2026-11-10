@@ -54,6 +54,12 @@ const SCOPE: &[&str] = &[
 /// command by construction.
 const SKIP: &[&str] = &["docs/reference/cli-and-config.md"];
 
+/// Pages that may name a plugin slash command that no longer exists: the page
+/// that lists every renamed or removed command. `CHANGELOG.md` and `docs/adr/`
+/// are outside `SCOPE`, so they need no entry. The page's `playbook` command
+/// names are still checked.
+const SLASH_EXEMPT: &[&str] = &["docs/renamed.md"];
+
 fn root() -> PathBuf {
     PathBuf::from(env!("PLAYBOOK_REPO_ROOT"))
 }
@@ -342,7 +348,7 @@ fn check_page(file: &str, text: &str, rules: &Rules) -> Report {
         }
         for cap in slash.captures_iter(line) {
             let name = &cap[2];
-            if !(rules.slash_exists)(name) {
+            if !(rules.slash_exists)(name) && !SLASH_EXEMPT.contains(&file) {
                 report.errors.push(format!(
                     "{file}:{no}: unknown slash command `/playbook:{name}`. It matches no file in plugins/playbook/commands and no folder in plugins/playbook/skills."
                 ));
@@ -508,6 +514,67 @@ mod synthetic {
         }
         let block = "<!-- names: legacy -->\n```bash\ntool upgrade\ntool old\n```\n";
         assert_eq!(run(block, true, &[]), Report::default());
+    }
+
+    #[test]
+    fn the_renamed_page_is_exempt_from_the_slash_check() {
+        // Arrange
+        let cli = tool();
+        let slash = |n: &str| n == "plan" || n == "writing-style";
+        let rules = Rules {
+            root: &cli,
+            alias_is_error: false,
+            legacy_extra: &[],
+            slash_exists: &slash,
+        };
+        let gone = "`/playbook:nope` is now `/playbook:plan`.";
+        let rows: [(&str, &str, &[&str]); 4] = [
+            ("docs/renamed.md", gone, &[]),
+            (
+                "docs/guides/x.md",
+                gone,
+                &["docs/guides/x.md:1: unknown slash command `/playbook:nope`"],
+            ),
+            (
+                "docs/renamed.md",
+                "run `tool nope` for it",
+                &["unknown command `tool nope`"],
+            ),
+            (
+                "docs/renamed.md",
+                "`/playbook:nope` was renamed; run `tool nope`.",
+                &["unknown command `tool nope`"],
+            ),
+        ];
+        let mut problems = Vec::new();
+
+        // Act
+        for (file, text, expected) in rows {
+            let report = check_page(file, text, &rules);
+            if expected.is_empty() && report != Report::default() {
+                problems.push(format!(
+                    "{file} {text:?}: want a clean report, got {report:?}"
+                ));
+            }
+            for fragment in expected {
+                if !report.errors.iter().any(|e| e.contains(fragment)) {
+                    problems.push(format!(
+                        "{file} {text:?}: no error holds {fragment:?}: {report:?}"
+                    ));
+                }
+            }
+            if file == "docs/renamed.md"
+                && report
+                    .errors
+                    .iter()
+                    .any(|e| e.contains("unknown slash command"))
+            {
+                problems.push(format!("{file} {text:?}: the exemption failed: {report:?}"));
+            }
+        }
+
+        // Assert
+        assert!(problems.is_empty(), "{problems:#?}");
     }
 
     #[test]

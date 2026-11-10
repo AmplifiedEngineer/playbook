@@ -4,7 +4,7 @@
 //! Ports the retired shell original: a mechanical sanity pass over the staged
 //! diff before a commit.
 //!
-//! `/playbook:commit-and-push` drafts the message from the staged diff with no
+//! `/playbook:commit` drafts the message from the staged diff with no
 //! model, so nothing in that flow judges the diff it is about to commit. This covers the half that needs
 //! no judgement: debug leftovers, secret-shaped filenames, an oversized commit.
 //!

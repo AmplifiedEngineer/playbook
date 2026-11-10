@@ -2462,7 +2462,7 @@ fn a_subagent_at_the_session_ceiling_can_still_close_its_work_and_is_told_what_t
         "Bash",
         json!({"command": "playbook pr create --title t --body-file b.md"}),
     );
-    let skill = as_agent("Skill", json!({"skill": "playbook:commit-and-push"}));
+    let skill = as_agent("Skill", json!({"skill": "playbook:commit"}));
     let build = as_agent("Bash", json!({"command": "cargo build"}));
 
     // Assert

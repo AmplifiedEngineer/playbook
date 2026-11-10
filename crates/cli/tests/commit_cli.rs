@@ -3,7 +3,7 @@
 
 //! `playbook commit prepare` and `commit run` against real git repos with a
 //! local bare `origin`. They replace the two bash blocks of
-//! `commands/commit-and-push.md`.
+//! `commands/commit.md`.
 
 use std::fs;
 use std::io::Write;

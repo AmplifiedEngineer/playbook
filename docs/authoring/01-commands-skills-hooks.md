@@ -38,7 +38,7 @@ Instruction for Claude. Reference `$ARGUMENTS` here if needed.
 Instruction for Claude.
 ```
 
-`plan.md` adds `model: opus` because the planning interview needs that capability. Use an alias (`haiku`, `sonnet`, `opus`), never a model id. `commit-and-push.md` omits `model` and inherits the session default. Only set `model` when the command always needs a specific model.
+`plan.md` adds `model: opus` because the planning interview needs that capability. Use an alias (`haiku`, `sonnet`, `opus`), never a model id. `commit.md` omits `model` and inherits the session default. Only set `model` when the command always needs a specific model.
 
 A command's `description` does double duty. It is the one line a human reads in the picker, and it is the text Claude matches a plain-English request against when deciding whether to reach for the command. `adr.md` shows the shape: "Use when recording a significant, hard-to-reverse architectural decision." Name the situation, not the mechanics. The mechanics belong in the body, which only loads once the command actually runs. A description that is a feature list ("Executes X, delegating to Y, then Z") reads fine in the picker and matches nothing.
 

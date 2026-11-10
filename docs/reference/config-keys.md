@@ -31,7 +31,7 @@ Some keys may sync between your own machines: `usage.theme`, `usage.weekStart`, 
 | `autoReview.type` | `auto` | `quick`, `deep`, `auto` | Which review the self-review runs. `auto` picks `quick` only when the triage agrees three times, and `deep` otherwise. |
 | `autoReview.fix` | `false` | `true`, `false` | Fixes every finding the self-review confirms, pushes the fixes, and re-runs the scoped checks. |
 | `autoMerge.enabled` | `false` | `true`, `false` | After the review and fixes, marks the PR ready, waits for green checks, then merges with `gh pr merge --auto`. |
-| `commit.signOff` | `true` | `true`, `false` | Commits made through `/playbook:commit-and-push` carry a `Signed-off-by` trailer. |
+| `commit.signOff` | `true` | `true`, `false` | Commits made through `/playbook:commit` carry a `Signed-off-by` trailer. |
 | `handoff.onClear` | `false` | `true`, `false` | When `/clear` ends a session that saved no handoff in the last 10 minutes, the `handoff-on-clear` hook resumes it as a fork on Haiku with no tools and saves the handoff, so the next session loads it. It adds up to 50 seconds to the `/clear`, skips a transcript over 8 MiB, and never blocks the clear. |
 | `pr.draft` | `true` | `true`, `false` | `/playbook:create-pull-request` opens the PR as a draft. |
 | `pr.rules.template` | `block` | `off`, `warn`, `block` | The PR body must follow the template: optional ticket line, `## Summary`, optional `## Notes for reviewers`, optional `## Related work`, in that order, with no empty section. The old `## What Changed` section only warns. |

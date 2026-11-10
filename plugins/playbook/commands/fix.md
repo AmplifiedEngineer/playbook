@@ -68,15 +68,15 @@ To escalate, stop making changes. Hand off to `/playbook:plan` and say which rul
 
 ## Step 5: Commit
 
-If you are on the default branch, create a branch named `fix/<short-slug>` first. Then invoke the `/playbook:commit-and-push` skill with the Skill tool, with the worktree root and branch in its prompt ("Worktree root: <path>, branch: <name>") when you work in a git worktree. `/playbook:commit-and-push` drafts the message from the diff; the branch name `fix/<short-slug>` carries the intent.
+If you are on the default branch, create a branch named `fix/<short-slug>` first. Then invoke the `/playbook:commit` skill with the Skill tool, with the worktree root and branch in its prompt ("Worktree root: <path>, branch: <name>") when you work in a git worktree. `/playbook:commit` drafts the message from the diff; the branch name `fix/<short-slug>` carries the intent.
 
 In auto mode never force-push. If the push is rejected, stop and report it in the final output.
 
-- If mode is ask, `/playbook:commit-and-push` can use `--force-with-lease` after its own rebase. Say so in the final report.
+- If mode is ask, `/playbook:commit` can use `--force-with-lease` after its own rebase. Say so in the final report.
 
 ## Step 6: Open the pull request
 
-Invoke the `/playbook:create-pull-request` skill with the Skill tool. When you work in a git worktree, put its absolute root (`git rev-parse --show-toplevel`) and branch (`git branch --show-current`) in the prompt of this and of every `/playbook:commit-and-push` call, as "Worktree root: <path>, branch: <name>". Do not run `gh pr create` yourself. Open one pull request for the fix. Link the issue when there is one.
+Invoke the `/playbook:create-pull-request` skill with the Skill tool. When you work in a git worktree, put its absolute root (`git rev-parse --show-toplevel`) and branch (`git branch --show-current`) in the prompt of this and of every `/playbook:commit` call, as "Worktree root: <path>, branch: <name>". Do not run `gh pr create` yourself. Open one pull request for the fix. Link the issue when there is one.
 
 When it returns the PR URL, invoke the `playbook:finish-pull-request` skill with the Skill tool for that PR. It runs the self-review the `autoReview.*` settings select, fixes findings, promotes the draft, and merges only when `autoMerge.enabled` allows it. The create-pull-request command does not run the review, so this step is needed. In auto mode no self-review runs for a fix PR and it is not merged; say so in the report.
 
