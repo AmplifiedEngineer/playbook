@@ -7,7 +7,7 @@
  F1 Charts ╭┤ Layout: tabs and panels ├─────────────────────────────────────────────────╮
 ╭─┤¹Spend p│  Charts  Numbers  Sessions                                                 │──────────╮
 │Thu 2026-0│                                                                            │7.6K tok  │
-│ $8┤┄┄┄┄┄┄│ Add after spend.model   enter add   esc back   j/k choose                  │┄┄┄┄┄┄┄┄┄┄│
+│ $8┤┄┄┄┄┄┄│ Add after burnup   enter add   esc back   j/k choose                       │┄┄┄┄┄┄┄┄┄┄│
 │ $4┤┄┄┄┄┄┄│ > spend              cost per day as a chart or a daily table              │┄┄┄┄┄┄┄┄┄┄│
 │ $0┤▁▄▁  ▂│   models             cost and tokens per model                             │ ▃▂  ▅  ▄ │
 │    5 7  9│   breakdown          projects, agents, skills, tools or health (v switches)│ 29 31  3 │

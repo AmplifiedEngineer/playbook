@@ -62,6 +62,25 @@ Every tab has a header with the range, the cost, the tokens and the messages. Fo
 
 **Layout editor.** `e` opens a window to add, move and remove tabs and panels. Each change applies and saves at once. The `usage.ui.layout` key holds the result.
 
+Adding a panel takes one action: press `a`, choose the panel and press Enter. The panel lands in the next free place, and the tab arranges itself. A tab holds up to 8 panels, and the editor refuses a ninth with a message. The `budget` strip is not one of the 8: it always sits at the top of the tab across the full width, takes no cell of the grid, and cannot be moved. Adding it puts it first in the list, and the editor shows it on its own line at the top.
+
+A tab with no row layout of its own draws this grid, which the editor edits as it is:
+
+| Panels | Rows | Why |
+|---|---|---|
+| 1 | one full panel | The whole body for one panel. |
+| 2 | two stacked, each full width | Live and Sessions are tables that want the width. |
+| 3 | a pair, then one full width | Two small panels over one that gets the width. |
+| 4 | 2 by 2 | Four equal panels. |
+| 5 | 2, 2, then one full width | Rows of two, and the odd last one takes the row. |
+| 6 | 2, 2, 2 | Three rows of two. |
+| 7 | 2, 2, 2, then one full width | Four rows. |
+| 8 | 2, 2, 2, 2 | Four rows of two. |
+
+A tab keeps its own rows only when you set them with `f` (split or join a row) or when the stored value has a `|`. Then adding fills the last row that has room, opens a new row while the tab has fewer than 4, and otherwise fills the first row with room. Old stored layouts load and save as written.
+
+A short screen keeps every row at 5 lines or more. When the rows do not fit, the tab draws the rows that do and hides the panels of the others. The footer then says how many panels are hidden and how many screen rows show all of them, for example `2 panels hidden, 28 rows show all`. The screen needs 28 rows for 8 panels on a tab without a budget strip, so the 80 by 24 minimum shows 6. At 150 by 44 every count from 1 to 8 fits, with the budget strip as well. The strip itself needs 24 rows on a tab with up to 3 other panels and 36 rows on a bigger one. On a shorter screen the strip drops out and the panels stay.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/pbtop/layout-editor-dark.svg">
   <img src="images/pbtop/layout-editor-light.svg" alt="pbtop layout editor over the Charts tab, for arranging tabs and panels, sample data">
@@ -234,7 +253,7 @@ Live means a session whose last message is no older than 15 minutes.
 | `usage.telemetry` | `auto` | `off` stops Playbook from pointing sessions at the receiver. |
 | `usage.budget.monthlyUsd` | `0` | A manual monthly budget. `0` means none. |
 | `usage.budget.weeklyUsd` | `0` | The same for the week. |
-| `usage.ui.layout` | empty | The tabs and panels. Empty means the three default tabs. |
+| `usage.ui.layout` | empty | The tabs and panels, up to 8 panels per tab besides the budget strip. Empty means the three default tabs. |
 
 Set one with `playbook config set --global usage.theme dark`. The [config keys page](reference/config-keys.md) has the rest. Three environment variables matter too:
 

@@ -105,7 +105,17 @@ pub struct Placed {
     pub budget: Rect,
     /// Each panel of the tab with its place, budget excluded.
     pub panels: Vec<(PanelId, Rect)>,
+    /// What a short body left out, `None` when every panel has its place.
+    pub hidden: Option<Hidden>,
     pub footer: Rect,
+}
+
+/// The panels of a tab a body too short for its rows does not draw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Hidden {
+    pub count: usize,
+    /// The screen height at which every panel of the grid fits.
+    pub needs_height: u16,
 }
 
 /// The screen height of a tabbed layout from which the budget strip is drawn.
@@ -130,26 +140,33 @@ fn tile(body: Rect, rows: &[(usize, u16)]) -> Vec<Rect> {
     out
 }
 
-/// Splits `body` for `n` panels: one or two panels stack, three and four make
-/// two rows, five and six make three rows of two (the last row of five is
-/// one wide panel). Six panels land exactly where the classic screen puts them.
-/// Beyond six, rows of two share the height equally, the last one wide if odd.
-fn grid(body: Rect, n: usize) -> Vec<Rect> {
-    if n == 0 {
-        return Vec::new();
-    }
-    // The panel count of each row is `auto_rows`, which the editor shares; only
-    // five and six panels weigh their row heights.
-    let heights: &[u16] = match n {
-        5 | 6 => &[40, 26, 34],
-        _ => &[],
-    };
-    let rows: Vec<(usize, u16)> = auto_rows(n)
+/// The row heights of five and six panels, which land where the classic screen
+/// puts them.
+const WEIGHTS_FIVE_SIX: [u16; 3] = [40, 26, 34];
+
+/// Splits `body` for `n` panels in the automatic grid of `auto_rows`: one panel
+/// fills the body, two stack, three make a pair over a wide panel, four make
+/// two pairs, and five to eight make rows of two with the last row wide when
+/// the count is odd. Two stack at every width because the panels that default
+/// to two (Live and Sessions) are tables that want the whole width, and a
+/// 150x44 screen still gives each of them 150x15 cells. Rows are never shorter
+/// than `MIN_ROW_HEIGHT`, so a short body keeps only the rows that fit and the
+/// panels of the others stay out; the count of those is the second value.
+fn grid(body: Rect, n: usize) -> (Vec<Rect>, usize) {
+    let full = auto_rows(n);
+    let fit = usize::from(body.height / MIN_ROW_HEIGHT).max(1);
+    let rows = &full[..full.len().min(fit)];
+    let weighted = rows.len() == full.len() && matches!(n, 5 | 6);
+    let bands: Vec<(usize, u16)> = rows
         .iter()
         .enumerate()
-        .map(|(i, cols)| (usize::from(*cols), heights.get(i).copied().unwrap_or(1)))
+        .map(|(i, cols)| {
+            let weight = if weighted { WEIGHTS_FIVE_SIX[i] } else { 1 };
+            (usize::from(*cols), weight)
+        })
         .collect();
-    tile(body, &rows)
+    let shown: usize = rows.iter().map(|c| usize::from(*c)).sum();
+    (tile(body, &bands), n - shown)
 }
 
 /// The least body height per row for an arranged tab to be drawn as arranged.
@@ -174,7 +191,8 @@ fn body_rows(ids: &[PanelId], rows: &[u8]) -> Vec<usize> {
 /// a tab and the footer on `area`. A layout with one tab keeps the classic
 /// screen: no tab bar, and the budget strip from 36 rows as before. `rows` is
 /// the size of each row of an arranged tab; `None`, or a body too short for
-/// the rows, gives the automatic grid.
+/// the rows, gives the automatic grid, which leaves out the rows that do not
+/// fit and reports them in `hidden`.
 pub fn place(area: Rect, ids: &[PanelId], rows: Option<&[u8]>, tabbed: bool) -> Placed {
     let wants_budget = ids.contains(&PanelId::Budget);
     // A tab with few other panels can afford the strip on a short screen.
@@ -207,16 +225,28 @@ pub fn place(area: Rect, ids: &[PanelId], rows: Option<&[u8]>, tabbed: bool) -> 
             && r.iter().sum::<usize>() == shown.len()
             && body.height >= MIN_ROW_HEIGHT * r.len() as u16
     });
-    let rects = match arranged {
-        Some(r) => tile(body, &r.iter().map(|n| (*n, 1)).collect::<Vec<_>>()),
+    let (rects, left_out) = match arranged {
+        Some(r) => (
+            tile(body, &r.iter().map(|n| (*n, 1)).collect::<Vec<_>>()),
+            0,
+        ),
         None => grid(body, shown.len()),
     };
+    let rows_needed = u16::try_from(auto_rows(shown.len()).len()).unwrap_or(u16::MAX);
+    let hidden = (left_out > 0).then(|| Hidden {
+        count: left_out,
+        needs_height: area
+            .height
+            .saturating_sub(body.height)
+            .saturating_add(rows_needed.saturating_mul(MIN_ROW_HEIGHT)),
+    });
     let panels = shown.iter().copied().zip(rects).collect();
     Placed {
         header,
         tabbar,
         budget,
         panels,
+        hidden,
         footer,
     }
 }
@@ -317,7 +347,10 @@ pub fn render(frame: &mut Frame, app: &App) {
             &pal,
         );
     }
-    frame.render_widget(Paragraph::new(footer(app, &pal, area.width)), p.footer);
+    frame.render_widget(
+        Paragraph::new(footer(app, &pal, area.width, p.hidden)),
+        p.footer,
+    );
     if let Some(scroll) = app.help {
         render_help(frame, area, scroll, &pal);
     }
@@ -446,7 +479,7 @@ fn render_notice(frame: &mut Frame, area: Rect, n: &Notice, pal: &Palette) {
 
 /// The key hints: each key in the accent color, its meaning in the text color,
 /// and at the right when the view was last refreshed.
-fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
+fn footer(app: &App, pal: &Palette, area_width: u16, hidden: Option<Hidden>) -> Line<'static> {
     let plain = Style::default().fg(pal.color(pal.fg));
     if let Some(note) = &app.note {
         return Line::styled(format!(" {note}"), Style::default().fg(pal.color(pal.hi)));
@@ -462,7 +495,15 @@ fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
         .add_modifier(Modifier::BOLD);
     let (status, status_style) = refresh_status(app, pal, area_width);
     // The status keeps its place at the right, so the hints get what is left.
-    let room = usize::from(area_width).saturating_sub(status.chars().count());
+    let alert = hidden.map(|h| {
+        let noun = if h.count == 1 { "panel" } else { "panels" };
+        format!(
+            "{} {noun} hidden, {} rows show all ",
+            h.count, h.needs_height
+        )
+    });
+    let alert_width = alert.as_ref().map_or(0, |a| a.chars().count());
+    let room = usize::from(area_width).saturating_sub(status.chars().count() + alert_width);
     let theme = format!("theme ({})", app.theme.name());
     // Shown in the order of the key table. When the line is too wide, hints
     // drop in the table's `drop` order, so the ones that matter most stay.
@@ -490,8 +531,11 @@ fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
         }
         hints.retain(|(_, _, d)| *d != rank);
     }
-    let used = width(&hints);
+    let used = width(&hints) + alert_width;
     let mut spans = vec![Span::raw(" ")];
+    if let Some(alert) = alert {
+        spans.push(Span::styled(alert, Style::default().fg(pal.color(pal.hi))));
+    }
     for (key, label, _) in hints {
         spans.push(Span::styled(key.to_string(), keys));
         spans.push(Span::styled(format!(" {label} "), plain));
@@ -1427,7 +1471,7 @@ mod tests {
             let area = Rect::new(0, 0, 100, 60);
 
             // Act
-            let rects = grid(area, n);
+            let (rects, _) = grid(area, n);
             let mut by_row: Vec<u8> = Vec::new();
             let mut last_y = None;
             for r in &rects {
@@ -2079,14 +2123,14 @@ mod tests {
         let text = screen(&app, 100, 30);
 
         // Assert
-        assert!(text.contains("Add after spend"), "{text}");
+        assert!(text.contains("Add after tokens"), "{text}");
         assert!(text.contains("> models"), "{text}");
         assert!(text.contains("live"), "{text}");
         assert!(!text.contains("  tokens "), "{text}");
     }
 
     #[test]
-    fn the_picker_names_the_panel_the_new_one_lands_after_in_an_arranged_tab() {
+    fn the_picker_names_the_last_panel_of_the_row_the_new_one_joins_in_an_arranged_tab() {
         // Arrange
         let mut app = tabbed_app();
         app.layout = Layout::parse("Charts=spend,tokens|models").unwrap();
@@ -2098,7 +2142,7 @@ mod tests {
         let text = screen(&app, 100, 30);
 
         // Assert
-        assert!(text.contains("Add after tokens"), "{text}");
+        assert!(text.contains("Add after models"), "{text}");
         assert!(!text.contains("Add after spend"), "{text}");
     }
 
@@ -2158,5 +2202,166 @@ mod tests {
 
         assert!(shown.contains("Layout kept for this run only"), "{shown}");
         assert!(app.note.is_none());
+    }
+
+    fn eight_panels() -> Vec<PanelId> {
+        ALL.iter()
+            .copied()
+            .filter(|p| !p.is_pinned() && *p != PanelId::Budget)
+            .take(8)
+            .collect()
+    }
+
+    #[test]
+    fn on_a_wide_screen_every_count_from_one_to_eight_shows_every_panel_with_its_rows() {
+        // Arrange
+        let area = Rect::new(0, 0, 150, 44);
+        let ids = eight_panels();
+
+        for n in 1..=8 {
+            // Act
+            let placed = assert_tiles_body(area, &ids[..n], None);
+
+            // Assert
+            assert_eq!(placed.panels.len(), n, "{n} panels");
+            assert_eq!(placed.hidden, None, "{n} panels");
+            let mut by_row: Vec<u8> = Vec::new();
+            let mut last_y = None;
+            for (_, r) in &placed.panels {
+                if last_y == Some(r.y) {
+                    *by_row.last_mut().unwrap() += 1;
+                } else {
+                    by_row.push(1);
+                    last_y = Some(r.y);
+                }
+            }
+            assert_eq!(by_row, auto_rows(n), "{n} panels");
+            assert!(placed
+                .panels
+                .iter()
+                .all(|(_, r)| r.height >= MIN_ROW_HEIGHT));
+        }
+    }
+
+    #[test]
+    fn on_the_smallest_screen_a_tab_keeps_the_rows_that_fit_and_names_the_rest() {
+        // Arrange
+        let area = Rect::new(0, 0, MIN_WIDTH, MIN_HEIGHT);
+        let ids = eight_panels();
+
+        // Act
+        let shown: Vec<(usize, usize, Option<Hidden>)> = (1..=8)
+            .map(|n| {
+                let placed = place(area, &ids[..n], None, true);
+                (n, placed.panels.len(), placed.hidden)
+            })
+            .collect();
+
+        // Assert
+        let body_rows = usize::from((MIN_HEIGHT - HEADER_HEIGHT - 2) / MIN_ROW_HEIGHT);
+        assert_eq!(body_rows, 3);
+        for (n, drawn, hidden) in shown {
+            let expected: usize = auto_rows(n)
+                .iter()
+                .take(body_rows)
+                .map(|c| usize::from(*c))
+                .sum();
+            assert_eq!(drawn, expected, "{n} panels");
+            assert_eq!(hidden.map_or(0, |h| h.count), n - expected, "{n} panels");
+            if let Some(h) = hidden {
+                assert_eq!(
+                    h.needs_height,
+                    MIN_HEIGHT + MIN_ROW_HEIGHT * auto_rows(n).len() as u16 - 16,
+                    "{n} panels"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_screen_height_a_hidden_note_asks_for_shows_every_panel() {
+        // Arrange
+        let ids = eight_panels();
+        let short = place(Rect::new(0, 0, 100, 24), &ids, None, true);
+
+        // Act
+        let needs = short.hidden.unwrap().needs_height;
+        let tall = place(Rect::new(0, 0, 100, needs), &ids, None, true);
+
+        // Assert
+        assert_eq!(tall.hidden, None);
+        assert_eq!(tall.panels.len(), 8);
+    }
+
+    #[test]
+    fn rows_chosen_by_hand_give_way_to_fewer_rows_and_a_note_on_a_short_screen() {
+        // Arrange
+        let area = Rect::new(0, 0, 100, 24);
+        let ids = eight_panels();
+        let rows = [1, 1, 1, 1, 1, 1, 1, 1];
+
+        // Act
+        let placed = place(area, &ids, Some(&rows), true);
+
+        // Assert
+        assert_eq!(placed.panels.len(), 6);
+        assert_eq!(placed.hidden.map(|h| h.count), Some(2));
+    }
+
+    #[test]
+    fn the_budget_strip_draws_on_top_wherever_it_is_listed_and_beside_eight_panels() {
+        // Arrange
+        let area = Rect::new(0, 0, 150, 44);
+        let mut ids = eight_panels();
+        ids.push(PanelId::Budget);
+        let mut first = vec![PanelId::Budget];
+        first.extend(eight_panels());
+
+        // Act
+        let last = place(area, &ids, None, true);
+        let top = place(area, &first, None, true);
+
+        // Assert
+        assert_eq!(last.budget.height, budget::HEIGHT);
+        assert_eq!(last.budget.y, last.tabbar.bottom());
+        assert_eq!(last.budget.width, area.width);
+        assert_eq!(last.panels, top.panels);
+        assert_eq!(last.panels.len(), 8);
+        assert_eq!(last.hidden, None);
+    }
+
+    #[test]
+    fn a_screen_too_short_for_the_strip_leaves_it_out_and_keeps_the_panels() {
+        // Arrange
+        let ids = [PanelId::Budget, PanelId::Models, PanelId::Breakdown];
+
+        // Act
+        let short = place(Rect::new(0, 0, 100, 23), &ids, None, true);
+        let enough = place(Rect::new(0, 0, 100, 24), &ids, None, true);
+
+        // Assert
+        assert_eq!(short.budget.height, 0);
+        assert_eq!(enough.budget.height, budget::HEIGHT);
+        assert_eq!(short.panels.len(), 2);
+    }
+
+    #[test]
+    fn the_footer_names_the_panels_a_short_screen_hides_and_the_height_that_shows_them() {
+        // Arrange
+        let mut app = tabbed_app();
+        let words: Vec<&str> = eight_panels().iter().map(|p| p.word()).collect();
+        app.layout = Layout::parse(&format!("A={};B=live", words.join(","))).unwrap();
+        app.go_tab(0);
+
+        // Act
+        let short = screen(&app, 100, 24);
+        let tall = screen(&app, 100, 44);
+
+        // Assert
+        assert!(
+            short.contains("2 panels hidden, 28 rows show all"),
+            "{short}"
+        );
+        assert!(!tall.contains("hidden"), "{tall}");
     }
 }

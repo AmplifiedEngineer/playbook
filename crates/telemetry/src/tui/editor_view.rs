@@ -119,7 +119,8 @@ fn describe_cursor(ed: &Editor) -> String {
 }
 
 /// One line per row of the tab, panels side by side as the screen draws them.
-/// The cursor cell is bold and starts with `>`, so it shows without color.
+/// The budget strip, which no row holds, comes first because the screen draws
+/// it on top. The cursor cell is bold and starts with `>`, so it shows without color.
 fn map_lines(ed: &Editor, inner: usize, accent: Style, plain: Style) -> Vec<Line<'static>> {
     let Some(tab) = ed.layout.tabs.get(ed.tab) else {
         return Vec::new();
@@ -146,9 +147,9 @@ fn map_lines(ed: &Editor, inner: usize, accent: Style, plain: Style) -> Vec<Line
         }
         Line::from(spans)
     };
-    rows.iter()
-        .map(|slots| line(slots))
-        .chain(strip.map(|i| line(&[i])))
+    strip
+        .map(|i| line(&[i]))
+        .chain(rows.iter().map(|slots| line(slots)))
         .collect()
 }
 
@@ -169,10 +170,7 @@ fn picker_lines(ed: &Editor, at: usize, accent: Style, plain: Style) -> Vec<Line
         .layout
         .tabs
         .get(ed.tab)
-        .and_then(|t| {
-            t.panels
-                .get(arrange::insert_point(t, ed.slot).checked_sub(1)?)
-        })
+        .and_then(|t| t.panels.get(arrange::insert_point(t).checked_sub(1)?))
         .map_or("", |p| p.word());
     let mut lines = vec![Line::styled(
         format!(" Add after {after}   enter add   esc back   j/k choose"),
