@@ -84,6 +84,20 @@ Typing `/playbook` lists every skill. Only entry points a user would type belong
 
 Commands stay visible. The Claude Code docs state `user-invocable` for skills only, and `/playbook:review` runs `quick-review` and `deep-review` as commands, so a hidden command could break that path. The test also fails if a command sets the field. Hide commands only after a live session confirms the field works there.
 
+## Names
+
+A command file or a visible skill folder gets one name, and `/playbook:<name>` is what the user types. The name is one lowercase word (`review`, `plan`, `fix`) or a group and a word joined by one hyphen (`pr-create`, `handoff-save`). The groups are `pr` and `handoff`, and they match the binary command groups that the recipe drives, so a recipe reads like the commands it calls. A depth or a mode is a flag, not a second name: one `/playbook:review` takes `--quick` and `--deep`.
+
+Names are flat. Claude Code turns `commands/pr/create.md` into a name with a second segment, so a subfolder changes what the user types. The plugin keeps every command file directly under `commands/`, and a check fails on a subfolder.
+
+Hidden skills (`user-invocable: false`) are ids that the model and other prompts read, not names a user types. They follow the skill name rule in `skills_lint.rs` (lowercase letters, digits and hyphens, 64 characters at most) and keep their names unless a name misleads.
+
+Plugin names get no alias before 1.0.0. A renamed or removed command has no stub: the old name disappears, because Claude Code has no redirect and a stub costs every session a listing entry. To rename or remove one:
+
+1. Add a `RENAMES` row or a `REMOVED` entry in `crates/plugin-checks/tests/support/renames.rs`, and a row in `docs/renamed.md`.
+2. Change every caller. The leftover check fails on the old name anywhere in `plugins/`, `seed/`, `README.md`, `CONTRIBUTING.md`, `docs/` and `crates/*/src`, except in `CHANGELOG.md`, `docs/adr/` and `docs/renamed.md`. Name those files as code spans, not links.
+3. Open a breaking PR: the title starts `feat(plugin)!:` and a `BREAKING CHANGE:` footer lists the old and new names.
+
 ## Hooks
 
 Hooks are commands registered in `settings.json` under the `hooks` key. Each entry maps an event to one or more commands.
