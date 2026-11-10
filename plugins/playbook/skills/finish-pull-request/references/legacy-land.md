@@ -23,9 +23,9 @@ Review comments follow Conventional Comments: the review commands read `playbook
 1. Decide whether a review runs, and which one, before touching the PR further.
    - Read `autoReview.enabled`. If it is `false`, skip the review and say so in the final report ("auto-review is disabled for this repo, review skipped"). If it is `true`, or the key is unset (it defaults to `true`), read `autoReview.type`, which is `auto` (the default), `deep` or `quick`.
    - `auto`: pick the depth. Intent: pr-review-triage. If the session's tool map lists it, use that command with the PR number and read its first line, `review=quick` or `review=deep`. It prints `quick` only when three small-model reads agree. If it exits non-zero or prints anything else, use `deep`: a triage failure never skips or lightens the review. Otherwise do this: use `deep`.
-   - `deep`: run `/playbook:deep-review <n> --self` against the PR just created (a draft is a real PR, so this works).
-   - `quick`: run `/playbook:quick-review <n> --self`.
-   - Config read error on either call: do not block and do not skip. Run `/playbook:deep-review <n> --self`.
+   - `deep`: run `/playbook:review <n> --self --deep` against the PR just created (a draft is a real PR, so this works).
+   - `quick`: run `/playbook:review <n> --self --quick`.
+   - Config read error on either call: do not block and do not skip. Run `/playbook:review <n> --self --deep`.
    - Never issue `/clear` here: a model cannot, and the reviewers are fresh subagents that never saw the code. A person may clear first; nothing depends on it. If this session has no `Agent` tool, the review command runs its lenses inline and says so in its report; treat that report as the review.
 2. After the review, read `autoReview.fix` and `autoMerge.enabled`. Both default to `false`, apply in ask and auto mode alike, and need no question.
 3. Check the PR text. The body follows the short template (first line the ticket key when one is known, `## Summary`, optional Notes and Related work, under 1200 characters, `Closes #N` or `Refs #N` for a handled issue). The title and every commit carry the key in the scope, for example `feat(PROJ-123): add retry to the sync job`; a stacked PR must have it everywhere. Fix a miss with `gh pr edit <n> --title` or `--body-file`, or, in ask mode only, reword the commit with an interactive rebase and `git push --force-with-lease`. In auto mode never force: report the commit-scope miss instead of fixing it.

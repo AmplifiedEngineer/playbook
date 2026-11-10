@@ -1,14 +1,10 @@
----
-description: Use for a routine PR review or a quick check of your own branch. Single pass; asks which findings to post as a pending review; skips posting only with --self or --no-post.
-allowed-tools: Bash, Read, Grep, Glob, Write, Agent, SendMessage, TaskStop, Skill, AskUserQuestion
-argument-hint: "[--help] [PR number] [--self] [--no-post] [--this-pr] [--whole-stack] [--auto] [--ask]"
-model: sonnet
-effort: medium
----
-
 # Quick Review
 
 Review a pull request with grounding-review discipline. Output a structured report, then orchestrate posting findings as inline comments on a **pending** GitHub review so the user picks the submit verb.
+
+## Contents
+
+Steps 0 to 6 run in order, and the teardown always runs.
 
 ## Argument parsing
 
@@ -24,9 +20,7 @@ Parse `$ARGUMENTS` (strip `--self`, `--no-post`, `--auto` and `--ask` before rea
 
 `--self` and `--no-post` (the same flag) force `SELF_MODE=true` regardless of whether a PR number was also given: review and report, skip Step 4's posting orchestration entirely. Those flags are the only causes: no PR number and self-authorship never skip the posting question. When the PR is yours, GitHub rejects `APPROVE` and `REQUEST_CHANGES`, so Q2 offers `comment` and `skip` only.
 
-## Step 0: Read the run mode
-
-Do this first, before Step 1. Read the run mode and the effort ceiling for `quick-review` with `$ARGUMENTS`: read `skills/delegating-subagents/references/run-context.md` in this plugin and follow it. It covers the tool, the plain steps without it, the warning, the ceiling, the flag conflict and any failure.
+## Step 0: Routing
 
 **Routing.** Where you choose what to spawn, route the `review` kind. Intent: route-model. If the session's tool map (printed at session start) lists it, use that command and follow its `action` under the `routing.escalate` gate: on `ask` stop and ask the user, on `downgraded` (`deny`) use the lower tier it names, and in auto mode (`auto`) proceed and log the assumption. If the command fails, carry on. Otherwise do this: spawn the agents this file names, with the model their agent files pin.
 
@@ -126,7 +120,7 @@ The subagent prompt MUST include:
 
 - The PR diff and `HEAD_SHA`, plus numbered excerpts of each changed file, the scoped test command and the stated limit to read beyond them only when needed (the "Review brief builder" in `skills/delegating-subagents/references/briefs.md`), and its `Callers` block only when `code.briefFactsTokens` is above 0.
 - How to read files: **worktree mode** → the absolute `$WT` path with "read and grep files under $WT; do not install or build"; **in-place mode** (`WT` empty) → "read the local working tree, which is at HEAD_SHA".
-- The full **Voice rules (mandatory)** and **Anti-patterns to refuse** sections from this command, verbatim, plus the instruction to load `playbook:grounding-review` for the rest of the discipline. The reviewer loads no other skill and writes no comment body.
+- The full **Voice rules (mandatory)** and **Anti-patterns to refuse** sections from this pass, verbatim, plus the instruction to load `playbook:grounding-review` for the rest of the discipline. The reviewer loads no other skill and writes no comment body.
 - The output contract in Step 3: it MUST return exactly that report of plain findings, with no `Post:` block.
 - Cite from the excerpts; read a file at `HEAD_SHA` only when they cannot settle a claim. Quote exact evidence; tag anything unconfirmed `[unverified]`.
 
@@ -142,7 +136,7 @@ So:
 - **A silent reviewer is NOT a clean review.** If nothing comes back, say the review did not run. Do not report zero findings, and do not post a pending review implying the diff was reviewed. Those are different outcomes and only one is safe to act on.
 - After the idle notification fires, one `SendMessage` asking for partial results is worth a single try; it sometimes works. Do not spend more than one round on it.
 
-The report is rendered in the `playbook:grounding-review` Review Report Format. `/playbook:quick-review` is single-pass, so it OMITS the `### Reviewers` line; every other line matches the canonical shape. Each finding is plain, with no comment body: label, `file:line`, evidence, the failure, and one fix. A finding whose evidence is not on a changed diff line ends with `Report-only: not on a changed line, no inline comment.`
+The report is rendered in the `playbook:grounding-review` Review Report Format. `/playbook:review --quick` is single-pass, so it OMITS the `### Reviewers` line; every other line matches the canonical shape. Each finding is plain, with no comment body: label, `file:line`, evidence, the failure, and one fix. A finding whose evidence is not on a changed diff line ends with `Report-only: not on a changed line, no inline comment.`
 
 Do not relay the report yet. It goes through Step 3b first.
 

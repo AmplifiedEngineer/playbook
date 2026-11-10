@@ -8,7 +8,7 @@ Turn an idea into a checked plan, build it in small pull requests, then review t
 
 1. Plan the idea. The command interviews you and checks the plan before it saves it: `/playbook:plan add a retry to the sync job`.
 2. Build the plan. Each segment of the plan becomes one small pull request: `/playbook:implement`.
-3. Review your branch. The command sizes the diff and offers a quick or a deep review: `/playbook:review`.
+3. Review your branch. The command picks a quick or a deep review, says why, and runs it: `/playbook:review`.
 
 ## What you see
 

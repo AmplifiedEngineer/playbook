@@ -13,7 +13,7 @@ use std::path::PathBuf;
 const REFERENCE: &str = "skills/grounding-review/references/pick-list.md";
 const REFERENCE_POINTER: &str = "skills/grounding-review/references/pick-list.md";
 
-const POSTING_COMMANDS: [&str; 2] = ["quick-review", "deep-review"];
+const POSTING_COMMANDS: [&str; 2] = ["quick-pass", "deep-pass"];
 
 fn read(rel: &str) -> String {
     let path = PathBuf::from(env!("PLAYBOOK_PLUGIN_ROOT")).join(rel);
@@ -58,7 +58,7 @@ fn the_reference_uses_checkbox_questions_with_a_typed_fallback() {
 
 #[test]
 fn commands_that_pick_allow_ask_user_question() {
-    for name in ["quick-review", "deep-review", "pr-comments"] {
+    for name in ["review", "pr-comments"] {
         let text = read(&format!("commands/{name}.md"));
         let tools = text
             .lines()
@@ -88,7 +88,7 @@ fn the_reference_keeps_the_tier_names_working() {
 #[test]
 fn both_review_commands_use_the_pick_list_and_keep_the_post_question() {
     for name in POSTING_COMMANDS {
-        let text = read(&format!("commands/{name}.md"));
+        let text = read(&format!("skills/grounding-review/references/{name}.md"));
         assert!(
             text.contains(REFERENCE_POINTER),
             "{name}: does not read the pick list"

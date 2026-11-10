@@ -33,9 +33,6 @@ pub(super) enum Auto {
     Dedicated,
     /// Stops at Step 0 with a one-line refusal naming the command and why.
     Refuses,
-    /// Auto mode does not skip the post question; only `--self` and
-    /// `--no-post` do.
-    ReportsOnly,
     /// Behaves as `--stage`: collects candidates and skips the write prompt.
     Stages,
     /// Asks nothing and behaves the same in both modes, so it has no Step 0.
@@ -100,16 +97,6 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         name: "pr-comments",
         asks: true,
         auto: Auto::Refuses,
-    },
-    CommandSpec {
-        name: "quick-review",
-        asks: true,
-        auto: Auto::ReportsOnly,
-    },
-    CommandSpec {
-        name: "deep-review",
-        asks: true,
-        auto: Auto::ReportsOnly,
     },
     CommandSpec {
         name: "learn-project",

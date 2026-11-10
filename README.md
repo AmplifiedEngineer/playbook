@@ -23,7 +23,7 @@ Out of the box, Claude Code leaves planning, review, safety rules and cost track
 | Code search | `playbook code context "how is the cart total computed"` returns whole matching declarations inside a token budget. One tree-sitter index serves every worktree of a repo. | [Page](docs/code-search.md) |
 | Document reading | `playbook doc read report.pdf` turns a PDF or Office file into text, offline on your machine, inside a frame that marks it as untrusted data. | [Guide](docs/guides/06-reading-documents.md) |
 | pbtop | A terminal dashboard of token use and cost by session and by model, with your usage limits. | [Page](docs/pbtop.md) |
-| Review | `/playbook:review` sizes the diff, then runs a quick or a deep review. | [Guide](docs/guides/02-review-and-pr-flow.md) |
+| Review | `/playbook:review` picks a quick or a deep review, says why, and runs it. | [Guide](docs/guides/02-review-and-pr-flow.md) |
 | Safety guards | The rm guard blocks `rm -rf /` and `rm -rf ~`. An opt-in guard denies a short list of risky calls. | [Guide](docs/guides/07-rm-guard.md) |
 
 ## Install

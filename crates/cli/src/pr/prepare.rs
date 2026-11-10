@@ -191,7 +191,7 @@ pub fn render_text(outcome: &Outcome) -> String {
     let r = match outcome {
         Outcome::Exists { url } => {
             return format!(
-                "A PR already exists: {url}\nUse /playbook:pr-comments or /playbook:quick-review instead."
+                "A PR already exists: {url}\nUse /playbook:pr-comments or /playbook:review instead."
             )
         }
         Outcome::Ready(r) => r,

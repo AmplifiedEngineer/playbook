@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook worktree review setup|teardown`: the locked, detached PR review
-//! worktrees `/playbook:quick-review` and `/playbook:deep-review` run in.
+//! worktrees `/playbook:review --quick` and `/playbook:review --deep` run in.
 //! Ported from the retired shell original.
 
 use std::fs;

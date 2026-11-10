@@ -127,11 +127,11 @@ fn plugin_markdown_frontmatter_has_no_unquoted_colon_space() {
 }
 
 /// Without this the cheapest way to satisfy the scan is to ban colons outright,
-/// which would fire on every `/playbook:deep-review` reference.
+/// which would fire on every `/playbook:review` reference.
 #[test]
 fn bare_and_quoted_colons_are_accepted() {
     let block = "name: reviewer\n\
-                 description: Runs the /playbook:deep-review swarm.\n\
+                 description: Runs the /playbook:review swarm.\n\
                  quoted: \"takes a focus from the prompt: a single named lens\"\n\
                  single: 'also fine: quoted'\n";
     assert!(colon_space_offenders(block).is_empty());

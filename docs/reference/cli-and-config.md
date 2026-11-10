@@ -734,12 +734,12 @@ Show one component's shipped effort, ceiling and effective level
 
 For an agent it also names the file to dispatch and every file allowed under the ceiling.
 
-`--cap <level>` adds a ceiling from the calling command, for example `quick-review` holding its reviewer to `medium`. The lowest of the cap and the user's ceilings applies.
+`--cap <level>` adds a ceiling from the calling command, for example `review` holding its reviewer to `medium`. The lowest of the cap and the user's ceilings applies.
 
 Example: `playbook effort resolve agents reviewer --cap medium --json`
 
 - `<KIND>`: One of agents, commands or skills
-- `<NAME>`: Component name, such as `reviewer` or `deep-review`
+- `<NAME>`: Component name, such as `reviewer` or `review`
 - `--cap <CAP>`: Extra ceiling from the caller: low, medium, high, xhigh or max
 - `--json`: Print JSON
 
@@ -2025,7 +2025,7 @@ Example: `playbook worktree remove ../.worktrees/my-repo/my-branch`
 
 Create or remove the locked review worktrees
 
-`/playbook:quick-review` and `/playbook:deep-review` run in them.
+`/playbook:review --quick` and `/playbook:review --deep` run in them.
 
 Subcommands: `setup`, `teardown`
 

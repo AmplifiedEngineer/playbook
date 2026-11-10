@@ -1,6 +1,6 @@
 # Triage tiers
 
-How `/playbook:deep-review` and `/playbook:implement` (Step 9) act on the tier map that `review-triage` returns, once it is completed. The two commands point here for the rules below and keep their own lens lists, prompts and commands.
+How `/playbook:review --deep` and `/playbook:implement` (Step 9) act on the tier map that `review-triage` returns, once it is completed. The two commands point here for the rules below and keep their own lens lists, prompts and commands.
 
 ## Completing the map
 

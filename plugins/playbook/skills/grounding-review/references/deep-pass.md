@@ -1,28 +1,22 @@
----
-description: Use for substantial, risky, or cross-cutting PRs. Parallel specialist reviewers, fact-checked, asks which findings to post as a pending GitHub review. Heavier than quick-review.
-allowed-tools: Bash, Read, Grep, Glob, Write, Agent, SendMessage, TaskStop, Skill, AskUserQuestion
-argument-hint: "[PR number] [--all] [--preset <name>] [--self] [--no-post] [--this-pr] [--whole-stack] [--auto] [--ask] [--help]"
-model: opus
-effort: medium
----
-
 # Deep Review: Multi-Agent PR Review
 
-Review a pull request with a swarm of specialist reviewer subagents run in parallel, each a focused `reviewer` subagent under the `playbook:grounding-review` discipline. The orchestrating session consolidates, dedups, and fact-checks their findings, then posts them as a **pending** GitHub review (same posting flow as `/playbook:quick-review`). This is heavier and slower than `/playbook:quick-review`; use it for substantial, risky, or cross-cutting PRs.
+Review a pull request with a swarm of specialist reviewer subagents run in parallel, each a focused `reviewer` subagent under the `playbook:grounding-review` discipline. The orchestrating session consolidates, dedups, and fact-checks their findings, then posts them as a **pending** GitHub review (same posting flow as `quick-pass.md`). This is heavier and slower than `/playbook:review --quick`; use it for substantial, risky, or cross-cutting PRs.
 
-Invoked as `/playbook:deep-review`. The remaining arguments are an optional PR number and flags.
+> **Security caveat:** running `/playbook:review --deep` on an explicit PR installs and runs the PR's code in your local environment: npm preinstall/postinstall hooks, build scripts, test suites. This exposes you to supply-chain attacks and code execution with your credentials in reach. Only run it on PRs you trust to execute locally.
 
-> **Security caveat:** running `/playbook:deep-review` on an explicit PR installs and runs the PR's code in your local environment: npm preinstall/postinstall hooks, build scripts, test suites. This exposes you to supply-chain attacks and code execution with your credentials in reach. Only run it on PRs you trust to execute locally.
+## Contents
+
+Steps 0 to 8 run in order, and the teardown always runs.
 
 ## Help
 
 If the arguments contain `--help`, print this and stop:
 
 ```
-/playbook:deep-review - Multi-agent PR review with a specialist reviewer swarm
+/playbook:review --deep - Multi-agent PR review with a specialist reviewer swarm
 
 USAGE:
-  /playbook:deep-review [PR_NUMBER] [options]
+  /playbook:review --deep [PR_NUMBER] [options]
 
 OPTIONS:
   --help            Show this help
@@ -37,17 +31,15 @@ OPTIONS:
   --ask             Force the interactive mode
 
 EXAMPLES:
-  /playbook:deep-review               Review the current branch's PR and ask what to post
-  /playbook:deep-review 123           Review and post to PR #123 (unless #123 is your own PR)
-  /playbook:deep-review 123 --all     PR #123 with every reviewer, posts (unless it's yours)
-  /playbook:deep-review 123 --self    Review PR #123, report only, never posts
+  /playbook:review --deep               Review the current branch's PR and ask what to post
+  /playbook:review --deep 123           Review and post to PR #123 (unless #123 is your own PR)
+  /playbook:review --deep 123 --all     PR #123 with every reviewer, posts (unless it's yours)
+  /playbook:review --deep 123 --self    Review PR #123, report only, never posts
 ```
 
 With no PR number the current branch's PR is reviewed and the post question is asked as usual. Only `--self` and `--no-post` skip it, auto mode included. On your own PR GitHub blocks approve and request-changes, so the submit verb is limited to comment or skip.
 
-## Step 0: Read the run mode
-
-Do this first, before Step 1. Read the run mode and the effort ceiling for `deep-review` with `$ARGUMENTS`: read `skills/delegating-subagents/references/run-context.md` in this plugin and follow it. It covers the tool, the plain steps without it, the warning, the ceiling, the flag conflict and any failure.
+## Step 0: Routing
 
 **Routing.** Where you choose what to spawn, route the `review` kind. Intent: route-model. If the session's tool map (printed at session start) lists it, use that command and follow its `action` under the `routing.escalate` gate: on `ask` stop and ask the user, on `downgraded` (`deny`) use the lower tier it names, and in auto mode (`auto`) proceed and log the assumption. If the command fails, carry on. Otherwise do this: spawn the agents this file names, with the model their agent files pin.
 
@@ -95,11 +87,11 @@ Auto mode does not change posting. Only `--self` or `--no-post` skips the post q
 5. Follow the command's gates, not your own.
 6. Show real data: tables and reports come from actual output, never placeholders.
 7. **No selective filtering at presentation.** After consolidation (Step 4) and the verification sweep (Step 4b) you present EVERY surviving finding; the user decides what to post in Step 6. (Consolidation's dedup/drop rules and the sweep's drops are the only removals, and they happen in Steps 4 and 4b, not by hiding findings in Step 5.)
-8. **Never ask whether to run.** Invoking `/playbook:deep-review` IS the instruction to run; start immediately.
+8. **Never ask whether to run.** Invoking `/playbook:review --deep` IS the instruction to run; start immediately.
 
 ## Voice rules
 
-Findings are plain: Conventional Comments label and decorations (read `playbook:grounding-review` reference `references/conventional-comments.md`), `file:line`, evidence, a short failure scenario, and one fix in plain words, with no comment body (same discipline as `/playbook:quick-review`). Step 5 drafts the comments after the sweep, and only when something can be posted. Non-negotiables for every finding: Conventional Comments label in **plain text** and bare (`blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`, never bold; `blocking:` replaces `issue:` specifically for a merge-blocking finding); plain, jargon-free language; findings kept short (one sentence when possible, two at most, the problem then what breaks, a second only when the mechanism is non-obvious); one pragmatic fix, not a menu; no hedging; no meta-justification; no em or en dashes.
+Findings are plain: Conventional Comments label and decorations (read `playbook:grounding-review` reference `references/conventional-comments.md`), `file:line`, evidence, a short failure scenario, and one fix in plain words, with no comment body (same discipline as `quick-pass.md`). Step 5 drafts the comments after the sweep, and only when something can be posted. Non-negotiables for every finding: Conventional Comments label in **plain text** and bare (`blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`, never bold; `blocking:` replaces `issue:` specifically for a merge-blocking finding); plain, jargon-free language; findings kept short (one sentence when possible, two at most, the problem then what breaks, a second only when the mechanism is non-obvious); one pragmatic fix, not a menu; no hedging; no meta-justification; no em or en dashes.
 
 ## Step 1: Resolve PR and gather context
 
@@ -203,7 +195,7 @@ For full-lens dispatches, instruct the reviewer to:
  "category": "security", "confidence": "HIGH", "evidence": "<exact code>", "body": "<short plain finding; the problem then what breaks, 1 sentence when possible, a second only when the mechanism is non-obvious>", "fix": "<one fix, in plain words>"}
 ```
 
-**A silent reviewer is NOT a reviewer with zero findings.** This is the single most important rule in this command (`playbook:delegating-subagents`).
+**A silent reviewer is NOT a reviewer with zero findings.** This is the single most important rule in this pass (`playbook:delegating-subagents`).
 
 The `reviewer` agent is structurally read-only (Read, Grep, Glob, Skill), so it cannot write its findings to a file. The repo's agent checks forbid `Write` and `Bash` for that tier by design, and granting them would fail CI, so the return value is the only channel there is. In measured use, Agent-tool return values have failed outright. Treat a swarm as likely to lose lenses.
 

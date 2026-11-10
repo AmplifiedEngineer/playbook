@@ -10,12 +10,12 @@ use std::path::PathBuf;
 
 fn read(name: &str) -> String {
     let path = PathBuf::from(env!("PLAYBOOK_PLUGIN_ROOT"))
-        .join("commands")
+        .join("skills/grounding-review/references")
         .join(format!("{name}.md"));
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-const COMMANDS: [&str; 2] = ["quick-review", "deep-review"];
+const COMMANDS: [&str; 2] = ["quick-pass", "deep-pass"];
 
 #[test]
 fn both_commands_name_no_post_and_ask_what_to_post() {

@@ -22,8 +22,8 @@ use std::path::PathBuf;
 /// Files that carry the sweep as a section of their own.
 const SWEEP_FILES: &[&str] = &[
     "skills/grounding-review/references/orchestrator.md",
-    "commands/quick-review.md",
-    "commands/deep-review.md",
+    "skills/grounding-review/references/quick-pass.md",
+    "skills/grounding-review/references/deep-pass.md",
     "commands/implement.md",
 ];
 
@@ -165,48 +165,48 @@ fn every_review_flow_has_a_sweep_section_with_the_three_checks() {
 #[test]
 fn quick_review_sweeps_before_it_relays_or_posts() {
     // Arrange
-    let doc = load("commands/quick-review.md");
+    let doc = load("skills/grounding-review/references/quick-pass.md");
 
     // Act
     let contract = doc.step("Step 3:");
-    let sweep = doc.sweep().expect("quick-review has a sweep section");
+    let sweep = doc.sweep().expect("quick-pass has a sweep section");
     let posting = doc.step("Step 4:");
 
     // Assert
     assert!(
         contract.start < sweep.start && sweep.start < posting.start,
-        "quick-review: the sweep must sit after the report contract and before posting"
+        "quick-pass: the sweep must sit after the report contract and before posting"
     );
     let text = doc.lines.join("\n");
     assert!(
         !text.contains("Relay the report to the user unchanged"),
-        "quick-review still relays the reviewer report unchanged"
+        "quick-pass still relays the reviewer report unchanged"
     );
     assert!(
         !text.contains("the orchestrator does NOT re-read source files"),
-        "quick-review still forbids the orchestrator from re-reading cited lines"
+        "quick-pass still forbids the orchestrator from re-reading cited lines"
     );
 }
 
 #[test]
 fn deep_review_sweeps_before_it_presents_or_posts() {
     // Arrange
-    let doc = load("commands/deep-review.md");
+    let doc = load("skills/grounding-review/references/deep-pass.md");
 
     // Act
     let consolidate = doc.step("Step 4:");
-    let sweep = doc.sweep().expect("deep-review has a sweep section");
+    let sweep = doc.sweep().expect("deep-pass has a sweep section");
     let present = doc.step("Step 5:");
     let posting = doc.step("Step 6:");
 
     // Assert
     assert!(
         consolidate.start < sweep.start,
-        "deep-review: the sweep must follow consolidation"
+        "deep-pass: the sweep must follow consolidation"
     );
     assert!(
         sweep.start < present.start && sweep.start < posting.start,
-        "deep-review: the sweep must come before presenting or posting"
+        "deep-pass: the sweep must come before presenting or posting"
     );
 }
 
@@ -255,24 +255,24 @@ fn every_review_flow_recomputes_the_verdict_from_the_swept_list() {
 #[test]
 fn quick_review_sweep_traces_but_never_runs_pr_code() {
     // Arrange
-    let doc = load("commands/quick-review.md");
+    let doc = load("skills/grounding-review/references/quick-pass.md");
 
     // Act
-    let sweep = doc.sweep().expect("quick-review has a sweep section");
+    let sweep = doc.sweep().expect("quick-pass has a sweep section");
     let text = doc.text_of(&sweep);
 
     // Assert
     assert!(
         text.contains("Trace the failure scenario"),
-        "quick-review: the sweep does not say to trace the failure scenario"
+        "quick-pass: the sweep does not say to trace the failure scenario"
     );
     assert!(
         !text.contains("or run"),
-        "quick-review: the sweep must not tell the orchestrator to run PR code"
+        "quick-pass: the sweep must not tell the orchestrator to run PR code"
     );
     assert!(
         text.contains("never run PR code"),
-        "quick-review: the sweep does not forbid running PR code"
+        "quick-pass: the sweep does not forbid running PR code"
     );
 }
 
@@ -361,8 +361,8 @@ fn reviewer_agents_never_load_writing_style() {
 #[test]
 fn reviewer_prompt_sections_never_load_writing_style() {
     // Arrange: the sections each command hands to a reviewer prompt.
-    let quick = load("commands/quick-review.md");
-    let deep = load("commands/deep-review.md");
+    let quick = load("skills/grounding-review/references/quick-pass.md");
+    let deep = load("skills/grounding-review/references/deep-pass.md");
     let implement = load("commands/implement.md");
     let step9 = implement.step("Step 9:");
     let fixes = implement
@@ -398,10 +398,10 @@ fn reviewer_prompt_sections_never_load_writing_style() {
 #[test]
 fn quick_review_loads_writing_style_once_after_the_sweep_outside_self_mode() {
     // Arrange
-    let doc = load("commands/quick-review.md");
+    let doc = load("skills/grounding-review/references/quick-pass.md");
 
     // Act
-    let sweep = doc.sweep().expect("quick-review has a sweep section");
+    let sweep = doc.sweep().expect("quick-pass has a sweep section");
     let posting = doc.step("Step 4:");
     let draft = draft_section(&doc);
     let loads = doc.writing_style_loads(0, doc.lines.len());
@@ -410,81 +410,81 @@ fn quick_review_loads_writing_style_once_after_the_sweep_outside_self_mode() {
         .expect("Step 4 stops in self mode");
     let show = doc
         .find_line(draft.start, "Relay the swept report with each draft")
-        .expect("quick-review shows the drafts");
+        .expect("quick-pass shows the drafts");
     let ask = doc
         .find_line(draft.end, "Post which findings")
-        .expect("quick-review asks which findings to post");
+        .expect("quick-pass asks which findings to post");
 
     // Assert
     assert_eq!(
         loads.len(),
         1,
-        "quick-review must load writing-style once: {loads:?}"
+        "quick-pass must load writing-style once: {loads:?}"
     );
     let load = loads[0];
     assert!(
         sweep.end <= load,
-        "quick-review: the load must sit after the sweep"
+        "quick-pass: the load must sit after the sweep"
     );
     assert!(
         posting.start < self_stop && self_stop < load && load < posting.end,
-        "quick-review: the load must sit inside Step 4, after the self mode stop"
+        "quick-pass: the load must sit inside Step 4, after the self mode stop"
     );
     assert!(
         draft.start <= load && load < show && show < ask,
-        "quick-review: the load must come before the drafts are shown and the post question"
+        "quick-pass: the load must come before the drafts are shown and the post question"
     );
 }
 
 #[test]
 fn deep_review_loads_writing_style_once_after_the_sweep_outside_self_mode() {
     // Arrange
-    let doc = load("commands/deep-review.md");
+    let doc = load("skills/grounding-review/references/deep-pass.md");
 
     // Act
-    let sweep = doc.sweep().expect("deep-review has a sweep section");
+    let sweep = doc.sweep().expect("deep-pass has a sweep section");
     let present = doc.step("Step 5:");
     let posting = doc.step("Step 6:");
     let draft = draft_section(&doc);
     let loads = doc.writing_style_loads(0, doc.lines.len());
     let show = doc
         .find_line(draft.start, "Present the report with each draft")
-        .expect("deep-review shows the drafts");
+        .expect("deep-pass shows the drafts");
     let ask = doc
         .find_line(posting.start, "Post which findings")
-        .expect("deep-review asks which findings to post");
+        .expect("deep-pass asks which findings to post");
 
     // Assert
     assert_eq!(
         loads.len(),
         1,
-        "deep-review must load writing-style once: {loads:?}"
+        "deep-pass must load writing-style once: {loads:?}"
     );
     let load = loads[0];
     let line = doc.lines[load].to_lowercase();
     assert!(
         sweep.end <= load,
-        "deep-review: the load must sit after the sweep"
+        "deep-pass: the load must sit after the sweep"
     );
     assert!(
         present.start < draft.start && draft.start <= load && load < draft.end,
-        "deep-review: the load must sit in the draft section of the presenting step"
+        "deep-pass: the load must sit in the draft section of the presenting step"
     );
     assert!(
         line.find("skip this in `self_mode`")
             .is_some_and(|skip| skip < line.find(WRITING_STYLE_LOAD).unwrap_or(0)),
-        "deep-review: the load must come after the self mode skip"
+        "deep-pass: the load must come after the self mode skip"
     );
     assert!(
         load < show && show < posting.start && posting.start < ask,
-        "deep-review: the load must come before the drafts are shown and the post question"
+        "deep-pass: the load must come before the drafts are shown and the post question"
     );
 }
 
 #[test]
 fn deep_review_loads_skills_only_after_triage_settles_the_lenses() {
     // Arrange
-    let doc = load("commands/deep-review.md");
+    let doc = load("skills/grounding-review/references/deep-pass.md");
 
     // Act
     let triage = doc.step("Step 2d:");
@@ -493,14 +493,14 @@ fn deep_review_loads_skills_only_after_triage_settles_the_lenses() {
     // Assert
     assert!(
         triage.start < load_step.start,
-        "deep-review: Step 2e must start after the Step 2d triage"
+        "deep-pass: Step 2e must start after the Step 2d triage"
     );
 }
 
 #[test]
 fn quick_review_invokes_grounding_review_after_self_mode_is_settled() {
     // Arrange
-    let doc = load("commands/quick-review.md");
+    let doc = load("skills/grounding-review/references/quick-pass.md");
 
     // Act
     let resolve = doc.step("Step 1:");
@@ -512,17 +512,20 @@ fn quick_review_invokes_grounding_review_after_self_mode_is_settled() {
     // Assert
     assert!(
         doc.text_of(&resolve).contains("`SELF_MODE`"),
-        "quick-review: Step 1 does not settle SELF_MODE"
+        "quick-pass: Step 1 does not settle SELF_MODE"
     );
     assert!(
         resolve.end <= invoke,
-        "quick-review: grounding-review is invoked before Step 1 settles SELF_MODE"
+        "quick-pass: grounding-review is invoked before Step 1 settles SELF_MODE"
     );
 }
 
 #[test]
 fn posting_steps_post_the_previewed_drafts_as_they_are() {
-    for rel in ["commands/quick-review.md", "commands/deep-review.md"] {
+    for rel in [
+        "skills/grounding-review/references/quick-pass.md",
+        "skills/grounding-review/references/deep-pass.md",
+    ] {
         // Arrange
         let doc = load(rel);
 

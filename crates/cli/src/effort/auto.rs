@@ -39,7 +39,7 @@ pub const BIG_LINES: u64 = 1500;
 pub const BIG_FILES: u64 = 40;
 pub const BIG_BYTES: u64 = 60 * 1024;
 /// At most this many lines and files is a small diff (the `dedup` trigger in
-/// `/playbook:deep-review` is 300 lines).
+/// `/playbook:review --deep` is 300 lines).
 pub const SMALL_LINES: u64 = 300;
 pub const SMALL_FILES: u64 = 10;
 /// The level a raise aims for, capped by what is allowed.

@@ -5,6 +5,8 @@
 
 use super::ap::{is_ask, require_section, CommandFile, Section};
 use regex::Regex;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 impl CommandFile {
@@ -87,4 +89,24 @@ pub(super) fn is_post_call(line: &str) -> bool {
     static POST: OnceLock<Regex> = OnceLock::new();
     POST.get_or_init(|| Regex::new(r"gh api[^\n]*(-X POST|/reviews)").expect("post pattern"))
         .is_match(line)
+}
+
+/// The two review passes `/playbook:review` reads. They post a pending review,
+/// so the posting rules apply to their files. Auto mode does not skip the post
+/// question; only `--self` and `--no-post` do.
+pub(super) const PASSES: [&str; 2] = ["quick-pass", "deep-pass"];
+
+/// A pass file under `skills/grounding-review/references/`. It has no
+/// frontmatter, so its body starts at the first line.
+pub(super) fn load_pass(name: &str) -> CommandFile {
+    let path = PathBuf::from(env!("PLAYBOOK_PLUGIN_ROOT"))
+        .join("skills/grounding-review/references")
+        .join(format!("{name}.md"));
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("could not read {}: {e}", path.display()));
+    CommandFile {
+        name: name.to_owned(),
+        lines: text.lines().map(str::to_owned).collect(),
+        body_start: 0,
+    }
 }

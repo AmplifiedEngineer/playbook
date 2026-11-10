@@ -1,10 +1,10 @@
 # Orchestrator Reference
 
-For the session that runs a review (`/playbook:quick-review`, `/playbook:deep-review`, `/playbook:implement` Step 9). Lens reviewers and `cheap-checker` do not read this file. The finding block, labels, evidence and proof rules are in the skill itself.
+For the session that runs a review (`/playbook:review`, `/playbook:implement` Step 9). Lens reviewers and `cheap-checker` do not read this file. The finding block, labels, evidence and proof rules are in the skill itself.
 
 ## Review Report Format
 
-Both `/playbook:quick-review` and `/playbook:deep-review` render this exact structure. The only difference: `/playbook:deep-review` includes the `### Reviewers` line; `/playbook:quick-review` omits it. The `·` separators are the middle dot U+00B7, not a dash.
+Both `/playbook:review --quick` and `/playbook:review --deep` render this exact structure. The only difference: `/playbook:review --deep` includes the `### Reviewers` line; `/playbook:review --quick` omits it. The `·` separators are the middle dot U+00B7, not a dash.
 
 ### Report skeleton
 
@@ -17,7 +17,7 @@ Both `/playbook:quick-review` and `/playbook:deep-review` render this exact stru
 Sweep: <N> kept, <N> dropped, <N> relabelled, <N> moved
 
 ### Reviewers
-<deep-review and implement Step 9 only: lens roll-up with tier, e.g. "security: full (2) · docs: cheap-check (0) · perf: skip">
+<deep review and implement Step 9 only: lens roll-up with tier, e.g. "security: full (2) · docs: cheap-check (0) · perf: skip">
 
 ### Findings
 <numbered finding blocks, ordered by resolved action: must-fix first (anything marked blocking, then issue, chore, todo, typo unless marked non-blocking), then question, then suggestion, then the optional ones (polish, thought, nitpick, anything marked non-blocking)>
@@ -34,7 +34,7 @@ After the first review pass produces its findings, and before the list is shown,
 
 Check three things for each finding:
 
-1. **True.** Re-read the cited lines. Trace the failure scenario where that is cheap; run it only in a flow that already runs the PR's code behind its own warning (deep-review). A finding tagged `[unverified]` is either confirmed, dropped, or kept with the `[unverified]` tag stated plainly.
+1. **True.** Re-read the cited lines. Trace the failure scenario where that is cheap; run it only in a flow that already runs the PR's code behind its own warning (the deep pass). A finding tagged `[unverified]` is either confirmed, dropped, or kept with the `[unverified]` tag stated plainly.
 2. **Label.** The label and decorations (see `conventional-comments.md`) match the real impact.
 3. **Anchor.** The file and line are right. In a stacked or multi-PR review, the finding sits on the PR or branch that owns the code.
 

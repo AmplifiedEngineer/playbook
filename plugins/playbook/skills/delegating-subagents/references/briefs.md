@@ -25,9 +25,9 @@ An `Agent` call that omits `subagent_type` forks the parent: the child inherits 
 | Site | Needs parent history? | Mechanism |
 |---|---|---|
 | `repo-audit` | No | `context: fork`, `agent: auditor` (fresh) |
-| `deep-review`, `quick-review`, `implement` Step 9 reviewers, `review-triage`, `cheap-checker` | No, diff and excerpts go in the brief | `subagent_type: playbook:<agent>` |
+| `review` (both passes), `implement` Step 9 reviewers, `review-triage`, `cheap-checker` | No, diff and excerpts go in the brief | `subagent_type: playbook:<agent>` |
 | `implement` implementers | No, the Work Unit brief is self-contained | `subagent_type: playbook:implementer` |
-| `deep-review`, `quick-review` comment drafts | No, the swept facts go in the brief | `subagent_type: playbook:writer` |
+| `review` comment drafts | No, the swept facts go in the brief | `subagent_type: playbook:writer` |
 | `plan`, `adr` critic, fact-checker, test-reviewer | No, they get the full artifact | `subagent_type: playbook:<agent>` |
 | `plan` Step 2 and discovery agents | No, they get a question and paths | `subagent_type: Explore` or `general-purpose` |
 | `learn-project` collectors and analysts | No | `subagent_type: playbook:<agent>` |

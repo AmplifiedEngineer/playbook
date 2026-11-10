@@ -39,7 +39,7 @@ When you are unsure a problem exists, use `question` and do not use `issue`.
 |---|---|
 | blocking | Must be fixed before the change is accepted. |
 | non-blocking | Must not stop the change from being accepted. |
-| security, test, perf, data, types, logic | Optional second decoration that names the review lens. Any reviewer name from the deep-review tables also works. |
+| security, test, perf, data, types, logic | Optional second decoration that names the review lens. Any reviewer name from the deep pass tables also works. |
 
 Use `blocking` or `non-blocking` first when you add a lens: `issue (blocking, security): ...`. Add a decoration when the default does not fit. A bare `blocking:` label from older comments reads as `issue (blocking):`. Write the new form only.
 

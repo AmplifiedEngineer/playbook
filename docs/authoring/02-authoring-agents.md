@@ -47,7 +47,7 @@ That is what `commands/repo-audit.md` adds to its frontmatter to route to `playb
 subagent_type: playbook:reviewer
 ```
 
-`commands/quick-review.md` spawns one `reviewer` for the whole diff in a single pass. `commands/deep-review.md` spawns several `reviewer` subagents in parallel, one per review lens.
+`skills/grounding-review/references/quick-pass.md` spawns one `reviewer` for the whole diff in a single pass. `skills/grounding-review/references/deep-pass.md` spawns several `reviewer` subagents in parallel, one per review lens.
 
 ## Model and tool policy
 
@@ -81,7 +81,7 @@ The template also carries a read-only invariant and a zero-attribution invariant
 
 [ADR 0003: Purpose-built subagents over generic fallbacks](../adr/0003-purpose-built-subagents.md) sets the rule: parametrize one agent with a focus parameter when the variants are near-identical, split into separate agents when the discipline genuinely diverges.
 
-`reviewer` is the real parametrized example on disk: it takes a lens (`logic`, `test`, `security`, `data`, `types`, `perf`, or a conditional lens) and the same agent covers every review site across `quick-review` and `deep-review`.
+`reviewer` is the real parametrized example on disk: it takes a lens (`logic`, `test`, `security`, `data`, `types`, `perf`, or a conditional lens) and the same agent covers every review site across the quick and deep passes of `review`.
 
 ADR 0003 works the same rule through a second example. A `critic` takes a focus parameter (`premise`, `plan`, `decision`, `pre-exec`) and covers several commands, because the role is one adversarial pass and the focus just flips the stance. A `fact-checker` and a `test-reviewer` split apart instead, because one follows the `playbook:grounding-research` discipline and the other follows `playbook:engineering-standards`, checklists too different to share one file. Same rule, opposite answers, because the question is whether the discipline diverges, not whether the wording does.
 

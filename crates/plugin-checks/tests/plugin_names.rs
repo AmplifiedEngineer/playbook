@@ -377,6 +377,9 @@ fn removed_names_appear_nowhere() {
     );
     assert!(real.is_empty(), "{real:#?}");
     assert!(real_files.is_empty(), "{real_files:#?}");
+    for name in ["quick-review", "deep-review"] {
+        assert!(REMOVED.contains(&name), "REMOVED lacks {name}");
+    }
 }
 
 #[test]
