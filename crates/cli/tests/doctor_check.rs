@@ -53,7 +53,7 @@ impl Box {
             "#!/bin/sh\ncase \"$1\" in --version) echo 'playbook {version}';; gate) {gate};; esac\n"
         );
         let f = d.join("playbook");
-        playbook::testing::write_stub(&f, &body);
+        playbook::testing::write_stub(&f, &body).unwrap();
         d
     }
 
@@ -898,7 +898,7 @@ fn the_sync_row_shows_only_when_sync_is_enabled() {
     b.settings("{}");
     let dir = b.stub("bin", "1.2.3", true);
     let pbsync = dir.join("pbsync");
-    playbook::testing::write_stub(&pbsync, "#!/bin/sh\n");
+    playbook::testing::write_stub(&pbsync, "#!/bin/sh\n").unwrap();
     let data = b.home().join(".config/playbook/data");
     fs::create_dir_all(&data).unwrap();
 
@@ -953,7 +953,7 @@ fn stub_with_hooks(b: &Box, listed: &[&str]) -> PathBuf {
         "#!/bin/sh\ncase \"$1\" in --version) echo 'playbook 0.1.0';; hook) echo '{names}';; esac\n"
     );
     let f = d.join("playbook");
-    playbook::testing::write_stub(&f, &body);
+    playbook::testing::write_stub(&f, &body).unwrap();
     d
 }
 
@@ -1123,7 +1123,7 @@ fn an_old_ccc_alias_and_ccd_script_are_reported_with_their_replacements_and_left
     let bin = b.root.join("old");
     fs::create_dir_all(&bin).unwrap();
     let ccd = bin.join("ccd");
-    playbook::testing::write_stub(&ccd, "#!/bin/sh\nexec claude \"$@\"\n");
+    playbook::testing::write_stub(&ccd, "#!/bin/sh\nexec claude \"$@\"\n").unwrap();
 
     // Act
     let rows = b.run(&[&bin], "/bin/zsh", None);
@@ -1145,7 +1145,7 @@ fn fake_claude(b: &Box, body: &str) -> PathBuf {
     let dir = b.root.join("claude-bin");
     fs::create_dir_all(&dir).unwrap();
     let claude = dir.join("claude");
-    playbook::testing::write_stub(&claude, &format!("#!/bin/sh\nprintf '{body}'\n"));
+    playbook::testing::write_stub(&claude, &format!("#!/bin/sh\nprintf '{body}'\n")).unwrap();
     dir
 }
 
@@ -2294,7 +2294,7 @@ fn pbtop_stub(b: &Box, dir: &str, version: &str) -> PathBuf {
     let d = b.root.join(dir);
     fs::create_dir_all(&d).unwrap();
     let f = d.join("pbtop");
-    playbook::testing::write_stub(&f, &format!("#!/bin/sh\necho 'pbtop {version}'\n"));
+    playbook::testing::write_stub(&f, &format!("#!/bin/sh\necho 'pbtop {version}'\n")).unwrap();
     d
 }
 

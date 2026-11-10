@@ -578,7 +578,7 @@ fn the_sandbox_links_the_binaries_it_is_given() {
     let folder = std::env::temp_dir().join(format!("docs-recipes-tool-{}", std::process::id()));
     fs::create_dir_all(&folder).expect("stub folder");
     let target = folder.join("tool");
-    playbook::testing::write_stub(&target, "#!/bin/sh\necho linked\n");
+    playbook::testing::write_stub(&target, "#!/bin/sh\necho linked\n").expect("stub");
     let parent = parent_env();
     let page =
         format!("# How to test\n\n{MARKER_RUN}\n\n```bash\ntool linked\n# expect: linked\n```\n");

@@ -306,7 +306,8 @@ mod tests {
     fn path_with_script(name: &str, version: &str) -> OsString {
         let dir = scratch_dir(name);
         let script = dir.join(PBTOP_PROGRAM);
-        crate::testing::write_stub(&script, &format!("#!/bin/sh\necho \"pbtop {version}\"\n"));
+        crate::testing::write_stub(&script, &format!("#!/bin/sh\necho \"pbtop {version}\"\n"))
+            .unwrap();
         dir.into_os_string()
     }
 
