@@ -12,14 +12,14 @@
 │ $0┤▁▄▁  ▂│   models             cost and tokens per model                             │ ▃▂  ▅  ▄ │
 │    5 7  9│   breakdown          projects, agents, skills, tools or health (v switches)│ 29 31  3 │
 ╰┤peak $6.0│   live               sessions with a message in the last 15 minutes        │ haiku-5├─╯
-╭─┤²Tokens │   sessions           every session of the period, grouped by day           │──────────╮
+╭─┤²Tokens │   sessions           every session of the period, grouped by day           │────┤UTC├─╮
 │total 618.│   budget             limits and how fast you are using them                │          │
-│Thu 2026-0│   hourly             cost per hour over the last 24 hours as a chart, with │          │
-│ 50K┤┄┄┄┄┄│   spend.daily        cost per day as a table, always this view             │▇▇┄┄┄┄▇▇▇┄│
-│ 25K┤▃▃┄▃▃│ spend.total: total cost per day as a chart, always this view               │██┄┄┄┄███┄│
-│   0┤██ ██│                                                                            │██    ███ │
-│     5  6 │ Left/Right tab   h/l j/k move cursor   H/J/K/L move panel   f width        │1  2  3   │
-╰──────────│ a add   d remove   u undo   < > move tab   n new   x delete   r rename     │■■■ high├─╯
+│Thu 2026-0│   spend.daily        cost per day as a table, always this view             │          │
+│ 50K┤┄┄┄┄┄│   breakdown.projects cost per project, always this view                    │┄┄┄┄┄┄┄┄▃┄│
+│ 25K┤▃▃▃┄┄│ spend.total: total cost per day as a chart, always this view               │┄┄┄┄┄┄┄┄█┄│
+│   0┤███  │                                                                            │        █ │
+│     5   8│ Left/Right tab   h/l j/k move cursor   H/J/K/L move panel   f width        │0  22 0 1 │
+╰──────────│ a add   d remove   u undo   < > move tab   n new   x delete   r rename     │ haiku-5├─╯
 ╭─┤Burn-up├│ R reset   esc or q close   changes are saved as you make them              │iod, UTC├─╮
 │no burn-up╰────────────────────────────────────────────────────────────────────────────╯          │
 │                                                                                                  │

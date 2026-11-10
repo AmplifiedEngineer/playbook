@@ -4,7 +4,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/pbtop/charts-dark.svg">
-  <img src="images/pbtop/charts-light.svg" alt="pbtop Charts tab: spend per day, spend per day by model, tokens per day and a burn-up panel, sample data">
+  <img src="images/pbtop/charts-light.svg" alt="pbtop Charts tab: spend per day, spend per day by model, tokens per day, spend per hour and a burn-up panel, sample data">
 </picture>
 
 ## When to use it
@@ -37,13 +37,13 @@ The screen needs at least 80 columns and 24 rows. Below that it says so and draw
 
 Every tab has a header with the range, the cost, the tokens and the messages. For today, this week and this month it compares them with the previous period. A tab bar sits under it. `F1` to `F3` pick a tab, and the default layout has three.
 
-**Charts.** Spend per day, spend per day by model and tokens per day, with a burn-up panel below. It has no data in the sample, because the sample sets no limit.
+**Charts.** Every chart: spend per day and spend per day by model side by side, tokens per day and the Hourly chart side by side, with a burn-up panel below. The Hourly chart shows the cost of each of the last 24 hours with the total in its title. It has no data in the sample, because the sample sets no limit.
 
-**Numbers.** The Budget strip, the models table, the projects table and the Hourly chart, which shows the cost of each of the last 24 hours with the total in its title. Each limit on the Budget strip also says when it reaches the limit at the current pace, so a separate Projection panel is gone.
+**Numbers.** The Budget strip, the models table and the projects table. Each limit on the Budget strip also says when it reaches the limit at the current pace, so a separate Projection panel is gone.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/pbtop/numbers-dark.svg">
-  <img src="images/pbtop/numbers-light.svg" alt="pbtop Numbers tab: budget, models, projects and the cost per hour, sample data">
+  <img src="images/pbtop/numbers-light.svg" alt="pbtop Numbers tab: budget, models and projects, sample data">
 </picture>
 
 **Sessions tab.** Live sessions, which have a message in the last 15 minutes, and every session of the range grouped by day.

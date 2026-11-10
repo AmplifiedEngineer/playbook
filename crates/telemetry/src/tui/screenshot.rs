@@ -182,12 +182,12 @@ fn budget(app: &mut App) {
 const VIEWS: &[View] = &[
     View {
         stem: "charts",
-        label: "pbtop Charts tab: spend per day, spend per day by model, tokens per day and a burn-up panel",
+        label: "pbtop Charts tab: spend per day, spend per day by model, tokens per day, spend per hour and a burn-up panel",
         setup: charts,
     },
     View {
         stem: "numbers",
-        label: "pbtop Numbers tab: budget, models, projects and projection",
+        label: "pbtop Numbers tab: budget, models and projects",
         setup: numbers,
     },
     View {
