@@ -15,7 +15,7 @@ fn read(rel: &str) -> String {
 
 const BASH_RUNNERS: [&str; 7] = [
     "commands/implement.md",
-    "commands/commit-and-push.md",
+    "commands/commit.md",
     "commands/quick-review.md",
     "commands/deep-review.md",
     "commands/learn-project.md",

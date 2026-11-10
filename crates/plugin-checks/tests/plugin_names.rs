@@ -458,3 +458,93 @@ fn hidden_skill_names_follow_the_skill_rule() {
     // Assert
     assert!(problems.is_empty(), "{problems:#?}");
 }
+
+/// One row of the renamed page table: what the check gets and what it must say.
+struct PageCase<'a> {
+    label: &'a str,
+    page: Option<&'a str>,
+    renames: &'a [(&'a str, &'a str)],
+    removed: &'a [&'a str],
+    expected: Option<&'a str>,
+}
+
+#[test]
+fn renamed_page_lists_every_old_slash_name() {
+    // Arrange
+    let renames = [("commit-and-push", "commit")];
+    let removed = ["finish-pull-request"];
+    let live = names(&["review", "pr-create", "commit"]);
+    let good = "| Old name | New name |\n| --- | --- |\n\
+        | `/playbook:commit-and-push` | `/playbook:commit` |\n\
+        | `/playbook:finish-pull-request` | removed, use `/playbook:pr-create` |\n";
+    let missing_row = "| `/playbook:commit-and-push` | `/playbook:commit` |\n";
+    let reverted = format!("{good}| `/playbook:review` | `/playbook:plan` |\n");
+    let stray = format!("{good}| `/playbook:never-was` | `/playbook:plan` |\n");
+    let case = |label, page, renames, removed, expected| PageCase {
+        label,
+        page,
+        renames,
+        removed,
+        expected,
+    };
+    let cases = [
+        case("a full page", Some(good), &renames[..], &removed[..], None),
+        case(
+            "a missing row",
+            Some(missing_row),
+            &renames[..],
+            &removed[..],
+            Some("docs/renamed.md has no row for /playbook:finish-pull-request"),
+        ),
+        case(
+            "a reverted rename",
+            Some(reverted.as_str()),
+            &renames[..],
+            &removed[..],
+            Some("/playbook:review is live but listed as an old name"),
+        ),
+        case(
+            "a stray row",
+            Some(stray.as_str()),
+            &renames[..],
+            &removed[..],
+            Some("/playbook:never-was is listed but was never renamed or removed"),
+        ),
+        case("no names and no page", None, &[], &[], None),
+        case(
+            "names and no page",
+            None,
+            &renames[..],
+            &[],
+            Some("docs/renamed.md does not exist"),
+        ),
+    ];
+    let mut problems = Vec::new();
+
+    // Act
+    for c in cases {
+        let found = check_renamed_page(c.renames, c.removed, c.page, &live);
+        match c.expected {
+            None if !found.is_empty() => {
+                problems.push(format!("{}: want a pass, got {found:?}", c.label))
+            }
+            Some(text) if !found.iter().any(|f| f.contains(text)) => {
+                problems.push(format!("{}: want {text:?}, got {found:?}", c.label));
+            }
+            _ => {}
+        }
+    }
+    let pairs: Vec<(&str, &str)> = RENAMES.iter().map(|r| (r.old, r.new)).collect();
+    let page = fs::read_to_string(repo_root().join("docs/renamed.md")).ok();
+    let mut live_now = command_names();
+    live_now.extend(skill_names());
+    let real = check_renamed_page(&pairs, REMOVED, page.as_deref(), &live_now);
+
+    // Assert
+    assert!(problems.is_empty(), "{problems:#?}");
+    assert!(
+        page.is_some() || (pairs.is_empty() && REMOVED.is_empty()),
+        "docs/renamed.md is required"
+    );
+    assert!(real.is_empty(), "{real:#?}");
+}

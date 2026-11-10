@@ -121,6 +121,51 @@ fn level_of(home: &Path, key: &str) -> String {
     }
 }
 
+/// Plugin components that changed name: (kind, old name, new name). A ceiling
+/// set under the old key keeps applying while the new key is unset, so a user's
+/// config is not lost with the name. The rows go when `KEY_RENAMES` takes the
+/// one-to-one renames.
+const RENAMED_COMPONENTS: &[(Kind, &str, &str)] = &[(Kind::Command, "commit-and-push", "commit")];
+
+/// What a ceiling key holds.
+#[derive(Debug, PartialEq, Eq)]
+enum Setting {
+    /// Nothing is set: the built-in default applies.
+    Unset,
+    /// A value outside the allowed levels was ignored; the text says which.
+    Invalid(String),
+    /// A valid level, `auto` included.
+    Level(String),
+}
+
+fn setting_of(home: &Path, key: &str) -> Setting {
+    match config::resolve_valid(key, home, None) {
+        Ok((_, _, Some(ignored))) => Setting::Invalid(ignored.warning),
+        Ok((Value::String(level), source, None)) if source != config::Source::Default => {
+            Setting::Level(level)
+        }
+        _ => Setting::Unset,
+    }
+}
+
+/// The ceiling set for a component, `auto` when none is. The new key wins when
+/// it is set; only an unset new key falls back to the old name's key, and an
+/// invalid new value never does.
+fn configured_level(home: &Path, kind: Kind, name: &str) -> String {
+    let level = |setting: Setting| match setting {
+        Setting::Level(level) => Some(level),
+        Setting::Invalid(_) | Setting::Unset => None,
+    };
+    match setting_of(home, &config_key(kind, name)) {
+        Setting::Unset => RENAMED_COMPONENTS
+            .iter()
+            .find(|(k, _, new)| *k == kind && *new == name)
+            .and_then(|(_, old, _)| level(setting_of(home, &config_key(kind, old))))
+            .unwrap_or_else(|| "auto".to_string()),
+        set => level(set).unwrap_or_else(|| "auto".to_string()),
+    }
+}
+
 /// `auto` and `max` set no ceiling.
 fn as_ceiling(level: &str) -> Option<&str> {
     (level != "auto" && level != "max").then_some(level)
@@ -154,7 +199,7 @@ pub fn resolve_capped(
     let shipped = path.as_deref().and_then(shipped_effort);
     let model = path.as_deref().and_then(shipped_model);
     let model_cap = super::model_cap::cap_for(model.as_deref(), name);
-    let configured = level_of(home, &config_key(kind, name));
+    let configured = configured_level(home, kind, name);
     let global = level_of(home, super::KEY);
 
     let ceiling = lower(
@@ -590,5 +635,54 @@ mod tests {
         );
         let text = run_list(&home, None, Some(&root), false);
         assert!(text.contains("agents/reviewer"), "{text}");
+    }
+
+    /// Write `config.json` with exactly these keys, bypassing the check that
+    /// `write::set` runs, so a hand-edited invalid value can be tested.
+    fn write_raw(home: &Path, pairs: &[(&str, &str)]) {
+        let map: serde_json::Map<String, Value> = pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), Value::String((*v).to_string())))
+            .collect();
+        let file = home.join(".config/playbook/config.json");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, Value::Object(map).to_string()).unwrap();
+    }
+
+    #[test]
+    fn an_effort_ceiling_falls_back_only_when_the_new_key_is_unset() {
+        // Arrange
+        let old = "effort.commands.commit-and-push";
+        let new = "effort.commands.commit";
+        let rows: [(&[(&str, &str)], &str); 6] = [
+            (&[(old, "low")], "low"),
+            (&[(new, "medium")], "medium"),
+            (&[(old, "low"), (new, "medium")], "medium"),
+            (&[(old, "low"), (new, "auto")], "auto"),
+            (&[(old, "low"), (new, "bogus")], "auto"),
+            (&[], "auto"),
+        ];
+        let mut problems = Vec::new();
+
+        // Act
+        for (index, (pairs, expected)) in rows.iter().enumerate() {
+            let (home, root) = plugin(&format!("cmp-renamed-{index}"));
+            fs::write(root.join("commands/commit.md"), "---\neffort: high\n---\n").unwrap();
+            write_raw(&home, pairs);
+            let got = resolve(Kind::Command, "commit", &home, None, Some(&root)).configured;
+            if got != *expected {
+                problems.push(format!("{pairs:?}: got {got}, want {expected}"));
+            }
+        }
+        let (home, _) = plugin("cmp-renamed-invalid");
+        write_raw(&home, &[(old, "low"), (new, "bogus")]);
+        let invalid = setting_of(&home, new);
+
+        // Assert
+        assert!(problems.is_empty(), "{problems:#?}");
+        assert!(
+            matches!(&invalid, Setting::Invalid(w) if w.contains("bogus")),
+            "{invalid:?}"
+        );
     }
 }
