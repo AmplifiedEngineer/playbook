@@ -65,6 +65,11 @@ check "size list: an added row fails" "$size_base" "${size_base}size commands/b.
 check "size list: a raised number fails" "$size_base" $'size commands/a.md 250 30001\nfallbacks commands/a.md 5\n' 1 "went up"
 check "size list: a raised fallback count fails" "$size_base" $'size commands/a.md 250 30000\nfallbacks commands/a.md 6\n' 1 "went up"
 
+check "size list: a moved row with the same numbers passes" "$size_base" $'size commands/b.md 250 30000\nfallbacks commands/b.md 5\n' 0
+check "size list: a moved row with a lower number passes" "$size_base" $'size commands/b.md 240 30000\nfallbacks commands/a.md 5\n' 0
+check "size list: a moved row with a higher number fails" "$size_base" $'size commands/b.md 251 30000\nfallbacks commands/a.md 5\n' 1 "a row was added"
+check "size list: a moved row of another kind fails" "$size_base" $'size commands/a.md 250 30000\nsize commands/b.md 5 5\n' 1 "a row was added"
+
 graph_base=$'invoke commands/fix.md pr-create\nmention commands/x.md plan\n'
 
 check "call graph list: an unchanged file passes" "$graph_base" "$graph_base" 0

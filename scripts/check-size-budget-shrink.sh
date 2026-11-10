@@ -62,29 +62,50 @@ rows() {
     }'
 }
 
-base_rows="$(git show "$base:$list" | rows)"
-head_rows="$(rows <"$list")"
+base_file="$(mktemp)"
+head_file="$(mktemp)"
+trap 'rm -f "$base_file" "$head_file"' EXIT
+git show "$base:$list" | rows >"$base_file"
+rows <"$list" >"$head_file"
 
-status=0
-while IFS=$'\t' read -r key nums; do
-  [ -n "$key" ] || continue
-  old="$(printf '%s\n' "$base_rows" | awk -F'\t' -v k="$key" '$1 == k { print $2; exit }')"
-  if ! printf '%s\n' "$base_rows" | awk -F'\t' -v k="$key" '$1 == k { found = 1 } END { exit !found }'; then
-    problem "$list: a row was added: $key; the lists only shrink"
-    status=1
-    continue
-  fi
-  i=0
-  for n in $nums; do
-    i=$((i + 1))
-    o="$(printf '%s\n' "$old" | awk -v i="$i" '{ print $i }')"
-    if [ -n "$o" ] && [ "$n" -gt "$o" ]; then
-      problem "$list: $key: number $i went up from $o to $n; the lists only shrink"
-      status=1
-    fi
-  done
-done <<EOF
-$head_rows
-EOF
-
-exit "$status"
+# A row whose key is new passes only as a move: a base row of the same kind
+# that is gone from the head and has numbers at least as high. A rename of a
+# file moves its rows this way. A row without numbers is never a move.
+awk -F'\t' -v list="$list" '
+  FNR == NR { base[$1] = $2; order[++n] = $1; next }
+  { head[$1] = $2; hkeys[++m] = $1 }
+  END {
+    status = 0
+    for (j = 1; j <= m; j++) {
+      key = hkeys[j]; nums = head[key]
+      if (key in base) {
+        split(base[key], old, " "); cnt = split(nums, now, " ")
+        for (i = 1; i <= cnt; i++) {
+          if (old[i] != "" && now[i] + 0 > old[i] + 0) {
+            printf "check-size-budget-shrink: %s: %s: number %d went up from %s to %s; the lists only shrink\n", list, key, i, old[i], now[i] > "/dev/stderr"
+            status = 1
+          }
+        }
+        continue
+      }
+      moved = 0
+      if (nums != "") {
+        split(key, kw, " ")
+        for (i = 1; i <= n && !moved; i++) {
+          bk = order[i]
+          if ((bk in head) || (bk in used)) continue
+          split(bk, bw, " ")
+          if (bw[1] != kw[1]) continue
+          split(base[bk], old, " "); cnt = split(nums, now, " ")
+          ok = 1
+          for (c = 1; c <= cnt; c++) if (now[c] + 0 > old[c] + 0) ok = 0
+          if (ok) { used[bk] = 1; moved = 1 }
+        }
+      }
+      if (!moved) {
+        printf "check-size-budget-shrink: %s: a row was added: %s; the lists only shrink\n", list, key > "/dev/stderr"
+        status = 1
+      }
+    }
+    exit status
+  }' "$base_file" "$head_file"
