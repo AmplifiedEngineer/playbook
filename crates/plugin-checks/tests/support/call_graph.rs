@@ -12,29 +12,10 @@
 //! list must match. Every function takes file texts as arguments, so a test
 //! runs it on literals first.
 
+use crate::skill_kinds::{skills_of, SkillKind};
 use regex::Regex;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Mutex, OnceLock};
-
-/// Skills that hold knowledge. Their `SKILL.md` loads no skill.
-pub(crate) const RULE_SKILLS: &[&str] = &[
-    "atlassian",
-    "delegating-subagents",
-    "engineering-standards",
-    "engineering-standards-javascript",
-    "engineering-standards-python",
-    "engineering-standards-rust",
-    "grounding-research",
-    "grounding-review",
-    "systematic-debugging",
-    "writing-style",
-];
-
-/// Skills that have steps, so they count as recipes.
-pub(crate) const RECIPE_SKILLS: &[&str] = &["finish-pull-request"];
-
-/// The catalog skill. It may name every command, so the scan skips it.
-pub(crate) const CATALOG_SKILLS: &[&str] = &["playbook-usage"];
 
 /// What reads a line.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -236,10 +217,10 @@ fn owner(path: &str) -> Option<(String, Source)> {
     match (parts.next()?, parts.next()?) {
         ("commands", file) => Some((file.strip_suffix(".md")?.to_owned(), Source::Recipe)),
         ("agents", file) => Some((file.strip_suffix(".md")?.to_owned(), Source::Agent)),
-        ("skills", skill) if CATALOG_SKILLS.contains(&skill) => None,
+        ("skills", skill) if skills_of(SkillKind::Catalog).contains(&skill) => None,
         ("skills", skill) => {
             let main = parts.next() == Some("SKILL.md") && parts.next().is_none();
-            let source = if main && RULE_SKILLS.contains(&skill) {
+            let source = if main && skills_of(SkillKind::Rule).contains(&skill) {
                 Source::RuleSkill
             } else {
                 Source::Recipe
@@ -270,7 +251,7 @@ pub(crate) fn edges(files: &[File], recipes: &[String]) -> BTreeSet<Row> {
                 }
             }
             if source == Source::RuleSkill {
-                for target in RULE_SKILLS.iter().filter(|r| **r != own) {
+                for target in skills_of(SkillKind::Rule).into_iter().filter(|r| *r != own) {
                     if classify_line(line, target, true, source) == Some(Class::Load) {
                         rows.insert(Row::new(RowKind::RuleLoad, file.path, target));
                     }
@@ -302,7 +283,7 @@ pub(crate) fn rule_load_lines(files: &[File]) -> usize {
         .filter(|f| matches!(owner(f.path), Some((_, Source::Recipe))))
         .flat_map(|f| f.text.lines())
         .filter(|line| {
-            RULE_SKILLS
+            skills_of(SkillKind::Rule)
                 .iter()
                 .any(|r| classify_line(line, r, true, Source::Recipe) == Some(Class::Load))
         })
