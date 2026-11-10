@@ -70,10 +70,29 @@ rows <"$list" >"$head_file"
 
 # A row whose key is new passes only as a move: a base row of the same kind
 # that is gone from the head. A row with numbers needs numbers at least as
-# high. A row without numbers (the call graph list: kind, file, target) needs
-# the same file or the same target, so a renamed file or a renamed recipe moves
-# its rows and a row with a new file and a new target is an added row.
-awk -F'\t' -v list="$list" '
+# high. A row without numbers (the call graph list: kind, file, target) is a
+# move when renaming its file and its target with the rows of docs/renamed.md
+# gives the new row, so a renamed command or skill moves its rows and nothing
+# else does.
+renames=""
+if [ -f docs/renamed.md ]; then
+  renames="$(sed -nE 's#^\| `/playbook:([a-z0-9-]+)` \| `/playbook:([a-z0-9-]+)` \|.*#\1=\2#p' docs/renamed.md | tr '\n' ';')"
+fi
+awk -F'\t' -v list="$list" -v renames="$renames" '
+  function rename_name(name) { return (name in ren) ? ren[name] : name }
+  function rename_file(path,   parts, k, rest, q) {
+    k = split(path, parts, "/")
+    if (parts[1] == "commands" && k == 2) {
+      sub(/\.md$/, "", parts[2]); return "commands/" rename_name(parts[2]) ".md"
+    }
+    if (parts[1] == "skills" && k >= 3) {
+      rest = parts[3]
+      for (q = 4; q <= k; q++) rest = rest "/" parts[q]
+      return "skills/" rename_name(parts[2]) "/" rest
+    }
+    return path
+  }
+  BEGIN { cnt = split(renames, pairs, ";"); for (r = 1; r <= cnt; r++) { if (split(pairs[r], kv, "=") == 2) ren[kv[1]] = kv[2] } }
   FNR == NR { base[$1] = $2; order[++n] = $1; next }
   { head[$1] = $2; hkeys[++m] = $1 }
   END {
@@ -92,12 +111,12 @@ awk -F'\t' -v list="$list" '
       }
       moved = 0
       if (nums == "") {
-        split(key, kw, " ")
         for (i = 1; i <= n && !moved; i++) {
           bk = order[i]
           if ((bk in head) || (bk in used) || base[bk] != "") continue
           split(bk, bw, " ")
-          if (bw[1] == kw[1] && (bw[2] == kw[2] || bw[3] == kw[3])) { used[bk] = 1; moved = 1 }
+          mapped = bw[1] " " rename_file(bw[2]) " " rename_name(bw[3])
+          if (mapped == key) { used[bk] = 1; moved = 1 }
         }
       } else {
         split(key, kw, " ")
