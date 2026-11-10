@@ -1,6 +1,6 @@
 ---
 description: Use when a PR has unresolved review comments. Walks them one at a time, applies fixes or drafts replies, then posts the replies.
-allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Skill
+allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Skill, AskUserQuestion
 argument-hint: "[PR number] [--bots] [--dry-run] [-y|--yes] [--auto] [--ask]"
 model: opus
 effort: medium
@@ -126,7 +126,7 @@ If `DRY_RUN=true`, stop here. Print "dry-run: no edits applied, no replies poste
 
 ## Step 3b: Pick what to work on
 
-With one item or none, skip this step. Otherwise ask **Which comments to work on?** Read `skills/grounding-review/references/pick-list.md` in this plugin and follow it, using the indexes from Step 3 and every item marked `[x]` by default. A reply such as `1,3,5-7` or `all except 4` picks the items. An item left out is treated as **Skip**: Step 4 does not visit it and the final summary lists it, so nothing slips through silently. `--dry-run` never reaches this step.
+With one item or none, skip this step. Otherwise ask **Which comments to work on?** Read `skills/grounding-review/references/pick-list.md` in this plugin and follow it with `AskUserQuestion` checkboxes (typed list if absent), using the Step 3 indexes, every item selected. An item left out is treated as **Skip**: Step 4 does not visit it and the final summary lists it, so nothing slips through silently. `--dry-run` never reaches this step.
 
 ## Reading and writing Conventional Comments
 
