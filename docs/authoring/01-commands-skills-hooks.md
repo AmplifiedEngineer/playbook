@@ -110,6 +110,8 @@ A recipe is a command or a skill with steps. A rule skill holds knowledge: stand
 
 `crates/plugin-checks/tests/skill_call_graph.rs` scans every command, skill and agent file. In a command or skill file, a line that names a recipe counts as an invocation unless it is a pointer line or a reviewed `mention` row covers it, so a new edge cannot pass by leaving out a keyword. An agent file counts only when a line pairs a recipe name with an invoke verb, and no row allows that. The rows live in `crates/plugin-checks/tests/call_graph_allowlist.txt`. A found edge that is not listed fails, and so does a listed row the scan no longer finds. `scripts/check-size-budget-shrink.sh` fails a change that adds a row. Stubs and the catalog skill are skipped.
 
+Every skill folder has one row in `crates/plugin-checks/tests/support/skill_kinds.rs`: `rule`, `catalog` or `recipe`. The rule skills, the catalog and the public skills in the slash menu are read from that list, and `skill_kinds.rs` fails a folder with no row, a row with no folder and a second recipe. Add a row when you add a skill. Only the catalog skill is visible.
+
 ## Hooks
 
 Hooks are commands registered in `settings.json` under the `hooks` key. Each entry maps an event to one or more commands.

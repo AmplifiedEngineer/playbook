@@ -9,8 +9,11 @@
 mod call_graph;
 #[path = "support/markdown.rs"]
 mod markdown;
+#[path = "support/skill_kinds.rs"]
+mod skill_kinds;
 
 use call_graph::*;
+use skill_kinds::{skills_of, SkillKind};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
@@ -33,7 +36,7 @@ fn recipes(files: &[File]) -> Vec<String> {
         .filter_map(|f| f.path.strip_prefix("commands/")?.strip_suffix(".md"))
         .map(str::to_owned)
         .collect();
-    out.extend(RECIPE_SKILLS.iter().map(|s| (*s).to_owned()));
+    out.extend(skills_of(SkillKind::Recipe).into_iter().map(str::to_owned));
     out
 }
 

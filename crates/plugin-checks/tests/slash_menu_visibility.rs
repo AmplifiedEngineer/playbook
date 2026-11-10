@@ -4,19 +4,24 @@
 //! Only public entry points show in the slash menu. A skill with
 //! `user-invocable: false` is hidden from the `/` menu and stays loadable by
 //! the model and by subagents (Claude Code docs, "Control who invokes a
-//! skill"). A new skill is hidden by default: it must be added to
-//! `PUBLIC_SKILLS` on purpose to show up.
+//! skill"). A new skill is hidden by default: it needs a `catalog` row in
+//! `SKILL_KINDS` on purpose to show up.
 //!
-//! Commands are not hidden. The docs state the field for skills only, and
-//! `/playbook:review` runs `quick-review` and `deep-review` as commands, so a
-//! hidden command could break that path. The command side stays visible until a
-//! live session confirms the field works there.
+//! Commands are not hidden. The docs state the field for skills only, so a
+//! hidden command could break a path that runs one. The command side stays
+//! visible until a live session confirms the field works there.
 
+#[path = "support/skill_kinds.rs"]
+mod skill_kinds;
+
+use skill_kinds::{skills_of, SkillKind};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Skills a user may type as a slash command.
-const PUBLIC_SKILLS: [&str; 1] = ["playbook-usage"];
+/// Skills a user may type as a slash command: the catalog rows.
+fn public_skills() -> Vec<&'static str> {
+    skills_of(SkillKind::Catalog)
+}
 
 const HIDE_LINE: &str = "user-invocable: false";
 
@@ -58,7 +63,7 @@ fn only_the_public_skills_show_in_the_slash_menu() {
     assert!(skills.len() >= 10, "skill walk looks broken");
     let mut problems = Vec::new();
     for (name, path) in &skills {
-        let public = PUBLIC_SKILLS.contains(&name.as_str());
+        let public = public_skills().contains(&name.as_str());
         match (public, is_hidden(path)) {
             (true, true) => problems.push(format!("{name}: public skill must not be hidden")),
             (false, false) => problems.push(format!("{name}: helper skill needs `{HIDE_LINE}`")),
@@ -71,10 +76,10 @@ fn only_the_public_skills_show_in_the_slash_menu() {
 #[test]
 fn every_public_skill_exists() {
     let names: Vec<String> = skill_files().into_iter().map(|(n, _)| n).collect();
-    for public in PUBLIC_SKILLS {
+    for public in public_skills() {
         assert!(
             names.iter().any(|n| n == public),
-            "PUBLIC_SKILLS names `{public}`, which is not a skill"
+            "the catalog row names `{public}`, which is not a skill"
         );
     }
 }
