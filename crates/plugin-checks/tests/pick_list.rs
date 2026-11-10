@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Pins the numbered pick list that replaces the tier-only question. The user
-//! marks findings or comments with a reply such as `1,3,5-7` or `all except 4`.
-//! `AskUserQuestion` offers at most four options, so it cannot carry a long
-//! list. The rules live in one reference that the review commands and
-//! `address-pr-comments` all point at.
+//! Pins the pick list. The user picks findings or comments with real checkboxes
+//! from `AskUserQuestion` (`multiSelect`), in groups of at most four. Where the
+//! tool is not available, a numbered typed list with replies such as `1,3,5-7`
+//! or `all except 4` is the fallback. The rules live in one reference that the
+//! review commands and `address-pr-comments` all point at.
 
 use std::fs;
 use std::path::PathBuf;
@@ -34,6 +34,41 @@ fn the_reference_defines_the_reply_forms() {
         text.contains("empty reply"),
         "pick-list.md: lost the default-selection rule"
     );
+}
+
+#[test]
+fn the_reference_uses_checkbox_questions_with_a_typed_fallback() {
+    let text = read(REFERENCE);
+    for part in [
+        "AskUserQuestion",
+        "multiSelect: true",
+        "Pick individually",
+        "Must-fix and questions (recommended)",
+        "at most 4 items",
+        "at most 4 questions",
+        "Unselected findings are not posted",
+        "auto-guard",
+        "headless `-p`",
+        "Codex",
+        "Report-only",
+    ] {
+        assert!(text.contains(part), "pick-list.md: lost `{part}`");
+    }
+}
+
+#[test]
+fn commands_that_pick_allow_ask_user_question() {
+    for name in ["quick-review", "deep-review", "address-pr-comments"] {
+        let text = read(&format!("commands/{name}.md"));
+        let tools = text
+            .lines()
+            .find(|l| l.starts_with("allowed-tools:"))
+            .unwrap_or_else(|| panic!("{name}: no allowed-tools line"));
+        assert!(
+            tools.contains("AskUserQuestion"),
+            "{name}: allowed-tools lacks AskUserQuestion"
+        );
+    }
 }
 
 #[test]
