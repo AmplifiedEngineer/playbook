@@ -191,8 +191,8 @@ fn create_pull_request_makes_one_deliver_call_with_one_retry_and_no_draft_flag()
 }
 
 #[test]
-fn commit_and_push_has_no_tool_call_and_under_sixty_lines() {
-    let text = command("commit-and-push.md");
+fn commit_has_no_tool_call_and_under_sixty_lines() {
+    let text = command("commit.md");
 
     assert!(text.lines().count() < 60);
     assert!(!text.contains("context: fork") && !text.contains("agent:"));

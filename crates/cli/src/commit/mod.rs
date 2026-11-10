@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook commit`: the git work of `/playbook:commit-and-push`. `prepare`
+//! `playbook commit`: the git work of `/playbook:commit`. `prepare`
 //! stages, formats and prints what the message drafter needs. `run` commits
 //! with a sign-off and signing decision, rebases when behind, and pushes
 //! without ever escalating a rejected push to a force. `all` does the three in

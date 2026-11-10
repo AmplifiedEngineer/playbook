@@ -74,7 +74,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         auto: Auto::Dedicated,
     },
     CommandSpec {
-        name: "commit-and-push",
+        name: "commit",
         asks: false,
         // The binary decides the mode and never forces; see the
         // parity_no_force tests in crates/cli/tests/commit_cli.rs.

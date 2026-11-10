@@ -28,7 +28,7 @@ description: Lists /playbook:* commands and when to use each, and points to the 
 
 | Command | Use when |
 |---|---|
-| `/playbook:commit-and-push` | Committing staged changes with a generated, signed message and pushing, instead of hand-running `git commit` and `git push`. |
+| `/playbook:commit` | Committing staged changes with a generated, signed message and pushing, instead of hand-running `git commit` and `git push`. |
 | `/playbook:create-pull-request` | Opening a PR with pre-flight checks, a conventional-commit title and the team template, instead of hand-running `gh pr create`. Then run the `playbook:finish-pull-request` skill. |
 | `/playbook:fix` | A small, well understood bug. A failing test, the smallest fix, one PR. Escalates to `/playbook:plan` when the fix is not small. |
 

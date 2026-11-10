@@ -1,17 +1,17 @@
 # Review and PR Flow
 
-Four commands take a ready branch to a merged PR: `/playbook:commit-and-push`, `/playbook:create-pull-request`, `/playbook:review`, and `/playbook:address-pr-comments`.
+Four commands take a ready branch to a merged PR: `/playbook:commit`, `/playbook:create-pull-request`, `/playbook:review`, and `/playbook:address-pr-comments`.
 
 ## Commit and push
 
-`/playbook:commit-and-push` writes a commit message from the staged diff, commits signed with a `Signed-off-by` trailer (see [PR and commit settings](#pr-and-commit-settings)), rebases if you are behind, then pushes. It runs in a forked `git` subagent, so the diff stays out of your main context. There is no confirmation gate.
+`/playbook:commit` writes a commit message from the staged diff, commits signed with a `Signed-off-by` trailer (see [PR and commit settings](#pr-and-commit-settings)), rebases if you are behind, then pushes. It runs in a forked `git` subagent, so the diff stays out of your main context. There is no confirmation gate.
 
 ```bash
-/playbook:commit-and-push               # commit staged changes and push
-/playbook:commit-and-push -A            # git add -A first
-/playbook:commit-and-push -u            # git add -u first
-/playbook:commit-and-push -a            # amend the previous commit
-/playbook:commit-and-push --no-signoff  # no Signed-off-by on this commit
+/playbook:commit               # commit staged changes and push
+/playbook:commit -A            # git add -A first
+/playbook:commit -u            # git add -u first
+/playbook:commit -a            # amend the previous commit
+/playbook:commit --no-signoff  # no Signed-off-by on this commit
 ```
 
 With `-A` and no message, the command is one call to `playbook commit all`. It stages everything, drafts a conventional message from the staged files with no model, commits, rebases if you are behind and pushes. The type comes from the files: only docs gives `docs`, only tests `test`, only workflow files `ci`, only lock files `chore(deps)`, a new source file `feat`, and any other change `fix`. The scope is the shared top level area, and it is left out when the files span areas. The message is a guide. The PR title and body carry the meaning. Run it yourself too:
@@ -123,13 +123,13 @@ Every review ends with a **Verification Summary**: each file, whether it was rea
 /playbook:address-pr-comments -y        # skip the final commit confirmation
 ```
 
-It first asks which comments to work on with the same checkbox picker, and falls back to a numbered list with the same reply forms where the picker is not available. A comment you leave out is skipped and named in the final summary. With one comment it does not ask. For each comment you then choose `[F]ix`, `[R]eply`, `[B]oth`, `[S]kip`, `[Q]uit` or `[E]dit-then-fix`. Replies queue until after the commit. At the end it runs `commit-and-push -A`, then posts the replies. It never resolves threads. Bot authors are skipped unless you pass `--bots`.
+It first asks which comments to work on with the same checkbox picker, and falls back to a numbered list with the same reply forms where the picker is not available. A comment you leave out is skipped and named in the final summary. With one comment it does not ask. For each comment you then choose `[F]ix`, `[R]eply`, `[B]oth`, `[S]kip`, `[Q]uit` or `[E]dit-then-fix`. Replies queue until after the commit. At the end it runs `commit -A`, then posts the replies. It never resolves threads. Bot authors are skipped unless you pass `--bots`.
 
 ## Auto mode
 
 In `ask` mode, the default, nothing changes. Pass `--auto` or `--ask` to override the mode for one run. See [Auto mode](../guides/04-auto-mode.md).
 
-- `/playbook:commit-and-push` commits and pushes without asking. It never force-pushes. A push that would need a force is left on the local branch and reported, so you decide how to publish it.
+- `/playbook:commit` commits and pushes without asking. It never force-pushes. A push that would need a force is left on the local branch and reported, so you decide how to publish it.
 - `/playbook:review`, `/playbook:quick-review` and `/playbook:deep-review` take the recommended depth without asking. A review still asks what to post unless you pass `--self` or `--no-post`, because a posted review speaks as you.
 - `/playbook:address-pr-comments` refuses to run. It replies on GitHub in your name, so each reply needs your approval.
 
@@ -143,7 +143,7 @@ Six keys shape the PR flow and the commit trailer. Read one with `playbook confi
 | `autoReview.type` | `auto` | Which review it runs: `deep`, `quick`, or `auto`. `auto` runs `playbook pr review-triage`, which asks a small model three times and picks `quick` only when all three agree; any disagreement or failure runs `deep`. |
 | `autoReview.fix` | `false` | After the self-review, fixes every finding that survived the review's verification, pushes the fixes to the PR branch, and re-runs the scoped checks. |
 | `autoMerge.enabled` | `false` | After the review and fixes, marks the PR ready, waits until every check on the PR head is green, runs `gh pr merge <n> --auto`, then re-reads the PR and reports whether it merged, is queued, was rejected, or was closed. |
-| `commit.signOff` | `true` | Commits made through `/playbook:commit-and-push` carry a `Signed-off-by` trailer. |
+| `commit.signOff` | `true` | Commits made through `/playbook:commit` carry a `Signed-off-by` trailer. |
 | `pr.draft` | `true` | `/playbook:create-pull-request` opens the PR as a draft. Set it to `false` to open PRs ready for review. |
 
 ```bash
@@ -168,7 +168,7 @@ A stacked PR whose base is another open PR is not merged before its base. In aut
 ## A typical cycle
 
 ```bash
-/playbook:commit-and-push -A          # commit and push
+/playbook:commit -A                   # commit and push
 /playbook:create-pull-request         # open the PR
 /playbook:review --self               # self-review; it picks quick or deep
 /playbook:address-pr-comments         # after a reviewer leaves comments

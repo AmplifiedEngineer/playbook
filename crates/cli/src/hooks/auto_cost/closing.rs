@@ -16,9 +16,12 @@ use crate::common::shell::{commands, program_name, Command};
 use std::path::Path;
 
 /// The skills a closing step loads: the two delivery skills and the ones they
-/// depend on.
-const CLOSING_SKILLS: [&str; 4] = [
+/// depend on. A renamed skill is listed under both names until 1.0.0, so a new
+/// binary still parks a caller that runs a plugin not yet updated. The old
+/// names go at 1.0.0.
+const CLOSING_SKILLS: [&str; 5] = [
     "playbook:create-pull-request",
+    "playbook:commit",
     "playbook:commit-and-push",
     "playbook:writing-style",
     "playbook:engineering-standards",
@@ -626,13 +629,14 @@ mod tests {
     fn only_the_delivery_skills_and_their_dependencies_are_closing_skills() {
         for skill in [
             "playbook:create-pull-request",
+            "playbook:commit",
             "playbook:commit-and-push",
             "playbook:writing-style",
             "playbook:engineering-standards",
         ] {
             assert!(is_closing_skill(skill), "{skill}");
         }
-        for skill in ["playbook:implement", "playbook:fix", "commit-and-push", ""] {
+        for skill in ["playbook:implement", "playbook:fix", "commit", ""] {
             assert!(!is_closing_skill(skill), "{skill}");
         }
     }

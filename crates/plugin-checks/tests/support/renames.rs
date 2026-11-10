@@ -24,7 +24,6 @@ pub(crate) const GROUPS: &[&str] = &["pr", "handoff"];
 /// a docs list: the docs name an old slash name only in `docs/renamed.md`.
 pub(crate) const LEGACY_NAMES: &[&str] = &[
     "address-pr-comments",
-    "commit-and-push",
     "create-pull-request",
     "deep-review",
     "quick-review",
@@ -275,4 +274,59 @@ pub(crate) fn find_old_names(
         }
     }
     found.into_iter().collect()
+}
+
+/// The old names in the first column of the renamed page's table: every row
+/// whose first cell holds a `/playbook:<name>` code span.
+pub(crate) fn renamed_page_old_names(page: &str) -> Vec<String> {
+    const PREFIX: &str = "/playbook:";
+    page.lines()
+        .filter_map(|line| line.trim().strip_prefix('|'))
+        .filter_map(|row| row.split('|').next())
+        .filter_map(|cell| cell.trim().strip_prefix('`')?.strip_suffix('`'))
+        .filter_map(|span| span.strip_prefix(PREFIX))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The problems with `docs/renamed.md`: a row for every rename and removal, and
+/// no row for a name that is live or was never renamed. `page` is `None` when
+/// the file does not exist, which only passes while there is nothing to list.
+pub(crate) fn check_renamed_page(
+    renames: &[(&str, &str)],
+    removed: &[&str],
+    page: Option<&str>,
+    live: &[String],
+) -> Vec<String> {
+    let expected: Vec<&str> = renames
+        .iter()
+        .map(|(old, _)| *old)
+        .chain(removed.iter().copied())
+        .collect();
+    let Some(page) = page else {
+        return if expected.is_empty() {
+            Vec::new()
+        } else {
+            vec!["docs/renamed.md does not exist but a name was renamed or removed".to_owned()]
+        };
+    };
+    let listed = renamed_page_old_names(page);
+    let mut problems = Vec::new();
+    for old in &expected {
+        if !listed.iter().any(|l| l == old) {
+            problems.push(format!("docs/renamed.md has no row for /playbook:{old}"));
+        }
+    }
+    for name in &listed {
+        if live.iter().any(|l| l == name) {
+            problems.push(format!(
+                "/playbook:{name} is live but listed as an old name"
+            ));
+        } else if !expected.contains(&name.as_str()) {
+            problems.push(format!(
+                "/playbook:{name} is listed but was never renamed or removed"
+            ));
+        }
+    }
+    problems
 }

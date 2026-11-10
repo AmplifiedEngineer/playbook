@@ -120,7 +120,7 @@ Commands differ in how they use memory:
 | Commands | Memory use |
 |---|---|
 | `/playbook:plan`, `/playbook:adr`, `/playbook:implement` | Read all three scopes before planning or executing. Project facts override org, which overrides global, for that repo. Conflicts between scopes surface rather than resolve silently. |
-| `/playbook:commit-and-push`, `/playbook:quick-review`, `/playbook:address-pr-comments` | Don't touch memory. |
+| `/playbook:commit`, `/playbook:quick-review`, `/playbook:address-pr-comments` | Don't touch memory. |
 
 ## memory.db
 

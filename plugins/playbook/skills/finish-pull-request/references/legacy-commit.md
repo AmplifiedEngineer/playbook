@@ -1,4 +1,4 @@
-# Legacy commit-and-push steps
+# Legacy commit steps
 
 ## Contents
 
@@ -7,7 +7,7 @@
 - Step 0: the run mode
 - Steps 1 to 4: stage, message, commit and push
 
-These are the steps `/playbook:commit-and-push` followed before it ran one inline `playbook commit all --json` call. The command points here only when shell execution is disabled by policy (the inline block prints `[shell command execution disabled by policy]`). Tell the user once to upgrade (`brew upgrade playbook` or `playbook upgrade`), then follow the steps below with normal `Bash` calls.
+These are the steps `/playbook:commit` followed before it ran one inline `playbook commit all --json` call. The command points here only when shell execution is disabled by policy (the inline block prints `[shell command execution disabled by policy]`). Tell the user once to upgrade (`brew upgrade playbook` or `playbook upgrade`), then follow the steps below with normal `Bash` calls.
 
 # Commit and Push
 
