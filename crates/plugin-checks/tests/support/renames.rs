@@ -23,13 +23,7 @@ pub(crate) const GROUPS: &[&str] = &["pr", "handoff"];
 /// Current file names that break the naming rule until their rename lands.
 /// The list empties as the renames land. It is an allowlist for the rule, not
 /// a docs list: the docs name an old slash name only in `docs/renamed.md`.
-pub(crate) const LEGACY_NAMES: &[&str] = &[
-    "learn-project",
-    "repo-audit",
-    "session-handoff",
-    "session-start",
-    "playbook-usage",
-];
+pub(crate) const LEGACY_NAMES: &[&str] = &["learn-project", "repo-audit", "playbook-usage"];
 
 /// The release that removes every deprecated stub.
 pub(crate) const STUB_REMOVED_IN: &str = "1.0.0";

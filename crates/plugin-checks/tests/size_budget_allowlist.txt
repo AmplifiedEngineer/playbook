@@ -15,8 +15,8 @@ fallbacks commands/implement.md 11
 fallbacks commands/learn-project.md 4
 fallbacks commands/plan.md 9
 fallbacks commands/repo-audit.md 1
-fallbacks commands/session-handoff.md 4
-fallbacks commands/session-start.md 1
+fallbacks commands/handoff-save.md 4
+fallbacks commands/handoff-show.md 1
 fallbacks commands/setup.md 1
 fallbacks skills/grounding-review/references/deep-pass.md 6
 fallbacks skills/grounding-review/references/quick-pass.md 5
