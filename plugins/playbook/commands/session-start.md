@@ -8,7 +8,7 @@ effort: low
 
 # Session Start
 
-Pick up where the last session in this directory stopped. `/playbook:session-handoff` saves a handoff, and when the session-start hook is installed it loads that handoff on its own after `/clear`. Run this command when no handoff appeared, or to read it again.
+Pick up where the last session in this directory stopped. `/playbook:session-handoff` saves a handoff. When the session-start hook is installed, it loads that handoff on its own after `/clear`. Run this command when no handoff appeared, or to read it again.
 
 ## Run this now
 

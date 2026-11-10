@@ -531,7 +531,7 @@ Enable when Step 0 resolves the mode to auto (the `--auto` flag, `PLAYBOOK_MODE`
 - **Skip the confirmation gates.** Do not pause at Step 8 ("Does this capture everything?") or Step 11 ("Does this plan look right?"). Fold the Design Summary and the Assumptions list into the saved plan instead.
 - **`--auto-design` also self-answers Steps 3 to 6.** It is opt-in on the command line only; the environment and the repo config never turn it on. It takes the recommended answer to every discovery question, the problem statement check, the approach, the `/playbook:adr` route check, the spike offer (no) and the design approval, and logs each one in the Assumptions list with its reason. Plain `--auto` never approves the design: it stops at Step 6 with a message.
 - **Quality gate still runs (Step 10).** It needs no user input. If a phase ends STUCK or FAIL at the gate loop's cap, STOP: do not save; report the stop report from `references/gate-loop.md` and the assumptions made. No user is present to override a FAIL in `--auto`.
-- **Save and report (Step 12).** On a passing gate, save the plan and quality report, then tell the user the paths, the assumptions made (flag any `OPEN` ones), and to run `/playbook:implement` when ready. If a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist the accepted decisions there; otherwise skip.
+- **Save and report (Step 12).** On a passing gate, save the plan and quality report, then tell the user the paths and assumptions (flag `OPEN` ones). Tell the user to run `/playbook:implement` when ready. If a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist the accepted decisions there; otherwise skip.
 
 ## Adapting to Complexity
 

@@ -1,0 +1,82 @@
+# The skill call graph, as the guard scans it. Paths start at plugins/playbook.
+# A row is allowed only while the scan still finds it, and
+# scripts/check-size-budget-shrink.sh fails a change that adds a row, so the
+# list only shrinks as the tree does.
+#
+#   invoke <file> <target>     a step in the file runs the recipe
+#   mention <file> <target>    a reviewed line names the recipe as context
+#   rule-load <file> <target>  a rule skill loads another rule skill
+
+# Recipes that run recipes. The commit chains go in the commit binary step, create then finish in one command, and the review offer becomes a pointer.
+invoke commands/fix.md commit
+invoke commands/fix.md finish-pull-request
+invoke commands/fix.md plan
+invoke commands/fix.md pr-create
+invoke commands/implement.md commit
+invoke commands/implement.md pr-create
+invoke commands/implement.md review
+invoke commands/pr-comments.md commit
+invoke commands/pr-create.md finish-pull-request
+invoke skills/finish-pull-request/SKILL.md commit
+invoke skills/finish-pull-request/SKILL.md review
+invoke skills/finish-pull-request/references/land-segment.md commit
+invoke skills/finish-pull-request/references/legacy-land.md commit
+invoke skills/finish-pull-request/references/legacy-land.md review
+invoke skills/grounding-review/references/deep-pass.md pr-comments
+
+# Lines that name a recipe as context, reviewed by hand.
+mention commands/adr.md implement
+mention commands/adr.md plan
+mention commands/commit.md pr-create
+mention commands/doctor.md implement
+mention commands/doctor.md setup
+mention commands/implement.md adr
+mention commands/implement.md finish-pull-request
+mention commands/implement.md plan
+mention commands/plan.md adr
+mention commands/plan.md implement
+mention commands/plan.md session-handoff
+mention commands/pr-create.md implement
+mention commands/pr-create.md pr-comments
+mention commands/pr-create.md review
+mention commands/session-start.md session-handoff
+mention commands/setup.md doctor
+mention skills/atlassian/references/acli-confluence.md learn-project
+mention skills/delegating-subagents/references/gate-loop.md adr
+mention skills/delegating-subagents/references/gate-loop.md implement
+mention skills/delegating-subagents/references/gate-loop.md plan
+mention skills/delegating-subagents/references/quality-gate.md adr
+mention skills/delegating-subagents/references/quality-gate.md plan
+mention skills/delegating-subagents/references/worktree-guard.md commit
+mention skills/delegating-subagents/references/worktree-guard.md pr-create
+mention skills/finish-pull-request/references/land-segment.md implement
+mention skills/finish-pull-request/references/land-segment.md pr-create
+mention skills/finish-pull-request/references/land-segment.md review
+mention skills/finish-pull-request/references/legacy-commit.md commit
+mention skills/finish-pull-request/references/legacy-commit.md pr-create
+mention skills/finish-pull-request/references/legacy-land.md implement
+mention skills/finish-pull-request/references/legacy-land.md pr-create
+mention skills/finish-pull-request/references/legacy-pr.md implement
+mention skills/finish-pull-request/references/legacy-pr.md pr-comments
+mention skills/finish-pull-request/references/legacy-pr.md pr-create
+mention skills/finish-pull-request/references/legacy-pr.md review
+mention skills/finish-pull-request/SKILL.md implement
+mention skills/finish-pull-request/SKILL.md pr-create
+mention skills/grounding-review/references/deep-pass.md review
+mention skills/grounding-review/references/orchestrator.md implement
+mention skills/grounding-review/references/orchestrator.md review
+mention skills/grounding-review/references/quick-pass.md review
+mention skills/grounding-review/references/review-routing.md review
+mention skills/grounding-review/references/stack-review.md review
+mention skills/grounding-review/references/triage-tiers.md implement
+mention skills/grounding-review/references/triage-tiers.md review
+
+# Rule skills that load rule skills. The rule skills stop loading skills.
+rule-load skills/atlassian/SKILL.md writing-style
+rule-load skills/delegating-subagents/SKILL.md grounding-research
+rule-load skills/grounding-research/SKILL.md writing-style
+rule-load skills/grounding-review/SKILL.md writing-style
+rule-load skills/systematic-debugging/SKILL.md engineering-standards
+rule-load skills/systematic-debugging/SKILL.md engineering-standards-javascript
+rule-load skills/systematic-debugging/SKILL.md engineering-standards-python
+rule-load skills/systematic-debugging/SKILL.md engineering-standards-rust

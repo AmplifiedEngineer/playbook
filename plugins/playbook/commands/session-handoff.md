@@ -37,4 +37,4 @@ Write a handoff for the next session. The facts come from git. You write only th
    - File: `<slug>-<epoch>-<pid>.md`. `<slug>` is the absolute directory path with every character that is not a letter or digit turned into `-` (`printf '%s' "$PWD" | tr -c 'A-Za-z0-9' '-'`), `<epoch>` is `date +%s` and `<pid>` is `$$`. Write it through the same quoted heredoc.
 6. If `$ARGUMENTS` holds a path, also write the document there, creating parent directories, and confirm the path in one line. A bare filename goes in the current working directory. Never write to a path the user did not provide.
 
-Print the handoff, then end with one line: run `/clear` and then `/playbook:session-start` to load it. When the session-start hook is installed, the next session loads it on its own after `/clear`.
+Print the handoff, then end with one line: tell the user to run `/clear` and `/playbook:session-start` to load it. When the session-start hook is installed, the next session loads it on its own after `/clear`.

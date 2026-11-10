@@ -98,6 +98,18 @@ A renamed command or skill keeps its old name as a deprecated stub until 1.0.0. 
 2. Change every caller to the new name. A recipe never calls the old name. The leftover check fails on the old name anywhere in `plugins/`, `seed/`, `README.md`, `CONTRIBUTING.md`, `docs/` and `crates/*/src`, except in its own stub, `CHANGELOG.md`, `docs/adr/` and `docs/renamed.md`. Name those files as code spans, not links.
 3. Open the PR as `feat(plugin):` with a `Deprecated:` footer that lists the old and new names. The old name still works, so the PR is not breaking. The 1.0.0 removal of the stubs is `feat(plugin)!:` with a `BREAKING CHANGE:` footer. A removal with no stub is breaking at once.
 
+## Calls between recipes and skills
+
+A recipe is a command or a skill with steps. A rule skill holds knowledge: standards, evidence rules, style, routing tables. The catalog skill `playbook-usage` may name every command and nothing else. Five rules keep the call graph small:
+
+- R1. A rule skill's `SKILL.md` has no steps that run tools or skills.
+- R2. A recipe may load rule skills, dispatch agents and call the binary. It never invokes another recipe. To send the user on, write the pointer line "Tell the user to run `/playbook:<x>`".
+- R3. A rule skill's `SKILL.md` never loads or invokes another skill. The recipe or agent that needs two rule skills loads both.
+- R4. A reference file is a file, not a skill, so reading one runs nothing. A recipe may read reference files in any skill folder. A reference file follows the rule of the recipe that reads it: it may load rule skills, and it invokes no recipe except the rows on the list.
+- R5. Chaining moves into the binary or into one command, not into a recipe that calls a recipe.
+
+`crates/plugin-checks/tests/skill_call_graph.rs` scans every command, skill and agent file. In a command or skill file, a line that names a recipe counts as an invocation unless it is a pointer line or a reviewed `mention` row covers it, so a new edge cannot pass by leaving out a keyword. An agent file counts only when a line pairs a recipe name with an invoke verb, and no row allows that. The rows live in `crates/plugin-checks/tests/call_graph_allowlist.txt`. A found edge that is not listed fails, and so does a listed row the scan no longer finds. `scripts/check-size-budget-shrink.sh` fails a change that adds a row. Stubs and the catalog skill are skipped.
+
 ## Hooks
 
 Hooks are commands registered in `settings.json` under the `hooks` key. Each entry maps an event to one or more commands.

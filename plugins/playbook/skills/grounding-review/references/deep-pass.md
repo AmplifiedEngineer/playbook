@@ -87,7 +87,7 @@ Auto mode does not change posting. Only `--self` or `--no-post` skips the post q
 5. Follow the command's gates, not your own.
 6. Show real data: tables and reports come from actual output, never placeholders.
 7. **No selective filtering at presentation.** After consolidation (Step 4) and the verification sweep (Step 4b) you present EVERY surviving finding; the user decides what to post in Step 6. (Consolidation's dedup/drop rules and the sweep's drops are the only removals, and they happen in Steps 4 and 4b, not by hiding findings in Step 5.)
-8. **Never ask whether to run.** Invoking `/playbook:review --deep` IS the instruction to run; start immediately.
+8. **Never ask whether to run.** Calling `/playbook:review --deep` IS the instruction to run; start immediately.
 
 ## Voice rules
 
