@@ -6,16 +6,16 @@
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
  F1 Charts  F2 Numbers  F3 Sessions
 ╭─┤Budget├─────────────────────────────────────────────────────────────────────────────────────────────────────────────┤UTC  all projects├─╮
-│monthly budget [cached 10m ago]  ■■········ $120.00/$500.00  ! will exceed ~09-09 15:24 UTC                                               │
-│5 hour and weekly windows: not available for this plan (Pro and Max get them from the playbook statusline)                                │
-│this week spend [local history]  $3.05 so far  avg $0.04/h $0.99/day  last week $0.08/h $2.02/day                                         │
+│Monthly  c ####|#########---------------------------------------------   24%  $120 of $500  ! hits it in 6d 13h  resets in 27d (Thu 10-01)│
+│Monthly    left $380     pace +17pt   allow $0.57/h $13.61/d  proj $1,736   resets Thu 10-01 00:00 UTC  cached 10m ago                    │
+│Spend    h this week $3.05 #####-----  last week $6.21 ##########  -51%  avg $0.04/h $0.99/d                                              │
+│5 hour and weekly windows: not on this plan  (i: details)                                                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─┤³Models├────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │name                                                                                                       msgs  tokens     cost▼ share   │
 │■ opus-5                                                                                                     10  238.0K    $14.25 ■■■■■■··│
 │■ sonnet-5                                                                                                    9  214.2K     $5.85 ■■······│
 │■ haiku-5                                                                                                     7  166.6K     $0.17 ········│
-│                                                                                                                                          │
 │                                                                                                                                          │
 │                                                                                                                                          │
 │                                                                                                                                          │

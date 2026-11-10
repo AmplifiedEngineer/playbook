@@ -4,10 +4,11 @@
 │tokens         95.2K   vs          0      +95.2K      new                                                                                                     │
 │messages           4   vs          0          +4      new                                                                                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─┤Budget├─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤UTC  all projects├─╮
-│monthly budget [manual, local]  ■········· $3.05/$40.00  ! will exceed ~09-28 04:49 UTC  reaches the limit in 25d 3h at the average pace  left $36.95         │
-│weekly budget [manual, local]  ■■■■■■···· $3.05/$5.00  ! will exceed ~09-05 00:56 UTC  reaches the limit in 1d 13h at the 24h pace  left $1.95                │
-│this month spend [local history]  $3.05 so far  avg $0.06/h $1.47/day  last month $0.00/h $0.00/day                                                           │
+╭─┤Budget├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤UTC  all projects  1 note, i├─╮
+│Monthly  u ####|-------------------------------------------------------    8%  $3.05 of $40.00  ! hits it in 25d 3h  resets in 27d (Thu 10-01)                │
+│Monthly    left $36.95   pace +1pt    allow $0.06/h $1.32/d   proj $44.12   avg $0.06/h $1.47/d    resets Thu 10-01 00:00 UTC  manual, local                  │
+│Weekly   u ##########################|##########-----------------------   61%  $3.05 of $5.00  ! hits it in 1d 13h (24h)  resets in 3d (Mon 09-07)            │
+│Spend    h this month $3.05 ##########  last month $0.00 ----------  new  avg $0.06/h $1.47/d                                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─┤¹Spend per day, USD├─┤v view: total├────────────────────────────────────────╮╭─┤²Tokens per day├────────────────────────────────────────────────────────────╮
 │total $3.05  peak $1.80 on 09-01  avg $1.02/day                               ││total 95.2K  peak 47.6K on 09-01  avg 31.7K/day                               │
@@ -28,7 +29,6 @@
 │name                           msgs  tokens    cost▼     prev   change       %││name                                           msgs  tokens     cost▼ share   │
 │■ sonnet-5                        2   47.6K    $1.80    $0.00   +$1.80     new││beta                                              2   47.6K     $1.80 ■■■■■···│
 │■ opus-5                          2   47.6K    $1.25    $0.00   +$1.25     new││alpha                                             2   47.6K     $1.25 ■■■·····│
-│                                                                              ││                                                                              │
 │                                                                              ││                                                                              │
 │                                                                              ││                                                                              │
 │                                                                              ││                                                                              │

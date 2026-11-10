@@ -160,6 +160,8 @@ pub struct App {
     pub help: Option<usize>,
     /// The budget window, when it is open.
     pub budget_popup: Option<super::budget_popup::BudgetPopup>,
+    /// The budget strip shows the figures of every limit and the full notes.
+    pub budget_detail: bool,
     /// True while the window that asks before deleting the usage history is open.
     pub reset_popup: bool,
     /// Files read and files to read while a first read runs.
@@ -229,6 +231,7 @@ impl App {
             area: Rect::new(0, 0, 100, 30),
             help: None,
             budget_popup: None,
+            budget_detail: false,
             reset_popup: false,
             indexing: None,
             sources: String::new(),
@@ -936,6 +939,7 @@ impl App {
             }
             Cmd::Help => self.help = Some(0),
             Cmd::Budget => self.budget_popup = Some(super::budget_popup::BudgetPopup::default()),
+            Cmd::BudgetDetail => self.budget_detail = !self.budget_detail,
             Cmd::Zone => {
                 let to = match crate::tz::current() {
                     crate::tz::Zone::Utc => crate::tz::Zone::Local,
@@ -1274,6 +1278,17 @@ mod tests {
         assert_eq!(app.key(press(KeyCode::Char('u'))), Effect::None);
         assert_eq!(app.account, AccountSel::Latest);
         assert_eq!(app.note.as_deref(), Some("Only one account has usage"));
+    }
+
+    #[test]
+    fn i_toggles_the_budget_detail_and_changes_nothing_else() {
+        let mut app = loaded();
+        assert!(!app.budget_detail);
+
+        assert_eq!(app.key(press(KeyCode::Char('i'))), Effect::None);
+        assert!(app.budget_detail);
+        assert_eq!(app.key(press(KeyCode::Char('i'))), Effect::None);
+        assert!(!app.budget_detail);
     }
 
     #[test]

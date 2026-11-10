@@ -386,9 +386,9 @@ fn the_budget_panel_shows_the_plan_windows_as_measured() {
         Range::ThisWeek(WeekStart::Monday),
     );
     let text = draw(&a, 100, 36);
-    assert!(text.contains("5 hour window [measured]"));
-    assert!(text.contains("will exceed"));
-    assert!(text.contains("weekly window [measured]"));
+    assert!(text.contains("5 hour"));
+    assert!(text.contains("hits it in 2h 0m"));
+    assert!(text.contains("7 day"));
     check("budget_measured_100x36", &text);
 }
 
@@ -401,8 +401,8 @@ fn the_budget_panel_shows_a_manual_limit_and_says_so() {
         Range::CurrentMonth,
     );
     let text = draw(&a, 160, 50);
-    assert!(text.contains("[manual, local]"));
-    assert!(text.contains("[local history]"));
+    assert!(text.contains("manual, local"));
+    assert!(text.contains("Spend"));
     check("budget_manual_160x50", &text);
 }
 
@@ -410,7 +410,8 @@ fn the_budget_panel_shows_a_manual_limit_and_says_so() {
 fn the_budget_panel_says_how_to_set_a_limit_when_none_is_known() {
     let text = draw(&app(Theme::Standard), 100, 36);
     check("budget_unknown_100x36", &text);
-    assert!(text.contains("Limit unknown: playbook config set --global usage.budget.monthlyUsd"));
+    assert!(text.contains("No limit"));
+    assert!(text.contains("press b to set a monthly budget"));
 }
 
 #[test]
@@ -433,7 +434,9 @@ fn a_stale_plan_reading_is_marked() {
         resets_at: NOW + 3600,
     });
     let a = with_limits(app(Theme::Standard), Some(&snap), &[], Range::Today);
-    assert!(draw(&a, 160, 50).contains("[measured, stale]"));
+    let text = draw(&a, 160, 50);
+    assert!(text.contains("stale"), "{text}");
+    assert!(text.contains("measured, stale"), "{text}");
 }
 
 #[test]
@@ -452,7 +455,7 @@ fn the_state_wears_the_error_color_when_the_limit_will_be_exceeded() {
     let cells: Vec<&str> = (0..100).map(|x| buf[(x, row)].symbol()).collect();
     let at = cells
         .windows(4)
-        .position(|w| w.concat() == "will")
+        .position(|w| w.concat() == "hits")
         .expect("the state is on the first limit row");
     let pal = Theme::Standard.palette(ColorDepth::True);
     assert_eq!(buf[(at as u16, row)].fg, pal.color(pal.error));
@@ -955,7 +958,8 @@ fn the_health_view_shows_errors_retries_busy_time_and_cache_hit_against_the_prev
         "{text}"
     );
     // A tall terminal shows every figure, the cache hit rate from transcripts too.
-    let tall = draw(&health_app(true, ProjectsView::Health), 160, 50);
+    // The budget strip takes 6 rows, so every figure needs 52.
+    let tall = draw(&health_app(true, ProjectsView::Health), 160, 52);
     assert!(
         tall.contains("Cache hit")
             && tall.contains("Active time")
@@ -1214,11 +1218,8 @@ fn the_budget_strip_says_when_each_limit_is_reached_at_the_current_pace() {
     let text = draw(&a, 140, 40);
 
     assert!(!text.contains("Projection"), "{text}");
-    assert!(text.contains("reaches the limit in 2h 0m"), "{text}");
-    assert!(
-        text.contains("will not reach the limit before it resets"),
-        "{text}"
-    );
+    assert!(text.contains("hits it in 2h 0m"), "{text}");
+    assert!(text.contains("safe"), "{text}");
     check("budget_reach_140x40", &text);
 }
 
@@ -1251,10 +1252,10 @@ fn an_enterprise_account_shows_the_cached_spend_limit_and_says_the_windows_are_n
 
     let text = draw(&a, 140, 40);
 
-    assert!(text.contains("[cached 10m ago]"), "{text}");
-    assert!(text.contains("$120.00/$500.00"), "{text}");
+    assert!(text.contains("cached 10m ago"), "{text}");
+    assert!(text.contains("$120 of $500"), "{text}");
     assert!(
-        text.contains("5 hour and weekly windows: not available for this plan"),
+        text.contains("5 hour and weekly windows: not on this plan"),
         "{text}"
     );
     check("projection_enterprise_140x40", &text);
@@ -1271,10 +1272,11 @@ fn a_stale_cached_limit_is_labeled_with_its_age_and_says_this_machine_is_added()
     let text = draw(&a, 140, 40);
 
     assert!(
-        text.contains("[cached 1d 22h ago, plus this machine since]"),
+        text.contains("cached 1d 22h ago, plus this machine since"),
         "{text}"
     );
-    assert!(text.contains("$121.80/$500.00"), "{text}");
+    assert!(text.contains("stale 1d 22h"), "{text}");
+    assert!(text.contains("$122 of $500"), "{text}");
 }
 
 #[test]
@@ -1291,7 +1293,7 @@ fn a_stale_cache_without_an_amount_still_says_used_is_this_machine_only() {
     let text = draw(&a, 140, 40);
 
     assert!(
-        text.contains("[limit cached 1d 22h ago, used is this machine only]"),
+        text.contains("limit cached 1d 22h ago, used is this machine only"),
         "{text}"
     );
 }
@@ -1308,10 +1310,16 @@ fn with_reported(mut s: Sources, used: f64) -> Sources {
 #[test]
 fn a_stale_reported_figure_is_shown_with_its_age_beside_this_machines_estimate() {
     let s = with_reported(enterprise_sources(46 * 3600), 120.0);
-    let a = with_sources(tabbed(1), &s, Range::LastDays(30));
+    let mut a = with_sources(tabbed(1), &s, Range::LastDays(30));
+    let short = draw(&a, 140, 40);
+    a.budget_detail = true;
 
     let text = draw(&a, 140, 40);
 
+    assert!(
+        short.contains("Claude read $120 used 1d 22h ago (stale)"),
+        "{short}"
+    );
     assert!(
         text.contains("Claude reported $120.00 used this month, read 1d 22h ago (stale)"),
         "{text}"
@@ -1326,11 +1334,12 @@ fn a_manual_bar_gets_the_reported_figure_line_without_stale_when_it_is_fresh() {
         c.spend = None;
     }
     s.budgets = vec![(LimitPeriod::Monthly, 40.0)];
-    let a = with_sources(tabbed(1), &s, Range::LastDays(30));
+    let mut a = with_sources(tabbed(1), &s, Range::LastDays(30));
+    a.budget_detail = true;
 
     let text = draw(&a, 140, 40);
 
-    assert!(text.contains("[manual, local]"), "{text}");
+    assert!(text.contains("manual, local"), "{text}");
     assert!(
         text.contains("Claude reported $120.00 used this month, read 10m ago;"),
         "{text}"
@@ -1353,9 +1362,9 @@ fn with_no_limit_and_no_windows_the_budget_strip_says_what_is_missing() {
 
     let text = draw(&a, 140, 40);
 
-    assert!(text.contains("Limit unknown:"), "{text}");
+    assert!(text.contains("No limit"), "{text}");
     assert_eq!(
-        text.matches("5 hour and weekly windows: not available for this plan")
+        text.matches("5 hour and weekly windows: not on this plan")
             .count(),
         1,
         "{text}"
@@ -1824,4 +1833,99 @@ fn the_charted_burnup_is_the_most_used_limit_else_the_spend_alone() {
 
     assert_eq!(view.charted(), Some(&high));
     assert_eq!(none.charted(), Some(&spend));
+}
+
+/// The rows of the Budget strip alone, from its top border to its bottom one.
+fn strip(a: &App, width: u16, height: u16) -> String {
+    let top = crate::tui::view::place(
+        ratatui::layout::Rect::new(0, 0, width, height),
+        &a.layout.tabs[a.tab].panels,
+        None,
+        true,
+    )
+    .budget;
+    assert_eq!(top.height, crate::tui::budget::HEIGHT, "{width}x{height}");
+    draw(a, width, height)
+        .lines()
+        .skip(usize::from(top.y))
+        .take(usize::from(top.height))
+        .map(|l| format!("{l}\n"))
+        .collect()
+}
+
+/// The numbers tab with the sources of one budget scenario.
+fn numbers_with(sources: &Sources, icon: Icon, detail: bool) -> App {
+    let mut a = with_sources(tabbed(1), sources, Range::LastDays(30));
+    a.icon = icon;
+    a.budget_detail = detail;
+    a
+}
+
+fn two_limits() -> Sources {
+    Sources {
+        snapshot: Some(plan_snapshot()),
+        budgets: vec![(LimitPeriod::Monthly, 100.0)],
+        ..Sources::default()
+    }
+}
+
+/// A weekly budget a little over its pace: 61 percent used, 8 hours short of
+/// the 4 day mark.
+fn over_pace() -> Sources {
+    Sources {
+        budgets: vec![(LimitPeriod::Weekly, 5.0)],
+        ..Sources::default()
+    }
+}
+
+/// Each scenario at the two sizes the design is drawn for, in ASCII and in
+/// UTF-8 glyphs.
+#[test]
+fn the_budget_strip_in_each_scenario_at_80x24_and_150x44() {
+    let scenarios = [
+        ("one_limit", enterprise_sources(600)),
+        ("two_limits", two_limits()),
+        ("over_pace", over_pace()),
+        ("no_limit", Sources::default()),
+        ("stale_cache", enterprise_sources(46 * 3600)),
+    ];
+    for (name, sources) in &scenarios {
+        for (w, h) in [(80, 24), (150, 44)] {
+            for (icon, tag) in [(Icon::Off, "ascii"), (Icon::Wide, "utf8")] {
+                let a = numbers_with(sources, icon, false);
+                check(&format!("strip_{name}_{tag}_{w}x{h}"), &strip(&a, w, h));
+            }
+        }
+    }
+}
+
+#[test]
+fn the_detail_key_shows_the_figures_of_both_limits_and_the_full_notes() {
+    let mut sources = two_limits();
+    sources.account.plan = crate::plan::Plan::Unknown;
+    let normal = numbers_with(&sources, Icon::Off, false);
+    let detail = numbers_with(&sources, Icon::Off, true);
+
+    let (short, long) = (strip(&normal, 150, 44), strip(&detail, 150, 44));
+
+    assert_eq!(short.matches("left ").count(), 1, "{short}");
+    assert_eq!(long.matches("left ").count(), 2, "{long}");
+    assert!(long.contains("7 day      left"), "{long}");
+    check("strip_detail_two_limits_150x44", &long);
+}
+
+#[test]
+fn the_strip_has_no_wide_text_clauses_left() {
+    let a = numbers_with(&two_limits(), Icon::Off, false);
+
+    let text = strip(&a, 150, 44);
+
+    for gone in [
+        "reaches the limit in",
+        "will not reach",
+        "[measured",
+        "left 50%  allow",
+    ] {
+        assert!(!text.contains(gone), "{gone}: {text}");
+    }
 }

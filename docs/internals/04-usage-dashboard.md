@@ -207,7 +207,7 @@ Notes:
 2. With no statusline reading, the cached spend limit at any age.
 3. `usage.budget.monthlyUsd`, only when nothing is detected. It does not draw a bar beside a detected limit. When both are set and differ, the Budget panel adds a line with both amounts and says the detected one applies.
 
-A cached limit over six hours old, whether it won under item 1 or item 2, is tagged `cached <age> ago, plus this machine since` when the cache has a used amount from this UTC month. The bar then shows that amount plus this machine's messages after the read, because spend only grows within a month. Without such an amount the tag is `limit cached <age> ago, used is this machine only` and the bar is this machine's estimate for the UTC month. A line under the bar shows the amount Claude Code last reported, with its age and the word stale. A manual budget is tagged `manual, local` for the same reason and gets the same line. Once other machines have synced events into `usage_events_remote`, the account scope panels (Budget, Projection, Burnup, Spend, Tokens, Models) and the account list read the `usage_events_all` view, so those events count, and the manual tag reads `manual, all machines`. The machine scope panels keep reading this machine's tables.
+A cached limit over six hours old, whether it won under item 1 or item 2, is tagged `cached <age> ago, plus this machine since` when the cache has a used amount from this UTC month. The bar then shows that amount plus this machine's messages after the read, because spend only grows within a month. Without such an amount the tag is `limit cached <age> ago, used is this machine only` and the bar is this machine's estimate for the UTC month. A note on the strip, read in full with `i`, shows the amount Claude Code last reported, with its age and the word stale. The tag sits on the figures line under the limit, and the row itself carries a one letter source glyph and a `stale` mark. A manual budget is tagged `manual, local` for the same reason and gets the same note. Once other machines have synced events into `usage_events_remote`, the account scope panels (Budget, Projection, Burnup, Spend, Tokens, Models) and the account list read the `usage_events_all` view, so those events count, and the manual tag reads `manual, all machines`. The machine scope panels keep reading this machine's tables.
 
 Cache rules:
 
@@ -337,12 +337,12 @@ A seat billed by usage has no 5 hour or 7 day window. It has a monthly dollar li
 
 ### When a limit is reached
 
-The Budget strip says when each limit is reached at your current pace, in the time zone shown in its title (UTC or local). It was a separate Projection panel before, and the math is the same. The strip shows the sooner of the two paces below as `reaches the limit in 2d 4h at the 24h pace`, or `will not reach the limit before it resets`. The older layout word `projection` still loads and draws nothing. A dollar limit has two paces:
+The Budget strip says when each limit is reached at your current pace, in the time zone shown in its title (UTC or local). It was a separate Projection panel before, and the math is the same. The strip shows the sooner of the two paces below as `hits it in 2d 4h`, with `(24h)` added when the 24 hour pace is the sooner one, or `safe` when neither reaches the limit before it resets. The older layout word `projection` still loads and draws nothing. A dollar limit has two paces:
 
 1. The last 24 hours, which follows what you are doing now. When the period started less than 24 hours ago, it uses the spend of the period over the age of the period, so spend from before the period never counts (under one hour of data it says "no pace yet").
 2. The period average since the period began, which is steadier and shows the long view.
 
-A limit that is a percentage of a window (the 5 hour and weekly windows of a plan) has the window average only, because the window has no per day cost. The strip shows no clause for a limit that is reached already (its state says so) or when no pace is known yet. With no limit known, the strip says how to set one.
+A limit that is a percentage of a window (the 5 hour and weekly windows of a plan) has the window average only, because the window has no per day cost. The strip shows no clause for a limit that is reached already (its state says so) or when no pace is known yet. With no limit known, the strip shows an empty bar and says to press `b`.
 
 ### The burn-up panel
 

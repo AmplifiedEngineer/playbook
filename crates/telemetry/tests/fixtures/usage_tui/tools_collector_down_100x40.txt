@@ -5,9 +5,10 @@
 │messages           2   vs          0          +2      new                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─┤Budget├─────────────────────────────────────────────────────────────────────┤UTC  all projects├─╮
-│Limit unknown: playbook config set --global usage.budget.monthlyUsd <usd> (or weeklyUsd),         │
-│or use Claude Code on Pro or Max with the playbook statusline for the 5 hour and weekly limits.   │
-│this week spend [local history]  $0.00 so far  avg n/a  last week n/a                             │
+│No limit   ------------------------------------------------------  press b to set a monthly budget│
+│Spend    h this week $0.00 ----------  last week $0.00 ----------  new  avg n/a                   │
+│                                                                                                  │
+│                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─┤¹Spend per day, USD, 7 days├─┤v view: total├──╮╭─┤²Tokens per day, 7 days├──────────────────────╮
 │total $4.80  peak $1.80 on 09-01  avg $0.69/day ││total 142.8K  peak 47.6K on 09-01  avg 20.4K/day│
@@ -30,7 +31,6 @@
 ╭─┤⁵Live sessions├─────┤hour $1.25  today $1.25├─╮╭─┤⁶Sessions per day├──────────────────────┤UTC├─╮
 │state project     model       msgs     cost ago▲││day   session  project      model          cost▼│
 │live  alpha       opus-5         2    $1.25  20s││09-03 s-live   alpha        opus-5         $1.25│
-│                                                ││                                                │
 │                                                ││                                                │
 │                                                ││                                                │
 │                                                ││                                                │
