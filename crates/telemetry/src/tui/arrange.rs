@@ -23,7 +23,7 @@ fn cells(tab: &Tab) -> (Vec<u8>, Vec<usize>) {
         .panels
         .iter()
         .enumerate()
-        .filter(|(_, p)| **p != PanelId::Budget)
+        .filter(|(_, p)| p.has_cell())
         .map(|(i, _)| i)
         .collect();
     let Some(rows) = &tab.rows else {
@@ -35,7 +35,7 @@ fn cells(tab: &Tab) -> (Vec<u8>, Vec<usize>) {
         .map(|n| {
             next.by_ref()
                 .take(usize::from(*n))
-                .filter(|p| **p != PanelId::Budget)
+                .filter(|p| p.has_cell())
                 .count() as u8
         })
         .filter(|n| *n > 0)
@@ -112,10 +112,33 @@ pub fn move_vertically(tab: &mut Tab, slot: usize, by: isize) -> Result<usize, S
     Ok(target)
 }
 
+/// Takes the retired words off the tab, which draw nothing, unless that would
+/// leave it empty. Returns where the panel at `slot` is afterwards.
+fn drop_retired(tab: &mut Tab, mut slot: usize) -> usize {
+    while let Some(at) = tab.panels.iter().position(|p| p.is_retired()) {
+        if tab.panels.len() == 1 {
+            break;
+        }
+        if let Some(rows) = &mut tab.rows {
+            let (row, _) = locate(rows, at);
+            rows[row] -= 1;
+            if rows[row] == 0 {
+                rows.remove(row);
+            }
+        }
+        tab.panels.remove(at);
+        if slot > at {
+            slot -= 1;
+        }
+    }
+    slot.min(tab.panels.len() - 1)
+}
+
 /// Puts the budget strip first in the list and, in an arranged tab, on a row of
 /// its own ahead of the grid rows. The strip draws on top either way, so the
 /// tab looks as before. Returns where the panel at `slot` is afterwards.
 fn settle(tab: &mut Tab, slot: usize) -> usize {
+    let slot = drop_retired(tab, slot);
     let Some(at) = tab.panels.iter().position(|p| *p == PanelId::Budget) else {
         return slot;
     };
@@ -148,7 +171,7 @@ fn strip_lead(tab: &Tab) -> (usize, usize) {
 
 /// The panels of the tab that take a cell, which is every panel but the strip.
 pub fn grid_count(tab: &Tab) -> usize {
-    tab.panels.iter().filter(|p| **p != PanelId::Budget).count()
+    tab.panels.iter().filter(|p| p.has_cell()).count()
 }
 
 /// Splits a row of two into two rows, or joins a row of one with a row of one
@@ -413,7 +436,7 @@ mod tests {
     fn the_width_toggle_refuses_a_fifth_row_and_a_tab_over_eight_panels() {
         // Arrange
         let mut four_rows = tab("A=spend,tokens|models|live|sessions");
-        let mut nine = tab("A=spend,tokens,models,live,sessions,projection,burnup,breakdown");
+        let mut nine = tab("A=spend,tokens,models,live,sessions,hourly,burnup,breakdown");
         nine.panels.push(PanelId::Live);
         nine.panels.push(PanelId::Sessions);
 
@@ -500,7 +523,7 @@ mod tests {
             PanelId::Live,
             PanelId::Sessions,
             PanelId::Burnup,
-            PanelId::Projection,
+            PanelId::Hourly,
         ];
         for arranged in [false, true] {
             let mut t = tab(if arranged {
@@ -541,8 +564,8 @@ mod tests {
     #[test]
     fn the_budget_strip_goes_first_beside_eight_panels_and_takes_no_cell() {
         // Arrange
-        let mut automatic = tab("A=spend,tokens,models,breakdown,live,sessions,burnup,projection");
-        let mut arranged = tab("A=spend,tokens|models,breakdown|live,sessions|burnup,projection");
+        let mut automatic = tab("A=spend,tokens,models,breakdown,live,sessions,burnup,hourly");
+        let mut arranged = tab("A=spend,tokens|models,breakdown|live,sessions|burnup,hourly");
 
         // Act
         let auto_at = add(&mut automatic, PanelId::Budget);
@@ -624,21 +647,21 @@ mod tests {
     #[test]
     fn moves_in_an_automatic_tab_skip_the_budget_strip_wherever_it_is_listed() {
         // Arrange
-        let mut t = tab("A=models,breakdown,budget,projection");
+        let mut t = tab("A=models,breakdown,budget,hourly");
 
         // Act
         let down = move_vertically(&mut t, 0, 1);
 
         // Assert
         assert_eq!(down, Ok(3));
-        assert_eq!(words(&t), ["projection", "breakdown", "budget", "models"]);
+        assert_eq!(words(&t), ["hourly", "breakdown", "budget", "models"]);
         assert!(move_sideways(&mut t, 2, 1).is_err());
     }
 
     #[test]
     fn the_width_toggle_moves_the_budget_strip_first_and_keeps_it_out_of_the_grid() {
         // Arrange
-        let mut t = tab("A=models,budget,breakdown,projection");
+        let mut t = tab("A=models,budget,breakdown,hourly");
 
         // Act
         let to = toggle_width(&mut t, 0);
@@ -646,7 +669,7 @@ mod tests {
         // Assert
         assert_eq!(to, Ok(1));
         assert_eq!(t.rows, Some(vec![1, 1, 1, 1]));
-        assert_eq!(words(&t), ["budget", "models", "breakdown", "projection"]);
+        assert_eq!(words(&t), ["budget", "models", "breakdown", "hourly"]);
     }
 
     #[test]
@@ -675,5 +698,47 @@ mod tests {
         // Assert
         assert!(result.is_err());
         assert_eq!(t.rows, Some(vec![2, 1, 2]));
+    }
+
+    #[test]
+    fn a_retired_word_takes_no_cell_and_the_editor_drops_it_on_the_first_change() {
+        // Arrange
+        let mut t = tab("A=models,breakdown,budget,projection");
+
+        // Act
+        let before = grid(&t);
+        let added = add(&mut t, PanelId::Hourly);
+
+        // Assert
+        assert_eq!(before, vec![vec![0], vec![1]]);
+        assert_eq!(added, Ok(3));
+        assert_eq!(words(&t), ["budget", "models", "breakdown", "hourly"]);
+        assert_eq!(t.rows, None);
+    }
+
+    #[test]
+    fn a_retired_word_does_not_count_toward_the_eight_panels() {
+        // Arrange
+        let mut t = tab("A=spend,tokens,models,breakdown,live,sessions,burnup,hourly,projection");
+
+        // Act
+        let ninth = add(&mut t, PanelId::SpendTotal);
+
+        // Assert
+        assert!(ninth.is_err());
+        assert_eq!(grid_count(&t), 8);
+    }
+
+    #[test]
+    fn a_tab_of_only_the_retired_word_keeps_it_beside_a_new_panel() {
+        // Arrange
+        let mut t = tab("A=projection");
+
+        // Act
+        let at = add(&mut t, PanelId::Hourly);
+
+        // Assert
+        assert_eq!(at, Ok(1));
+        assert_eq!(words(&t), ["projection", "hourly"]);
     }
 }

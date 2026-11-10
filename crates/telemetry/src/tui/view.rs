@@ -14,7 +14,6 @@ use super::keys::{self, HelpLine};
 use super::layout::{auto_rows, PanelId};
 use super::notice::{self, Notice};
 use super::panels;
-use super::projection;
 use super::theme::Palette;
 use crate::aggregate::date_key;
 use crate::period::{elapsed_text, Comparison, Span as TimeSpan};
@@ -172,15 +171,15 @@ fn grid(body: Rect, n: usize) -> (Vec<Rect>, usize) {
 /// The least body height per row for an arranged tab to be drawn as arranged.
 const MIN_ROW_HEIGHT: u16 = 5;
 
-/// The panel count of each row once the budget strip, which has no cell in the
-/// body, is taken out. A row that held only the strip disappears.
+/// The panel count of each row once the budget strip and the retired
+/// projection word, which have no cell in the body, are taken out. A row that held only the strip disappears.
 fn body_rows(ids: &[PanelId], rows: &[u8]) -> Vec<usize> {
     let mut ids = ids.iter();
     rows.iter()
         .map(|n| {
             ids.by_ref()
                 .take(usize::from(*n))
-                .filter(|id| **id != PanelId::Budget)
+                .filter(|id| id.has_cell())
                 .count()
         })
         .filter(|n| *n > 0)
@@ -196,7 +195,7 @@ fn body_rows(ids: &[PanelId], rows: &[u8]) -> Vec<usize> {
 pub fn place(area: Rect, ids: &[PanelId], rows: Option<&[u8]>, tabbed: bool) -> Placed {
     let wants_budget = ids.contains(&PanelId::Budget);
     // A tab with few other panels can afford the strip on a short screen.
-    let few = ids.iter().filter(|id| **id != PanelId::Budget).count() <= 3;
+    let few = ids.iter().filter(|id| id.has_cell()).count() <= 3;
     let min_rows = if tabbed && few {
         TAB_BUDGET_MIN_ROWS
     } else {
@@ -215,11 +214,7 @@ pub fn place(area: Rect, ids: &[PanelId], rows: Option<&[u8]>, tabbed: bool) -> 
         Constraint::Length(1),
     ])
     .areas(area);
-    let shown: Vec<PanelId> = ids
-        .iter()
-        .copied()
-        .filter(|id| *id != PanelId::Budget)
-        .collect();
+    let shown: Vec<PanelId> = ids.iter().copied().filter(|id| id.has_cell()).collect();
     let arranged = rows.map(|r| body_rows(ids, r)).filter(|r| {
         !r.is_empty()
             && r.iter().sum::<usize>() == shown.len()
@@ -322,9 +317,9 @@ pub fn render(frame: &mut Frame, app: &App) {
                     }
                     PanelId::Live => panels::live(frame, *rect, app, data, &pal),
                     PanelId::Sessions => panels::sessions(frame, *rect, app, data, &pal),
-                    PanelId::Projection => projection::render(frame, *rect, data, &pal),
+                    PanelId::Hourly => panels::hourly(frame, *rect, data, &pal),
                     PanelId::Burnup => burnup::render(frame, *rect, data, &pal, dots),
-                    PanelId::Budget => {}
+                    PanelId::Budget | PanelId::Projection => {}
                 }
             }
         }
@@ -1488,19 +1483,6 @@ mod tests {
         }
     }
 
-    /// The nine panels that existed before the pinned view words.
-    const NINE: [PanelId; 9] = [
-        PanelId::Spend,
-        PanelId::Tokens,
-        PanelId::Models,
-        PanelId::Breakdown,
-        PanelId::Live,
-        PanelId::Sessions,
-        PanelId::Budget,
-        PanelId::Projection,
-        PanelId::Burnup,
-    ];
-
     fn assert_tiles_body(area: Rect, ids: &[PanelId], rows: Option<&[u8]>) -> Placed {
         let placed = place(area, ids, rows, true);
         let body_cells: u32 = placed
@@ -1581,12 +1563,12 @@ mod tests {
     fn seven_and_eight_panels_all_get_a_place() {
         // Arrange
         let area = Rect::new(0, 0, 120, 40);
-        let panels = NINE.iter().copied().filter(|p| *p != PanelId::Budget);
+        let panels = eight_panels();
 
         for n in 7..=8 {
             // Act
-            let ids: Vec<PanelId> = panels.clone().take(n).collect();
-            let placed = assert_tiles_body(area, &ids, None);
+            let ids = &panels[..n];
+            let placed = assert_tiles_body(area, ids, None);
 
             // Assert
             assert_eq!(placed.panels.len(), n, "{n} panels");
@@ -1870,7 +1852,7 @@ mod tests {
         assert_eq!(
             effect,
             crate::tui::app::Effect::SaveLayout(
-                "Numbers=models,breakdown,budget,projection;Sessions=live,sessions".into()
+                "Numbers=models,breakdown,budget,hourly;Sessions=live,sessions".into()
             )
         );
         assert_eq!(app.layout.tabs.len(), 2);
@@ -2207,7 +2189,7 @@ mod tests {
     fn eight_panels() -> Vec<PanelId> {
         ALL.iter()
             .copied()
-            .filter(|p| !p.is_pinned() && *p != PanelId::Budget)
+            .filter(|p| !p.is_pinned() && p.has_cell())
             .take(8)
             .collect()
     }
@@ -2363,5 +2345,86 @@ mod tests {
             "{short}"
         );
         assert!(!tall.contains("hidden"), "{tall}");
+    }
+
+    #[test]
+    fn the_retired_projection_word_takes_no_cell_and_draws_nothing() {
+        // Arrange
+        let area = Rect::new(0, 0, 100, 30);
+        let with = [PanelId::Models, PanelId::Breakdown, PanelId::Projection];
+        let without = [PanelId::Models, PanelId::Breakdown];
+
+        // Act
+        let old = place(area, &with, None, true);
+        let new = place(area, &without, None, true);
+
+        // Assert
+        assert_eq!(old.panels, new.panels);
+        assert_eq!(old.hidden, None);
+    }
+
+    #[test]
+    fn the_numbers_tab_draws_hourly_under_the_pair_and_the_strip_on_top() {
+        // Arrange
+        let area = Rect::new(0, 0, 100, 30);
+        let ids = Layout::default().tabs[1].panels.clone();
+
+        // Act
+        let placed = place(area, &ids, None, true);
+
+        // Assert
+        let rect = |id| placed.panels.iter().find(|(p, _)| *p == id).unwrap().1;
+        let (models, breakdown, hourly) = (
+            rect(PanelId::Models),
+            rect(PanelId::Breakdown),
+            rect(PanelId::Hourly),
+        );
+        assert_eq!(placed.budget.height, budget::HEIGHT);
+        assert_eq!(models.y, breakdown.y);
+        assert_eq!(models.width + breakdown.width, 100);
+        assert_eq!(hourly.y, models.bottom());
+        assert_eq!(hourly.width, 100);
+        assert_eq!(placed.panels.len(), 3);
+    }
+
+    #[test]
+    fn the_hourly_panel_charts_the_last_day_with_its_total_in_the_title() {
+        // Arrange
+        let mut app = app_with(&[
+            UsageEvent {
+                timestamp: NOW - 60,
+                ..event("opus", "alpha", 1.25)
+            },
+            UsageEvent {
+                timestamp: NOW - 3 * 3600,
+                ..event("sonnet", "alpha", 2.0)
+            },
+        ]);
+        app.layout = Layout::parse("A=hourly,models").unwrap();
+
+        // Act
+        let text = screen(&app, 120, 30);
+
+        // Assert
+        assert!(text.contains("Spend per hour, 24h total $3.25"), "{text}");
+        assert!(text.contains("total $3.25  peak $2.00 at"), "{text}");
+        assert!(text.contains("now"), "{text}");
+    }
+
+    #[test]
+    fn the_hourly_panel_says_so_when_the_last_day_is_idle() {
+        // Arrange
+        let mut app = app_with(&[UsageEvent {
+            timestamp: NOW - 3 * 86_400,
+            ..event("opus", "alpha", 1.0)
+        }]);
+        app.layout = Layout::parse("A=hourly,models").unwrap();
+
+        // Act
+        let text = screen(&app, 120, 30);
+
+        // Assert
+        assert!(text.contains("Spend per hour, 24h total $0.00"), "{text}");
+        assert!(text.contains("No usage in the last 24 hours."), "{text}");
     }
 }

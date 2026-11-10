@@ -28,6 +28,9 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Cell, Paragraph, Row, Table, Wrap};
 use ratatui::Frame;
 
+/// The day number no bar holds, for a chart that marks no day as today.
+const NO_DAY: i64 = -1;
+
 /// A session whose last message is newer than this is working right now.
 const LIVE_SECONDS: i64 = 120;
 
@@ -565,6 +568,51 @@ fn daily_table(
                 .collect()
         },
     );
+}
+
+/// Cost per hour over the last 24 hours, stacked by model, with the total in
+/// the title. It takes no focus and has no cursor: the readout shows the
+/// current hour.
+pub fn hourly(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette) {
+    let box_ink = pal.box_cpu;
+    let total: f64 = data.hours.iter().map(|h| h.cost_usd).sum();
+    let title = format!("Spend per hour, 24h total {}", money(total));
+    let edge = fg(pal, box_ink);
+    let mut block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(edge)
+        .title(Line::from(vec![
+            Span::styled("\u{2500}\u{2524}", edge),
+            Span::styled(title, fg(pal, pal.title)),
+            Span::styled("\u{251c}", edge),
+        ]))
+        .title(note_line(pal, crate::tz::label(), box_ink).right_aligned());
+    if data.hours.iter().all(|h| h.messages == 0) {
+        return empty(frame, area, pal, block, "No usage in the last 24 hours.");
+    }
+    let plot = Plot::hourly(area, &data.hours);
+    let mut note_width = 0;
+    if plot.geo.stats_y.is_none() {
+        let peak = plot.bars.iter().map(|b| b.cost).fold(0.0, f64::max);
+        let note = format!("peak {}", money(peak));
+        note_width = note.chars().count() + 2;
+        block = block.title_bottom(note_line(pal, &note, box_ink));
+    }
+    let legend = model_legend(
+        pal,
+        &data.slots,
+        usize::from(area.width).saturating_sub(note_width),
+        box_ink,
+    );
+    block = block.title_bottom(legend.right_aligned());
+    frame.render_widget(block, area);
+    let view = chart::View {
+        fill: pal.cpu,
+        stack: Some(&data.slots),
+        cursor: None,
+        today: NO_DAY,
+    };
+    chart::render(frame.buffer_mut(), &plot, &data.hours, &view, pal);
 }
 
 /// Tokens per day.

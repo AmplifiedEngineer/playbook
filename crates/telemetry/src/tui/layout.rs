@@ -21,6 +21,8 @@ pub enum PanelId {
     Budget,
     Projection,
     Burnup,
+    /// Cost per hour over the last 24 hours.
+    Hourly,
     /// Spend pinned to one view; `Spend` is the panel whose view `v` switches.
     SpendTotal,
     SpendModel,
@@ -34,7 +36,7 @@ pub enum PanelId {
 }
 
 /// Every panel, in the order the layout editor lists them.
-pub const ALL: [PanelId; 17] = [
+pub const ALL: [PanelId; 18] = [
     PanelId::Spend,
     PanelId::Tokens,
     PanelId::Models,
@@ -44,6 +46,7 @@ pub const ALL: [PanelId; 17] = [
     PanelId::Budget,
     PanelId::Projection,
     PanelId::Burnup,
+    PanelId::Hourly,
     PanelId::SpendTotal,
     PanelId::SpendModel,
     PanelId::SpendDaily,
@@ -67,6 +70,7 @@ impl PanelId {
             PanelId::Budget => "budget",
             PanelId::Projection => "projection",
             PanelId::Burnup => "burnup",
+            PanelId::Hourly => "hourly",
             PanelId::SpendTotal => "spend.total",
             PanelId::SpendModel => "spend.model",
             PanelId::SpendDaily => "spend.daily",
@@ -88,8 +92,9 @@ impl PanelId {
             PanelId::Live => "sessions with a message in the last 15 minutes",
             PanelId::Sessions => "every session of the period, grouped by day",
             PanelId::Budget => "limits and how fast you are using them",
-            PanelId::Projection => "when each limit is reached at the current pace",
+            PanelId::Projection => "retired: the budget strip says when each limit is reached",
             PanelId::Burnup => "how much of a limit is used over its period, with a projection",
+            PanelId::Hourly => "cost per hour over the last 24 hours as a chart, with the total",
             PanelId::SpendTotal => "total cost per day as a chart, always this view",
             PanelId::SpendModel => "cost per model per day as a chart, always this view",
             PanelId::SpendDaily => "cost per day as a table, always this view",
@@ -118,7 +123,7 @@ impl PanelId {
             | PanelId::BreakdownHealth => Some(Panel::Projects),
             PanelId::Live => Some(Panel::Live),
             PanelId::Sessions => Some(Panel::Sessions),
-            PanelId::Budget | PanelId::Projection | PanelId::Burnup => None,
+            PanelId::Budget | PanelId::Projection | PanelId::Burnup | PanelId::Hourly => None,
         }
     }
 
@@ -144,6 +149,17 @@ impl PanelId {
             PanelId::BreakdownHealth => Some(ProjectsView::Health),
             _ => None,
         }
+    }
+
+    /// Whether the panel takes a cell of the grid. The budget strip draws on
+    /// top and the retired projection word draws nothing, so neither does.
+    pub fn has_cell(self) -> bool {
+        !matches!(self, PanelId::Budget | PanelId::Projection)
+    }
+
+    /// A word an old layout may hold that the editor no longer offers.
+    pub fn is_retired(self) -> bool {
+        self == PanelId::Projection
     }
 
     /// True for the ids that pin a view, which the classic screen never holds.
@@ -230,7 +246,7 @@ impl Default for Layout {
                         PanelId::Models,
                         PanelId::Breakdown,
                         PanelId::Budget,
-                        PanelId::Projection,
+                        PanelId::Hourly,
                     ],
                 ),
                 tab("Sessions", &[PanelId::Live, PanelId::Sessions]),
@@ -288,7 +304,11 @@ fn parse_rows(name: &str, list: &str) -> Result<(Vec<PanelId>, Option<Vec<u8>>),
                 format!(
                     "{:?} is not a panel; use {}",
                     word.trim(),
-                    ALL.map(PanelId::word).join(", ")
+                    ALL.iter()
+                        .filter(|p| !p.is_retired())
+                        .map(|p| p.word())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )
             })?;
             if panels.contains(&panel) {
@@ -319,13 +339,14 @@ fn parse_rows(name: &str, list: &str) -> Result<(Vec<PanelId>, Option<Vec<u8>>),
     if !arranged {
         return Ok((panels, None));
     }
-    // The budget strip takes no cell, so it counts toward neither limit.
-    let strip = usize::from(panels.contains(&PanelId::Budget));
+    // The budget strip and a retired word take no cell, so they count toward
+    // neither limit.
+    let strip = panels.iter().filter(|p| !p.has_cell()).count();
     let mut rest = panels.as_slice();
     let mut strip_rows = 0;
     for n in &rows {
         let (row, tail) = rest.split_at(usize::from(*n));
-        strip_rows += usize::from(row.iter().all(|p| *p == PanelId::Budget));
+        strip_rows += usize::from(row.iter().all(|p| !p.has_cell()));
         rest = tail;
     }
     if rows.len() - strip_rows > MAX_ROWS || panels.len() - strip > MAX_TAB_PANELS {
@@ -340,7 +361,7 @@ fn parse_rows(name: &str, list: &str) -> Result<(Vec<PanelId>, Option<Vec<u8>>),
 
 impl Layout {
     /// One tab with the panels of the single screen pbtop had before tabs, which
-    /// is every panel except Projection, Burnup and the pinned view words.
+    /// is every panel except Projection, Burnup, Hourly and the pinned view words.
     pub fn classic() -> Layout {
         Layout {
             tabs: vec![Tab {
@@ -349,7 +370,8 @@ impl Layout {
                     .iter()
                     .copied()
                     .filter(|p| {
-                        !p.is_pinned() && !matches!(p, PanelId::Projection | PanelId::Burnup)
+                        !p.is_pinned()
+                            && !matches!(p, PanelId::Projection | PanelId::Burnup | PanelId::Hourly)
                     })
                     .collect(),
                 rows: None,
@@ -750,5 +772,53 @@ mod tests {
         assert_eq!(layout.tabs[0].panels.len(), 9);
         assert_eq!(layout.to_text(), strip_and_eight);
         assert!(Layout::parse(nine).unwrap_err().contains("4 rows"));
+    }
+
+    #[test]
+    fn the_default_numbers_tab_is_models_breakdown_budget_and_hourly() {
+        let layout = Layout::default();
+
+        let numbers = &layout.tabs[1];
+
+        assert_eq!(
+            numbers.panels,
+            [
+                PanelId::Models,
+                PanelId::Breakdown,
+                PanelId::Budget,
+                PanelId::Hourly
+            ]
+        );
+        assert_eq!(numbers.rows, None);
+        assert!(layout
+            .to_text()
+            .contains("Numbers=models,breakdown,budget,hourly;"));
+    }
+
+    #[test]
+    fn the_retired_projection_word_still_loads_and_round_trips_as_written() {
+        for old in [
+            "Numbers=models,breakdown,budget,projection",
+            "A=spend,tokens|projection",
+            "A=projection",
+        ] {
+            let layout = Layout::parse(old).unwrap();
+
+            assert_eq!(layout.to_text(), old);
+        }
+        assert!(PanelId::Projection.is_retired() && !PanelId::Projection.has_cell());
+        assert!(!PanelId::Budget.has_cell() && PanelId::Hourly.has_cell());
+    }
+
+    #[test]
+    fn the_hourly_word_parses_and_the_error_for_a_bad_word_leaves_out_the_retired_one() {
+        let layout = Layout::parse("A=hourly,models").unwrap();
+        let why = Layout::parse("A=nothing").unwrap_err();
+
+        assert_eq!(layout.tabs[0].panels, [PanelId::Hourly, PanelId::Models]);
+        assert!(
+            why.contains("hourly") && !why.contains("projection"),
+            "{why}"
+        );
     }
 }

@@ -17,7 +17,7 @@ It is part of the [playbook](https://github.com/amplifiedengineer/playbook) tool
 - Cache read and write tokens, split into the five minute and one hour tiers.
 - Tool, skill and agent breakdowns and latency, when Claude Code telemetry is on (see the receiver below).
 - Tabs (Charts, Numbers, Sessions by default) with the panels you choose. Press `e` to edit the layout, `Tab` and `F1` to `F12` to switch tabs.
-- Budget, rate limit and projection panels (when each limit is reached at the current pace). The limits come from the playbook statusline (Pro and Max windows), from the usage numbers Claude Code caches in its config file (the 5 hour and weekly windows, or the monthly spend limit on Enterprise, shown with its age), or from a budget you set.
+- A Budget strip with the rate limits and, beside each limit, when it is reached at the current pace, and an Hourly chart of the cost of the last 24 hours. The limits come from the playbook statusline (Pro and Max windows), from the usage numbers Claude Code caches in its config file (the 5 hour and weekly windows, or the monthly spend limit on Enterprise, shown with its age), or from a budget you set.
 - Your last tab, range, views, sorts and filter, restored on the next start.
 - Codex session history, read the same way.
 
@@ -104,7 +104,7 @@ Settings are playbook's own, from the global tier of its config store (`~/.confi
 | `usage.autoIngestMinutes` | `10` | number |
 | `usage.budget.monthlyUsd` | `0` | number |
 | `usage.budget.weeklyUsd` | `0` | number |
-| `usage.ui.layout` | empty | text like `Charts=spend.total,spend.model\|tokens\|burnup;Numbers=models,breakdown,budget,projection;Sessions=live,sessions`; press `e` in pbtop to edit, changes save at once |
+| `usage.ui.layout` | empty | text like `Charts=spend.total,spend.model\|tokens\|burnup;Numbers=models,breakdown,budget,hourly;Sessions=live,sessions`; press `e` in pbtop to edit, changes save at once |
 | `usage.ui.state` | empty | text written by pbtop: the screen setup it restores |
 
 ## Telemetry receiver
