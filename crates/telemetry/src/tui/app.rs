@@ -1281,6 +1281,17 @@ mod tests {
     }
 
     #[test]
+    fn i_toggles_the_budget_detail_and_changes_nothing_else() {
+        let mut app = loaded();
+        assert!(!app.budget_detail);
+
+        assert_eq!(app.key(press(KeyCode::Char('i'))), Effect::None);
+        assert!(app.budget_detail);
+        assert_eq!(app.key(press(KeyCode::Char('i'))), Effect::None);
+        assert!(!app.budget_detail);
+    }
+
+    #[test]
     fn b_opens_the_budget_window_and_enter_asks_to_store_the_amount() {
         let mut app = loaded();
         app.key(press(KeyCode::Char('b')));
