@@ -614,6 +614,16 @@ mod tests {
     use crate::common::test_support::scratch_dir;
     use std::fs;
 
+    /// How much time a test that checks logic gives the first-run step. The
+    /// real budget is [`START_BUDGET`], which a loaded machine can spend before
+    /// the step starts. Only the test of the stopping point uses a deadline
+    /// that has passed.
+    const TEST_BUDGET: Duration = Duration::from_secs(600);
+
+    fn ample_deadline() -> Instant {
+        Instant::now() + TEST_BUDGET
+    }
+
     fn ctx(home: &Path) -> Ctx {
         Ctx::for_home(home)
     }
@@ -682,8 +692,8 @@ mod tests {
         );
         let after_late = Record::read(&root(&home)).unwrap();
         let kept = script.exists();
-        let text = start(&home, Instant::now() + START_BUDGET);
-        let again = start(&home, Instant::now() + START_BUDGET);
+        let text = start(&home, ample_deadline());
+        let again = start(&home, ample_deadline());
 
         // Assert
         assert!(!late.recorded && late.failed.is_empty());
@@ -904,7 +914,7 @@ mod tests {
         let out = run(
             &ctx(&home),
             Trigger::Start {
-                deadline: Instant::now() + START_BUDGET,
+                deadline: ample_deadline(),
             },
             1000,
         );
@@ -1130,7 +1140,7 @@ mod tests {
         let home = scratch_dir("heal-listed");
         seed(&home, env!("CARGO_PKG_VERSION"), LEGACY_SCHEMA, None);
         let start = Trigger::Start {
-            deadline: Instant::now() + START_BUDGET,
+            deadline: ample_deadline(),
         };
 
         // Act
@@ -1313,7 +1323,7 @@ mod tests {
 
         // Act
         let fix = run(&ctx(&home), Trigger::Fix, 5000);
-        let note = start(&home, Instant::now() + START_BUDGET);
+        let note = start(&home, ample_deadline());
         let owned = migrate::run_owned(&ctx(&home), 0, None);
         let all = migrate::run_with(&migrate::active(), &ctx(&home));
         let manager = crate::service_manager::manager_for(&home).run("launchctl", &[]);
