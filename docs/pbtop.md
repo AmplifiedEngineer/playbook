@@ -39,11 +39,11 @@ Every tab has a header with the range, the cost, the tokens and the messages. Fo
 
 **Charts.** Spend per day, spend per day by model and tokens per day, with a burn-up panel below. It has no data in the sample, because the sample sets no limit.
 
-**Numbers.** The Budget panel, the models table, the projects table and the Projection panel.
+**Numbers.** The Budget strip, the models table, the projects table and the Hourly chart, which shows the cost of each of the last 24 hours with the total in its title. Each limit on the Budget strip also says when it reaches the limit at the current pace, so a separate Projection panel is gone.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/pbtop/numbers-dark.svg">
-  <img src="images/pbtop/numbers-light.svg" alt="pbtop Numbers tab: budget, models, projects and projection, sample data">
+  <img src="images/pbtop/numbers-light.svg" alt="pbtop Numbers tab: budget, models, projects and the cost per hour, sample data">
 </picture>
 
 **Sessions tab.** Live sessions, which have a message in the last 15 minutes, and every session of the range grouped by day.
@@ -226,7 +226,7 @@ The cost is an estimate at API prices. It is not what a subscription plan bills.
 
 ## Limits
 
-The Budget and Projection panels compare your use with a limit. A limit comes from one of these, and the panel tags it so you can tell them apart:
+The Budget strip compares your use with a limit. A limit comes from one of these, and the strip tags it so you can tell them apart:
 
 - `measured`: the 5 hour and weekly windows of a Pro or Max plan, from the `rate_limits` data that Claude Code passes to the Playbook statusline. Behind a Claude apps gateway it can also hold a dollar limit.
 - `cached`: usage numbers that Claude Code keeps in its own config file, with how old they are. Only a few plan and usage fields are read.
@@ -234,7 +234,7 @@ The Budget and Projection panels compare your use with a limit. A limit comes fr
 
 A limit that Claude Code reports wins over a manual budget. A manual monthly budget covers the calendar month in your chosen time zone, and the spend is the estimated cost from your history. A weekly budget starts on the day in `usage.weekStart`. With no limit at all, the panels say so and print how to set one.
 
-A projection needs at least one hour of elapsed time in the period. The [internals page](internals/04-usage-dashboard.md#the-math) has the math, and `playbook usage doctor` lists which limit sources exist on this machine.
+The clause that says when a limit is reached needs at least one hour of elapsed time in the period. The [internals page](internals/04-usage-dashboard.md#the-math) has the math, and `playbook usage doctor` lists which limit sources exist on this machine.
 
 ## Refresh
 

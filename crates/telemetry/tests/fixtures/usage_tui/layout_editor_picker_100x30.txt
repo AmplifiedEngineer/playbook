@@ -14,7 +14,7 @@
 ╰┤peak $6.0│   live               sessions with a message in the last 15 minutes        │ haiku-5├─╯
 ╭─┤²Tokens │   sessions           every session of the period, grouped by day           │──────────╮
 │total 618.│   budget             limits and how fast you are using them                │          │
-│Thu 2026-0│   projection         when each limit is reached at the current pace        │          │
+│Thu 2026-0│   hourly             cost per hour over the last 24 hours as a chart, with │          │
 │ 50K┤┄┄┄┄┄│   spend.daily        cost per day as a table, always this view             │▇▇┄┄┄┄▇▇▇┄│
 │ 25K┤▃▃┄▃▃│ spend.total: total cost per day as a chart, always this view               │██┄┄┄┄███┄│
 │   0┤██ ██│                                                                            │██    ███ │

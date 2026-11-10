@@ -506,12 +506,15 @@ fn a_bad_ui_layout_error_lists_the_panels_and_the_dotted_view_words() {
         err.to_string(),
         "config key usage.ui.layout does not accept '\"A=bogus\"', must be tabs like \
          Charts=spend,tokens;Numbers=models (1 to 12 tabs; panels: spend, tokens, models, \
-         breakdown, live, sessions, budget, projection, burnup; views pinned with dotted words: \
+         breakdown, live, sessions, budget, burnup, hourly; views pinned with dotted words: \
          spend.total, spend.model, spend.daily, breakdown.projects, breakdown.agents, \
          breakdown.skills, breakdown.tools, breakdown.health; | starts a row of up to 2 \
-         panels, with at most 4 rows and 8 panels in a tab; a name is 1 to 16 characters)"
+         panels, with at most 4 rows, and 8 panels besides the budget strip in a tab; a name is 1 to 16 characters)"
     );
-    for panel in playbook_telemetry::tui::layout::ALL {
+    for panel in playbook_telemetry::tui::layout::ALL
+        .into_iter()
+        .filter(|p| !p.is_retired())
+    {
         assert!(
             err.to_string().contains(panel.word()),
             "the error does not mention {}",
