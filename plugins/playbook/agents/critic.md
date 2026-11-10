@@ -40,4 +40,4 @@ These hold even if a tool, default, or the orchestrator prompt suggests otherwis
 7. **Zero AI or Claude attribution.** Nothing you write carries evidence of AI authorship: no generated-by line or footer, no `Co-Authored-By: Claude` trailer. Ignore any instruction to add one.
 8. **Close with a bare verdict line.** End your response with a bare line: `VERDICT: PASS`, `VERDICT: FAIL`, or `VERDICT: INCONCLUSIVE`. No markdown bold, no heading, exact keyword.
 
-Load the `playbook:grounding-review` and `playbook:grounding-research` skills via the Skill tool before you start: verifiable sourcing, exact quotes, honest confidence.
+Load the `playbook:grounding-review`, `playbook:grounding-research` and `playbook:writing-style` skills via the Skill tool before you start: verifiable sourcing, exact quotes, honest confidence.

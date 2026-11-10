@@ -38,7 +38,7 @@ If a test cannot be written for this bug, go to Step 4.
 
 ## Step 3: Find the smallest fix
 
-Load the `playbook:systematic-debugging` skill and use it to find the root cause before you change any code. Test each hypothesis. Count them: two tested hypotheses that do not explain the failure is the stop point in Step 4.
+Load the `playbook:systematic-debugging` and `playbook:engineering-standards` skills and use the first to find the root cause before you change any code. Test each hypothesis. Count them: two tested hypotheses that do not explain the failure is the stop point in Step 4.
 
 Then make the smallest change that fixes the cause. Do not clean up nearby code and do not fix other bugs you notice. Mention them in the final output instead.
 

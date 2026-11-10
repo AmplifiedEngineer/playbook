@@ -33,7 +33,7 @@ Finish each phase before the next.
 
 ## Phase 4: Fix the root cause
 
-1. **Write a failing test first**, the simplest reproduction (a one-off script if no framework exists). Follow `playbook:engineering-standards`; for JS/TS also `playbook:engineering-standards-javascript`, for Rust also `playbook:engineering-standards-rust`, for Python also `playbook:engineering-standards-python`.
+1. **Write a failing test first**, the simplest reproduction (a one-off script if no framework exists). Follow the project's engineering standards, including the language rules for the code under test.
 2. **Make one fix.** No "while I am here" changes, no bundled refactor.
 3. **Verify:** the new test passes, nothing else broke, the issue is gone.
 4. **Count failed fixes.** Under 3: return to Phase 1 with the new information. **3 or more: stop and question the architecture.** If each fix reveals new shared state or coupling elsewhere, needs massive refactoring, or creates a new symptom, the pattern may be wrong. Ask the user before attempting fix 4.
@@ -59,7 +59,7 @@ If the cause is genuinely environmental, timing-dependent or external: document 
 - `condition-based-waiting.md`: replace arbitrary timeouts in tests with polling on the real condition.
 - `rationalizations.md`: excuses for skipping the process and the reality behind each.
 
-Use `playbook:grounding-research` to verify claims against real code and cite `file:line`.
+Verify claims against real code and cite `file:line`.
 
 ## Memory
 
