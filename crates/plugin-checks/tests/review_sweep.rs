@@ -578,9 +578,8 @@ fn grounding_review_loads_writing_style_for_human_text_only() {
         "grounding-review still requires writing-style alongside it"
     );
     assert!(
-        text.contains(
-            "Load the `playbook:writing-style` skill when writing text a person will read"
-        ) && text.contains("not to produce or check findings"),
+        text.contains("loads the writing style skill")
+            && text.contains("not to produce or check findings"),
         "grounding-review does not scope the writing-style load to human text"
     );
     for (name, part) in [("report format", &format_text), ("sweep", &sweep_text)] {

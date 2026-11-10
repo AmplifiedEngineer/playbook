@@ -12,7 +12,7 @@ Discipline for reviewing pull requests: how to ground, label, and report finding
 
 The session that runs the review also reads `references/orchestrator.md` in this skill's folder for the report skeleton, the verification sweep and the subject line examples. A lens reviewer or `cheap-checker` skips it: the orchestrator sweeps your findings, you do not.
 
-Load the `playbook:writing-style` skill when writing text a person will read (a posted review comment, a PR or issue body), not to produce or check findings. Findings stay plain: label first, one or two sentences, no hedging, no em or en dashes. The posting step of the review command drafts the comment bodies from the swept findings and loads `playbook:writing-style` for that.
+Findings stay plain: label first, one or two sentences, no hedging, no em or en dashes. The posting step of each review pass loads the writing style skill to draft the comment bodies from the swept findings, not to produce or check findings.
 
 **One register.** A posted review comment uses the same simple, plain, direct English as chat. The rules come from `playbook:writing-style`, applied at the posting step. There is no warmer register for posted comments.
 

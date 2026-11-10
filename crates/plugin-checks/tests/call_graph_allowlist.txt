@@ -70,13 +70,3 @@ mention skills/grounding-review/references/review-routing.md review
 mention skills/grounding-review/references/stack-review.md review
 mention skills/grounding-review/references/triage-tiers.md implement
 mention skills/grounding-review/references/triage-tiers.md review
-
-# Rule skills that load rule skills. The rule skills stop loading skills.
-rule-load skills/atlassian/SKILL.md writing-style
-rule-load skills/delegating-subagents/SKILL.md grounding-research
-rule-load skills/grounding-research/SKILL.md writing-style
-rule-load skills/grounding-review/SKILL.md writing-style
-rule-load skills/systematic-debugging/SKILL.md engineering-standards
-rule-load skills/systematic-debugging/SKILL.md engineering-standards-javascript
-rule-load skills/systematic-debugging/SKILL.md engineering-standards-python
-rule-load skills/systematic-debugging/SKILL.md engineering-standards-rust

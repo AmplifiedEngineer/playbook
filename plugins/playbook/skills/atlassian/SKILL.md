@@ -41,4 +41,4 @@ twg doctor
 
 ## Read-only versus write
 
-`/playbook:learn-project` and any research flow are read-only on the remote. Read verbs: auth and status checks, searches, views, gets and lists. Never run creates, edits, transitions, comments, archives or deletes during research, whichever route you use. When a task does require a write, follow `playbook:writing-style`, and write in first person as the signed-in account holder ("I need clarification on X"), since the post goes out under that identity.
+`/playbook:learn-project` and any research flow are read-only on the remote. Read verbs: auth and status checks, searches, views, gets and lists. Never run creates, edits, transitions, comments, archives or deletes during research, whichever route you use. When a task does require a write, follow the writing style rules, and write in first person as the signed-in account holder ("I need clarification on X"), since the post goes out under that identity.

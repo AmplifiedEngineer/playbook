@@ -8,7 +8,7 @@ user-invocable: false
 
 Discipline for code exploration, investigation, and producing findings reports. This skill adds the research-specific layer on top of the universal writing rules and the system prompt's `## Code` discipline (verify, don't guess; self-review), which stay in scope.
 
-MUST load the `playbook:writing-style` skill alongside this one for voice, banned words, and prose rules; every finding and digest this skill produces is written in that register.
+Every finding and digest this skill produces is prose a person reads, so the caller also applies the writing style rules for voice, banned words and prose.
 
 ## Citation Rules
 
