@@ -1,0 +1,295 @@
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: Apache-2.0
+
+//! The registry and the pure checks behind the plugin name guard.
+//!
+//! A command file or a visible skill folder gets one name: one lowercase word,
+//! or a group and a word joined by one hyphen. A rename or a removal adds a row
+//! here, and the checks then fail on the old name anywhere outside the places
+//! that keep history. Every function takes its inputs as arguments (names,
+//! file texts, file lists), so a test runs it on literals before any real
+//! rename exists.
+
+use std::collections::BTreeSet;
+
+/// What a rename applies to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Kind {
+    Command,
+    Skill,
+}
+
+/// One rename: the old name stops existing and the new one takes its place.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Rename {
+    pub(crate) kind: Kind,
+    pub(crate) old: &'static str,
+    pub(crate) new: &'static str,
+}
+
+/// Renames that have landed. Each rename PR adds its row.
+pub(crate) const RENAMES: &[Rename] = &[];
+
+/// Names removed with no replacement. Each removal PR adds its entry.
+pub(crate) const REMOVED: &[&str] = &[];
+
+/// The binary command groups a visible name may start with.
+pub(crate) const GROUPS: &[&str] = &["pr", "handoff"];
+
+/// Current file names that break the naming rule until their rename lands.
+/// The list empties as the renames land. It is an allowlist for the rule, not
+/// a docs list: the docs name an old slash name only in `docs/renamed.md`.
+pub(crate) const LEGACY_NAMES: &[&str] = &[
+    "address-pr-comments",
+    "commit-and-push",
+    "create-pull-request",
+    "deep-review",
+    "quick-review",
+    "learn-project",
+    "repo-audit",
+    "session-handoff",
+    "session-start",
+    "playbook-usage",
+];
+
+/// The longest a skill name may be (`skills_lint.rs` holds the same limit).
+pub(crate) const SKILL_NAME_MAX: usize = 64;
+
+/// How much of an old name a file may keep.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Keeps {
+    /// Any form: the file keeps history.
+    Any,
+    /// Only the effort config key forms, `effort.commands.<old>` and
+    /// `effort.skills.<old>`.
+    EffortKeys,
+    /// Only `playbook:<old>` for a renamed name, never for a removed one.
+    RenamedSkillId,
+}
+
+/// A path (a folder when it ends with `/`) where an old name may stay.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Allowed {
+    pub(crate) path: &'static str,
+    pub(crate) keeps: Keeps,
+}
+
+/// Where an old or removed name may stay.
+pub(crate) const OLD_NAME_ALLOWED: &[Allowed] = &[
+    Allowed {
+        path: "crates/plugin-checks/tests/support/renames.rs",
+        keeps: Keeps::Any,
+    },
+    Allowed {
+        path: "crates/cli/src/hooks/auto_cost/closing.rs",
+        keeps: Keeps::RenamedSkillId,
+    },
+    Allowed {
+        path: "crates/cli/src/effort/component.rs",
+        keeps: Keeps::EffortKeys,
+    },
+    Allowed {
+        path: "crates/cli/src/config/keys.rs",
+        keeps: Keeps::EffortKeys,
+    },
+    Allowed {
+        path: "CHANGELOG.md",
+        keeps: Keeps::Any,
+    },
+    Allowed {
+        path: "docs/adr/",
+        keeps: Keeps::Any,
+    },
+    Allowed {
+        path: "docs/renamed.md",
+        keeps: Keeps::Any,
+    },
+    Allowed {
+        path: "crates/cli/tests/fixtures/",
+        keeps: Keeps::Any,
+    },
+];
+
+/// A file the scan reads: its path from the repository root and its text.
+pub(crate) struct ScannedFile<'a> {
+    pub(crate) path: &'a str,
+    pub(crate) text: &'a str,
+}
+
+/// An old name found where it may not stay.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub(crate) struct Leftover {
+    pub(crate) path: String,
+    pub(crate) name: String,
+    pub(crate) form: String,
+}
+
+/// Why a visible name breaks the rule, `None` when it follows it.
+pub(crate) fn check_name(name: &str) -> Option<String> {
+    let rule = "name rule: one lowercase word, or a group and a word joined by one hyphen";
+    let word_ok = |w: &str| {
+        !w.is_empty()
+            && w.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+    };
+    let parts: Vec<&str> = name.split('-').collect();
+    let follows = match parts.as_slice() {
+        [word] => word_ok(word),
+        [group, word] => GROUPS.contains(group) && word_ok(word),
+        _ => false,
+    };
+    (!follows).then(|| format!("`{name}` breaks the {rule}"))
+}
+
+/// Why a skill folder name breaks the id rule, `None` when it follows it.
+pub(crate) fn check_skill_name(name: &str) -> Option<String> {
+    let valid = !name.is_empty()
+        && name.len() <= SKILL_NAME_MAX
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    (!valid).then(|| {
+        format!("skill name `{name}` must be lowercase letters, digits and hyphens, at most {SKILL_NAME_MAX} characters")
+    })
+}
+
+/// The names that break the rule and are not on the legacy list.
+pub(crate) fn check_visible_names(names: &[String], legacy: &[&str]) -> Vec<String> {
+    names
+        .iter()
+        .filter(|n| !legacy.contains(&n.as_str()))
+        .filter_map(|n| check_name(n))
+        .collect()
+}
+
+/// The legacy names that no command file or skill folder carries.
+pub(crate) fn check_legacy_exist(
+    legacy: &[&str],
+    commands: &[String],
+    skills: &[String],
+) -> Vec<String> {
+    legacy
+        .iter()
+        .filter(|n| !commands.iter().chain(skills).any(|e| e == **n))
+        .map(|n| format!("legacy name `{n}` has no command file or skill folder: remove it from LEGACY_NAMES"))
+        .collect()
+}
+
+/// The renames whose new name is missing or whose old name still exists.
+pub(crate) fn check_renames(
+    renames: &[Rename],
+    commands: &[String],
+    skills: &[String],
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    for r in renames {
+        let existing = if r.kind == Kind::Command {
+            commands
+        } else {
+            skills
+        };
+        if !existing.iter().any(|e| e == r.new) {
+            problems.push(format!(
+                "rename `{}` to `{}`: the new name does not exist",
+                r.old, r.new
+            ));
+        }
+        if existing.iter().any(|e| e == r.old) {
+            problems.push(format!(
+                "rename `{}` to `{}`: the old name still exists",
+                r.old, r.new
+            ));
+        }
+    }
+    problems
+}
+
+/// The removed names that still have a command file or a skill folder.
+pub(crate) fn check_removed_files(
+    removed: &[&str],
+    commands: &[String],
+    skills: &[String],
+) -> Vec<String> {
+    removed
+        .iter()
+        .filter(|n| commands.iter().chain(skills).any(|e| e == **n))
+        .map(|n| format!("removed name `{n}` still has a command file or skill folder"))
+        .collect()
+}
+
+/// The entries of `commands/` that are not plain files: a subfolder adds a
+/// segment to the name the user types.
+pub(crate) fn check_commands_flat(entries: &[(String, bool)]) -> Vec<String> {
+    entries
+        .iter()
+        .filter(|(_, is_dir)| *is_dir)
+        .map(|(name, _)| format!("commands/{name} is a folder: command files stay flat"))
+        .collect()
+}
+
+/// The forms an old name takes in text.
+fn forms(name: &str) -> Vec<String> {
+    vec![
+        format!("playbook:{name}"),
+        format!("commands/{name}.md"),
+        format!("skills/{name}/"),
+        format!("effort.commands.{name}"),
+        format!("effort.skills.{name}"),
+    ]
+}
+
+/// Whether `text` holds `form` as a whole name: the next character does not
+/// continue a name, so `playbook:commit` does not match `playbook:commit-and-push`.
+fn holds_form(text: &str, form: &str) -> bool {
+    let continues = |c: char| c.is_ascii_alphanumeric() || c == '-';
+    let ends_with_delimiter = form.ends_with('/') || form.ends_with(".md");
+    text.match_indices(form).any(|(at, _)| {
+        ends_with_delimiter
+            || !text[at + form.len()..]
+                .chars()
+                .next()
+                .is_some_and(continues)
+    })
+}
+
+/// Whether `allowed` lets `path` keep `form` of a renamed or removed name.
+fn is_allowed(allowed: &[Allowed], path: &str, form: &str, removed: bool) -> bool {
+    allowed
+        .iter()
+        .filter(|a| path == a.path || (a.path.ends_with('/') && path.starts_with(a.path)))
+        .any(|a| match a.keeps {
+            Keeps::Any => true,
+            Keeps::EffortKeys => form.starts_with("effort."),
+            Keeps::RenamedSkillId => !removed && form.starts_with("playbook:"),
+        })
+}
+
+/// The old and removed names found outside the allowed places, sorted.
+pub(crate) fn find_old_names(
+    renamed: &[&str],
+    removed: &[&str],
+    files: &[ScannedFile],
+    allowed: &[Allowed],
+) -> Vec<Leftover> {
+    let mut found = BTreeSet::new();
+    let names = renamed
+        .iter()
+        .map(|n| (*n, false))
+        .chain(removed.iter().map(|n| (*n, true)));
+    for (name, is_removed) in names {
+        for file in files {
+            for form in forms(name) {
+                if holds_form(file.text, &form)
+                    && !is_allowed(allowed, file.path, &form, is_removed)
+                {
+                    found.insert(Leftover {
+                        path: file.path.to_owned(),
+                        name: name.to_owned(),
+                        form,
+                    });
+                }
+            }
+        }
+    }
+    found.into_iter().collect()
+}
