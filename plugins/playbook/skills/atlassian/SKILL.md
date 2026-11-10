@@ -19,7 +19,7 @@ Strengths, as notes on the order above: acli is strongest on Jira work items; it
 
 ## Auth checks
 
-Check that acli is present and new enough. Intent: atlassian-check. If the session's tool map (printed at session start) lists it, use that command; exit 0 means acli is usable. Otherwise do this: run `acli --version` and compare the `X.Y.Z` in `acli version X.Y.Z-stable` with 1.3.39. No output or no `X.Y.Z` means unreadable; a lower version means too old. Run `command -v twg` to see whether twg is present.
+Check that acli is present and new enough. Intent: atlassian-check. If the session's tool map (printed at session start) lists it, use that command; exit 0 means acli is usable. If the tool map lacks it, follow `without-binary.md#atlassian-check` in `skills/delegating-subagents/references/without-binary.md` in this plugin.
 
 ```bash
 acli jira auth status; acli confluence auth status

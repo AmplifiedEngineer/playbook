@@ -5,9 +5,12 @@
 //! names. The pure checks and the registry are in `support/renames.rs`; each
 //! runs on literals first and on the real tree second.
 
+#[path = "support/rename_table.rs"]
+mod rename_table;
 #[path = "support/renames.rs"]
 mod renames;
 
+use rename_table::*;
 use renames::*;
 use std::fs;
 use std::path::{Path, PathBuf};
