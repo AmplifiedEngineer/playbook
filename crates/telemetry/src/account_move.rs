@@ -34,9 +34,11 @@ CREATE TABLE IF NOT EXISTS account_assignment_rows (
 CREATE INDEX IF NOT EXISTS account_assignment_rows_by_event
     ON account_assignment_rows (kind, event_id);";
 
-/// The row kind recorded for each table that carries an account.
+/// The row kind recorded for a usage event.
 pub const USAGE_KIND: &str = "usage";
+/// The row kind recorded for a tool event.
 pub const TOOL_KIND: &str = "tool";
+/// The row kind and table of each table that carries an account.
 const TABLES: [(&str, &str); 2] = [
     (USAGE_KIND, "usage_events"),
     (TOOL_KIND, "tool_invocation_events"),
