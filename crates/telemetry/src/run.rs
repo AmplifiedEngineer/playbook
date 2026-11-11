@@ -88,6 +88,7 @@ pub fn ingest_into(
     backfill::run_once(&source, conn)?;
     if let Some(dir) = paths.db.parent() {
         super::session_account::import(conn, dir)?;
+        super::session_account::repair_joined_keys(conn)?;
     }
     let account = account_label(&paths.claude_json);
     let mut stats = ingest_claude(&source, &account, conn, on_batch)?;
