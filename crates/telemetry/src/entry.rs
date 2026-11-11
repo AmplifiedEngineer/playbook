@@ -189,8 +189,13 @@ pub fn run(
         }
         None if interactive => {
             let range = opts.range.as_deref().map(parse_range).transpose()?;
-            let key =
-                super::run::resolve_account(&db::open_db(&paths.db)?, opts.account.as_deref())?;
+            let key = match opts.account.as_deref() {
+                Some(account) => {
+                    let (conn, _) = ingest_new(paths)?;
+                    super::run::resolve_account(&conn, Some(account))?
+                }
+                None => None,
+            };
             tui::run(paths, range, key)?;
             Ok(String::new())
         }
@@ -257,6 +262,7 @@ mod tests {
 
     fn paths(name: &str) -> Paths {
         let dir = crate::util::scratch_dir(name);
+        crate::host::set_test_home(&dir);
         let mut p = Paths::from_home(&dir);
         p.db = dir.join("usage").join("usage.db");
         p

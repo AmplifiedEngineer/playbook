@@ -104,6 +104,18 @@ fn default_host() -> Box<dyn Host> {
 struct TestHost;
 
 #[cfg(test)]
+thread_local! {
+    static TEST_HOME: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Points the test host's home at `home` for the current thread, so a test
+/// never reads the developer's real config.
+#[cfg(test)]
+pub(crate) fn set_test_home(home: &Path) {
+    TEST_HOME.with(|h| *h.borrow_mut() = Some(home.to_path_buf()));
+}
+
+#[cfg(test)]
 impl Host for TestHost {
     fn program(&self) -> &str {
         "playbook"
@@ -130,7 +142,9 @@ impl Host for TestHost {
     }
 
     fn home_dir(&self) -> PathBuf {
-        crate::util::home_dir()
+        TEST_HOME
+            .with(|h| h.borrow().clone())
+            .unwrap_or_else(crate::util::home_dir)
     }
 
     fn config_value(&self, key: &str, home: &Path) -> Option<Value> {
