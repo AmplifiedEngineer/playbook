@@ -92,7 +92,8 @@ fn write_events(
         newest = newest.max(event.timestamp);
         let existed = db::has_usage_event(tx, &event.event_id)?;
         let mut event = event;
-        let assigned = if any_move {
+        // A stored event keeps its label: the upsert never rewrites `account`.
+        let assigned = if any_move && !existed {
             crate::account_move::assigned_to(tx, crate::account_move::USAGE_KIND, &event.event_id)?
         } else {
             None
@@ -267,6 +268,17 @@ mod tests {
         }
     }
 
+    fn tool(id: &str, ts: i64) -> ToolInvocationEvent {
+        ToolInvocationEvent {
+            event_id: id.into(),
+            timestamp: ts,
+            session_id: "s".into(),
+            account: String::new(),
+            kind: ToolKind::Skill,
+            name: "n".into(),
+        }
+    }
+
     #[test]
     fn ingested_usage_and_tool_rows_carry_the_local_machine_id() {
         // Arrange
@@ -376,7 +388,7 @@ mod tests {
                 usage("b", 200, 1.0),
                 usage("c", 300, 1.0),
             ],
-            tools: vec![],
+            tools: vec![tool("ta", 150), tool("tc", 350)],
         });
         ingest(&source, "work@example.com", &conn).unwrap();
         crate::account_move::assign(
@@ -402,6 +414,15 @@ mod tests {
             labels,
             ["token:aaaa1111", "token:aaaa1111", "work@example.com"]
         );
+        let mut stmt = conn
+            .prepare("SELECT account FROM tool_invocation_events ORDER BY timestamp")
+            .unwrap();
+        let tool_labels: Vec<String> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(tool_labels, ["token:aaaa1111", "work@example.com"]);
         let _ = fs::remove_dir_all(dir);
     }
 
