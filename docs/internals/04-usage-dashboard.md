@@ -335,6 +335,26 @@ A seat billed by usage has no 5 hour or 7 day window. It has a monthly dollar li
 
 `playbook usage doctor` prints the same decision under "What the statusline budget line will show": where the figure comes from and how old it is, the limit in force and why, and the order the sources are tried. `--raw` adds the numbers behind each choice. The plain output stays short.
 
+### Next message estimate
+
+Line 3 of the statusline shows what the next message will cost at least, and warns when the prompt cache has gone cold. It replaced the per minute rate.
+
+| Line 3 reads | Meaning |
+|---|---|
+| `$1.2345 (next ≥$0.10, warm 4m left)` | The cache is warm. The next message reads the current context from the cache at the cache read price, and the cache expires in 4 minutes. |
+| `$1.2345 ! cold cache, next ≥$1.25` | The cache expired, or the model changed. The next message writes the whole context to the cache again, so it pays the write price. The line is red. |
+| `$1.2345 (next ≥$0.10)` | The price is known but the cache state is not (no usable transcript, or no cache write in it). |
+| `$1.2345` | No estimate: the model has no price in the table, or the context is empty. After `/clear` the context is empty until the first reply. |
+
+What the figure counts:
+
+- **A lower bound.** It prices only the input side of the context the session already holds. The next message also writes the previous reply and the new prompt to the cache and pays for its output, so the message costs more than the figure. The figure rounds down to the cent, and a value under one cent shows as `<$0.01`.
+- **Where the numbers come from.** The token counts and the model id come from the statusline input. The time of the last request and the cache tier (5 minutes or 1 hour) come from the tail of the session transcript, which the statusline reads on each render (at most 2.25 MiB). The tier is the one of the last cache write the session made. A cache read refreshes the cache lifetime, so the countdown starts at the last request.
+- **Refresh.** The seed sets the statusline to refresh every 30 seconds, which keeps the countdown current while you are idle. Without a refresh interval the countdown stays stale until the next event.
+- **Model switch.** A different model starts a new cache, so a switch shows the cold warning. Its price uses the 5 minute write, because the tier of the new model's cache is not known.
+- **Not seen.** A tool call or subagent that runs longer than the cache lifetime turns the line red during the turn, because the transcript records a message only when it ends. A change to the system prompt also breaks the cache, and the estimate cannot see it.
+- **Prices.** They come from the same table as the usage dashboard (`crates/telemetry/src/pricing.rs`). A model that is not in the table shows no estimate.
+
 ### When a limit is reached
 
 The Budget strip says when each limit is reached at your current pace, in the time zone shown in its title (UTC or local). It was a separate Projection panel before, and the math is the same. The strip shows the sooner of the two paces below as `hits it in 2d 4h`, with `(24h)` added when the 24 hour pace is the sooner one, or `safe` when neither reaches the limit before it resets. The older layout word `projection` still loads and draws nothing. A dollar limit has two paces:
