@@ -22,6 +22,15 @@ fn allowed_tools(text: &str) -> &str {
         .unwrap_or("")
 }
 
+/// A deprecated stub hides itself from the model and runs the new command, so
+/// the new command's own Step 0 covers the run.
+fn is_stub(text: &str) -> bool {
+    text.lines()
+        .skip(1)
+        .take_while(|l| *l != "---")
+        .any(|l| l == "disable-model-invocation: true")
+}
+
 /// The body of the `Step 0` section: from its heading to the next heading of
 /// the same or a higher level.
 fn step_zero(text: &str) -> Option<String> {
@@ -58,7 +67,7 @@ fn every_command_that_spawns_agents_reads_the_effort_ceiling_in_step_zero() {
         let path = entry.unwrap().path();
         let name = path.file_stem().unwrap().to_string_lossy().into_owned();
         let text = fs::read_to_string(&path).unwrap();
-        if !allowed_tools(&text).split(',').any(|t| t.trim() == "Agent") {
+        if is_stub(&text) || !allowed_tools(&text).split(',').any(|t| t.trim() == "Agent") {
             continue;
         }
         let step = step_zero(&text).unwrap_or_else(|| panic!("{name}: no Step 0 section"));
@@ -84,7 +93,7 @@ fn every_command_that_spawns_agents_reads_the_effort_ceiling_in_step_zero() {
 #[test]
 fn the_resolved_names_are_real_components() {
     let root = PathBuf::from(env!("PLAYBOOK_PLUGIN_ROOT"));
-    for name in ["adr", "implement", "learn-project", "plan", "review"] {
+    for name in ["adr", "implement", "learn", "plan", "review"] {
         assert!(
             root.join("commands").join(format!("{name}.md")).is_file(),
             "{name}"
@@ -147,7 +156,7 @@ fn every_command_that_spawns_agents_calls_route_and_names_the_gate() {
         let path = entry.unwrap().path();
         let name = path.file_stem().unwrap().to_string_lossy().into_owned();
         let text = fs::read_to_string(&path).unwrap();
-        if !allowed_tools(&text).split(',').any(|t| t.trim() == "Agent") {
+        if is_stub(&text) || !allowed_tools(&text).split(',').any(|t| t.trim() == "Agent") {
             continue;
         }
         let step = step_zero(&text).unwrap_or_else(|| panic!("{name}: no Step 0 section"));

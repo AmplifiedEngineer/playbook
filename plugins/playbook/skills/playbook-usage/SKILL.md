@@ -34,15 +34,15 @@ description: Lists /playbook:* commands and when to use each, and points to the 
 
 | Command | Use when |
 |---|---|
-| `/playbook:repo-audit` | Assessing an unfamiliar or long-lived repo without changing it. Read-only, every claim cited to `file:line`. |
-| `/playbook:learn-project` | Building durable project knowledge in the memory store from git history, PRs, Jira and Confluence. |
+| `/playbook:audit` | Assessing an unfamiliar or long-lived repo without changing it. Read-only, every claim cited to `file:line`. |
+| `/playbook:learn` | Building durable project knowledge in the memory store from git history, PRs, Jira and Confluence. |
 | `/playbook:doctor` | Checking the seven playbook layers after install or update, or when hooks seem not to run. |
 | `/playbook:handoff-show` | After `/clear`, when the saved handoff did not load. The `/playbook:handoff-save` command writes the handoff. |
 | `/playbook:setup` | First install, or repairing the plugin's own settings. |
 
 ## Delivery pattern
 
-`/playbook:repo-audit` runs in an isolated forked context (`context: fork`). `/playbook:implement` delegates each Work Unit to `implementer` subagents, some in isolated git worktrees. A subagent's return value alone is not a reliable signal of what it did. See `playbook:delegating-subagents` for the file-based handoff discipline.
+`/playbook:audit` runs in an isolated forked context (`context: fork`). `/playbook:implement` delegates each Work Unit to `implementer` subagents, some in isolated git worktrees. A subagent's return value alone is not a reliable signal of what it did. See `playbook:delegating-subagents` for the file-based handoff discipline.
 
 The memory store, its scopes and its edge types are described in `docs/guides/03-decisions-and-memory.md`.
 

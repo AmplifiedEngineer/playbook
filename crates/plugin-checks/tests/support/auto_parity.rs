@@ -99,12 +99,12 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         auto: Auto::Refuses,
     },
     CommandSpec {
-        name: "learn-project",
+        name: "learn",
         asks: true,
         auto: Auto::Stages,
     },
     CommandSpec {
-        name: "repo-audit",
+        name: "audit",
         asks: false,
         auto: Auto::Unchanged,
     },

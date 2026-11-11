@@ -12,9 +12,9 @@ size commands/setup.md 181 20215
 size skills/grounding-review/references/deep-pass.md 306 31365
 fallbacks commands/adr.md 5
 fallbacks commands/implement.md 11
-fallbacks commands/learn-project.md 4
+fallbacks commands/learn.md 4
 fallbacks commands/plan.md 9
-fallbacks commands/repo-audit.md 1
+fallbacks commands/audit.md 1
 fallbacks commands/setup.md 1
 fallbacks skills/grounding-review/references/deep-pass.md 6
 fallbacks skills/grounding-review/references/quick-pass.md 5

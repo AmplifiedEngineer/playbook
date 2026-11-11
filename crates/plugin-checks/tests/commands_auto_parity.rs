@@ -465,7 +465,7 @@ fn review_auto_path_text_never_posts_a_review() {
 #[test]
 fn learn_project_step0_stages_in_auto_and_skips_the_write_question() {
     // Arrange
-    let file = load("learn-project");
+    let file = load("learn");
     let step0 = require_section(&file, file.step0(), "`Step 0`");
     let stages = Regex::new(r"(?is)\bauto\b[^.]*--stage").expect("stage pattern");
     let skips = Regex::new(

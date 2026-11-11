@@ -24,13 +24,13 @@ An `Agent` call that omits `subagent_type` forks the parent: the child inherits 
 
 | Site | Needs parent history? | Mechanism |
 |---|---|---|
-| `repo-audit` | No | `context: fork`, `agent: auditor` (fresh) |
+| `audit` | No | `context: fork`, `agent: auditor` (fresh) |
 | `review` (both passes), `implement` Step 9 reviewers, `review-triage`, `cheap-checker` | No, diff and excerpts go in the brief | `subagent_type: playbook:<agent>` |
 | `implement` implementers | No, the Work Unit brief is self-contained | `subagent_type: playbook:implementer` |
 | `review` comment drafts | No, the swept facts go in the brief | `subagent_type: playbook:writer` |
 | `plan`, `adr` critic, fact-checker, test-reviewer | No, they get the full artifact | `subagent_type: playbook:<agent>` |
 | `plan` Step 2 and discovery agents | No, they get a question and paths | `subagent_type: Explore` or `general-purpose` |
-| `learn-project` collectors and analysts | No | `subagent_type: playbook:<agent>` |
+| `learn` collectors and analysts | No | `subagent_type: playbook:<agent>` |
 | Ad hoc fan-out from the system prompt | No by default | an explicit `subagent_type`, never omitted |
 
 Nothing in this table needs history. A fork is justified only when a child must act on corrections the user gave earlier in the session and the corrections cannot be stated in the brief in a few lines.
@@ -100,7 +100,7 @@ Measured in the pilot of 18 cases (Sonnet writing from the old rules against Hai
 
 ## Auditor brief
 
-`repo-audit` runs in the `auditor` agent, which has Bash. Its Phase 1 starts with the code search rule: `playbook code status`, then `playbook code index` when it says stale or missing, then `playbook code context` and `playbook code outline` to map the core modules before reading files. Grep and Glob only when the binary or the index is unavailable.
+`audit` runs in the `auditor` agent, which has Bash. Its Phase 1 starts with the code search rule: `playbook code status`, then `playbook code index` when it says stale or missing, then `playbook code context` and `playbook code outline` to map the core modules before reading files. Grep and Glob only when the binary or the index is unavailable.
 
 ## Checks before dispatch
 

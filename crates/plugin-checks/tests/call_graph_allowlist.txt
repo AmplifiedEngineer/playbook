@@ -41,7 +41,7 @@ mention commands/pr-create.md pr-comments
 mention commands/pr-create.md review
 mention commands/handoff-show.md handoff-save
 mention commands/setup.md doctor
-mention skills/atlassian/references/acli-confluence.md learn-project
+mention skills/atlassian/references/acli-confluence.md learn
 mention skills/delegating-subagents/references/gate-loop.md adr
 mention skills/delegating-subagents/references/gate-loop.md implement
 mention skills/delegating-subagents/references/gate-loop.md plan

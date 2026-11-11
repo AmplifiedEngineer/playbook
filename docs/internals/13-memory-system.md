@@ -82,7 +82,7 @@ Facts get written two ways.
 
 **Ad-hoc during work.** When `/playbook:plan`, `/playbook:adr`, or `/playbook:implement` meets a durable convention, a decision, a rejected alternative, or an error fix, it writes a fact immediately. `/playbook:review --deep` writes findings from a review pass. These are narrow, targeted writes tied to the work at hand.
 
-**Bulk analysis via `/playbook:learn-project`.** This command reads the repo broadly (git history, code structure, PRs, and JIRA/Confluence when reachable), clusters what it finds into topics, and writes one fact file per topic. Before writing anything, it shows a candidate table and asks once. It won't write without your confirmation.
+**Bulk analysis via `/playbook:learn`.** This command reads the repo broadly (git history, code structure, PRs, and JIRA/Confluence when reachable), clusters what it finds into topics, and writes one fact file per topic. Before writing anything, it shows a candidate table and asks once. It won't write without your confirmation.
 
 Both paths produce the same file format and land in the right scope of the store.
 
@@ -140,7 +140,7 @@ The fact files stay the source of truth, so the database is safe to delete: the 
 
 ## The Auto-Learn Loop
 
-When a session ends after making at least five edits in a repo, the `session-clean-exit` hook drops a flag in `~/.config/playbook/runtime/to-learn/`. The next time you open a session in that repo, `session-init` reads the flag and surfaces a nudge: consider running `/playbook:learn-project` to refresh project memory, or `/playbook:learn-project --stage` to queue candidate facts for review.
+When a session ends after making at least five edits in a repo, the `session-clean-exit` hook drops a flag in `~/.config/playbook/runtime/to-learn/`. The next time you open a session in that repo, `session-init` reads the flag and surfaces a nudge: consider running `/playbook:learn` to refresh project memory, or `/playbook:learn --stage` to queue candidate facts for review.
 
 `--stage` collects candidates into `~/.config/playbook/memory/<owner>/<repo>/staging/` without touching the live store. `--from-staged` reviews them and promotes confirmed facts through the normal write flow.
 

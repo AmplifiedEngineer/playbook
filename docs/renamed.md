@@ -11,3 +11,5 @@ Deprecated: a renamed command keeps its old name as a stub until 1.0.0. The stub
 | `/playbook:deep-review` | Removed, use `/playbook:review --deep` | Removed, no stub |
 | `/playbook:session-handoff` | `/playbook:handoff-save` | 1.0.0 |
 | `/playbook:session-start` | `/playbook:handoff-show` | 1.0.0 |
+| `/playbook:learn-project` | `/playbook:learn` | 1.0.0 |
+| `/playbook:repo-audit` | `/playbook:audit` | 1.0.0 |

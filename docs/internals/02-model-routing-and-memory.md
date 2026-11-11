@@ -10,7 +10,7 @@ The policy lives in each file's frontmatter (`agents/*.md` and `commands/*.md`) 
 |---|---|
 | **Sonnet** (session default) | Most coding: `/playbook:implement`, `/playbook:fix`, the `implementer` and the `critic`. |
 | **Haiku** | Mechanical, formatting and search work: `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, `writer`, and the `doctor`, `session-handoff`, `session-start` and `setup` commands. |
-| **Opus** | Design (`/playbook:plan`, `/playbook:adr`), every `reviewer` (`/playbook:review --quick`, `/playbook:review --deep` and `/playbook:implement` Step 9, all at the reviewer's own medium effort unless a variant is picked), the `auditor` behind `/playbook:repo-audit`, `/playbook:pr-comments` and `/playbook:learn-project`. |
+| **Opus** | Design (`/playbook:plan`, `/playbook:adr`), every `reviewer` (`/playbook:review --quick`, `/playbook:review --deep` and `/playbook:implement` Step 9, all at the reviewer's own medium effort unless a variant is picked), the `auditor` behind `/playbook:audit`, `/playbook:pr-comments` and `/playbook:learn`. |
 
 Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mode.
 
@@ -71,8 +71,8 @@ The rule: lower effort where the work is mechanical or already decided, and neve
 | `agents/analyst` | haiku (was sonnet) | `medium` (was high) | See below. |
 | `agents/implementer` | sonnet | `medium` (was high) | See the implementer bench below. |
 | `agents/auditor` | opus | `high` (kept) | A whole repository audit whose findings people act on. No headless bench exists for it. The maintainer kept it at `high` on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). |
-| `implement`, `plan`, `adr`, `learn-project`, `fix`, `pr-comments` | opus, except implement and fix (sonnet) | `medium` (was high) | Lowered by the maintainer on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). No bench exists for the design commands. The evidence is the reviewer, implementer and critic results. Watch rework and missed findings. |
-| `commands/repo-audit` | fork into auditor (opus) | none | It forks into `playbook:auditor` (`high`), which sets the effort. |
+| `implement`, `plan`, `adr`, `learn`, `fix`, `pr-comments` | opus, except implement and fix (sonnet) | `medium` (was high) | Lowered by the maintainer on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). No bench exists for the design commands. The evidence is the reviewer, implementer and critic results. Watch rework and missed findings. |
+| `commands/audit` | fork into auditor (opus) | none | It forks into `playbook:auditor` (`high`), which sets the effort. |
 | `commands/doctor`, `handoff-show`, `setup` | haiku (was sonnet) | `low` (kept) | Run compiled helpers and print the result, or load a saved handoff. Mechanical, so the cheapest tier fits (about 95% less per call, 20x cheaper per token). Checked live (see PR). |
 | the `effort` parameter of the `Agent` call | the agent file's own effort | any level up to every ceiling | Passed by the orchestrator, from `playbook effort resolve` or `playbook effort choose`. The orchestrator picks by ceiling, then diff size and risk; see `playbook:delegating-subagents`. |
 | `skills/*` | none | none | A skill is knowledge loaded into whoever uses it. An `effort` key would override the caller's choice, so none sets one. |
@@ -89,7 +89,7 @@ Evidence for the rows marked "See below":
 - **`agents/critic`.** Round 2 bench (2026-10-10, 90 calls per cell on 6 plans, 4 with a seeded flaw and 2 clean): Sonnet medium 89/90 (98.9%) at $0.0088, Sonnet low 89/90 at $0.0078, Sonnet high 71/90 (78.9%) at $0.0145. Every miss at `high` was a false blocking finding on a clean plan. The only missed flaw in 180 medium and low calls was one `cr-destructive` run. Medium is 39% cheaper and no worse on seeded flaws. Haiku scored 67 to 73% on the same cases (false blocks on clean plans), so the critic stays on Sonnet.
 - **`agents/fact-checker`.** The `high` in the file was already cut to `medium` by the Haiku effort cap, so the file now says what runs. Measured with `playbook eval bench` on real playbook excerpts over three rounds (2026-10-09 and 2026-10-10, 6 cases): Haiku high 137/138 (99.3%) at $0.00027 a call, medium 134/138 (97.1%) at $0.00021, low 86/90 (95.6%, four misses on one case) at $0.00015, Sonnet high 78/78. Medium is within 3 points of high, so it is the setting.
 - **`agents/test-reviewer`.** Pilot, same benchmark (18 calls per cell, then 90 per Haiku cell in round 2 on real tests with weakened assertions and clean controls): Haiku low 86/90 (95.6%), medium 86/90, high 90/90, Sonnet high 48/48, Sonnet low 42/48. Every Haiku low miss was a false alarm on a clean control, not a missed weak test, so `low` stays; it is the lowest setting there is.
-- **`agents/analyst`.** Round 2 bench (2026-10-10, 3 cluster cases checked for well formed facts and for anchors drawn only from the allowed set): Haiku low 45/45 at $0.00035, medium 45/45 at $0.00049, high 44/45 at $0.00072, Sonnet medium and high 15/15 at $0.005 and $0.007. About 14 times cheaper than Sonnet high at the same pass rate. The bench checks structure and grounding, not how useful a fact is. The `learn-project` Phase 3 confirmation by the user is still the quality gate, and the analyst never writes to the store. Medium rather than low keeps one step of margin on a bench of only three cases.
+- **`agents/analyst`.** Round 2 bench (2026-10-10, 3 cluster cases checked for well formed facts and for anchors drawn only from the allowed set): Haiku low 45/45 at $0.00035, medium 45/45 at $0.00049, high 44/45 at $0.00072, Sonnet medium and high 15/15 at $0.005 and $0.007. About 14 times cheaper than Sonnet high at the same pass rate. The bench checks structure and grounding, not how useful a fact is. The `learn` Phase 3 confirmation by the user is still the quality gate, and the analyst never writes to the store. Medium rather than low keeps one step of margin on a bench of only three cases.
 
 To undo the Haiku moves, set `model: sonnet` and `effort: high` in the agent file and re-run `playbook eval bench --role <role> --model haiku,sonnet --effort medium,high` to compare. Tier overrides (`models.haiku`) stay inside one tier, so no config key moves a single agent to Sonnet.
 
@@ -263,7 +263,7 @@ Traversal depth is 1 for all edge types except `supersedes`, which is followed f
 
 ## See also
 
-- [Decisions and Memory](../guides/03-decisions-and-memory.md): using memory day-to-day and the `/playbook:learn-project` command.
+- [Decisions and Memory](../guides/03-decisions-and-memory.md): using memory day-to-day and the `/playbook:learn` command.
 - [Launcher and hooks](01-launcher-and-hooks.md): the `playbook cc` launcher that sets the session model.
 - [Docs index](../README.md)
 

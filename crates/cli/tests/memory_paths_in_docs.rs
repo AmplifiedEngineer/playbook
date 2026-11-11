@@ -89,14 +89,14 @@ fn the_scan_reaches_every_shipped_root_and_skips_the_adrs() {
         assert!(root().join(rel).is_file(), "history doc {rel} is missing");
     }
     let files = scanned_files();
-    assert!(files.contains(&PathBuf::from("plugins/playbook/commands/learn-project.md")));
+    assert!(files.contains(&PathBuf::from("plugins/playbook/commands/learn.md")));
     assert!(files.iter().any(|f| f.ends_with("SYSTEM_PROMPT.md")));
     assert!(!files.iter().any(|f| f.starts_with(SKIPPED)));
 }
 
 #[test]
 fn the_line_check_flags_stale_paths_and_keeps_history() {
-    let cmd = Path::new("plugins/playbook/commands/learn-project.md");
+    let cmd = Path::new("plugins/playbook/commands/learn.md");
     let history = Path::new("docs/internals/11-data-folder.md");
 
     assert!(is_stale(cmd, "read ~/.config/playbook/memory.db"));

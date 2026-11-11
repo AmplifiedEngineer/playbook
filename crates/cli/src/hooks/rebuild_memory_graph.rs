@@ -777,7 +777,7 @@ fn similarity_edges(infos: &[SimilarityInfo]) -> Vec<Edge> {
 ///
 /// Exists because `run` deliberately skips when the payload names no file
 /// under the memory dir, which is correct for a PostToolUse hook but leaves
-/// no way to force a rebuild. `commands/learn-project.md`'s `--graph-only`
+/// no way to force a rebuild. `commands/learn.md`'s `--graph-only`
 /// path needs exactly that: the python original treated empty stdin as
 /// "rebuild everything", and this port dropped that branch (see `should_skip`)
 /// on the grounds it was unexercised by the test suite. It was exercised, just
@@ -1056,7 +1056,7 @@ fn walk_markdown_files_into(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
         if path.is_dir() {
-            // `staging` holds unapproved learn-project candidates, never live facts.
+            // `staging` holds unapproved learn candidates, never live facts.
             if !name.starts_with('.') && name != "staging" {
                 walk_markdown_files_into(&path, out)?;
             }

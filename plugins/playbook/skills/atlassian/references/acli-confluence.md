@@ -53,7 +53,7 @@ Can: view a page by ID, view and list spaces, list and view blog posts, create b
 
 A page ID from a browser URL sits in the path (`/pages/123456789/Title`); that number is what `--id` wants.
 
-## Using it in /playbook:learn-project
+## Using it in /playbook:learn
 
 The confluence collector wants pages on setup, onboarding, architecture, runbooks and decisions. With no page search, the sequence is:
 

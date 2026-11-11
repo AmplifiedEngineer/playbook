@@ -268,7 +268,7 @@ pub(crate) const META: &[Meta] = &[
         .for_users(),
     ro("hooks list"),
     ro("learn")
-        .purpose("Gather repo facts for the `/playbook:learn-project` collectors")
+        .purpose("Gather repo facts for the `/playbook:learn` collectors")
         .for_agents(),
     ro("learn collect"),
     ro("learn preflight"),

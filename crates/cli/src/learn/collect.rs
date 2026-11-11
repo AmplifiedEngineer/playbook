@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook learn collect git|structure`: the two Phase 1 collectors of
-//! `/playbook:learn-project` that were Haiku agents running fixed git and
+//! `/playbook:learn` that were Haiku agents running fixed git and
 //! listing commands and summarising the output. The numbers here are counted,
 //! not summarised, and the repo is read only through `git`, so nothing
 //! outside version control and nothing ignored is looked at.

@@ -25,7 +25,7 @@ brew "node"         # installed only if no node is on PATH
 brew "agent-browser"  # register: claude mcp add --scope user agent-browser -- agent-browser mcp --tools core
 
 # Atlassian CLI (optional): Jira and Confluence from the terminal, used by
-# /playbook:learn-project when no Atlassian MCP server is connected. Ships from
+# /playbook:learn when no Atlassian MCP server is connected. Ships from
 # Atlassian's own tap, so the tap line below is required before the formula
 # resolves. Homebrew also refuses formulae from an untrusted third-party tap:
 # review it, then run `brew trust atlassian/acli` once. That step is left to you

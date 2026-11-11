@@ -31,9 +31,11 @@ and ADR 0021, 0022 and 0023).
 | command | `doctor` | `haiku` | `low` | Runs compiled helpers and prints the result. Mechanical. |
 | command | `fix` | `sonnet` | `medium` | Small, well understood bugs, with code changes. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
 | command | `implement` | `sonnet` | `medium` | Executes an approved plan and delegates edits. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
-| command | `learn-project` | `opus` | `medium` | Builds durable memory from a whole repo. Mistakes persist. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
+| command | `learn-project` | `opus` | `medium` | Deprecated stub of `learn` until 1.0.0. It copies the settings of `learn`. |
+| command | `learn` | `opus` | `medium` | Builds durable memory from a whole repo. Mistakes persist. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
 | command | `plan` | `opus` | `medium` | Design work. A weak plan is expensive. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
-| command | `repo-audit` | - | - | Forks into the auditor agent, which sets the model and effort. |
+| command | `repo-audit` | - | - | Deprecated stub of `audit` until 1.0.0. It copies the settings of `audit`. |
+| command | `audit` | - | - | Forks into the auditor agent, which sets the model and effort. |
 | command | `review` | `sonnet` | `medium` | Decides a quick or a deep review (a flag, the repo setting or the triage), then runs that pass. The deep pass moved from Opus to Sonnet, as the review rule says: reviews do not run on Opus. Its reviewer subagents keep their own tiers. |
 | command | `session-handoff` | `haiku` | `low` | Deprecated stub of `handoff-save` until 1.0.0. It copies the settings of `handoff-save`. |
 | command | `handoff-save` | `haiku` | `low` | Writes and saves a handoff using binary-supplied rules and facts. |

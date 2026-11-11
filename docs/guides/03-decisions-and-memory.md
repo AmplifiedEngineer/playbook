@@ -1,6 +1,6 @@
 # Decisions and Memory
 
-Two commands keep durable knowledge. `/playbook:adr` records an architectural decision with an optional execution blueprint. `/playbook:learn-project` reads the repo and stores what it learns as memory facts. Both read the same memory.
+Two commands keep durable knowledge. `/playbook:adr` records an architectural decision with an optional execution blueprint. `/playbook:learn` reads the repo and stores what it learns as memory facts. Both read the same memory.
 
 ## Record a decision
 
@@ -37,7 +37,7 @@ During investigation, any durable conventions or gotchas discovered get written 
 
 ## Learn a project
 
-`/playbook:learn-project` reads the repo broadly and distils atomic facts into memory. It never changes the project. The only writes are fact files under `~/.config/playbook/memory/`.
+`/playbook:learn` reads the repo broadly and distils atomic facts into memory. It never changes the project. The only writes are fact files under `~/.config/playbook/memory/`.
 
 Sources it reads (when available):
 - Git history: churn hotspots, commit conventions, contributors.
