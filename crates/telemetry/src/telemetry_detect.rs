@@ -7,9 +7,54 @@
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+/// The switch that turns Claude Code telemetry on. Claude Code passes it to
+/// hooks, unlike the `OTEL_*` variables.
+pub const ENABLE_VAR: &str = "CLAUDE_CODE_ENABLE_TELEMETRY";
+
+/// Claude Code sends no telemetry from an interactive session while this is
+/// set to anything but `DEMO_OFF_VALUE`. Observed 2026-11-11 by bisecting
+/// interactive runs: `1` and `false` blocked export, `0` and an absent key did
+/// not, and headless `claude -p` runs exported with `1`. This is observed
+/// Claude Code behaviour, not documented, so it can change in a release.
+pub const DEMO_VAR: &str = "IS_DEMO";
+
+/// Set by Claude Code to `cli` in an interactive session and `sdk-cli` in a
+/// `claude -p` session, and passed on to hooks.
+pub const ENTRYPOINT_VAR: &str = "CLAUDE_CODE_ENTRYPOINT";
+
+/// Entrypoints that start with this are headless runs (`sdk-cli`, `sdk-ts`).
+pub const HEADLESS_ENTRYPOINT_PREFIX: &str = "sdk-";
+
+/// The one `IS_DEMO` value that does not block export.
+pub const DEMO_OFF_VALUE: &str = "0";
+
 /// A variable that means the user configured telemetry themselves.
 pub fn is_telemetry_var(name: &str) -> bool {
-    name == "CLAUDE_CODE_ENABLE_TELEMETRY" || name.starts_with("OTEL_")
+    name == ENABLE_VAR || name.starts_with("OTEL_")
+}
+
+/// Whether the telemetry switch value is on: present, not empty, and not `0`
+/// or `false` after trim and lower case.
+pub fn is_on(value: Option<&str>) -> bool {
+    value.is_some_and(|v| {
+        let v = v.trim().to_ascii_lowercase();
+        !(v.is_empty() || v == "0" || v == "false")
+    })
+}
+
+/// Whether an `IS_DEMO` value blocks export: present, not empty after trim,
+/// and not `DEMO_OFF_VALUE`.
+pub fn demo_blocks_export(value: Option<&str>) -> bool {
+    value.is_some_and(|v| {
+        let v = v.trim();
+        !v.is_empty() && v != DEMO_OFF_VALUE
+    })
+}
+
+/// Whether an entrypoint value is a headless run. Case sensitive, because
+/// Claude Code sets it in lower case.
+pub fn is_headless_entrypoint(value: Option<&str>) -> bool {
+    value.is_some_and(|v| v.trim().starts_with(HEADLESS_ENTRYPOINT_PREFIX))
 }
 
 /// Whether the `env` block of a settings document names a telemetry variable.
@@ -77,12 +122,9 @@ pub fn classify(
     if vars.is_empty() {
         return Configured::Nothing;
     }
-    let enable = vars.get("CLAUDE_CODE_ENABLE_TELEMETRY");
-    if let Some(v) = enable {
-        let v = v.trim().to_ascii_lowercase();
-        if v.is_empty() || v == "0" || v == "false" {
-            return Configured::Disabled;
-        }
+    let enable = vars.get(ENABLE_VAR);
+    if enable.is_some() && !is_on(enable.map(String::as_str)) {
+        return Configured::Disabled;
     }
     let endpoint = vars
         .get("OTEL_EXPORTER_OTLP_ENDPOINT")
@@ -196,6 +238,56 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn is_on_follows_the_switch_rule() {
+        for off in [
+            None,
+            Some(""),
+            Some("  "),
+            Some("0"),
+            Some("false"),
+            Some(" FALSE "),
+        ] {
+            assert!(!is_on(off), "{off:?} is off");
+        }
+        for on in [Some("1"), Some("true")] {
+            assert!(is_on(on), "{on:?} is on");
+        }
+    }
+
+    #[test]
+    fn demo_blocks_export_for_any_non_empty_value_but_zero() {
+        for free in [None, Some(""), Some("   "), Some("0"), Some(" 0 ")] {
+            assert!(!demo_blocks_export(free), "{free:?} does not block");
+        }
+        for blocked in [
+            Some("1"),
+            Some("false"),
+            Some("true"),
+            Some("off"),
+            Some("no"),
+        ] {
+            assert!(demo_blocks_export(blocked), "{blocked:?} blocks");
+        }
+    }
+
+    #[test]
+    fn headless_entrypoints_start_with_sdk_dash() {
+        for headless in [Some("sdk-cli"), Some(" sdk-cli "), Some("sdk-ts")] {
+            assert!(is_headless_entrypoint(headless), "{headless:?}");
+        }
+        for interactive in [
+            Some("cli"),
+            Some("sdk"),
+            Some("sdkx"),
+            Some("SDK-CLI"),
+            None,
+            Some(""),
+        ] {
+            assert!(!is_headless_entrypoint(interactive), "{interactive:?}");
+        }
     }
 
     #[test]
