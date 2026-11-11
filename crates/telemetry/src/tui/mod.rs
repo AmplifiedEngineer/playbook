@@ -121,11 +121,12 @@ impl Reset<'_> {
 
 /// Runs the view until the user quits. Restores the terminal on every exit,
 /// including a panic (ratatui installs the hook).
-pub fn run(paths: &Paths, range: Option<Range>) -> Result<(), String> {
+/// Opens the view on `range` and, when given, on the account `account_key`.
+pub fn run(paths: &Paths, range: Option<Range>, account_key: Option<String>) -> Result<(), String> {
     // Nothing may write to stderr while the screen is drawn.
     crate::say::hold();
     let mut terminal = ratatui::init();
-    let result = event_loop(&mut terminal, paths, range);
+    let result = event_loop(&mut terminal, paths, range, account_key);
     ratatui::restore();
     crate::say::release();
     result.map_err(|e| format!("terminal error: {e}"))
@@ -135,6 +136,7 @@ fn event_loop(
     terminal: &mut ratatui::DefaultTerminal,
     paths: &Paths,
     range: Option<Range>,
+    account_key: Option<String>,
 ) -> std::io::Result<()> {
     let home = crate::host::home_dir();
     let mut saved = ui_state::load(&home);
@@ -145,6 +147,9 @@ fn event_loop(
     let (layout, layout_warning) = ui_state::load_layout(&home);
     app.layout = layout;
     app.apply_ui_state(&saved);
+    if let Some(key) = account_key {
+        app.account = account::AccountSel::Key(key);
+    }
     app.note = layout_warning;
     let mut last_saved = state_to_save(&app, flag, &saved);
     let mut autosave = Autosave::default();

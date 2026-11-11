@@ -33,6 +33,9 @@ struct Cli {
     /// Date range, counted in days of the chosen time zone. One of today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
     #[arg(long, value_name = "RANGE")]
     range: Option<String>,
+    /// Show only this account (a key or its name) in `--summary` and `--json`, and open the terminal view on it
+    #[arg(long, value_name = "KEY_OR_NAME")]
+    account: Option<String>,
     /// Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
     #[arg(long, global = true, conflicts_with = "local")]
     utc: bool,
@@ -55,7 +58,7 @@ pub fn main() {
         json: cli.json,
         summary: cli.summary,
         range: cli.range,
-        account: None,
+        account: cli.account,
     };
     match run(cli.sub, &opts, &paths, interactive()) {
         Ok(output) => {

@@ -188,7 +188,10 @@ pub fn run(
             )
         }
         None if interactive => {
-            tui::run(paths, opts.range.as_deref().map(parse_range).transpose()?)?;
+            let range = opts.range.as_deref().map(parse_range).transpose()?;
+            let key =
+                super::run::resolve_account(&db::open_db(&paths.db)?, opts.account.as_deref())?;
+            tui::run(paths, range, key)?;
             Ok(String::new())
         }
         None => {
