@@ -146,7 +146,7 @@ fn save_span(
     )
 }
 
-/// Every table column that holds an account label.
+/// The columns the joined-key repair rewrites.
 const ACCOUNT_COLUMNS: [(&str, &str); 5] = [
     ("usage_events", "account"),
     ("tool_invocation_events", "account"),
@@ -155,6 +155,16 @@ const ACCOUNT_COLUMNS: [(&str, &str); 5] = [
     ("account_assignment_rows", "previous"),
 ];
 
+/// SQL condition for a key shaped `head<TAB>digits`: a non-empty head and a
+/// non-empty, all-digit tail after the first separator.
+fn repairable(column: &str) -> String {
+    format!(
+        "instr({column}, char(?1)) > 1
+         AND substr({column}, instr({column}, char(?1)) + 1) != ''
+         AND substr({column}, instr({column}, char(?1)) + 1) NOT GLOB '*[^0-9]*'"
+    )
+}
+
 /// Strips the `<TAB><digits>` tail that an old two-field read of a timed log
 /// line left on stored keys. Returns how many rows it rewrote.
 pub fn repair_joined_keys(conn: &Connection) -> Result<usize, String> {
@@ -162,8 +172,12 @@ pub fn repair_joined_keys(conn: &Connection) -> Result<usize, String> {
     let sep = u32::from(LOG_FIELD_SEP);
     let broken: bool = conn
         .query_row(
-            "SELECT EXISTS (SELECT 1 FROM session_accounts WHERE instr(account, char(?1)) > 0)
-                 OR EXISTS (SELECT 1 FROM session_account_spans WHERE instr(account, char(?1)) > 0)",
+            &format!(
+                "SELECT EXISTS (SELECT 1 FROM session_accounts WHERE {})
+                     OR EXISTS (SELECT 1 FROM session_account_spans WHERE {})",
+                repairable("account"),
+                repairable("account")
+            ),
             [sep],
             |r| r.get(0),
         )
@@ -178,9 +192,8 @@ pub fn repair_joined_keys(conn: &Connection) -> Result<usize, String> {
             .execute(
                 &format!(
                     "UPDATE {table} SET {column} = substr({column}, 1, instr({column}, char(?1)) - 1)
-                     WHERE instr({column}, char(?1)) > 1
-                       AND substr({column}, instr({column}, char(?1)) + 1) != ''
-                       AND substr({column}, instr({column}, char(?1)) + 1) NOT GLOB '*[^0-9]*'"
+                     WHERE {}",
+                    repairable(column)
                 ),
                 [sep],
             )
@@ -507,5 +520,40 @@ mod tests {
             .map(Result::unwrap)
             .collect();
         assert_eq!(keys, vec!["a@b.c\t", "a\t1\t2", "a@b.c"]);
+    }
+
+    #[test]
+    fn a_store_with_only_unrepairable_keys_is_not_written() {
+        // Arrange
+        let dir = scratch_dir("session-account-repair-unrepairable");
+        let conn = open_db(&dir.join("u.db")).unwrap();
+        for (session, key) in [("s1", "a@b.c\t"), ("s2", "a\t1\t2"), ("s3", "\t5")] {
+            conn.execute(
+                "INSERT INTO session_accounts VALUES (?1, ?2)",
+                [session, key],
+            )
+            .unwrap();
+        }
+        let before = conn.total_changes();
+        // Act
+        let repaired = repair_joined_keys(&conn).unwrap();
+        // Assert
+        assert_eq!(repaired, 0);
+        assert_eq!(conn.total_changes(), before);
+    }
+
+    #[test]
+    fn an_ingest_repairs_broken_keys_once_and_then_leaves_them_alone() {
+        // Arrange
+        let paths = crate::util::scratch_paths("session-account-repair-ingest");
+        let conn = open_db(&paths.db).unwrap();
+        seed_broken(&conn, BROKEN);
+        // Act
+        crate::run::ingest_into(&paths, &conn, &mut |_, _| true).unwrap();
+        let first = stored(&conn);
+        crate::run::ingest_into(&paths, &conn, &mut |_, _| true).unwrap();
+        // Assert
+        assert_eq!(first, vec!["a@b.c"; 5]);
+        assert_eq!(stored(&conn), first);
     }
 }
