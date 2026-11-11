@@ -74,6 +74,29 @@ fn normalize(model: &str) -> String {
     name.to_string()
 }
 
+/// True when both ids name the same model the way prices are looked up
+/// (case, `[1m]` or `@` suffixes, `claude-` and an eight digit date are
+/// ignored). It also drops a Bedrock or Vertex provider prefix such as
+/// `us.anthropic.` and a `-v1` style version tail, so a bare id and a
+/// prefixed id for one model compare equal. `normalize` is unchanged, so
+/// prices are still looked up by the plain name only.
+pub fn same_model(a: &str, b: &str) -> bool {
+    fn key(model: &str) -> String {
+        let lower = model.to_lowercase();
+        let bare = lower
+            .split_once("anthropic.")
+            .map_or(lower.as_str(), |(_, rest)| rest);
+        let name = normalize(bare);
+        match name.rsplit_once("-v") {
+            Some((head, tail)) if !tail.is_empty() && tail.bytes().all(|b| b.is_ascii_digit()) => {
+                head.to_string()
+            }
+            _ => name,
+        }
+    }
+    key(a) == key(b)
+}
+
 /// Dollar cost of one message, or `None` when the model is not in the table.
 pub fn cost_usd(model: &str, tokens: &Tokens) -> Option<f64> {
     let name = normalize(model);
@@ -103,6 +126,29 @@ mod tests {
 
     fn per_million(model: &str, tokens: Tokens) -> f64 {
         cost_usd(model, &tokens).unwrap()
+    }
+
+    #[test]
+    fn same_model_ignores_suffixes_dates_and_provider_prefixes() {
+        for (a, b, want) in [
+            ("claude-opus-4-8[1m]", "claude-opus-4-8", true),
+            ("claude-opus-4-1-20250805", "claude-opus-4-1", true),
+            ("claude-sonnet-5", "claude-opus-4-8", false),
+            ("us.anthropic.claude-opus-4-8-v1:0", "claude-opus-4-8", true),
+            (
+                "us.anthropic.claude-opus-4-8",
+                "eu.anthropic.claude-opus-4-8",
+                true,
+            ),
+            ("claude-opus-4-8@20250805", "claude-opus-4-8", true),
+            (
+                "us.anthropic.claude-sonnet-5-v1:0",
+                "claude-opus-4-8",
+                false,
+            ),
+        ] {
+            assert_eq!(same_model(a, b), want, "{a} vs {b}");
+        }
     }
 
     #[test]

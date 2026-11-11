@@ -12,6 +12,7 @@ mod fmt;
 pub(crate) mod gh;
 mod git;
 mod lines;
+mod next_cost;
 mod telemetry;
 
 use crate::common::slug::slugify;
