@@ -215,9 +215,23 @@ fn settings_step(
     };
     match crate::init::telemetry::remove(&opts.home, &path, stamp, opts.dry_run) {
         Ok(out) if out.keys > 0 => {
+            if out.restored > 0 {
+                report.lines.push(format!(
+                    "{verb} put back IS_DEMO, which `playbook setup` removed"
+                ));
+            }
             report.lines.push(format!(
                 "{verb} {} telemetry variables that `playbook setup` wrote from {}",
                 out.keys,
+                path.display()
+            ));
+            if let Some(backup) = out.backup {
+                report.lines.push(format!("backup: {}", backup.display()));
+            }
+        }
+        Ok(out) if out.restored > 0 => {
+            report.lines.push(format!(
+                "{verb} put back IS_DEMO, which `playbook setup` removed from {}",
                 path.display()
             ));
             if let Some(backup) = out.backup {

@@ -17,7 +17,7 @@
 //! turned on, and the account uuid stays out of the metrics.
 
 use crate::init::run::StepReport;
-use crate::usage::telemetry_detect::{is_on, ENABLE_VAR};
+use crate::usage::telemetry_detect::{is_on, DEMO_OFF_VALUE, DEMO_VAR, ENABLE_VAR};
 use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -106,9 +106,15 @@ fn already_written(home: &Path, settings_path: &Path) -> bool {
 /// The marker key that holds the values init replaced, by variable name.
 const REPLACED: &str = "_replaced";
 
+/// The marker key that holds the `IS_DEMO` value setup removed, by variable
+/// name, so uninstall can put it back.
+const REMOVED: &str = "_removed";
+
 /// The entries of a record that name a written key, not its meta entries.
 fn recorded_keys(record: &Map<String, Value>) -> impl Iterator<Item = (&String, &Value)> {
-    record.iter().filter(|(k, _)| *k != REPLACED)
+    record
+        .iter()
+        .filter(|(k, _)| *k != REPLACED && *k != REMOVED)
 }
 
 /// Whether at least one recorded key still holds its recorded value.
@@ -321,7 +327,8 @@ pub fn skip_line(
 }
 
 /// The skip table. `repair` is whether a yes has something to put right in
-/// the user's settings.json: playbook keys that are missing or stale. It turns the "nothing to ask" and "set up by you" lines
+/// the user's settings.json: playbook keys that are missing or stale, or a
+/// blocking `IS_DEMO`. It turns the "nothing to ask" and "set up by you" lines
 /// into a question. `can_replace` is whether a yes may replace an off switch.
 fn skip_line_from(state: State, repair: bool, can_replace: bool) -> Option<&'static str> {
     match state {
@@ -332,7 +339,7 @@ fn skip_line_from(state: State, repair: bool, can_replace: bool) -> Option<&'sta
     }
 }
 
-/// Whether setup would repair keys now. It
+/// Whether setup would repair keys or remove a blocking `IS_DEMO` now. It
 /// reads the user file, the record and the collector state, and never
 /// creates any of them: with no collector state it compares against the
 /// placeholder `plan_lines` uses.
@@ -346,6 +353,12 @@ fn needs_action(home: &Path, claude_home: &Path, cwd: &Path, process_configured:
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
+    if user_env
+        .get(DEMO_VAR)
+        .is_some_and(|v| demo_is_removable(&value_text(v)))
+    {
+        return true;
+    }
     let record = load(&marker_path(home)).unwrap_or_default();
     let paths = crate::usage::run::Paths::from_home(home);
     let collector =
@@ -472,6 +485,14 @@ pub fn plan_lines(claude_home: &Path) -> Vec<String> {
             .collect::<Vec<_>>()
             .join(", ")
     ));
+    if let Some(v) = env.get(DEMO_VAR) {
+        if demo_is_removable(&text(v)) {
+            lines.push(format!(
+                "Removes: IS_DEMO={} (Claude Code sends no telemetry from interactive sessions while it is set; uninstall puts it back)",
+                text(v)
+            ));
+        }
+    }
     for name in ["DISABLE_TELEMETRY", "DO_NOT_TRACK"] {
         if let Some(v) = env.get(name) {
             lines.push(format!(
@@ -486,7 +507,69 @@ pub fn plan_lines(claude_home: &Path) -> Vec<String> {
 /// The init step. `cwd` is where project settings are looked up.
 /// `replace_off_ok` is whether a lone off switch the user set may be replaced
 /// (an answer to the question or an explicit `--telemetry`, not `--yes`).
+/// When playbook's telemetry is on after the step, it also removes an
+/// `IS_DEMO` that blocks export (see [`remove_blocking_demo`]).
 pub fn apply(
+    home: &Path,
+    claude_home: &Path,
+    cwd: &Path,
+    epoch: u64,
+    process_configured: bool,
+    replace_off_ok: bool,
+) -> StepReport {
+    apply_with_demo(
+        home,
+        claude_home,
+        cwd,
+        epoch,
+        process_configured,
+        replace_off_ok,
+        std::env::var(DEMO_VAR).ok(),
+    )
+}
+
+/// [`apply`] with the process's `IS_DEMO` passed in, so tests do not read the
+/// environment of the machine they run on.
+fn apply_with_demo(
+    home: &Path,
+    claude_home: &Path,
+    cwd: &Path,
+    epoch: u64,
+    process_configured: bool,
+    replace_off_ok: bool,
+    process_demo: Option<String>,
+) -> StepReport {
+    let step = apply_keys(
+        home,
+        claude_home,
+        cwd,
+        epoch,
+        process_configured,
+        replace_off_ok,
+    );
+    if !matches!(
+        step.status,
+        crate::init::run::StepStatus::Wired | crate::init::run::StepStatus::AlreadyCorrect
+    ) {
+        return step;
+    }
+    match remove_blocking_demo(home, claude_home, cwd, epoch, process_demo.as_deref()) {
+        Ok(None) => step,
+        Ok(Some((changed, line))) => StepReport {
+            name: step.name,
+            status: if changed {
+                crate::init::run::StepStatus::Wired
+            } else {
+                step.status
+            },
+            detail: format!("{}. {line}", step.detail),
+        },
+        Err(e) => StepReport::failed("telemetry", e),
+    }
+}
+
+/// The keys part of [`apply`].
+fn apply_keys(
     home: &Path,
     claude_home: &Path,
     cwd: &Path,
@@ -628,6 +711,10 @@ pub fn apply(
     } else {
         written.insert(REPLACED.to_string(), Value::Object(replaced));
     }
+    // What setup removed from the env block earlier outlives a rewrite.
+    if let Some(removed) = written_before.get(REMOVED) {
+        written.insert(REMOVED.to_string(), removed.clone());
+    }
     if let Err(e) = write_keeping_order(&settings_path, root, was_sorted, epoch) {
         return StepReport::failed("telemetry", e);
     }
@@ -676,10 +763,100 @@ fn holds_all(settings_path: &Path, wanted: &[(String, String)]) -> bool {
     })
 }
 
+/// Whether an `IS_DEMO` value is one setup removes: anything but `0`, an empty
+/// value included, because the owner wants it unset or `0` while playbook
+/// telemetry is on. (The session hook is narrower and ignores an empty value.)
+fn demo_is_removable(text: &str) -> bool {
+    text.trim() != DEMO_OFF_VALUE
+}
+
+/// Handles `IS_DEMO` after the keys are in place. Claude Code sends no
+/// telemetry from an interactive session while it is set to anything but `0`.
+/// When the user's settings.json env holds it, removes the key, records the
+/// old value so uninstall puts it back, and returns a line that says so (the
+/// first value is whether the file changed). When it comes from another
+/// settings file or the process environment, which setup does not write,
+/// returns a line that names the source. Never adds the key.
+fn remove_blocking_demo(
+    home: &Path,
+    claude_home: &Path,
+    cwd: &Path,
+    epoch: u64,
+    process_demo: Option<&str>,
+) -> Result<Option<(bool, String)>, String> {
+    let settings_path = claude_home.join("settings.json");
+    let mut root = load(&settings_path)?;
+    let was_sorted = root.keys().is_sorted();
+    let held = root
+        .get("env")
+        .and_then(Value::as_object)
+        .and_then(|env| env.get(DEMO_VAR))
+        .cloned();
+    let held_text = held.as_ref().map(value_text);
+    if let (Some(old), Some(text)) = (held, &held_text) {
+        if demo_is_removable(text) {
+            if let Some(env) = root.get_mut("env").and_then(Value::as_object_mut) {
+                env.remove(DEMO_VAR);
+            }
+            write_keeping_order(&settings_path, root, was_sorted, epoch)?;
+            let marker = marker_path(home);
+            let mut record = load(&marker)?;
+            let mut removed = record
+                .get(REMOVED)
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            removed.insert(DEMO_VAR.to_string(), old);
+            record.insert(REMOVED.to_string(), Value::Object(removed));
+            crate::common::atomic::write_atomic_private(
+                &marker,
+                format!("{:#}\n", Value::Object(record)),
+            )
+            .map_err(|e| format!("could not write {}: {e}", marker.display()))?;
+            return Ok(Some((
+                true,
+                format!(
+                    "removed IS_DEMO={text} from {}, because Claude Code sends no telemetry from interactive sessions while it is set; `playbook uninstall` puts it back",
+                    settings_path.display()
+                ),
+            )));
+        }
+    }
+    let mut sources: Vec<String> = crate::usage::telemetry_detect::env_value_in_other_files(
+        home,
+        cwd,
+        &settings_path,
+        DEMO_VAR,
+    )
+    .into_iter()
+    .filter(|(_, text)| demo_is_removable(text))
+    .map(|(file, _)| file.display().to_string())
+    .collect();
+    // A copy of the user file's own value, which Claude Code hands to the
+    // commands it runs, is not a second source.
+    if let Some(text) = process_demo.filter(|t| demo_is_removable(t)) {
+        if held_text.as_deref() != Some(text) {
+            sources.push("the environment this command runs in".to_string());
+        }
+    }
+    if sources.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some((
+        false,
+        format!(
+            "IS_DEMO is also set in {}, which `playbook setup` does not change, and Claude Code sends no telemetry from interactive sessions while it is set; remove it there",
+            sources.join(" and ")
+        ),
+    )))
+}
+
 /// What `remove` did.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Removed {
     pub keys: usize,
+    /// Keys put back that setup had removed (`IS_DEMO`).
+    pub restored: usize,
     pub backup: Option<PathBuf>,
 }
 
@@ -698,7 +875,16 @@ pub fn remove(
     }
     let mut root = load(settings_path)?;
     let mut keys = 0;
+    let mut restored = 0;
     let mut emptied = false;
+    let removed_by_setup = written
+        .get(REMOVED)
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    if !removed_by_setup.is_empty() && !root.contains_key("env") {
+        root.insert("env".to_string(), Value::Object(Map::new()));
+    }
     if let Some(env) = root.get_mut("env").and_then(Value::as_object_mut) {
         let replaced = written
             .get(REPLACED)
@@ -714,16 +900,27 @@ pub fn remove(
                 }
             }
         }
+        // A value the user put there since stays.
+        for (k, old) in &removed_by_setup {
+            if !env.contains_key(k) {
+                env.insert(k.clone(), old.clone());
+                restored += 1;
+            }
+        }
         emptied = keys > 0 && env.is_empty();
     }
     if emptied {
         root.remove("env");
     }
-    let mut out = Removed { keys, backup: None };
+    let mut out = Removed {
+        keys,
+        restored,
+        backup: None,
+    };
     if dry_run {
         return Ok(out);
     }
-    if keys > 0 {
+    if keys > 0 || restored > 0 {
         write_with_backup(settings_path, root, epoch)?;
         let name = settings_path
             .file_name()
@@ -841,7 +1038,9 @@ fn sync_with(
             if on { "auto" } else { "off" }
         )
     };
-    let before = owned_env(&env_block(&path).map_err(unreadable)?);
+    let before_env = env_block(&path).map_err(unreadable)?;
+    let before = owned_env(&before_env);
+    let demo_before = before_env.get(DEMO_VAR).cloned();
     if on {
         let step = apply(home, claude_home, cwd, epoch, process_configured, true);
         match step.status {
@@ -857,7 +1056,9 @@ fn sync_with(
     } else {
         remove(home, &path, epoch, false)?;
     }
-    let after = owned_env(&env_block(&path)?);
+    let after_env = env_block(&path)?;
+    let after = owned_env(&after_env);
+    let demo_after = after_env.get(DEMO_VAR).cloned();
     let find = |set: &[(String, String)], k: &str| {
         set.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone())
     };
@@ -879,6 +1080,18 @@ fn sync_with(
         }
     }
     let mut lines = Vec::new();
+    match (&demo_before, &demo_after) {
+        (Some(old), None) => lines.push(format!(
+            "telemetry: removed IS_DEMO={} from {}, because Claude Code sends no telemetry from interactive sessions while it is set",
+            value_text(old),
+            path.display()
+        )),
+        (None, Some(old)) => lines.push(format!(
+            "telemetry: put back IS_DEMO={} that `playbook setup` had removed",
+            value_text(old)
+        )),
+        _ => {}
+    }
     let left: Vec<&str> = after.iter().map(|(k, _)| k.as_str()).collect();
     let backup = path.with_file_name(format!("settings.json.bak.{epoch}"));
     if diff.is_empty() {
@@ -930,6 +1143,26 @@ mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
     use serde_json::json;
+
+    /// `apply` with no `IS_DEMO` in the process, whatever the test machine has.
+    fn apply(
+        home: &Path,
+        claude: &Path,
+        cwd: &Path,
+        epoch: u64,
+        process_configured: bool,
+        replace_off_ok: bool,
+    ) -> StepReport {
+        apply_with_demo(
+            home,
+            claude,
+            cwd,
+            epoch,
+            process_configured,
+            replace_off_ok,
+            None,
+        )
+    }
 
     fn setup(name: &str, settings: &str) -> (PathBuf, PathBuf, PathBuf) {
         crate::usage_host::install();
@@ -2037,6 +2270,147 @@ mod tests {
         let step = apply(&home, &claude, &cwd, 2, false, true);
         assert_eq!(step.status, WIRED);
         assert_eq!(env_of(&claude)["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
+    }
+
+    // ---- IS_DEMO (R7) ----
+
+    #[test]
+    fn setup_removes_a_blocking_demo_and_records_it_for_uninstall() {
+        for (i, value) in [r#""1""#, r#""true""#, r#""false""#, r#""""#]
+            .iter()
+            .enumerate()
+        {
+            let settings = format!(r#"{{"env":{{"IS_DEMO":{value},"FOO":"1"}}}}"#);
+            let (home, claude, cwd) = setup(&format!("init-tel-demo-{i}"), &settings);
+
+            let first = apply(&home, &claude, &cwd, 1, false, true);
+            let after_first = settings_bytes(&claude);
+            let second = apply(&home, &claude, &cwd, 2, false, true);
+
+            assert_eq!(first.status, WIRED, "{value}");
+            assert!(first.detail.contains("removed IS_DEMO"), "{}", first.detail);
+            assert!(!env_of(&claude).contains_key("IS_DEMO"), "{value}");
+            assert_eq!(env_of(&claude)["FOO"], "1");
+            assert_eq!(
+                record_of(&home)[REMOVED]["IS_DEMO"],
+                json!(value.trim_matches('"'))
+            );
+            assert_eq!(second.status, OK, "{value}: a second run reports no change");
+            assert_eq!(settings_bytes(&claude), after_first);
+
+            remove(&home, &claude.join("settings.json"), 3, false).unwrap();
+
+            let back = env_of(&claude);
+            assert_eq!(back["IS_DEMO"], json!(value.trim_matches('"')), "{value}");
+            assert_eq!(keys_in(&claude), Vec::<String>::new());
+        }
+    }
+
+    #[test]
+    fn a_demo_set_to_zero_is_left_alone_and_the_key_is_never_added() {
+        let (home, claude, cwd) = setup("init-tel-demo-zero", r#"{"env":{"IS_DEMO":"0"}}"#);
+
+        let step = apply(&home, &claude, &cwd, 1, false, true);
+
+        assert_eq!(step.status, WIRED);
+        assert!(!step.detail.contains("IS_DEMO"), "{}", step.detail);
+        assert_eq!(env_of(&claude)["IS_DEMO"], "0");
+
+        let (home, claude, cwd) = setup("init-tel-demo-absent", r#"{}"#);
+        apply(&home, &claude, &cwd, 1, false, true);
+        assert!(!env_of(&claude).contains_key("IS_DEMO"));
+        assert!(!record_of(&home).contains_key(REMOVED));
+    }
+
+    #[test]
+    fn a_demo_in_another_settings_file_is_named_and_not_changed() {
+        let (home, claude, cwd) = setup("init-tel-demo-local", r#"{}"#);
+        fs::create_dir_all(cwd.join(".claude")).unwrap();
+        let local = cwd.join(".claude/settings.local.json");
+        fs::write(&local, r#"{"env":{"IS_DEMO":"1"}}"#).unwrap();
+
+        let step = apply(&home, &claude, &cwd, 1, false, true);
+
+        assert_eq!(step.status, WIRED, "the keys were written");
+        assert!(
+            step.detail.contains("IS_DEMO is also set in")
+                && step.detail.contains("settings.local.json"),
+            "{}",
+            step.detail
+        );
+        assert_eq!(
+            fs::read_to_string(&local).unwrap(),
+            r#"{"env":{"IS_DEMO":"1"}}"#
+        );
+        assert!(!env_of(&claude).contains_key("IS_DEMO"));
+    }
+
+    #[test]
+    fn a_demo_in_the_process_environment_is_named_unless_it_copies_the_user_file() {
+        let (home, claude, cwd) = setup("init-tel-demo-env", r#"{}"#);
+        let step = apply_with_demo(&home, &claude, &cwd, 1, false, true, Some("1".into()));
+        assert!(
+            step.detail
+                .contains("IS_DEMO is also set in the environment this command runs in"),
+            "{}",
+            step.detail
+        );
+        assert!(!env_of(&claude).contains_key("IS_DEMO"));
+
+        // Claude Code hands the user file's own value to the commands it runs.
+        let (home, claude, cwd) = setup("init-tel-demo-copy", r#"{"env":{"IS_DEMO":"1"}}"#);
+        let step = apply_with_demo(&home, &claude, &cwd, 1, false, true, Some("1".into()));
+        assert!(step.detail.contains("removed IS_DEMO"), "{}", step.detail);
+        assert!(!step.detail.contains("is also set"), "{}", step.detail);
+    }
+
+    #[test]
+    fn a_demo_beside_a_foreign_setup_is_left_alone() {
+        let (home, claude, cwd) = setup(
+            "init-tel-demo-foreign",
+            r#"{"env":{"IS_DEMO":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"https://team"}}"#,
+        );
+        let before = settings_bytes(&claude);
+
+        let step = apply(&home, &claude, &cwd, 1, false, true);
+
+        assert_eq!(step.status, SKIPPED);
+        assert_eq!(settings_bytes(&claude), before);
+    }
+
+    #[test]
+    fn the_removed_demo_survives_a_later_repair_and_the_wizard_asks_while_it_is_set() {
+        let (home, claude, cwd) = setup("init-tel-demo-keep", r#"{"env":{"IS_DEMO":"1"}}"#);
+        apply(&home, &claude, &cwd, 1, false, true);
+        let mut state = collector_state(&home);
+        state.port = 51234;
+        fs::write(collector_file(&home), serde_json::to_vec(&state).unwrap()).unwrap();
+        apply(&home, &claude, &cwd, 2, false, true);
+
+        remove(&home, &claude.join("settings.json"), 3, false).unwrap();
+
+        assert_eq!(env_of(&claude)["IS_DEMO"], "1");
+
+        let (home, claude, cwd) = setup("init-tel-demo-ask", r#"{}"#);
+        apply(&home, &claude, &cwd, 1, false, true);
+        assert_eq!(
+            skip_line_files_only(&home, &claude, &cwd),
+            Some(ENABLED_LINE)
+        );
+        set_env_key(&claude, "IS_DEMO", Some("1"));
+        assert_eq!(skip_line_files_only(&home, &claude, &cwd), None);
+    }
+
+    #[test]
+    fn the_plan_names_a_demo_that_a_yes_removes() {
+        let (_home, claude, _cwd) = setup("init-tel-demo-plan", r#"{"env":{"IS_DEMO":"1"}}"#);
+
+        let lines = plan_lines(&claude);
+
+        assert!(
+            lines.iter().any(|l| l.starts_with("Removes: IS_DEMO=1")),
+            "{lines:?}"
+        );
     }
 
     fn text(lines: &[String]) -> String {

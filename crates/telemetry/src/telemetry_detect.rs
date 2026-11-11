@@ -205,6 +205,25 @@ pub fn files_configured_except(home: &Path, cwd: &Path, except: &Path) -> bool {
     configured_in_files(&files)
 }
 
+/// The settings files other than `except` whose `env` block holds `name`,
+/// with the value as text. An unreadable or unparsable file is skipped.
+pub fn env_value_in_other_files(
+    home: &Path,
+    cwd: &Path,
+    except: &Path,
+    name: &str,
+) -> Vec<(PathBuf, String)> {
+    settings_files(home, cwd)
+        .into_iter()
+        .filter(|f| same_file_key(f) != same_file_key(except))
+        .filter_map(|f| {
+            let doc: Value = serde_json::from_slice(&std::fs::read(&f).ok()?).ok()?;
+            let value = doc.get("env")?.as_object()?.get(name)?;
+            Some((f, text_of(value)))
+        })
+        .collect()
+}
+
 /// Like [`configured`] but reading only the settings files, not the process
 /// environment.
 pub fn configured_from_files(home: &Path, cwd: &Path, ours: Option<u16>) -> Configured {
@@ -349,6 +368,30 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&pinned).unwrap(),
             r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}"#
+        );
+    }
+
+    #[test]
+    fn a_variable_is_listed_from_every_settings_file_but_the_excepted_one() {
+        let home = scratch_dir("cc-telemetry-other-files");
+        let cwd = home.join("project");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(cwd.join(".claude")).unwrap();
+        let user = home.join(".claude/settings.json");
+        std::fs::write(&user, r#"{"env":{"IS_DEMO":"1"}}"#).unwrap();
+        std::fs::write(
+            cwd.join(".claude/settings.json"),
+            r#"{"env":{"IS_DEMO":0}}"#,
+        )
+        .unwrap();
+        std::fs::write(cwd.join(".claude/settings.local.json"), "{").unwrap();
+
+        let found = env_value_in_other_files(&home, &cwd, &user, "IS_DEMO");
+
+        assert_eq!(
+            found,
+            vec![(cwd.join(".claude/settings.json"), "0".to_string())],
+            "the user file is excepted and a broken file is skipped"
         );
     }
 }
