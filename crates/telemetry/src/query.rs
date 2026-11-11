@@ -302,12 +302,12 @@ pub fn load_agents(
     conn: &Connection,
     range: Range,
     now: i64,
-    machine: Option<&str>,
+    scope: RowScope<'_>,
 ) -> Result<AgentView, String> {
     let (since, until) = window_seconds(range, now);
-    let rows = super::telemetry_db::agent_groups(conn, since, until, RowScope::machine(machine))?;
+    let rows = super::telemetry_db::agent_groups(conn, since, until, scope)?;
     if rows.is_empty() {
-        return transcript_view(conn, crate::ToolKind::Agent, since, until, machine);
+        return transcript_view(conn, crate::ToolKind::Agent, since, until, scope);
     }
     let cost_usd = rows.iter().map(|g| g.cost_usd).sum();
     Ok(AgentView {
@@ -330,18 +330,17 @@ pub fn load_skills(
     conn: &Connection,
     range: Range,
     now: i64,
-    machine: Option<&str>,
+    scope: RowScope<'_>,
 ) -> Result<AgentView, String> {
     let (since, until) = window_seconds(range, now);
-    let mut rows =
-        super::telemetry_db::skill_groups(conn, since, until, RowScope::machine(machine))?;
+    let mut rows = super::telemetry_db::skill_groups(conn, since, until, scope)?;
     for row in &mut rows {
         if row.key == HIDDEN_PLUGIN_SKILL {
             row.key = "plugin skills (names hidden)".to_string();
         }
     }
     if rows.is_empty() {
-        return transcript_view(conn, crate::ToolKind::Skill, since, until, machine);
+        return transcript_view(conn, crate::ToolKind::Skill, since, until, scope);
     }
     let cost_usd = rows.iter().map(|g| g.cost_usd).sum();
     Ok(AgentView {
@@ -359,15 +358,9 @@ fn transcript_view(
     kind: crate::ToolKind,
     since: i64,
     until: i64,
-    machine: Option<&str>,
+    scope: RowScope<'_>,
 ) -> Result<AgentView, String> {
-    let rows = super::telemetry_db::invocation_groups(
-        conn,
-        kind,
-        since,
-        until,
-        RowScope::machine(machine),
-    )?;
+    let rows = super::telemetry_db::invocation_groups(conn, kind, since, until, scope)?;
     Ok(AgentView {
         rows,
         cost_usd: 0.0,
@@ -391,43 +384,23 @@ pub fn load_health(
     conn: &Connection,
     range: Range,
     now: i64,
-    machine: Option<&str>,
+    scope: RowScope<'_>,
 ) -> Result<HealthView, String> {
     use super::telemetry_db::{health, tool_stats};
     if let Some(period) = super::period::Period::of_range(range) {
         let w = period.windows(now);
         return Ok(HealthView {
-            tools: tool_stats(
-                conn,
-                w.current.start,
-                w.current.end,
-                RowScope::machine(machine),
-            )?,
-            tools_before: tool_stats(
-                conn,
-                w.previous.start,
-                w.previous.end,
-                RowScope::machine(machine),
-            )?,
-            now: health(
-                conn,
-                w.current.start,
-                w.current.end,
-                RowScope::machine(machine),
-            )?,
-            before: Some(health(
-                conn,
-                w.previous.start,
-                w.previous.end,
-                RowScope::machine(machine),
-            )?),
+            tools: tool_stats(conn, w.current.start, w.current.end, scope)?,
+            tools_before: tool_stats(conn, w.previous.start, w.previous.end, scope)?,
+            now: health(conn, w.current.start, w.current.end, scope)?,
+            before: Some(health(conn, w.previous.start, w.previous.end, scope)?),
         });
     }
     let (since, until) = window_seconds(range, now);
     Ok(HealthView {
-        tools: tool_stats(conn, since, until, RowScope::machine(machine))?,
+        tools: tool_stats(conn, since, until, scope)?,
         tools_before: Vec::new(),
-        now: health(conn, since, until, RowScope::machine(machine))?,
+        now: health(conn, since, until, scope)?,
         before: None,
     })
 }
@@ -671,14 +644,17 @@ pub struct LiveInputs {
 pub fn load_live_inputs(
     conn: &Connection,
     now: i64,
-    machine: Option<&str>,
+    scope: RowScope<'_>,
 ) -> Result<LiveInputs, String> {
     let mut window = db::load_usage_events_since(conn, live_window_start(now))?;
-    crate::tui::machine::keep(&mut window, machine);
+    crate::tui::machine::keep(&mut window, scope.machine);
+    crate::tui::account::keep(&mut window, scope.account);
     let ids = active_session_ids(&window, now);
     let mut sessions = db::load_usage_events_of_sessions(conn, &ids)?;
-    crate::tui::machine::keep(&mut sessions, machine);
-    let latest = db::load_latest_usage_events(conn, FEED_LIMIT as i64, machine)?;
+    crate::tui::machine::keep(&mut sessions, scope.machine);
+    crate::tui::account::keep(&mut sessions, scope.account);
+    let mut latest = db::load_latest_usage_events(conn, FEED_LIMIT as i64, scope.machine)?;
+    crate::tui::account::keep(&mut latest, scope.account);
     Ok(LiveInputs {
         window,
         sessions,
@@ -686,8 +662,8 @@ pub fn load_live_inputs(
     })
 }
 
-pub fn load_live(conn: &Connection, now: i64, machine: Option<&str>) -> Result<LiveView, String> {
-    let i = load_live_inputs(conn, now, machine)?;
+pub fn load_live(conn: &Connection, now: i64, scope: RowScope<'_>) -> Result<LiveView, String> {
+    let i = load_live_inputs(conn, now, scope)?;
     Ok(live_view(&i.window, &i.sessions, &i.latest, now))
 }
 
@@ -1039,7 +1015,7 @@ mod tests {
             };
             insert_request(&conn, &r).unwrap();
         }
-        let v = load_skills(&conn, Range::LastDays(1), NOW, None).unwrap();
+        let v = load_skills(&conn, Range::LastDays(1), NOW, RowScope::default()).unwrap();
         let keys: Vec<&str> = v.rows.iter().map(|g| g.key.as_str()).collect();
         assert!(keys.contains(&"review") && keys.contains(&"plugin skills (names hidden)"));
         assert!(!keys.contains(&"third-party"));
@@ -1062,11 +1038,11 @@ mod tests {
         insert_tool(&conn, &tool("today", day)).unwrap();
         insert_tool(&conn, &tool("yesterday", day - SECONDS_PER_DAY + 60)).unwrap();
         insert_tool(&conn, &tool("old", day - 3 * SECONDS_PER_DAY)).unwrap();
-        let v = load_health(&conn, Range::Today, NOW, None).unwrap();
+        let v = load_health(&conn, Range::Today, NOW, RowScope::default()).unwrap();
         assert_eq!(v.now.tool_calls, 1);
         assert_eq!(v.before.as_ref().unwrap().tool_calls, 1);
         assert_eq!(v.tools_before.len(), 1);
-        let v = load_health(&conn, Range::LastDays(30), NOW, None).unwrap();
+        let v = load_health(&conn, Range::LastDays(30), NOW, RowScope::default()).unwrap();
         assert_eq!(v.now.tool_calls, 3);
         assert!(v.before.is_none() && v.tools_before.is_empty());
     }
@@ -1098,8 +1074,8 @@ mod tests {
     fn agents_and_skills_fall_back_to_transcript_counts_when_telemetry_is_empty() {
         let (conn, dir) = transcript_db("fallback");
 
-        let agents = load_agents(&conn, Range::All, NOW, None).unwrap();
-        let skills = load_skills(&conn, Range::All, NOW, None).unwrap();
+        let agents = load_agents(&conn, Range::All, NOW, RowScope::default()).unwrap();
+        let skills = load_skills(&conn, Range::All, NOW, RowScope::default()).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
 
         assert!(agents.from_transcripts && skills.from_transcripts);
@@ -1129,10 +1105,65 @@ mod tests {
         };
         crate::telemetry_db::insert_request(&conn, &r).unwrap();
 
-        let agents = load_agents(&conn, Range::All, NOW, None).unwrap();
+        let agents = load_agents(&conn, Range::All, NOW, RowScope::default()).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
 
         assert!(!agents.from_transcripts);
         assert_eq!(agents.rows[0].key, "reviewer");
+    }
+
+    fn account_scope(account: &str) -> RowScope<'_> {
+        RowScope {
+            machine: None,
+            account: Some(account),
+        }
+    }
+
+    #[test]
+    fn live_view_with_an_account_lists_only_its_sessions_and_spend() {
+        // Arrange
+        let dir = crate::util::scratch_dir("live-account");
+        let conn = crate::db::open_db(&dir.join("usage.db")).unwrap();
+        for (account, session, cost) in [("work", "s-work", 1.0), ("home", "s-home", 1.0)] {
+            let e = UsageEvent {
+                account: account.into(),
+                model: "claude-sonnet-5".into(),
+                ..event(NOW - 60, session, cost)
+            };
+            crate::db::upsert_usage_event(&conn, &e).unwrap();
+        }
+
+        // Act
+        let work = load_live(&conn, NOW, account_scope("work")).unwrap();
+        let all = load_live(&conn, NOW, RowScope::default()).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Assert
+        assert_eq!(work.active.len(), 1);
+        assert_eq!(work.active[0].id, "s-work");
+        // The store prices each event from its tokens, and both accounts used
+        // the same tokens, so one account is half of the total.
+        assert!(work.hour.cost_usd > 0.0);
+        assert!((work.hour.cost_usd * 2.0 - all.hour.cost_usd).abs() < 1e-9);
+        assert!((work.today.cost_usd - work.hour.cost_usd).abs() < 1e-9);
+        assert_eq!(work.feed.len(), 1);
+        assert_eq!(all.active.len(), 2);
+    }
+
+    #[test]
+    fn agents_and_skills_fall_back_to_transcript_counts_of_the_account() {
+        // Arrange
+        let (conn, dir) = transcript_db("fallback-account");
+
+        // Act
+        let own = load_agents(&conn, Range::All, NOW, account_scope("a")).unwrap();
+        let skills = load_skills(&conn, Range::All, NOW, account_scope("a")).unwrap();
+        let other = load_agents(&conn, Range::All, NOW, account_scope("b")).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Assert
+        assert_eq!(own.rows[0].messages, 2);
+        assert_eq!(skills.rows[0].key, "plan");
+        assert!(other.rows.is_empty());
     }
 }

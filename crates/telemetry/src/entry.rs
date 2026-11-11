@@ -48,7 +48,7 @@ pub fn json_report(
     let usage = query::load_window(conn, range, now)?;
     let tools = db::load_tool_events(conn)?;
     let mut data = api::data_json(&usage, &tools, now, range);
-    let i = query::load_live_inputs(conn, now, None)?;
+    let i = query::load_live_inputs(conn, now, crate::telemetry_db::RowScope::default())?;
     let live = api::live_json(&i.window, &i.sessions, &i.latest, now);
     let since = super::limits_source::events_since(now, configured_week_start());
     let limit_events = db::load_usage_events_since(conn, since)?;
