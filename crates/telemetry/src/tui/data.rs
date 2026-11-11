@@ -516,7 +516,7 @@ impl Data {
 /// Reads the store and builds the snapshot. Budget, projection, burnup, spend,
 /// tokens and models count every machine of the account. Live, agents, skills,
 /// tools and health follow the account and the machine. Sessions and projects
-/// follow the machine.
+/// follow the account and are narrowed by the machine.
 pub fn load(
     conn: &Connection,
     range: Range,
