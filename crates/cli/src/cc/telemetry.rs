@@ -32,6 +32,9 @@ use crate::usage::run::Paths;
 pub use crate::usage::telemetry_detect::{
     configured, files_configured, process_configured, Configured,
 };
+use crate::usage::telemetry_detect::{
+    demo_blocks_export, is_headless_entrypoint, is_on, DEMO_VAR, ENABLE_VAR, ENTRYPOINT_VAR,
+};
 use serde_json::Value;
 use std::path::Path;
 use std::time::Duration;
@@ -154,27 +157,48 @@ pub fn telemetry_points_here(home: &Path) -> bool {
     configured_from_files(home, home, port) == Configured::Playbook
 }
 
-/// The line the session-init hook prints when this session started without
-/// the OpenTelemetry keys that Claude Code settings now hold. Claude Code
-/// reads `env` once at start, so a session begun before `setup` wrote the
-/// keys exports nothing until it restarts. It reads the `usage.telemetry`
-/// setting, the collector state, the user and managed settings files (with
-/// the home as the working directory, so a repo's own settings are not read)
-/// and one variable of the hook's own environment, which is the session's.
+/// The line the session-init hook prints when this session will not export
+/// telemetry, or `None`. It reads the `usage.telemetry` setting, the
+/// collector state, the user and managed settings files (with the home as the
+/// working directory, so a repo's own settings are not read) and three
+/// variables of the hook's own environment, which is the session's.
+///
+/// It cannot read the `OTEL_*` keys: Claude Code removes every `OTEL_*`
+/// variable from the environment it gives to hooks, so they are always empty
+/// there. It reads `CLAUDE_CODE_ENABLE_TELEMETRY` instead, which Claude Code
+/// does pass, and which is on in a session only when the settings holding it
+/// were loaded at start.
 pub fn missing_keys_line(home: &Path) -> Option<&'static str> {
     if !telemetry_auto(home) || !telemetry_points_here(home) {
         return None;
     }
-    let endpoint = std::env::var_os("OTEL_EXPORTER_OTLP_ENDPOINT");
-    keys_line(endpoint.is_some_and(|v| !v.is_empty()))
+    let var = |name: &str| std::env::var(name).ok();
+    session_telemetry_line(
+        var(ENABLE_VAR).as_deref(),
+        var(DEMO_VAR).as_deref(),
+        var(ENTRYPOINT_VAR).as_deref(),
+    )
 }
 
 const MISSING_KEYS: &str = "playbook: this session started without the OpenTelemetry keys, so it will not send telemetry. Restart it to load them.";
 
-/// The caller has already found that the settings hold the playbook keys.
-/// `session_has_endpoint` says the session's environment holds them too.
-fn keys_line(session_has_endpoint: bool) -> Option<&'static str> {
-    (!session_has_endpoint).then_some(MISSING_KEYS)
+const DEMO_BLOCKS: &str = "playbook: this session will not send telemetry because IS_DEMO is set, and Claude Code sends none from interactive sessions while it is. To send telemetry, remove IS_DEMO from the env block of ~/.claude/settings.json, or from the shell that starts Claude Code, and start a new session.";
+
+/// Picks the line from the hook's own environment. The caller has already
+/// found that the settings hold the playbook keys. A switch that is not on
+/// means the session started before they were written, so the restart line
+/// wins. Otherwise an interactive session with a blocking `IS_DEMO` is told
+/// why. A headless session still exports with `IS_DEMO` set, so it hears
+/// nothing. The name avoids a clash with `heal::session_line`.
+fn session_telemetry_line(
+    enable: Option<&str>,
+    demo: Option<&str>,
+    entrypoint: Option<&str>,
+) -> Option<&'static str> {
+    if !is_on(enable) {
+        return Some(MISSING_KEYS);
+    }
+    (demo_blocks_export(demo) && !is_headless_entrypoint(entrypoint)).then_some(DEMO_BLOCKS)
 }
 
 /// Makes sure a collector at this version runs for the user's home, as
@@ -286,16 +310,50 @@ pub fn on_start(command: &crate::Command) {
 mod tests {
     use super::*;
 
+    const ON: Option<&str> = Some("1");
+
     #[test]
-    fn the_warning_shows_only_when_the_session_lacks_the_endpoint() {
-        assert!(keys_line(false).is_some_and(|l| l.contains("Restart")));
-        assert_eq!(keys_line(true), None, "all fine stays quiet");
+    fn the_session_line_is_chosen_from_the_hook_environment() {
+        let restart = Some(MISSING_KEYS);
+        let demo = Some(DEMO_BLOCKS);
+        // (switch, IS_DEMO, entrypoint, expected)
+        type Case = (
+            Option<&'static str>,
+            Option<&'static str>,
+            Option<&'static str>,
+            Option<&'static str>,
+        );
+        let cases: &[Case] = &[
+            (None, None, None, restart),
+            (None, Some("1"), Some("cli"), restart),
+            (ON, Some("false"), Some("cli"), demo),
+            (Some("0"), None, Some("cli"), restart),
+            (Some("false"), None, Some("cli"), restart),
+            (Some("0"), Some("1"), Some("cli"), restart),
+            (ON, None, Some("cli"), None),
+            (ON, Some("1"), Some("cli"), demo),
+            (ON, Some("1"), Some("sdk-cli"), None),
+            (ON, Some("1"), None, demo),
+            (ON, Some("0"), Some("cli"), None),
+        ];
+        for (enable, demo_var, entrypoint, want) in cases {
+            assert_eq!(
+                session_telemetry_line(*enable, *demo_var, *entrypoint),
+                *want,
+                "switch {enable:?}, IS_DEMO {demo_var:?}, entrypoint {entrypoint:?}"
+            );
+        }
     }
 
     #[test]
-    fn the_warning_is_one_plain_line() {
-        let line = keys_line(false).unwrap();
-        assert!(!line.contains('\n') && !line.contains('\u{2014}') && !line.contains('\u{2013}'));
+    fn both_lines_are_one_plain_line() {
+        for line in [MISSING_KEYS, DEMO_BLOCKS] {
+            assert!(
+                !line.contains('\n') && !line.contains('\u{2014}') && !line.contains('\u{2013}')
+            );
+        }
+        assert!(MISSING_KEYS.contains("Restart"));
+        assert!(DEMO_BLOCKS.contains("IS_DEMO"));
     }
 
     fn live() -> State {

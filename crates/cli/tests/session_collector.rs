@@ -43,7 +43,13 @@ impl Home {
             .env(TEST_SPAWN_VAR, "1")
             .current_dir(&self.0);
         for (name, _) in std::env::vars() {
-            if name == "CLAUDE_CODE_ENABLE_TELEMETRY" || name.starts_with("OTEL_") {
+            // A Claude Code tool shell passes `IS_DEMO` and the entrypoint to its
+            // children; either one changes which telemetry line the hook prints.
+            if name == "CLAUDE_CODE_ENABLE_TELEMETRY"
+                || name == "IS_DEMO"
+                || name == "CLAUDE_CODE_ENTRYPOINT"
+                || name.starts_with("OTEL_")
+            {
                 cmd.env_remove(name);
             }
         }
@@ -220,6 +226,7 @@ impl Home {
 }
 
 const MISSING: &str = "without the OpenTelemetry keys";
+const DEMO: &str = "because IS_DEMO is set";
 
 #[test]
 fn a_session_that_started_without_the_keys_gets_one_warning_line() {
@@ -238,11 +245,69 @@ fn a_session_that_has_the_keys_or_no_setup_hears_nothing() {
     assert!(!none.contains(MISSING), "{none}");
 
     assert!(home.init_telemetry().status.success());
-    let port = home.state().unwrap()["port"].as_u64().unwrap();
-    let endpoint = format!("http://127.0.0.1:{port}");
-    let fine = home.session_start_stdout(&[("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint.as_str())]);
+    // Claude Code gives a hook the switch but no `OTEL_*` variable.
+    let fine = home.session_start_stdout(&[("CLAUDE_CODE_ENABLE_TELEMETRY", "1")]);
     assert!(!fine.contains(MISSING), "{fine}");
+    assert!(!fine.contains(DEMO), "{fine}");
 
     let headless = home.session_start_stdout(&[("PLAYBOOK_HEADLESS", "1")]);
     assert!(!headless.contains(MISSING), "{headless}");
+}
+
+/// Runs the positive control (an interactive session with `IS_DEMO=1` is told
+/// once) so a zero count in the same test cannot come from a closed gate.
+fn assert_demo_gate_is_open(home: &Home) {
+    let out = home.session_start_stdout(&[
+        ("CLAUDE_CODE_ENABLE_TELEMETRY", "1"),
+        ("IS_DEMO", "1"),
+        ("CLAUDE_CODE_ENTRYPOINT", "cli"),
+    ]);
+    assert_eq!(out.matches(DEMO).count(), 1, "{out}");
+}
+
+#[test]
+fn a_demo_session_is_told_why_it_sends_nothing() {
+    let home = Home::new("demo");
+    assert!(home.init_telemetry().status.success());
+
+    let out = home.session_start_stdout(&[
+        ("CLAUDE_CODE_ENABLE_TELEMETRY", "1"),
+        ("IS_DEMO", "1"),
+        ("CLAUDE_CODE_ENTRYPOINT", "cli"),
+    ]);
+
+    assert_eq!(out.matches(DEMO).count(), 1, "{out}");
+    assert_eq!(out.matches(MISSING).count(), 0, "{out}");
+}
+
+#[test]
+fn a_headless_demo_session_hears_nothing() {
+    let home = Home::new("demo-headless");
+    assert!(home.init_telemetry().status.success());
+    assert_demo_gate_is_open(&home);
+
+    let out = home.session_start_stdout(&[
+        ("CLAUDE_CODE_ENABLE_TELEMETRY", "1"),
+        ("IS_DEMO", "1"),
+        ("CLAUDE_CODE_ENTRYPOINT", "sdk-cli"),
+    ]);
+
+    assert_eq!(out.matches(DEMO).count(), 0, "{out}");
+    assert_eq!(out.matches(MISSING).count(), 0, "{out}");
+}
+
+#[test]
+fn a_session_with_demo_off_hears_nothing() {
+    let home = Home::new("demo-off");
+    assert!(home.init_telemetry().status.success());
+    assert_demo_gate_is_open(&home);
+
+    let out = home.session_start_stdout(&[
+        ("CLAUDE_CODE_ENABLE_TELEMETRY", "1"),
+        ("IS_DEMO", "0"),
+        ("CLAUDE_CODE_ENTRYPOINT", "cli"),
+    ]);
+
+    assert_eq!(out.matches(DEMO).count(), 0, "{out}");
+    assert_eq!(out.matches(MISSING).count(), 0, "{out}");
 }

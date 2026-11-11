@@ -129,6 +129,10 @@ impl Home {
         let mut cmd = isolated::playbook_in(&self.home);
         cmd.env_remove("CI")
             .env_remove("CLAUDE_CODE_ENABLE_TELEMETRY")
+            // A Claude Code tool shell passes these two to its children, and
+            // they change which telemetry line the session hook prints.
+            .env_remove("IS_DEMO")
+            .env_remove("CLAUDE_CODE_ENTRYPOINT")
             .current_dir(&self.home);
         for (name, _) in std::env::vars() {
             if name.starts_with("OTEL_") {
