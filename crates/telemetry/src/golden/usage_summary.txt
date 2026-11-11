@@ -1,0 +1,42 @@
+Usage: 3 messages, $0.0007 estimated cost across all recorded sessions
+Times and days are in UTC.
+
+By day (UTC, last 14)
+              messages         input        output       cache r/w    cost USD
+  2026-09-01         3            30            60             0/0      0.0007
+
+By week (starting Monday)
+              messages         input        output       cache r/w    cost USD
+  2026-08-31         3            30            60             0/0      0.0007
+
+By model
+                   messages         input        output       cache r/w    cost USD
+  claude-sonnet-5         3            30            60             0/0      0.0007
+
+By repo
+            messages         input        output       cache r/w    cost USD
+  proj             3            30            60             0/0      0.0007
+
+By branch
+            messages         input        output       cache r/w    cost USD
+  main             3            30            60             0/0      0.0007
+
+By effort
+            messages         input        output       cache r/w    cost USD
+  (none)           3            30            60             0/0      0.0007
+
+By account
+                  messages         input        output       cache r/w    cost USD
+  token:abcd1234         1            10            20             0/0      0.0002
+  work@x.io              2            20            40             0/0      0.0004
+
+Top skills
+       1  fix
+       1  plan
+
+Limits and burn rate (UTC)
+  limit unknown: set usage.budget.monthlyUsd or usage.budget.weeklyUsd, or sign in with a Pro or Max plan and use the playbook statusline to read the plan limits
+  cap not reported by Claude Code on this login
+  today: $0.00 so far, $0.00/h $0.00/day; yesterday $0.00/h $0.00/day
+  this week: $0.00 so far, $0.00/h $0.00/day; last week $0.00/h $0.00/day
+  this month: $0.00 so far, $0.00/h $0.00/day; last month $0.00/h $0.00/day

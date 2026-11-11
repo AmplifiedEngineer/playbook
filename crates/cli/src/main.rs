@@ -1043,6 +1043,7 @@ fn real_main() {
                 json,
                 summary,
                 range,
+                account: None,
             };
             match usage::entry::run(sub, &opts, &paths, usage::entry::interactive()) {
                 Ok(output) => {

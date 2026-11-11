@@ -6,7 +6,7 @@
 //! so a second login does not add to the first one's numbers.
 
 use crate::account::UNKNOWN_ACCOUNT;
-use crate::UsageEvent;
+use crate::{ToolInvocationEvent, UsageEvent};
 use playbook_store::Connection;
 
 /// What the user picked.
@@ -91,6 +91,13 @@ pub fn view(conn: &Connection, sel: &AccountSel) -> Result<AccountsView, String>
 
 /// Drops the events of other accounts. `None` keeps everything.
 pub fn keep(events: &mut Vec<UsageEvent>, key: Option<&str>) {
+    if let Some(key) = key {
+        events.retain(|e| e.account == key);
+    }
+}
+
+/// Drops the tool events of other accounts. `None` keeps everything.
+pub fn keep_tools(events: &mut Vec<ToolInvocationEvent>, key: Option<&str>) {
     if let Some(key) = key {
         events.retain(|e| e.account == key);
     }

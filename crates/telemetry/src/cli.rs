@@ -55,6 +55,7 @@ pub fn main() {
         json: cli.json,
         summary: cli.summary,
         range: cli.range,
+        account: None,
     };
     match run(cli.sub, &opts, &paths, interactive()) {
         Ok(output) => {

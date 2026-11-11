@@ -27,6 +27,8 @@ pub struct Opts {
     pub summary: bool,
     /// The `--range` value, or `None` when the flag was not given.
     pub range: Option<String>,
+    /// The `--account` value: an account key or its name.
+    pub account: Option<String>,
 }
 
 /// Whether the terminal view can run: it needs a terminal on both ends.
@@ -44,20 +46,34 @@ pub fn json_report(
     paths: &Paths,
     range: Range,
     now: i64,
+    account: Option<&str>,
 ) -> Result<String, String> {
-    let usage = query::load_window(conn, range, now)?;
-    let tools = db::load_tool_events(conn)?;
+    let key = super::run::resolve_account(conn, account)?;
+    let key = key.as_deref();
+    let mut usage = query::load_window(conn, range, now)?;
+    tui::account::keep(&mut usage, key);
+    let mut tools = db::load_tool_events(conn)?;
+    tui::account::keep_tools(&mut tools, key);
     let mut data = api::data_json(&usage, &tools, now, range);
-    let i = query::load_live_inputs(conn, now, crate::telemetry_db::RowScope::default())?;
+    let scope = crate::telemetry_db::RowScope {
+        machine: None,
+        account: key,
+    };
+    let i = query::load_live_inputs(conn, now, scope)?;
     let live = api::live_json(&i.window, &i.sessions, &i.latest, now);
     let since = super::limits_source::events_since(now, configured_week_start());
-    let limit_events = db::load_usage_events_since(conn, since)?;
+    let mut limit_events = db::load_usage_events_since(conn, since)?;
+    tui::account::keep(&mut limit_events, key);
     let limits = super::run::limits_json(paths, conn, &limit_events, now);
     if let Some(map) = data.as_object_mut() {
         map.insert("live".to_string(), live);
         map.insert("limits".to_string(), limits);
+        if let Some(key) = key {
+            map.insert("account".to_string(), key.into());
+        }
         if let Some(period) = Period::of_range(range) {
-            let events = db::load_usage_events_since(conn, period.windows(now).previous.start)?;
+            let mut events = db::load_usage_events_since(conn, period.windows(now).previous.start)?;
+            tui::account::keep(&mut events, key);
             map.insert(
                 "comparison".to_string(),
                 api::comparison_json(&events, now, period),
@@ -153,12 +169,23 @@ pub fn run(
         }
         None if opts.summary => {
             let range = opts.range.as_deref().map(parse_range).transpose()?;
-            run_summary(paths, range, crate::util::time::now_secs())
+            run_summary(
+                paths,
+                range,
+                crate::util::time::now_secs(),
+                opts.account.as_deref(),
+            )
         }
         None if opts.json => {
             let range = parse_range(opts.range.as_deref().unwrap_or(DEFAULT_RANGE))?;
             let (conn, _) = ingest_new(paths)?;
-            json_report(&conn, paths, range, crate::util::time::now_secs())
+            json_report(
+                &conn,
+                paths,
+                range,
+                crate::util::time::now_secs(),
+                opts.account.as_deref(),
+            )
         }
         None if interactive => {
             tui::run(paths, opts.range.as_deref().map(parse_range).transpose()?)?;
@@ -166,7 +193,12 @@ pub fn run(
         }
         None => {
             let range = opts.range.as_deref().map(parse_range).transpose()?;
-            run_summary(paths, range, crate::util::time::now_secs())
+            run_summary(
+                paths,
+                range,
+                crate::util::time::now_secs(),
+                opts.account.as_deref(),
+            )
         }
     }
 }
@@ -218,6 +250,7 @@ pub fn parse_range(value: &str) -> Result<Range, String> {
 mod tests {
     use super::*;
     use crate::command::AccountCommand;
+    use crate::{ToolInvocationEvent, ToolKind, UsageEvent};
 
     fn paths(name: &str) -> Paths {
         let dir = crate::util::scratch_dir(name);
@@ -231,6 +264,7 @@ mod tests {
             json: false,
             summary: false,
             range: None,
+            account: None,
         }
     }
 
@@ -431,6 +465,122 @@ mod tests {
         assert_eq!(account(&p.db), "a@b.c");
         let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o755, "the folder of the copy keeps its mode");
+    }
+
+    const NOW: i64 = 1_788_300_000;
+
+    /// Two accounts: `work@x.io` has two events, `token:abcd1234` one; the price comes from the model.
+    fn two_account_store(name: &str) -> Paths {
+        crate::tz::set(crate::tz::Zone::Utc);
+        let p = paths(name);
+        let conn = crate::db::open_db(&p.db).unwrap();
+        let usage = |id: &str, session: &str, account: &str, ts: i64, cost: f64| UsageEvent {
+            event_id: id.into(),
+            timestamp: ts,
+            session_id: session.into(),
+            account: account.into(),
+            model: "claude-sonnet-5".into(),
+            repo: "proj".into(),
+            branch: "main".into(),
+            input_tokens: 10,
+            output_tokens: 20,
+            cost_usd: cost,
+            ..UsageEvent::default()
+        };
+        for e in [
+            usage("e1", "s1", "work@x.io", NOW - 3600, 1.5),
+            usage("e2", "s1", "work@x.io", NOW - 1800, 0.25),
+            usage("e3", "s2", "token:abcd1234", NOW - 900, 4.0),
+        ] {
+            crate::db::upsert_usage_event(&conn, &e).unwrap();
+        }
+        let tool = |id: &str, session: &str, account: &str, name: &str| ToolInvocationEvent {
+            event_id: id.into(),
+            timestamp: NOW - 1000,
+            session_id: session.into(),
+            account: account.into(),
+            kind: ToolKind::Skill,
+            name: name.into(),
+        };
+        crate::db::insert_tool_event(&conn, &tool("t1", "s1", "work@x.io", "plan")).unwrap();
+        crate::db::insert_tool_event(&conn, &tool("t2", "s2", "token:abcd1234", "fix")).unwrap();
+        p
+    }
+
+    fn summary_text(p: &Paths, account: Option<&str>) -> Result<String, String> {
+        run_summary(p, None, NOW, account)
+    }
+
+    fn json_text(p: &Paths, account: Option<&str>) -> Result<String, String> {
+        let (conn, _) = ingest_new(p).unwrap();
+        json_report(&conn, p, parse_range("all").unwrap(), NOW, account)
+    }
+
+    #[test]
+    fn without_an_account_the_summary_and_json_match_the_captured_output() {
+        // Arrange
+        let p = two_account_store("entry-golden");
+
+        // Act
+        let text = summary_text(&p, None).unwrap();
+        let json = json_text(&p, None).unwrap();
+
+        // Assert
+        assert_eq!(text, include_str!("golden/usage_summary.txt"));
+        assert_eq!(json, include_str!("golden/usage_json.json"));
+    }
+
+    #[test]
+    fn one_account_gets_its_own_summary_total_and_names_itself() {
+        // Arrange
+        let p = two_account_store("entry-account-summary");
+        let conn = crate::db::open_db(&p.db).unwrap();
+        crate::account_store::set_name(&conn, "work@x.io", "Work").unwrap();
+        drop(conn);
+
+        // Act
+        let text = summary_text(&p, Some("work")).unwrap();
+
+        // Assert
+        let mut lines = text.lines();
+        assert!(lines
+            .next()
+            .unwrap()
+            .starts_with("Usage: 2 messages, $0.0004"));
+        assert_eq!(lines.next(), Some("Account: Work"));
+        assert!(text.contains("  plan") && !text.contains("  fix"), "{text}");
+        assert!(!text.contains("token:abcd1234"), "{text}");
+    }
+
+    #[test]
+    fn one_account_gets_its_own_json_totals_and_names_its_key() {
+        // Arrange
+        let p = two_account_store("entry-account-json");
+
+        // Act
+        let json = json_text(&p, Some("token:abcd1234")).unwrap();
+
+        // Assert
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["account"], "token:abcd1234");
+        assert_eq!(v["totals"]["messages"], 1);
+        assert_eq!(v["totals"]["cost_usd"], 0.00022);
+        assert_eq!(v["live"]["today"]["messages"], 1);
+        assert_eq!(v["skills"][0]["name"], "fix");
+    }
+
+    #[test]
+    fn an_unknown_account_is_an_error_that_points_to_the_account_list() {
+        // Arrange
+        let p = two_account_store("entry-account-unknown");
+
+        // Act
+        let summary = summary_text(&p, Some("nobody")).unwrap_err();
+        let json = json_text(&p, Some("nobody")).unwrap_err();
+
+        // Assert
+        assert!(summary.contains("playbook usage account list"), "{summary}");
+        assert_eq!(summary, json);
     }
 
     #[test]
