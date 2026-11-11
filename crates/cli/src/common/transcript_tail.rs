@@ -48,7 +48,10 @@ pub fn last_main_turn(path: &Path) -> Option<LastTurn> {
     if matches!(&first, Some(turn) if turn.tier.is_some()) || len <= TAIL_FIRST_BYTES {
         return first;
     }
-    scan(&read_window(&mut file, len, TAIL_CAP_BYTES)?)
+    // A failed second read keeps what the first window found.
+    read_window(&mut file, len, TAIL_CAP_BYTES)
+        .and_then(|body| scan(&body))
+        .or(first)
 }
 
 /// The last `cap` bytes of the file as text, without a partial first line
@@ -210,7 +213,10 @@ mod tests {
     #[test]
     fn the_tier_comes_from_an_older_record_but_the_time_from_the_newest() {
         let s = Scratch::new("older-tier");
-        let p = s.write(&[rec(T0, 0, 500), rec(T1, 0, 0)]);
+        let older = assistant(T0, "claude-opus-4-7", 0, 500, 100, false);
+        let p = s.write(&[older, rec(T1, 0, 0)]);
+        // The time and the model come from the newest record, the tier from
+        // the older one.
         assert_eq!(last_main_turn(&p), turn(T1_EPOCH, Some(CacheTier::OneHour)));
     }
 
