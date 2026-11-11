@@ -917,7 +917,13 @@ mod tests {
         }
         drop(jobs);
         writer.join().unwrap();
-        let h = crate::telemetry_db::health(&reader, 0, i64::MAX, None).unwrap();
+        let h = crate::telemetry_db::health(
+            &reader,
+            0,
+            i64::MAX,
+            crate::telemetry_db::RowScope::default(),
+        )
+        .unwrap();
         assert_eq!(
             (h.tool_calls, h.tool_failures, h.errors, h.retried),
             (1, 1, 1, 1)

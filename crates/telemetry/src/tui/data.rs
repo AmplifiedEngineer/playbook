@@ -16,6 +16,7 @@ use crate::limits_source::{self, Sources};
 use crate::period::{Comparison, Period};
 use crate::query::{self, LiveView, Range, SessionDay, Totals, WeekStart};
 use crate::run::Paths;
+use crate::telemetry_db::RowScope;
 use crate::UsageEvent;
 use playbook_store::Connection;
 use std::collections::BTreeMap;
@@ -526,20 +527,21 @@ pub fn load(
     let accounts = account::view(conn, sel)?;
     let machines = machine::view(conn, machine_sel)?;
     let machine = machines.key.as_deref();
+    let scope = RowScope::machine(machine);
     let mut window = match window_start(range, now) {
         Some(since) => db::load_account_events_since(conn, since)?,
         None => db::load_account_events(conn)?,
     };
     account::keep(&mut window, accounts.key.as_deref());
-    let live = query::load_live(conn, now, machine)?;
+    let live = query::load_live(conn, now, scope)?;
     let mut data = Data::build(&window, live, now, range, filter);
     if machine.is_some() {
         machine::keep(&mut window, machine);
         data.scope_machine_tables(&window);
     }
-    data.agents = query::load_agents(conn, range, now, machine)?;
-    data.skills = query::load_skills(conn, range, now, machine)?;
-    data.health = query::load_health(conn, range, now, machine)?;
+    data.agents = query::load_agents(conn, range, now, scope)?;
+    data.skills = query::load_skills(conn, range, now, scope)?;
+    data.health = query::load_health(conn, range, now, scope)?;
     data.telemetry_rows =
         (!data.agents.is_empty() && !data.agents.from_transcripts) || !data.health.now.is_empty();
     data.store = crate::db::usage_span(conn)?;

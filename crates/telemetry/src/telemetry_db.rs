@@ -11,7 +11,57 @@
 //! never stored; the receiver strips them before a row reaches this module.
 
 use crate::machine_rows::LOCAL_MACHINE_SQL;
-use playbook_store::{params, Connection, OptionalExtension};
+use playbook_store::types::ToSql;
+use playbook_store::{params, params_from_iter, Connection, OptionalExtension};
+
+/// The one account clause. Telemetry rows have no account of their own, so a
+/// row belongs to every account that has a usage event in its session.
+const ACCOUNT_SESSIONS_SQL: &str =
+    "AND {col} IN (SELECT session_id FROM usage_events WHERE account = ?{n})";
+
+/// Which rows a read covers: one machine and one account, each optional.
+#[derive(Default, Clone, Copy)]
+pub struct RowScope<'a> {
+    pub machine: Option<&'a str>,
+    pub account: Option<&'a str>,
+}
+
+impl<'a> RowScope<'a> {
+    pub fn machine(machine: Option<&'a str>) -> Self {
+        RowScope {
+            machine,
+            account: None,
+        }
+    }
+
+    /// An account pick needs `usage_events` to name the account's sessions.
+    fn without_events(&self, conn: &Connection) -> Result<bool, String> {
+        if self.account.is_none() {
+            return Ok(false);
+        }
+        conn.query_row(
+            "SELECT NOT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'usage_events')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("failed to read telemetry rows: {e}"))
+    }
+
+    /// The account clause on `column` bound at `?n`, empty without an account.
+    fn sessions_clause(&self, column: &str, n: usize) -> String {
+        match self.account {
+            Some(_) => ACCOUNT_SESSIONS_SQL
+                .replace("{col}", column)
+                .replace("{n}", &n.to_string()),
+            None => String::new(),
+        }
+    }
+
+    /// The account value to bind after the other arguments, if one is set.
+    fn arg(&self) -> Option<&dyn ToSql> {
+        self.account.as_ref().map(|a| a as &dyn ToSql)
+    }
+}
 
 pub(super) const UP_SQL: &str = "
 CREATE TABLE IF NOT EXISTS telemetry_requests (
@@ -389,8 +439,12 @@ pub fn tool_stats(
     conn: &Connection,
     since: i64,
     until: i64,
-    machine: Option<&str>,
+    scope: RowScope<'_>,
 ) -> Result<Vec<ToolStat>, String> {
+    if scope.without_events(conn)? {
+        return Ok(Vec::new());
+    }
+    let machine = scope.machine;
     let transcript = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'tool_invocation_events')",
@@ -398,20 +452,30 @@ pub fn tool_stats(
             |r| r.get::<_, bool>(0),
         )
         .map_err(|e| format!("failed to read telemetry tools: {e}"))?;
+    let transcript_account = if scope.account.is_some() {
+        "AND e.account = ?4"
+    } else {
+        ""
+    };
+    let live_account = scope.sessions_clause("session_id", 4);
     let from_transcripts = if transcript {
-        "UNION ALL
+        format!(
+            "UNION ALL
          SELECT CASE e.kind WHEN 'agent' THEN 'Agent' ELSE 'Skill' END, NULL, NULL, 1
          FROM tool_invocation_events e
          WHERE e.timestamp >= ?1 AND e.timestamp < ?2 AND (?3 IS NULL OR e.machine = ?3)
+           {transcript_account}
            AND NOT EXISTS (SELECT 1 FROM telemetry_tools t
                            WHERE t.session_id = e.session_id AND t.tool_use_id = e.event_id)"
+        )
     } else {
-        ""
+        String::new()
     };
     let sql = format!(
         "WITH calls(n, ok, ms, tr) AS (
             SELECT tool_name, success, duration_ms, 0 FROM telemetry_tools
             WHERE timestamp >= ?1 AND timestamp < ?2 AND (?3 IS NULL OR machine = ?3)
+            {live_account}
             {from_transcripts})
          SELECT CASE WHEN n = '' THEN 'unknown' ELSE n END AS name,
                 COUNT(*), SUM(tr), COALESCE(SUM(1 - ok), 0), COUNT(ok), COUNT(ms),
@@ -421,8 +485,10 @@ pub fn tool_stats(
     let mut stmt = conn
         .prepare(&sql)
         .map_err(|e| format!("failed to read telemetry tools: {e}"))?;
+    let mut args: Vec<&dyn ToSql> = vec![&since, &until, &machine];
+    args.extend(scope.arg());
     let rows = stmt
-        .query_map(params![since, until, machine], |r| {
+        .query_map(params_from_iter(args), |r| {
             let n = |i: usize| -> playbook_store::Result<u64> {
                 Ok(u64::try_from(r.get::<_, i64>(i)?).unwrap_or(0))
             };
@@ -503,29 +569,39 @@ pub fn health(
     conn: &Connection,
     since: i64,
     until: i64,
-    machine: Option<&str>,
+    scope: RowScope<'_>,
 ) -> Result<Health, String> {
+    if scope.without_events(conn)? {
+        return Ok(Health::default());
+    }
+    let machine = scope.machine;
     let one = |sql: &str| -> Result<Vec<u64>, String> {
-        conn.query_row(sql, params![since, until, machine], |r| {
+        let mut args: Vec<&dyn ToSql> = vec![&since, &until, &machine];
+        args.extend(scope.arg());
+        conn.query_row(sql, params_from_iter(args), |r| {
             (0..r.as_ref().column_count())
                 .map(|i| Ok(u64::try_from(r.get::<_, i64>(i)?).unwrap_or(0)))
                 .collect()
         })
         .map_err(|e| format!("failed to read telemetry health: {e}"))
     };
-    let req = one(
+    let account = scope.sessions_clause("session_id", 4);
+    let req = one(&format!(
         "SELECT COUNT(*), COALESCE(SUM(duration_ms), 0) FROM telemetry_requests
-                   WHERE timestamp >= ?1 AND timestamp < ?2 AND (?3 IS NULL OR machine = ?3)",
-    )?;
-    let err = one(
+                   WHERE timestamp >= ?1 AND timestamp < ?2 AND (?3 IS NULL OR machine = ?3)
+                   {account}"
+    ))?;
+    let err = one(&format!(
         "SELECT COUNT(*), COALESCE(SUM(attempt > 1), 0) FROM telemetry_errors
-                   WHERE timestamp >= ?1 AND timestamp < ?2 AND (?3 IS NULL OR machine = ?3)",
-    )?;
-    let tool = one(
+                   WHERE timestamp >= ?1 AND timestamp < ?2 AND (?3 IS NULL OR machine = ?3)
+                   {account}"
+    ))?;
+    let tool = one(&format!(
         "SELECT COUNT(*), COALESCE(SUM(1 - success), 0), COALESCE(SUM(duration_ms), 0)
                     FROM telemetry_tools
-                    WHERE timestamp >= ?1 AND timestamp < ?2 AND (?3 IS NULL OR machine = ?3)",
-    )?;
+                    WHERE timestamp >= ?1 AND timestamp < ?2 AND (?3 IS NULL OR machine = ?3)
+                    {account}"
+    ))?;
     Ok(Health {
         requests: req[0],
         api_ms: req[1],
@@ -534,10 +610,10 @@ pub fn health(
         tool_calls: tool[0],
         tool_failures: tool[1],
         tool_ms: tool[2],
-        active_ms: metric_sum(conn, "active_time", since, until, machine)?.saturating_mul(1000),
-        lines_changed: metric_sum(conn, "lines_of_code", since, until, machine)?,
-        commits: metric_sum(conn, "commits", since, until, machine)?,
-        pull_requests: metric_sum(conn, "pull_requests", since, until, machine)?,
+        active_ms: metric_sum(conn, "active_time", since, until, scope)?.saturating_mul(1000),
+        lines_changed: metric_sum(conn, "lines_of_code", since, until, scope)?,
+        commits: metric_sum(conn, "commits", since, until, scope)?,
+        pull_requests: metric_sum(conn, "pull_requests", since, until, scope)?,
     })
 }
 
@@ -547,16 +623,19 @@ fn metric_sum(
     metric: &str,
     since: i64,
     until: i64,
-    machine: Option<&str>,
+    scope: RowScope<'_>,
 ) -> Result<u64, String> {
+    let machine = scope.machine;
+    let sql = format!(
+        "SELECT COALESCE(SUM(value), 0) FROM telemetry_metrics
+         WHERE metric = ?1 AND timestamp >= ?2 AND timestamp < ?3
+           AND (?4 IS NULL OR machine = ?4) {}",
+        scope.sessions_clause("session_id", 5)
+    );
+    let mut args: Vec<&dyn ToSql> = vec![&metric, &since, &until, &machine];
+    args.extend(scope.arg());
     let v: f64 = conn
-        .query_row(
-            "SELECT COALESCE(SUM(value), 0) FROM telemetry_metrics
-             WHERE metric = ?1 AND timestamp >= ?2 AND timestamp < ?3
-               AND (?4 IS NULL OR machine = ?4)",
-            params![metric, since, until, machine],
-            |r| r.get(0),
-        )
+        .query_row(&sql, params_from_iter(args), |r| r.get(0))
         .map_err(|e| format!("failed to read telemetry metrics: {e}"))?;
     Ok(v.round() as u64)
 }
@@ -708,9 +787,9 @@ pub fn agent_groups(
     conn: &Connection,
     since: i64,
     until: i64,
-    machine: Option<&str>,
+    scope: RowScope<'_>,
 ) -> Result<Vec<super::aggregate::Group>, String> {
-    groups(conn, "agent_name", "main", since, until, machine)
+    groups(conn, "agent_name", "main", since, until, scope)
 }
 
 /// Telemetry requests in `[since, until)` grouped by the skill that was
@@ -719,9 +798,9 @@ pub fn skill_groups(
     conn: &Connection,
     since: i64,
     until: i64,
-    machine: Option<&str>,
+    scope: RowScope<'_>,
 ) -> Result<Vec<super::aggregate::Group>, String> {
-    groups(conn, "skill_name", "", since, until, machine)
+    groups(conn, "skill_name", "", since, until, scope)
 }
 
 /// Agent or skill invocations in `[since, until)` counted from transcripts,
@@ -731,18 +810,30 @@ pub fn invocation_groups(
     kind: crate::ToolKind,
     since: i64,
     until: i64,
-    machine: Option<&str>,
+    scope: RowScope<'_>,
 ) -> Result<Vec<super::aggregate::Group>, String> {
+    if scope.without_events(conn)? {
+        return Ok(Vec::new());
+    }
+    let machine = scope.machine;
+    let account = if scope.account.is_some() {
+        "AND account = ?5"
+    } else {
+        ""
+    };
     let mut stmt = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT name, COUNT(*) FROM tool_invocation_events
              WHERE kind = ?1 AND timestamp >= ?2 AND timestamp < ?3
-               AND (?4 IS NULL OR machine = ?4)
-             GROUP BY name ORDER BY name",
-        )
+               AND (?4 IS NULL OR machine = ?4) {account}
+             GROUP BY name ORDER BY name"
+        ))
         .map_err(|e| e.to_string())?;
+    let kind = kind.as_str();
+    let mut args: Vec<&dyn ToSql> = vec![&kind, &since, &until, &machine];
+    args.extend(scope.arg());
     let rows = stmt
-        .query_map((kind.as_str(), since, until, machine), |r| {
+        .query_map(params_from_iter(args), |r| {
             Ok(super::aggregate::Group {
                 key: r.get(0)?,
                 messages: r.get::<_, i64>(1)?.max(0) as u64,
@@ -760,26 +851,34 @@ fn groups(
     empty_as: &str,
     since: i64,
     until: i64,
-    machine: Option<&str>,
+    scope: RowScope<'_>,
 ) -> Result<Vec<super::aggregate::Group>, String> {
+    if scope.without_events(conn)? {
+        return Ok(Vec::new());
+    }
+    let machine = scope.machine;
     let filter = if empty_as.is_empty() {
         format!("AND {column} <> ''")
     } else {
         String::new()
     };
+    let account = scope.sessions_clause("session_id", 5);
     let sql = format!(
         "SELECT CASE WHEN {column} = '' THEN ?3 ELSE {column} END AS k,
                 COUNT(*), SUM(input_tokens), SUM(output_tokens),
                 SUM(cache_creation_tokens), SUM(cache_read_tokens), SUM(cost_usd)
          FROM telemetry_requests
          WHERE timestamp >= ?1 AND timestamp < ?2 AND (?4 IS NULL OR machine = ?4) {filter}
+           {account}
          GROUP BY k ORDER BY k"
     );
     let mut stmt = conn
         .prepare(&sql)
         .map_err(|e| format!("failed to read telemetry groups: {e}"))?;
+    let mut args: Vec<&dyn ToSql> = vec![&since, &until, &empty_as, &machine];
+    args.extend(scope.arg());
     let rows = stmt
-        .query_map(params![since, until, empty_as, machine], |r| {
+        .query_map(params_from_iter(args), |r| {
             let n = |i: usize| -> playbook_store::Result<u64> {
                 Ok(u64::try_from(r.get::<_, i64>(i)?).unwrap_or(0))
             };
@@ -946,12 +1045,14 @@ mod tests {
         for r in [&main, &sub, &sub2, &outside] {
             insert_request(&conn, r).unwrap();
         }
-        let groups = agent_groups(&conn, 0, 1_000, None).unwrap();
+        let groups = agent_groups(&conn, 0, 1_000, RowScope::default()).unwrap();
         let names: Vec<&str> = groups.iter().map(|g| g.key.as_str()).collect();
         assert_eq!(names, ["main", "reviewer"]);
         assert!((groups[1].cost_usd - 0.75).abs() < 1e-9);
         assert_eq!(groups[1].messages, 2);
-        assert!(agent_groups(&conn, 5_000, 6_000, None).unwrap().is_empty());
+        assert!(agent_groups(&conn, 5_000, 6_000, RowScope::default())
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -969,7 +1070,7 @@ mod tests {
         for r in [&a, &b, &c, &none] {
             insert_request(&conn, r).unwrap();
         }
-        let groups = skill_groups(&conn, 0, 1_000, None).unwrap();
+        let groups = skill_groups(&conn, 0, 1_000, RowScope::default()).unwrap();
         let names: Vec<&str> = groups.iter().map(|g| g.key.as_str()).collect();
         assert_eq!(names, ["plan", "review"]);
         assert!((groups[1].cost_usd - 0.75).abs() < 1e-9);
@@ -993,7 +1094,9 @@ mod tests {
         migrate_up(&conn).unwrap();
         migrate_up(&conn).unwrap();
         assert_eq!(count_requests(&conn).unwrap(), 1);
-        assert!(skill_groups(&conn, 0, 10, None).unwrap().is_empty());
+        assert!(skill_groups(&conn, 0, 10, RowScope::default())
+            .unwrap()
+            .is_empty());
     }
 
     fn tool(id: &str, name: &str, ok: bool, ms: u64, ts: i64) -> TelemetryTool {
@@ -1083,7 +1186,7 @@ mod tests {
         ] {
             insert_tool(&conn, &t).unwrap();
         }
-        let stats = tool_stats(&conn, 0, 1_000, None).unwrap();
+        let stats = tool_stats(&conn, 0, 1_000, RowScope::default()).unwrap();
         let names: Vec<&str> = stats.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(names, ["Bash", "Read", "unknown"]);
         let bash = &stats[0];
@@ -1094,7 +1197,9 @@ mod tests {
             stats[1].calls, 1,
             "the call outside the window is not counted"
         );
-        assert!(tool_stats(&conn, 9_000, 9_100, None).unwrap().is_empty());
+        assert!(tool_stats(&conn, 9_000, 9_100, RowScope::default())
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -1106,14 +1211,14 @@ mod tests {
         insert_tool(&conn, &tool("a", "Bash", false, 500, 10)).unwrap();
         insert_error(&conn, &failure(1, 1, 10)).unwrap();
         insert_error(&conn, &failure(2, 2, 10)).unwrap();
-        let h = health(&conn, 0, 1_000, None).unwrap();
+        let h = health(&conn, 0, 1_000, RowScope::default()).unwrap();
         assert_eq!((h.requests, h.errors, h.retried), (1, 2, 1));
         assert_eq!((h.tool_calls, h.tool_failures), (1, 1));
         assert_eq!(h.busy_ms(), 1_500);
         assert!((h.api_error_rate() - 2.0 / 3.0).abs() < 1e-9);
         assert_eq!(h.tool_error_rate(), 1.0);
         assert!(!h.is_empty());
-        let none = health(&conn, 5_000, 6_000, None).unwrap();
+        let none = health(&conn, 5_000, 6_000, RowScope::default()).unwrap();
         assert!(none.is_empty());
         assert_eq!((none.api_error_rate(), none.tool_error_rate()), (0.0, 0.0));
     }
@@ -1142,11 +1247,13 @@ mod tests {
             insert_metric(&conn, &row).unwrap();
         }
         // The same interval, session, metric and kind is one point.
-        let h = health(&conn, 0, 100, None).unwrap();
+        let h = health(&conn, 0, 100, RowScope::default()).unwrap();
         assert_eq!(h.active_ms, 120_000);
         assert_eq!((h.lines_changed, h.commits, h.pull_requests), (50, 2, 1));
         assert!(!h.is_empty());
-        assert!(health(&conn, 100, 200, None).unwrap().is_empty());
+        assert!(health(&conn, 100, 200, RowScope::default())
+            .unwrap()
+            .is_empty());
     }
 
     fn fill(conn: &Connection, n: i64) {
@@ -1263,7 +1370,7 @@ mod tests {
         )
         .unwrap();
         migrate_up(&conn).unwrap();
-        assert_eq!(health(&conn, 0, 10, None).unwrap().api_ms, 0);
+        assert_eq!(health(&conn, 0, 10, RowScope::default()).unwrap().api_ms, 0);
         insert_request(&conn, &request("r2")).unwrap();
     }
 
@@ -1292,7 +1399,9 @@ mod tests {
             crate::db::insert_tool_event(&conn, &e).unwrap();
         }
 
-        let groups = invocation_groups(&conn, crate::ToolKind::Agent, 0, 1_000, None).unwrap();
+        let groups =
+            invocation_groups(&conn, crate::ToolKind::Agent, 0, 1_000, RowScope::default())
+                .unwrap();
 
         let got: Vec<(&str, u64)> = groups
             .iter()
@@ -1340,13 +1449,15 @@ mod tests {
             ("k1", "s1", 40, "skill"),
             ("k2", "s1", 50, "skill"),
         ]);
-        let stats = tool_stats(&conn, 0, 100, None).unwrap();
+        let stats = tool_stats(&conn, 0, 100, RowScope::default()).unwrap();
         let agent = stat(&stats, "Agent");
         assert_eq!((agent.calls, agent.transcript_calls), (3, 3));
         assert_eq!((agent.outcomes, agent.timed, agent.failures), (0, 0, 0));
         assert!(!agent.has_outcome() && !agent.has_duration());
         assert_eq!(stat(&stats, "Skill").calls, 2);
-        assert!(tool_stats(&conn, 100, 200, None).unwrap().is_empty());
+        assert!(tool_stats(&conn, 100, 200, RowScope::default())
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -1355,7 +1466,7 @@ mod tests {
         // may say `custom`; neither name is in the key, so one id is one call.
         let conn = with_events(&[("tu1", "s1", 10, "agent"), ("tu2", "s1", 20, "agent")]);
         insert_tool(&conn, &tool("tu1", "Agent", false, 300, 11)).unwrap();
-        let stats = tool_stats(&conn, 0, 100, None).unwrap();
+        let stats = tool_stats(&conn, 0, 100, RowScope::default()).unwrap();
         let agent = stat(&stats, "Agent");
         assert_eq!((agent.calls, agent.transcript_calls), (2, 1));
         assert_eq!((agent.failures, agent.outcomes, agent.timed), (1, 1, 1));
@@ -1366,7 +1477,7 @@ mod tests {
     fn the_same_tool_use_id_in_another_session_is_a_different_call() {
         let conn = with_events(&[("tu1", "other", 10, "agent")]);
         insert_tool(&conn, &tool("tu1", "Agent", true, 5, 11)).unwrap();
-        let stats = tool_stats(&conn, 0, 100, None).unwrap();
+        let stats = tool_stats(&conn, 0, 100, RowScope::default()).unwrap();
         let agent = stat(&stats, "Agent");
         assert_eq!((agent.calls, agent.transcript_calls), (2, 1));
     }
@@ -1375,7 +1486,9 @@ mod tests {
     fn a_live_row_outside_the_window_still_hides_its_transcript_twin() {
         let conn = with_events(&[("tu1", "s1", 10, "agent")]);
         insert_tool(&conn, &tool("tu1", "Agent", true, 5, 500)).unwrap();
-        assert!(tool_stats(&conn, 0, 100, None).unwrap().is_empty());
+        assert!(tool_stats(&conn, 0, 100, RowScope::default())
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -1383,7 +1496,7 @@ mod tests {
         let conn = with_events(&[("a1", "s1", 10, "agent"), ("a2", "s1", 11, "agent")]);
         insert_tool(&conn, &tool("live1", "Agent", true, 100, 12)).unwrap();
         insert_tool(&conn, &tool("live2", "Agent", false, 300, 13)).unwrap();
-        let stats = tool_stats(&conn, 0, 100, None).unwrap();
+        let stats = tool_stats(&conn, 0, 100, RowScope::default()).unwrap();
         let agent = stat(&stats, "Agent");
         assert_eq!(agent.calls, 4);
         assert_eq!(
@@ -1403,15 +1516,191 @@ mod tests {
         let day = 86_400;
         let conn = with_events(&[("old", "s1", 2 * day + 5, "skill")]);
         insert_tool(&conn, &tool("live", "Bash", true, 3, 5 * day + 5)).unwrap();
-        let transcript_day = tool_stats(&conn, 2 * day, 3 * day, None).unwrap();
+        let transcript_day = tool_stats(&conn, 2 * day, 3 * day, RowScope::default()).unwrap();
         assert_eq!(transcript_day.len(), 1);
         assert_eq!(transcript_day[0].transcript_calls, 1);
-        let live_day = tool_stats(&conn, 5 * day, 6 * day, None).unwrap();
+        let live_day = tool_stats(&conn, 5 * day, 6 * day, RowScope::default()).unwrap();
         assert_eq!(
             (live_day[0].name.as_str(), live_day[0].transcript_calls),
             ("Bash", 0)
         );
-        let health = health(&conn, 2 * day, 3 * day, None).unwrap();
+        let health = health(&conn, 2 * day, 3 * day, RowScope::default()).unwrap();
         assert!(health.is_empty(), "health stays live only");
+    }
+
+    fn scoped(account: Option<&str>) -> RowScope<'_> {
+        RowScope {
+            machine: None,
+            account,
+        }
+    }
+
+    /// Sessions `s-work` and `s-home` belong to one account each, `s-both`
+    /// has events under both, and `s-orphan` has telemetry but no usage event.
+    /// Every session has one agent request, one skill request, one live tool
+    /// call, one retried error and one metric. Transcript agent calls sit in
+    /// `s-work` (1), `s-both` (1 work, 2 home) and `s-orphan` (1 home).
+    fn two_account_store(tag: &str) -> Connection {
+        let dir = crate::util::scratch_dir(tag);
+        let conn = crate::db::open_db(&dir.join("usage.db")).unwrap();
+        let usage = [
+            ("e1", "s-work", "work"),
+            ("e2", "s-home", "home"),
+            ("e3", "s-both", "work"),
+            ("e4", "s-both", "home"),
+        ];
+        for (id, session, account) in usage {
+            upsert_usage_event(
+                &conn,
+                &UsageEvent {
+                    event_id: id.into(),
+                    session_id: session.into(),
+                    account: account.into(),
+                    model: "opus".into(),
+                    ..UsageEvent::default()
+                },
+            )
+            .unwrap();
+        }
+        for session in ["s-work", "s-home", "s-both", "s-orphan"] {
+            let request = TelemetryRequest {
+                session_id: session.into(),
+                request_id: format!("r-{session}"),
+                agent_name: "reviewer".into(),
+                skill_name: "plan".into(),
+                ..request("x")
+            };
+            insert_request(&conn, &request).unwrap();
+            let call = TelemetryTool {
+                session_id: session.into(),
+                ..tool(&format!("t-{session}"), "Bash", true, 5, 100)
+            };
+            insert_tool(&conn, &call).unwrap();
+            let error = TelemetryError {
+                session_id: session.into(),
+                attempt: 2,
+                ..failure(1, 2, 100)
+            };
+            insert_error(&conn, &error).unwrap();
+            let metric = TelemetryMetric {
+                session_id: session.into(),
+                metric: "commits".into(),
+                timestamp: 100,
+                value: 1.0,
+                ..TelemetryMetric::default()
+            };
+            insert_metric(&conn, &metric).unwrap();
+        }
+        for (id, session, account) in [
+            ("i1", "s-work", "work"),
+            ("i2", "s-both", "work"),
+            ("i3", "s-both", "home"),
+            ("i4", "s-both", "home"),
+            ("i5", "s-orphan", "home"),
+        ] {
+            conn.execute(
+                "INSERT INTO tool_invocation_events (event_id, timestamp, session_id, account, kind, name)
+                 VALUES (?1, 100, ?2, ?3, 'agent', 'reviewer')",
+                params![id, session, account],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    /// What every scoped read returns, as comparable text.
+    fn seen(conn: &Connection, scope: RowScope<'_>) -> [String; 5] {
+        let keys = |g: Vec<crate::aggregate::Group>| {
+            g.iter()
+                .map(|g| format!("{}={}", g.key, g.messages))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        let h = health(conn, 0, 1_000, scope).unwrap();
+        let tools = tool_stats(conn, 0, 1_000, scope).unwrap();
+        [
+            keys(agent_groups(conn, 0, 1_000, scope).unwrap()),
+            keys(skill_groups(conn, 0, 1_000, scope).unwrap()),
+            // A store without usage events has no transcript table either.
+            keys(
+                invocation_groups(conn, crate::ToolKind::Agent, 0, 1_000, scope)
+                    .unwrap_or_default(),
+            ),
+            format!(
+                "req={} err={} tools={} commits={}",
+                h.requests, h.errors, h.tool_calls, h.commits
+            ),
+            tools
+                .iter()
+                .map(|t| format!("{}={}/{}", t.name, t.calls, t.transcript_calls))
+                .collect::<Vec<_>>()
+                .join(","),
+        ]
+    }
+
+    #[test]
+    fn an_account_keeps_only_the_telemetry_of_its_sessions() {
+        // Arrange
+        let conn = two_account_store("scope-work");
+
+        // Act
+        let work = seen(&conn, scoped(Some("work")));
+
+        // Assert: s-work and s-both stay, s-home and the orphan drop out.
+        assert_eq!(work[0], "reviewer=2");
+        assert_eq!(work[1], "plan=2");
+        assert_eq!(work[3], "req=2 err=2 tools=2 commits=2");
+    }
+
+    #[test]
+    fn no_account_keeps_every_row_including_a_session_without_usage_events() {
+        // Arrange
+        let conn = two_account_store("scope-all");
+
+        // Act
+        let all = seen(&conn, scoped(None));
+
+        // Assert
+        assert_eq!(all[0], "reviewer=4");
+        assert_eq!(all[1], "plan=4");
+        assert_eq!(all[2], "reviewer=5");
+        assert_eq!(all[3], "req=4 err=4 tools=4 commits=4");
+    }
+
+    #[test]
+    fn a_session_with_events_under_two_accounts_counts_under_each() {
+        // Arrange
+        let conn = two_account_store("scope-split");
+
+        // Act
+        let work = seen(&conn, scoped(Some("work")));
+        let home = seen(&conn, scoped(Some("home")));
+
+        // Assert: s-both shows in both accounts' telemetry rows.
+        assert_eq!(work[0], "reviewer=2");
+        assert_eq!(home[0], "reviewer=2");
+        // Transcript calls follow their own row's account (work 2, home 3),
+        // and live Bash calls follow the session join (s-both under each).
+        assert_eq!(work[2], "reviewer=2");
+        assert_eq!(home[2], "reviewer=3");
+        assert_eq!(work[4], "Agent=2/2,Bash=2/0");
+        assert_eq!(home[4], "Agent=3/3,Bash=2/0");
+    }
+
+    #[test]
+    fn an_account_with_no_usage_events_table_returns_no_rows_and_no_account_returns_all() {
+        // Arrange
+        let conn = mem();
+        insert_request(&conn, &request("r1")).unwrap();
+        insert_tool(&conn, &tool("t1", "Bash", true, 5, 100)).unwrap();
+
+        // Act
+        let all = seen(&conn, scoped(None));
+        let work = seen(&conn, scoped(Some("work")));
+
+        // Assert
+        assert_eq!(all[0], "reviewer=1");
+        assert_eq!(all[3], "req=1 err=0 tools=1 commits=0");
+        assert_eq!(work, ["", "", "", "req=0 err=0 tools=0 commits=0", ""]);
     }
 }

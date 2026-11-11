@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS usage_events (
 );
 CREATE INDEX IF NOT EXISTS usage_events_by_time ON usage_events (timestamp, event_id);
 CREATE INDEX IF NOT EXISTS usage_events_by_session ON usage_events (session_id, timestamp);
+CREATE INDEX IF NOT EXISTS usage_events_by_account ON usage_events (account, session_id);
 CREATE TABLE IF NOT EXISTS tool_invocation_events (
     event_id TEXT PRIMARY KEY,
     timestamp INTEGER NOT NULL,
@@ -1023,7 +1024,11 @@ mod tests {
         drop(old);
 
         let conn = open_db(&path).unwrap();
-        let expected = vec!["usage_events_by_session", "usage_events_by_time"];
+        let expected = vec![
+            "usage_events_by_account",
+            "usage_events_by_session",
+            "usage_events_by_time",
+        ];
         assert_eq!(index_names(&conn), expected);
         assert_eq!(index_names(&open_db(&path).unwrap()), expected);
         assert_eq!(count_usage_events(&conn).unwrap(), 1);
