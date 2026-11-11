@@ -106,16 +106,44 @@ pub fn ingest_into(
     Ok(stats)
 }
 
-/// Bare `playbook usage`: ingest, then render.
-/// The text report. `range` is `None` for every recorded session.
-pub fn run_summary(paths: &Paths, range: Option<Range>, now: i64) -> Result<String, String> {
+/// The account key behind an `--account` value, or `None` without the flag.
+/// Errors when no event carries the key, so a typo never reads as an empty report.
+pub fn resolve_account(conn: &Connection, input: Option<&str>) -> Result<Option<String>, String> {
+    let Some(input) = input else {
+        return Ok(None);
+    };
+    let key = super::account_store::resolve(conn, input)?;
+    if !super::account_store::has_events(conn, &key)? {
+        return Err(format!(
+            "no usage is recorded for the account `{input}`; run `playbook usage account list` to see the accounts"
+        ));
+    }
+    Ok(Some(key))
+}
+
+/// The text report. `range` is `None` for every recorded session, `account`
+/// an account key or name that keeps only that account's events.
+pub fn run_summary(
+    paths: &Paths,
+    range: Option<Range>,
+    now: i64,
+    account: Option<&str>,
+) -> Result<String, String> {
     let (conn, _) = ingest_new(paths)?;
-    let usage = load_usage_events(&conn)?;
-    let tools = load_tool_events(&conn)?;
+    let key = resolve_account(&conn, account)?;
+    let mut usage = load_usage_events(&conn)?;
+    super::tui::account::keep(&mut usage, key.as_deref());
+    let mut tools = load_tool_events(&conn)?;
+    super::tui::account::keep_tools(&mut tools, key.as_deref());
     let mut text = match range {
         Some(range) => summary::render_range(&usage, &tools, range, now),
         None => summary::render(&usage, &tools),
     };
+    if let Some(key) = &key {
+        let shown = super::account_store::display(&super::account_store::names(&conn)?, key);
+        let at = text.find('\n').map_or(text.len(), |i| i + 1);
+        text.insert_str(at, &format!("Account: {shown}\n"));
+    }
     if !usage.is_empty() {
         text.push_str(&limits_source::summary_section(
             &limit_sources(

@@ -1030,6 +1030,7 @@ fn real_main() {
             json,
             summary,
             range,
+            account,
             utc,
             local,
         } => {
@@ -1043,6 +1044,7 @@ fn real_main() {
                 json,
                 summary,
                 range,
+                account,
             };
             match usage::entry::run(sub, &opts, &paths, usage::entry::interactive()) {
                 Ok(output) => {

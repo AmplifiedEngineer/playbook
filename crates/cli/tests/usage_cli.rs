@@ -40,6 +40,25 @@ impl Home {
         Home(dir.canonicalize().unwrap())
     }
 
+    /// The fixture session of the work login, plus a second session that a
+    /// `session-accounts.log` line assigns to a token account.
+    fn with_two_accounts() -> Self {
+        let home = Self::new("two-accounts");
+        let project = home.0.join(".claude/projects/proj-one");
+        fs::write(
+            project.join("s2.jsonl"),
+            concat!(
+                r#"{"type":"assistant","uuid":"v1","sessionId":"s2","timestamp":"2026-09-01T09:00:00.000Z","cwd":"/home/u/Work/proj-one","gitBranch":"main","effort":"high","message":{"id":"msg_S2","model":"claude-sonnet-5","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":200}}}"#,
+                "\n"
+            ),
+        )
+        .unwrap();
+        let data = home.0.join(".config/playbook/data");
+        fs::create_dir_all(&data).unwrap();
+        fs::write(data.join("session-accounts.log"), "s2\ttoken:abcd1234\n").unwrap();
+        home
+    }
+
     fn run(&self, args: &[&str]) -> Output {
         Command::new(env!("CARGO_BIN_EXE_playbook"))
             .args(args)
@@ -533,4 +552,74 @@ fn a_summary_without_a_monthly_budget_has_no_burn_up_table() {
     // Assert
     assert!(out.status.success());
     assert!(!stdout(&out).contains("burn-up"), "{}", stdout(&out));
+}
+
+#[test]
+fn a_summary_for_the_work_account_has_its_exact_message_count_and_cost() {
+    // Arrange
+    let home = Home::with_two_accounts();
+
+    // Act
+    let out = home.run(&["usage", "--summary", "--account", "dev@example.com"]);
+
+    // Assert
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = stdout(&out);
+    let mut lines = text.lines();
+    assert!(
+        lines
+            .next()
+            .unwrap()
+            .starts_with("Usage: 3 messages, $0.0973 estimated cost"),
+        "{text}"
+    );
+    assert_eq!(lines.next(), Some("Account: dev@example.com"));
+    assert!(!text.contains("token:abcd1234"), "{text}");
+}
+
+#[test]
+fn json_for_a_token_account_has_its_exact_token_totals() {
+    // Arrange
+    let home = Home::with_two_accounts();
+
+    // Act
+    let out = home.run(&[
+        "usage",
+        "--json",
+        "--account",
+        "token:abcd1234",
+        "--range",
+        "all",
+    ]);
+
+    // Assert
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
+    assert_eq!(v["account"], "token:abcd1234");
+    assert_eq!(v["totals"]["messages"], 1);
+    assert_eq!(v["totals"]["input_tokens"], 100);
+    assert_eq!(v["totals"]["output_tokens"], 200);
+    assert_eq!(v["totals"]["cost_usd"], 0.0022);
+}
+
+#[test]
+fn an_unknown_account_exits_one_and_points_to_the_account_list() {
+    // Arrange
+    let home = Home::with_two_accounts();
+
+    // Act
+    let out = home.run(&["usage", "--summary", "--account", "nobody"]);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("playbook usage account list"), "{err}");
 }

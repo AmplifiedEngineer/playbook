@@ -1,0 +1,247 @@
+{
+  "generated_at": 1788300000,
+  "time_zone": {
+    "mode": "utc",
+    "offset_seconds": 0,
+    "label": "UTC"
+  },
+  "range": {
+    "key": "all",
+    "start": "2026-09-01",
+    "end": "2026-09-01"
+  },
+  "totals": {
+    "messages": 3,
+    "input_tokens": 30,
+    "output_tokens": 60,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "cost_usd": 0.00066,
+    "unpriced_messages": 0,
+    "unpriced_models": []
+  },
+  "groups": {
+    "day": [
+      {
+        "key": "2026-09-01",
+        "messages": 3,
+        "input_tokens": 30,
+        "output_tokens": 60,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "cost_usd": 0.00066,
+        "unpriced": 0
+      }
+    ],
+    "week": [
+      {
+        "key": "2026-08-31",
+        "messages": 3,
+        "input_tokens": 30,
+        "output_tokens": 60,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "cost_usd": 0.00066,
+        "unpriced": 0
+      }
+    ],
+    "model": [
+      {
+        "key": "claude-sonnet-5",
+        "messages": 3,
+        "input_tokens": 30,
+        "output_tokens": 60,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "cost_usd": 0.00066,
+        "unpriced": 0
+      }
+    ],
+    "repo": [
+      {
+        "key": "proj",
+        "messages": 3,
+        "input_tokens": 30,
+        "output_tokens": 60,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "cost_usd": 0.00066,
+        "unpriced": 0
+      }
+    ],
+    "branch": [
+      {
+        "key": "main",
+        "messages": 3,
+        "input_tokens": 30,
+        "output_tokens": 60,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "cost_usd": 0.00066,
+        "unpriced": 0
+      }
+    ],
+    "effort": [
+      {
+        "key": "(none)",
+        "messages": 3,
+        "input_tokens": 30,
+        "output_tokens": 60,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "cost_usd": 0.00066,
+        "unpriced": 0
+      }
+    ],
+    "account": [
+      {
+        "key": "token:abcd1234",
+        "messages": 1,
+        "input_tokens": 10,
+        "output_tokens": 20,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "cost_usd": 0.00022,
+        "unpriced": 0
+      },
+      {
+        "key": "work@x.io",
+        "messages": 2,
+        "input_tokens": 20,
+        "output_tokens": 40,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "cost_usd": 0.00044,
+        "unpriced": 0
+      }
+    ],
+    "agent": [
+      {
+        "key": "(none)",
+        "messages": 3,
+        "input_tokens": 30,
+        "output_tokens": 60,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "cost_usd": 0.00066,
+        "unpriced": 0
+      }
+    ]
+  },
+  "skills": [
+    {
+      "name": "fix",
+      "count": 1
+    },
+    {
+      "name": "plan",
+      "count": 1
+    }
+  ],
+  "agents": [],
+  "live": {
+    "generated_at": 1788300000,
+    "active": [],
+    "hour": {
+      "messages": 2,
+      "tokens": 60,
+      "cost_usd": 0.00044,
+      "unpriced": 0
+    },
+    "today": {
+      "messages": 3,
+      "tokens": 90,
+      "cost_usd": 0.00066,
+      "unpriced": 0
+    },
+    "feed": [
+      {
+        "time": 1788299100,
+        "session": "s2",
+        "repo": "proj",
+        "agent": "",
+        "model": "claude-sonnet-5",
+        "tokens": 30,
+        "cost_usd": 0.00022,
+        "unpriced": 0
+      },
+      {
+        "time": 1788298200,
+        "session": "s1",
+        "repo": "proj",
+        "agent": "",
+        "model": "claude-sonnet-5",
+        "tokens": 30,
+        "cost_usd": 0.00022,
+        "unpriced": 0
+      },
+      {
+        "time": 1788296400,
+        "session": "s1",
+        "repo": "proj",
+        "agent": "",
+        "model": "claude-sonnet-5",
+        "tokens": 30,
+        "cost_usd": 0.00022,
+        "unpriced": 0
+      }
+    ]
+  },
+  "limits": {
+    "known": false,
+    "hint": "limit unknown: set usage.budget.monthlyUsd or usage.budget.weeklyUsd, or sign in with a Pro or Max plan and use the playbook statusline to read the plan limits",
+    "snapshot_captured_at": null,
+    "snapshot_stale": null,
+    "plan": "unknown",
+    "plan_label": "Unknown plan",
+    "windows_note": "5 hour and weekly windows: not available for this plan (Pro and Max get them from the playbook statusline)",
+    "reason": "cap-unknown",
+    "comparison": null,
+    "cache": null,
+    "limits": [],
+    "burn": {
+      "today": {
+        "current": {
+          "cost_usd": 0.00066,
+          "elapsed_seconds": 79201,
+          "avg_per_hour": 0.000029999621216903827,
+          "avg_per_day": 0.0007199909092056919
+        },
+        "previous": {
+          "cost_usd": 0.0,
+          "elapsed_seconds": 79201,
+          "avg_per_hour": 0.0,
+          "avg_per_day": 0.0
+        }
+      },
+      "week": {
+        "current": {
+          "cost_usd": 0.00066,
+          "elapsed_seconds": 165601,
+          "avg_per_hour": 0.00001434773944601784,
+          "avg_per_day": 0.00034434574670442813
+        },
+        "previous": {
+          "cost_usd": 0.0,
+          "elapsed_seconds": 165601,
+          "avg_per_hour": 0.0,
+          "avg_per_day": 0.0
+        }
+      },
+      "month": {
+        "current": {
+          "cost_usd": 0.00066,
+          "elapsed_seconds": 79201,
+          "avg_per_hour": 0.000029999621216903827,
+          "avg_per_day": 0.0007199909092056919
+        },
+        "previous": {
+          "cost_usd": 0.0,
+          "elapsed_seconds": 79201,
+          "avg_per_hour": 0.0,
+          "avg_per_day": 0.0
+        }
+      }
+    }
+  }
+}

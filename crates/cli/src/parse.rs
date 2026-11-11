@@ -275,6 +275,7 @@ mod tests {
                         json: false,
                         summary: false,
                         range: None,
+                        account: None,
                         utc: false,
                         local: false,
                     }
