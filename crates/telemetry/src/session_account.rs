@@ -146,6 +146,50 @@ fn save_span(
     )
 }
 
+/// Every table column that holds an account label.
+const ACCOUNT_COLUMNS: [(&str, &str); 5] = [
+    ("usage_events", "account"),
+    ("tool_invocation_events", "account"),
+    ("session_accounts", "account"),
+    ("session_account_spans", "account"),
+    ("account_assignment_rows", "previous"),
+];
+
+/// Strips the `<TAB><digits>` tail that an old two-field read of a timed log
+/// line left on stored keys. Returns how many rows it rewrote.
+pub fn repair_joined_keys(conn: &Connection) -> Result<usize, String> {
+    let fail = |e| err("repair the joined account keys", e);
+    let sep = u32::from(LOG_FIELD_SEP);
+    let broken: bool = conn
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM session_accounts WHERE instr(account, char(?1)) > 0)
+                 OR EXISTS (SELECT 1 FROM session_account_spans WHERE instr(account, char(?1)) > 0)",
+            [sep],
+            |r| r.get(0),
+        )
+        .map_err(fail)?;
+    if !broken {
+        return Ok(0);
+    }
+    let tx = conn.unchecked_transaction().map_err(fail)?;
+    let mut repaired = 0;
+    for (table, column) in ACCOUNT_COLUMNS {
+        repaired += tx
+            .execute(
+                &format!(
+                    "UPDATE {table} SET {column} = substr({column}, 1, instr({column}, char(?1)) - 1)
+                     WHERE instr({column}, char(?1)) > 1
+                       AND substr({column}, instr({column}, char(?1)) + 1) != ''
+                       AND substr({column}, instr({column}, char(?1)) + 1) NOT GLOB '*[^0-9]*'"
+                ),
+                [sep],
+            )
+            .map_err(fail)?;
+    }
+    tx.commit().map_err(fail)?;
+    Ok(repaired)
+}
+
 /// Copies the rows of the old one-label-per-session table into spans that
 /// cover the whole session. It runs once, so a span later removed stays gone.
 pub fn copy_legacy_rows(conn: &Connection) -> Result<(), String> {
@@ -359,5 +403,109 @@ mod tests {
                 .any(|w| w == SENTINEL.as_bytes());
             assert!(!found, "token text found in {:?}", entry.path());
         }
+    }
+
+    const BROKEN: &str = "a@b.c\t1794204756";
+
+    fn seed_broken(conn: &Connection, key: &str) {
+        for sql in [
+            "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
+                repo, branch, input_tokens, output_tokens, cache_creation_tokens,
+                cache_read_tokens, cost_usd) VALUES ('e', 1, 's1', ?1, 'm', '', 'r', 'b', 1, 1, 0, 0, 0)",
+            "INSERT INTO tool_invocation_events (event_id, timestamp, session_id, account, kind, name)
+                VALUES ('t', 1, 's1', ?1, 'skill', 'x')",
+            "INSERT INTO session_accounts VALUES ('s1', ?1)",
+            "INSERT INTO session_account_spans (session_id, since, account) VALUES ('s1', 5, ?1)",
+            "INSERT INTO account_assignment_rows VALUES (1, 'usage', 'e', ?1)",
+        ] {
+            conn.execute(sql, [key]).unwrap();
+        }
+    }
+
+    fn stored(conn: &Connection) -> Vec<String> {
+        [
+            "SELECT account FROM usage_events",
+            "SELECT account FROM tool_invocation_events",
+            "SELECT account FROM session_accounts",
+            "SELECT account FROM session_account_spans",
+            "SELECT previous FROM account_assignment_rows",
+        ]
+        .iter()
+        .map(|sql| conn.query_row(sql, [], |r| r.get(0)).unwrap())
+        .collect()
+    }
+
+    #[test]
+    fn a_key_joined_to_a_timestamp_is_repaired_in_every_table() {
+        // Arrange
+        let dir = scratch_dir("session-account-repair");
+        let conn = open_db(&dir.join("u.db")).unwrap();
+        seed_broken(&conn, BROKEN);
+        // Act
+        let repaired = repair_joined_keys(&conn).unwrap();
+        // Assert
+        assert_eq!(repaired, 5);
+        assert_eq!(stored(&conn), vec!["a@b.c"; 5]);
+    }
+
+    #[test]
+    fn a_three_field_line_read_as_two_fields_is_repaired() {
+        // Arrange: the old two-field split kept "key<TAB>at" as the key.
+        let dir = scratch_dir("session-account-repair-log");
+        let conn = open_db(&dir.join("u.db")).unwrap();
+        let old_split = "s1\ta@b.c\t1794204756".split_once('\t').unwrap().1;
+        conn.execute(
+            "INSERT INTO session_accounts VALUES ('s1', ?1)",
+            [old_split],
+        )
+        .unwrap();
+        // Act
+        repair_joined_keys(&conn).unwrap();
+        // Assert
+        let account: String = conn
+            .query_row("SELECT account FROM session_accounts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(account, "a@b.c");
+    }
+
+    #[test]
+    fn a_store_without_a_joined_key_is_not_written() {
+        // Arrange
+        let dir = scratch_dir("session-account-repair-clean");
+        let conn = open_db(&dir.join("u.db")).unwrap();
+        seed_broken(&conn, "a@b.c");
+        let before = conn.total_changes();
+        // Act
+        let repaired = repair_joined_keys(&conn).unwrap();
+        // Assert
+        assert_eq!(repaired, 0);
+        assert_eq!(conn.total_changes(), before);
+    }
+
+    #[test]
+    fn an_empty_or_multi_tab_tail_is_left_alone_and_a_second_run_repairs_nothing() {
+        // Arrange
+        let dir = scratch_dir("session-account-repair-odd");
+        let conn = open_db(&dir.join("u.db")).unwrap();
+        conn.execute("INSERT INTO session_accounts VALUES ('s1', 'a@b.c\t')", [])
+            .unwrap();
+        conn.execute("INSERT INTO session_accounts VALUES ('s2', 'a\t1\t2')", [])
+            .unwrap();
+        conn.execute("INSERT INTO session_accounts VALUES ('s3', ?1)", [BROKEN])
+            .unwrap();
+        // Act
+        let first = repair_joined_keys(&conn).unwrap();
+        let second = repair_joined_keys(&conn).unwrap();
+        // Assert
+        assert_eq!(first, 1);
+        assert_eq!(second, 0);
+        let keys: Vec<String> = conn
+            .prepare("SELECT account FROM session_accounts ORDER BY session_id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(keys, vec!["a@b.c\t", "a\t1\t2", "a@b.c"]);
     }
 }
