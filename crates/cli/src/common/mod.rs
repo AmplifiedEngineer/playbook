@@ -30,6 +30,7 @@ pub mod shell;
 pub mod slug;
 pub mod stdin;
 pub mod time;
+pub mod transcript_tail;
 
 pub use atomic::atomic_append;
 pub use config_hash::config_hash;
