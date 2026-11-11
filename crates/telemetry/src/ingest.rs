@@ -71,11 +71,14 @@ fn write_events(
     mut newest: i64,
     stats: &mut IngestStats,
 ) -> Result<i64, String> {
-    // The spans of each session are read once; each event then takes the
-    // account in effect at its own time, else the account Claude Code is
-    // signed in to.
+    // A move the user applied wins. Else the spans of each session are read
+    // once and each event takes the account in effect at its own time, else
+    // the account Claude Code is signed in to.
     let mut spans: std::collections::HashMap<String, crate::session_account::Spans> =
         std::collections::HashMap::new();
+    // One check per call: with no applied move the per-event lookup is skipped,
+    // so a full re-read of a large history runs no extra query per event.
+    let any_move = crate::account_move::any_applied(tx)?;
     let mut label_at = |session: &str, ts: i64| -> Result<String, String> {
         if !spans.contains_key(session) {
             spans.insert(
@@ -89,7 +92,16 @@ fn write_events(
         newest = newest.max(event.timestamp);
         let existed = db::has_usage_event(tx, &event.event_id)?;
         let mut event = event;
-        event.account = label_at(&event.session_id, event.timestamp)?;
+        // A stored event keeps its label: the upsert never rewrites `account`.
+        let assigned = if any_move && !existed {
+            crate::account_move::assigned_to(tx, crate::account_move::USAGE_KIND, &event.event_id)?
+        } else {
+            None
+        };
+        event.account = match assigned {
+            Some(assigned) => assigned,
+            None => label_at(&event.session_id, event.timestamp)?,
+        };
         if event.agent.is_empty() {
             event.agent = name.to_string();
         }
@@ -107,7 +119,15 @@ fn write_events(
             continue;
         }
         let mut event = event;
-        event.account = label_at(&event.session_id, event.timestamp)?;
+        let assigned = if any_move {
+            crate::account_move::assigned_to(tx, crate::account_move::TOOL_KIND, &event.event_id)?
+        } else {
+            None
+        };
+        event.account = match assigned {
+            Some(assigned) => assigned,
+            None => label_at(&event.session_id, event.timestamp)?,
+        };
         db::insert_tool_event(tx, &event)?;
         stats.tools_inserted += 1;
     }
@@ -248,6 +268,17 @@ mod tests {
         }
     }
 
+    fn tool(id: &str, ts: i64) -> ToolInvocationEvent {
+        ToolInvocationEvent {
+            event_id: id.into(),
+            timestamp: ts,
+            session_id: "s".into(),
+            account: String::new(),
+            kind: ToolKind::Skill,
+            name: "n".into(),
+        }
+    }
+
     #[test]
     fn ingested_usage_and_tool_rows_carry_the_local_machine_id() {
         // Arrange
@@ -342,6 +373,86 @@ mod tests {
             label_of("tool_invocation_events", "s2"),
             ["dev@example.com"]
         );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_usage_reset_and_re_read_keeps_the_events_a_move_assigned() {
+        // Arrange: the signed in account is the work one, a move put the first
+        // two events on the personal token, and the move was applied.
+        let dir = scratch_dir("usage-reset-keeps-moves");
+        let conn = db::open_db(&dir.join("usage.db")).unwrap();
+        let source = Fake(Events {
+            usage: vec![
+                usage("a", 100, 1.0),
+                usage("b", 200, 1.0),
+                usage("c", 300, 1.0),
+            ],
+            tools: vec![tool("ta", 150), tool("tc", 350)],
+        });
+        ingest(&source, "work@example.com", &conn).unwrap();
+        crate::account_move::assign(
+            &conn,
+            crate::account_move::Scope::time(0, 250),
+            "token:aaaa1111",
+            None,
+            1,
+        )
+        .unwrap();
+
+        // Act
+        db::reset_usage(&conn).unwrap();
+        ingest(&source, "work@example.com", &conn).unwrap();
+
+        // Assert
+        let labels: Vec<String> = db::load_usage_events(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.account)
+            .collect();
+        assert_eq!(
+            labels,
+            ["token:aaaa1111", "token:aaaa1111", "work@example.com"]
+        );
+        let mut stmt = conn
+            .prepare("SELECT account FROM tool_invocation_events ORDER BY timestamp")
+            .unwrap();
+        let tool_labels: Vec<String> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(tool_labels, ["token:aaaa1111", "work@example.com"]);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_undone_move_no_longer_labels_a_re_read_event() {
+        // Arrange
+        let dir = scratch_dir("usage-undone-move");
+        let conn = db::open_db(&dir.join("usage.db")).unwrap();
+        let source = Fake(Events {
+            usage: vec![usage("a", 100, 1.0)],
+            tools: vec![],
+        });
+        ingest(&source, "work@example.com", &conn).unwrap();
+        crate::account_move::assign(
+            &conn,
+            crate::account_move::Scope::time(0, 250),
+            "token:aaaa1111",
+            None,
+            1,
+        )
+        .unwrap();
+        crate::account_move::undo(&conn, None).unwrap();
+
+        // Act
+        db::reset_usage(&conn).unwrap();
+        ingest(&source, "work@example.com", &conn).unwrap();
+
+        // Assert
+        let rows = db::load_usage_events(&conn).unwrap();
+        assert_eq!(rows[0].account, "work@example.com");
         let _ = fs::remove_dir_all(dir);
     }
 

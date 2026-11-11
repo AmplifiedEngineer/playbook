@@ -30,12 +30,18 @@ CREATE TABLE IF NOT EXISTS account_assignment_rows (
     event_id TEXT NOT NULL,
     previous TEXT NOT NULL,
     PRIMARY KEY (assignment_id, kind, event_id)
-);";
+);
+CREATE INDEX IF NOT EXISTS account_assignment_rows_by_event
+    ON account_assignment_rows (kind, event_id);";
 
-/// The row kind recorded for each table that carries an account.
+/// The row kind recorded for a usage event.
+pub const USAGE_KIND: &str = "usage";
+/// The row kind recorded for a tool event.
+pub const TOOL_KIND: &str = "tool";
+/// The row kind and table of each table that carries an account.
 const TABLES: [(&str, &str); 2] = [
-    ("usage", "usage_events"),
-    ("tool", "tool_invocation_events"),
+    (USAGE_KIND, "usage_events"),
+    (TOOL_KIND, "tool_invocation_events"),
 ];
 
 /// `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM` or `YYYY-MM-DDTHH:MM:SS` on the clock of
@@ -210,6 +216,37 @@ pub fn assign(
     }
     tx.commit().map_err(|e| err("commit the move", e))?;
     Ok(Some((id, moved)))
+}
+
+/// True when at least one move is applied and not undone. Ingest checks this
+/// once so a store with no moves pays no per-event lookup.
+pub fn any_applied(conn: &Connection) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM account_assignments WHERE undone = 0)",
+        [],
+        |r| r.get(0),
+    )
+    .map_err(|e| err("check for applied moves", e))
+}
+
+/// The account the newest move not undone gave to the row `event_id` of `kind`,
+/// if any move did. A reset deletes the events but keeps the moves, so a row
+/// read again takes this label instead of the one its session would give.
+pub fn assigned_to(
+    conn: &Connection,
+    kind: &str,
+    event_id: &str,
+) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT a.target FROM account_assignment_rows r
+         JOIN account_assignments a ON a.id = r.assignment_id
+         WHERE r.kind = ?1 AND r.event_id = ?2 AND a.undone = 0
+         ORDER BY a.id DESC LIMIT 1",
+        [kind, event_id],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(|e| err("read the moves of an event", e))
 }
 
 /// Puts the old labels back for move `id`, or the newest move not undone.
