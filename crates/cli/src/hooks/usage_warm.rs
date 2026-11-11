@@ -26,9 +26,11 @@ pub fn run(payload: &Payload) {
         crate::usage::session_account::record(
             &dir,
             &payload.field(".session_id"),
-            crate::usage::session_account::env_fingerprint()
-                .or_else(|| signed_in_label(&paths.claude_json))
-                .as_deref(),
+            session_key(
+                crate::usage::session_account::env_fingerprint(),
+                signed_in_label(&paths.claude_json),
+            )
+            .as_deref(),
             crate::common::time::now_secs(),
         );
     }
@@ -43,4 +45,77 @@ pub fn run(payload: &Payload) {
 fn signed_in_label(claude_json: &std::path::Path) -> Option<String> {
     Some(crate::usage::account::account_label(claude_json))
         .filter(|label| label != crate::usage::account::UNKNOWN_ACCOUNT)
+}
+
+/// The key a session is filed under: the token fingerprint when the session
+/// has a token, else the signed in account.
+fn session_key(token: Option<String>, signed_in: Option<String>) -> Option<String> {
+    token.or(signed_in)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::test_support::scratch_dir;
+
+    const TOKEN_KEY: &str = "token:4243ddb1";
+    const EMAIL: &str = "dev@example.com";
+
+    #[test]
+    fn a_token_alone_gives_the_token_key() {
+        // Arrange
+        let token = Some(TOKEN_KEY.to_string());
+        // Act
+        let key = session_key(token, None);
+        // Assert
+        assert_eq!(key.as_deref(), Some(TOKEN_KEY));
+    }
+
+    #[test]
+    fn an_email_alone_gives_the_email() {
+        // Arrange
+        let signed_in = Some(EMAIL.to_string());
+        // Act
+        let key = session_key(None, signed_in);
+        // Assert
+        assert_eq!(key.as_deref(), Some(EMAIL));
+    }
+
+    #[test]
+    fn a_token_and_an_email_give_the_token_key() {
+        // Arrange
+        let token = Some(TOKEN_KEY.to_string());
+        let signed_in = Some(EMAIL.to_string());
+        // Act
+        let key = session_key(token, signed_in);
+        // Assert
+        assert_eq!(key.as_deref(), Some(TOKEN_KEY));
+    }
+
+    #[test]
+    fn neither_gives_none() {
+        // Arrange, Act
+        let key = session_key(None, None);
+        // Assert
+        assert_eq!(key, None);
+    }
+
+    #[test]
+    fn a_signed_in_file_with_a_token_gives_the_token_key_and_not_the_email() {
+        // Arrange
+        let dir = scratch_dir("usage-warm-key");
+        std::fs::create_dir_all(&dir).unwrap();
+        let claude_json = dir.join(".claude.json");
+        std::fs::write(
+            &claude_json,
+            format!(r#"{{"oauthAccount":{{"emailAddress":"{EMAIL}"}}}}"#),
+        )
+        .unwrap();
+        // Act
+        let key = session_key(Some(TOKEN_KEY.to_string()), signed_in_label(&claude_json));
+        // Assert
+        let key = key.expect("a key");
+        assert_eq!(key, TOKEN_KEY);
+        assert!(!key.contains(EMAIL));
+    }
 }

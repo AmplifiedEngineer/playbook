@@ -69,6 +69,20 @@ fn run_hook(
     )
 }
 
+/// Variables that pick the account a session starts under, removed so a
+/// developer's own values cannot reach the hook.
+const ACCOUNT_ENV: &[&str] = &[
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
+];
+const SESSION_START: &str = r#"{"session_id":"fire-token","hook_event_name":"SessionStart"}"#;
+const SENTINEL_TOKEN: &str = "sk-ant-oat01-FIRE-SENTINEL-0123456789";
+/// `token:` and the first 8 hex digits of SHA-256 over
+/// `playbook-account-v1:` plus `SENTINEL_TOKEN`.
+const SENTINEL_KEY: &str = "token:f87cdf04";
+
 fn installed() -> Fire {
     let work = Work::new("fire");
     let bin = bin_dir_with_playbook(&work);
@@ -374,7 +388,7 @@ fn fires(f: &Fire, name: &str) -> bool {
                 &home,
                 &home,
                 &[],
-                &[],
+                ACCOUNT_ENV,
             );
             let stamp = home.join(".config/playbook/data/auto-ingest.stamp");
             let mut seen = false;
@@ -664,4 +678,60 @@ fn every_wired_hook_fires_and_produces_its_observable_effect() {
     );
     let failed: Vec<&String> = names.iter().filter(|n| !fires(&f, n)).collect();
     assert!(failed.is_empty(), "hooks that did not fire: {failed:?}");
+}
+
+fn account_log(home: &Path) -> String {
+    fs::read_to_string(home.join(".config/playbook/data/session-accounts.log"))
+        .expect("the hook wrote the session account log")
+}
+
+#[test]
+fn a_session_start_with_a_token_logs_its_fingerprint_and_never_the_token() {
+    // Arrange
+    let f = installed();
+    let home = scratch(&f, "h-account-token");
+    // Act
+    let (_, stdout) = run_hook(
+        &f.playbook,
+        "usage-warm",
+        SESSION_START,
+        &home,
+        &home,
+        &[("CLAUDE_CODE_OAUTH_TOKEN", SENTINEL_TOKEN)],
+        ACCOUNT_ENV,
+    );
+    // Assert
+    let log = account_log(&home);
+    let lines: Vec<&str> = log.lines().collect();
+    assert_eq!(lines.len(), 1, "one line per session start: {log:?}");
+    let fields: Vec<&str> = lines[0].split('\t').collect();
+    assert_eq!(&fields[..2], ["fire-token", SENTINEL_KEY]);
+    assert!(fields[2].parse::<i64>().is_ok(), "time field: {log:?}");
+    assert!(!log.contains(SENTINEL_TOKEN) && !stdout.contains(SENTINEL_TOKEN));
+}
+
+#[test]
+fn a_session_start_without_a_token_logs_the_signed_in_email() {
+    // Arrange
+    let f = installed();
+    let home = scratch(&f, "h-account-email");
+    fs::write(
+        home.join(".claude.json"),
+        r#"{"oauthAccount":{"emailAddress":"dev@example.com"}}"#,
+    )
+    .unwrap();
+    // Act
+    run_hook(
+        &f.playbook,
+        "usage-warm",
+        SESSION_START,
+        &home,
+        &home,
+        &[],
+        ACCOUNT_ENV,
+    );
+    // Assert
+    let log = account_log(&home);
+    let fields: Vec<&str> = log.lines().next().unwrap().split('\t').collect();
+    assert_eq!(&fields[..2], ["fire-token", "dev@example.com"]);
 }
