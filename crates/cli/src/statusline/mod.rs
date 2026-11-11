@@ -366,6 +366,22 @@ fn logical_pwd(env: &Env) -> String {
     }
 }
 
+/// The next message estimate from the stdin counts and the transcript tail.
+/// The transcript is read only when `transcript_path` is set, and the stdin
+/// model id wins over the transcript's.
+fn next_message(session: &Session, now: i64) -> Option<next_cost::NextCost> {
+    let count = |text: &str| u64::try_from(int_part(text).max(0)).unwrap_or(0);
+    let context_tokens = count(&session.ctx_input_tokens)
+        + count(&session.cache_create)
+        + count(&session.cache_read);
+    let last = (!session.transcript_path.is_empty())
+        .then(|| {
+            crate::common::transcript_tail::last_main_turn(Path::new(&session.transcript_path))
+        })
+        .flatten();
+    next_cost::estimate(&session.model_id, context_tokens, last.as_ref(), now)
+}
+
 /// Renders the whole status line for `input`, as the bytes to print.
 pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
     let home = env
@@ -484,6 +500,7 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
         .map_or_else(|| PathBuf::from(&home), PathBuf::from)
         .join(".claude.json");
     let budget = budget::build(input, now, &claude_json, Path::new(&home), &cache_dir);
+    let next = next_message(&session, now);
     let opts = Opts {
         show_model: env.flag("STATUSLINE_SHOW_MODEL"),
         show_context: env.flag("STATUSLINE_SHOW_CONTEXT"),
@@ -497,6 +514,7 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
             .unwrap_or_else(|| env.int("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", 90)),
         home,
         now,
+        next,
     };
     for line in [
         lines::line_2(&session, &opts),
