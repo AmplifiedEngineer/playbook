@@ -614,3 +614,71 @@ fn yes_repairs_missing_keys_and_no_terminal_without_yes_prints_the_command() {
     assert!(out.status.success(), "{}", text(&out));
     assert_eq!(otel_keys(&yes.env()), 7);
 }
+
+#[test]
+fn setup_removes_a_blocking_is_demo_says_so_and_uninstall_puts_it_back() {
+    assert_no_managed_settings();
+    let sb = Sandbox::new("demo", Some(r#"{"env":{"IS_DEMO":"1","FOO":"1"}}"#));
+    sb.write_collector(47318, "tok");
+
+    let first = sb.run(&["setup", "--only", "telemetry"]);
+    let after_first = sb.settings_bytes();
+    let second = sb.run(&["setup", "--only", "telemetry"]);
+
+    assert!(first.status.success(), "{}", text(&first));
+    assert!(
+        text(&first).contains("removed IS_DEMO=1"),
+        "{}",
+        text(&first)
+    );
+    let env = sb.env();
+    assert!(!env.contains_key("IS_DEMO"));
+    assert_eq!(env["FOO"], "1");
+    assert!(second.status.success());
+    assert!(!text(&second).contains("IS_DEMO"), "{}", text(&second));
+    assert_eq!(sb.settings_bytes(), after_first, "byte for byte");
+
+    let gone = sb.run(&["uninstall", "--yes"]);
+
+    assert!(gone.status.success(), "{}", text(&gone));
+    assert_eq!(sb.env()["IS_DEMO"], "1");
+    assert_eq!(otel_keys(&sb.env()), 0);
+}
+
+#[test]
+fn an_is_demo_of_zero_stays_and_setup_never_adds_the_key() {
+    assert_no_managed_settings();
+    let zero = Sandbox::new("demo-zero", Some(r#"{"env":{"IS_DEMO":"0"}}"#));
+    zero.write_collector(47318, "tok");
+    let out = zero.run(&["setup", "--only", "telemetry"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(zero.env()["IS_DEMO"], "0");
+
+    let none = Sandbox::new("demo-none", Some("{}"));
+    none.write_collector(47318, "tok");
+    let out = none.run(&["setup", "--only", "telemetry"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!none.env().contains_key("IS_DEMO"));
+}
+
+#[test]
+fn an_is_demo_in_the_project_settings_is_named_and_left_alone() {
+    assert_no_managed_settings();
+    let sb = Sandbox::new("demo-local", Some("{}"));
+    sb.write_collector(47318, "tok");
+    let local = sb.home.join(".claude/settings.local.json");
+    fs::write(&local, r#"{"env":{"IS_DEMO":"1"}}"#).unwrap();
+
+    let out = sb.run(&["setup", "--only", "telemetry"]);
+
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(
+        text(&out).contains("IS_DEMO is also set in") && text(&out).contains("settings.local.json"),
+        "{}",
+        text(&out)
+    );
+    assert_eq!(
+        fs::read_to_string(&local).unwrap(),
+        r#"{"env":{"IS_DEMO":"1"}}"#
+    );
+}
