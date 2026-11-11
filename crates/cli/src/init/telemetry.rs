@@ -17,6 +17,7 @@
 //! turned on, and the account uuid stays out of the metrics.
 
 use crate::init::run::StepReport;
+use crate::usage::telemetry_detect::{is_on, ENABLE_VAR};
 use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -84,26 +85,158 @@ pub(crate) fn write_keeping_order(
     write_with_backup(path, root, epoch)
 }
 
-/// Whether the record exists and settings.json still holds every value in it.
+/// Whether the record names at least one key and settings.json still holds
+/// every value in it. A record that holds only its meta entries names no key,
+/// so it counts as no record.
 fn already_written(home: &Path, settings_path: &Path) -> bool {
     let Ok(written) = load(&marker_path(home)) else {
         return false;
     };
-    if written.is_empty() {
+    if recorded_keys(&written).next().is_none() {
         return false;
     }
     let Ok(root) = load(settings_path) else {
         return false;
     };
     let env = root.get("env").and_then(Value::as_object);
-    written
-        .iter()
-        .filter(|(k, _)| *k != REPLACED)
-        .all(|(k, v)| env.is_some_and(|e| e.get(k) == Some(v)))
+    let all_held = recorded_keys(&written).all(|(k, v)| env.is_some_and(|e| e.get(k) == Some(v)));
+    all_held
 }
 
 /// The marker key that holds the values init replaced, by variable name.
 const REPLACED: &str = "_replaced";
+
+/// The entries of a record that name a written key, not its meta entries.
+fn recorded_keys(record: &Map<String, Value>) -> impl Iterator<Item = (&String, &Value)> {
+    record.iter().filter(|(k, _)| *k != REPLACED)
+}
+
+/// Whether at least one recorded key still holds its recorded value.
+fn record_is_live(user_env: &Map<String, Value>, record: &Map<String, Value>) -> bool {
+    recorded_keys(record).any(|(k, v)| user_env.get(k) == Some(v))
+}
+
+/// What `apply` does with keys that are missing or stale beside telemetry
+/// settings it did not write.
+#[derive(Debug, PartialEq, Eq)]
+enum Repair {
+    /// Every wanted key already holds a wanted value.
+    NotNeeded,
+    /// Write these keys, in `env_for` order.
+    Keys(Vec<String>),
+    /// Someone else's setup: leave it alone.
+    Foreign,
+}
+
+/// The two local endpoint forms setup writes, up to the port.
+const LOCAL_ENDPOINT_PREFIXES: [&str; 2] = ["http://127.0.0.1:", "http://localhost:"];
+
+/// The start of the headers value setup writes, up to the token.
+const BEARER_PREFIX: &str = "Authorization=Bearer ";
+
+/// The lowest and highest valid port.
+const PORT_MIN: u32 = 1;
+const PORT_MAX: u32 = 65535;
+
+const ENDPOINT_KEY: &str = "OTEL_EXPORTER_OTLP_ENDPOINT";
+const HEADERS_KEY: &str = "OTEL_EXPORTER_OTLP_HEADERS";
+
+fn value_text(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// Whether `endpoint` is a local collector address: `http://127.0.0.1:<port>`
+/// or `http://localhost:<port>`, a port from 1 to 65535, and nothing after it
+/// but an optional `/`.
+fn is_local_endpoint(endpoint: &str) -> bool {
+    LOCAL_ENDPOINT_PREFIXES.iter().any(|prefix| {
+        let Some(rest) = endpoint.strip_prefix(prefix) else {
+            return false;
+        };
+        let port = rest.strip_suffix('/').unwrap_or(rest);
+        !port.is_empty()
+            && port.bytes().all(|b| b.is_ascii_digit())
+            && port
+                .parse::<u32>()
+                .is_ok_and(|n| (PORT_MIN..=PORT_MAX).contains(&n))
+    })
+}
+
+/// Whether `headers` is `Authorization=Bearer <token>` with a token.
+fn is_bearer_header(headers: &str) -> bool {
+    headers
+        .strip_prefix(BEARER_PREFIX)
+        .is_some_and(|token| !token.trim().is_empty())
+}
+
+/// Decides whether the playbook keys in the user's settings.json env can be
+/// repaired. `wanted` is `env_for` for the collector state. Pure.
+fn repair_needed(
+    user_env: &Map<String, Value>,
+    record: &Map<String, Value>,
+    wanted: &[(String, String)],
+    elsewhere_configured: bool,
+) -> Repair {
+    let current = |k: &str| user_env.get(k).map(value_text);
+    let switch = current(ENABLE_VAR);
+    if elsewhere_configured || (switch.is_some() && !is_on(switch.as_deref())) {
+        return Repair::Foreign;
+    }
+    let differs = |k: &str, want: &str| match current(k) {
+        None => true,
+        Some(cur) => cur != want && !(k == ENABLE_VAR && is_on(Some(&cur))),
+    };
+    let keys_that_differ = |only: &dyn Fn(&str) -> bool| {
+        let keys: Vec<String> = wanted
+            .iter()
+            .filter(|(k, want)| only(k) && differs(k, want))
+            .map(|(k, _)| k.clone())
+            .collect();
+        if keys.is_empty() {
+            Repair::NotNeeded
+        } else {
+            Repair::Keys(keys)
+        }
+    };
+    if record_is_live(user_env, record) {
+        let user_changed_one = wanted.iter().any(|(k, want)| {
+            current(k).is_some_and(|cur| {
+                cur != *want
+                    && record.get(k).map(value_text).as_deref() != Some(cur.as_str())
+                    && !(k == ENABLE_VAR && is_on(Some(&cur)))
+            })
+        });
+        if user_changed_one {
+            return Repair::Foreign;
+        }
+        return keys_that_differ(&|_| true);
+    }
+    // No record, or a dead one: only two shapes count as playbook's.
+    let telemetry_keys: Vec<&String> = user_env
+        .keys()
+        .filter(|k| crate::usage::telemetry_detect::is_telemetry_var(k))
+        .collect();
+    if telemetry_keys.len() == 1 && switch.is_some() {
+        return keys_that_differ(&|k| k != ENABLE_VAR);
+    }
+    let full_set = wanted.iter().all(|(k, _)| user_env.contains_key(k));
+    let fixed_hold = wanted
+        .iter()
+        .filter(|(k, _)| k != ENABLE_VAR && k != ENDPOINT_KEY && k != HEADERS_KEY)
+        .all(|(k, want)| current(k).as_deref() == Some(want.as_str()));
+    let shape_ok = full_set
+        && fixed_hold
+        && current(ENDPOINT_KEY).is_some_and(|e| is_local_endpoint(&e))
+        && current(HEADERS_KEY).is_some_and(|h| is_bearer_header(&h));
+    if shape_ok {
+        keys_that_differ(&|k| k == ENDPOINT_KEY || k == HEADERS_KEY)
+    } else {
+        Repair::Foreign
+    }
+}
 
 /// Whether Claude Code telemetry is on, off or not mentioned, as the process
 /// environment and every Claude Code settings file read together say.
@@ -177,13 +310,58 @@ pub fn skip_line(
     cwd: &Path,
     process_configured: bool,
 ) -> Option<&'static str> {
-    match state(home, cwd, true) {
-        State::Enabled => Some(ENABLED_LINE),
-        State::SetUpByYou => Some(SET_UP_LINE),
+    let found = state(home, cwd, true);
+    let can_replace = found == State::Disabled
+        && can_replace_off_switch(home, claude_home, cwd, process_configured);
+    skip_line_from(
+        found,
+        needs_action(home, claude_home, cwd, process_configured),
+        can_replace,
+    )
+}
+
+/// The skip table. `repair` is whether a yes has something to put right in
+/// the user's settings.json: playbook keys that are missing or stale. It turns the "nothing to ask" and "set up by you" lines
+/// into a question. `can_replace` is whether a yes may replace an off switch.
+fn skip_line_from(state: State, repair: bool, can_replace: bool) -> Option<&'static str> {
+    match state {
+        State::Enabled => (!repair).then_some(ENABLED_LINE),
+        State::SetUpByYou => (!repair).then_some(SET_UP_LINE),
         State::Unset => None,
-        State::Disabled => (!can_replace_off_switch(home, claude_home, cwd, process_configured))
-            .then_some(OFF_ELSEWHERE_LINE),
+        State::Disabled => (!can_replace).then_some(OFF_ELSEWHERE_LINE),
     }
+}
+
+/// Whether setup would repair keys now. It
+/// reads the user file, the record and the collector state, and never
+/// creates any of them: with no collector state it compares against the
+/// placeholder `plan_lines` uses.
+fn needs_action(home: &Path, claude_home: &Path, cwd: &Path, process_configured: bool) -> bool {
+    let settings_path = claude_home.join("settings.json");
+    let Ok(root) = load(&settings_path) else {
+        return false;
+    };
+    let user_env = root
+        .get("env")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let record = load(&marker_path(home)).unwrap_or_default();
+    let paths = crate::usage::run::Paths::from_home(home);
+    let collector =
+        crate::usage::collector::read_state(&crate::usage::collector::state_path(&paths))
+            .unwrap_or_default();
+    let elsewhere = process_configured
+        || crate::usage::telemetry_detect::files_configured_except(home, cwd, &settings_path);
+    matches!(
+        repair_needed(
+            &user_env,
+            &record,
+            &crate::cc::telemetry::env_for(&collector),
+            elsewhere
+        ),
+        Repair::Keys(_)
+    )
 }
 
 /// Whether a yes may replace the off switch: telemetry is off, the process
@@ -326,7 +504,7 @@ pub fn apply(
     let settings_path = claude_home.join("settings.json");
     let paths = crate::usage::run::Paths::from_home(home);
     let written_before = load(&marker_path(home)).unwrap_or_default();
-    let ours = !written_before.is_empty() && already_written(home, &settings_path);
+    let ours = already_written(home, &settings_path);
     if ours {
         let current = match crate::usage::collector::ensure_state(&paths) {
             Ok(s) => s,
@@ -348,24 +526,61 @@ pub fn apply(
             "CLAUDE_CODE_ENABLE_TELEMETRY is 0 in your settings and --yes does not change a value you set; to turn it on, run: playbook setup --only telemetry",
         );
     }
+    let mut repair_keys: Option<Vec<String>> = None;
+    let mut ensured = None;
     if !ours
         && !switch_off_here
         && (process_configured || crate::cc::telemetry::files_configured(home, cwd))
     {
-        return StepReport::skipped(
-            "telemetry",
-            "you already have telemetry configured, left as it is (`playbook usage status` shows how it is read)",
-        );
+        let skip = || {
+            StepReport::skipped(
+                "telemetry",
+                "you already have telemetry configured, left as it is (`playbook usage status` shows how it is read)",
+            )
+        };
+        // An unparsable settings file counts as configured: leave it alone.
+        let Ok(user_root) = load(&settings_path) else {
+            return skip();
+        };
+        let elsewhere = process_configured
+            || crate::usage::telemetry_detect::files_configured_except(home, cwd, &settings_path);
+        if elsewhere {
+            return skip();
+        }
+        let current = match crate::usage::collector::ensure_state(&paths) {
+            Ok(s) => s,
+            Err(e) => return StepReport::failed("telemetry", e),
+        };
+        let user_env = user_root
+            .get("env")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let wanted = crate::cc::telemetry::env_for(&current);
+        match repair_needed(&user_env, &written_before, &wanted, false) {
+            Repair::NotNeeded => {
+                return StepReport::already_correct("telemetry", ALREADY_POINTS_LINE);
+            }
+            Repair::Foreign => return skip(),
+            Repair::Keys(keys) => repair_keys = Some(keys),
+        }
+        ensured = Some(current);
     }
-    let state = match crate::usage::collector::ensure_state(&paths) {
-        Ok(s) => s,
-        Err(e) => return StepReport::failed("telemetry", e),
+    let state = match ensured {
+        Some(s) => s,
+        None => match crate::usage::collector::ensure_state(&paths) {
+            Ok(s) => s,
+            Err(e) => return StepReport::failed("telemetry", e),
+        },
     };
     let mut root = match load(&settings_path) {
         Ok(r) => r,
         Err(e) => return StepReport::failed("telemetry", e),
     };
-    let vars = crate::cc::telemetry::env_for(&state);
+    let mut vars = crate::cc::telemetry::env_for(&state);
+    if let Some(keys) = &repair_keys {
+        vars.retain(|(k, _)| keys.contains(k));
+    }
     // The settings merge writes its keys sorted. A file that is sorted stays
     // sorted, so the next merge finds nothing to reorder.
     let was_sorted = root.keys().is_sorted();
@@ -378,24 +593,39 @@ pub fn apply(
             "the env entry in settings.json is not an object, left as it is",
         );
     };
-    let mut written = Map::new();
-    // A refresh keeps what the first run replaced, so uninstall still restores it.
+    // A live record is kept whole: unrepaired keys stay in it, so uninstall
+    // still removes them, and so does what the first run replaced. A dead or
+    // absent record starts over with only this run's keys.
+    let live = record_is_live(env, &written_before);
+    let mut written = if live {
+        written_before.clone()
+    } else {
+        Map::new()
+    };
     let mut replaced = written_before
         .get(REPLACED)
         .and_then(Value::as_object)
-        .filter(|_| ours)
+        .filter(|_| live)
         .cloned()
         .unwrap_or_default();
+    let mut repaired = Vec::new();
     for (k, v) in vars {
+        // A user's own spelling of an on switch stays, and stays unrecorded.
+        if k == ENABLE_VAR && is_on(env.get(&k).map(value_text).as_deref()) {
+            continue;
+        }
         let new = Value::String(v);
-        if ours && env.get(&k) == written_before.get(&k) {
+        if live && env.get(&k) == written_before.get(&k) {
             env.insert(k.clone(), new.clone());
         } else if let Some(old) = env.insert(k.clone(), new.clone()) {
             replaced.insert(k.clone(), old);
         }
+        repaired.push(k.clone());
         written.insert(k, new);
     }
-    if !replaced.is_empty() {
+    if replaced.is_empty() {
+        written.remove(REPLACED);
+    } else {
         written.insert(REPLACED.to_string(), Value::Object(replaced));
     }
     if let Err(e) = write_keeping_order(&settings_path, root, was_sorted, epoch) {
@@ -411,6 +641,16 @@ pub fn apply(
             format!("could not write {}: {e}", marker.display()),
         );
     }
+    if repair_keys.is_some() {
+        return StepReport::wired(
+            "telemetry",
+            format!(
+                "put the OpenTelemetry variables for the local collector (127.0.0.1:{}) right: {}",
+                state.port,
+                repaired.join(", ")
+            ),
+        );
+    }
     StepReport::wired(
         "telemetry",
         format!(
@@ -420,15 +660,20 @@ pub fn apply(
     )
 }
 
+/// The detail when every key already holds a wanted value and no record says
+/// playbook wrote them.
+const ALREADY_POINTS_LINE: &str = "the OpenTelemetry keys already point at the local collector";
+
 /// Whether settings.json's env holds every `(key, value)` in `wanted`.
 fn holds_all(settings_path: &Path, wanted: &[(String, String)]) -> bool {
     let Ok(root) = load(settings_path) else {
         return false;
     };
     let env = root.get("env").and_then(Value::as_object);
-    wanted
-        .iter()
-        .all(|(k, v)| env.is_some_and(|e| e.get(k).and_then(Value::as_str) == Some(v)))
+    wanted.iter().all(|(k, v)| {
+        let held = env.and_then(|e| e.get(k)).and_then(Value::as_str);
+        held == Some(v) || (k == ENABLE_VAR && is_on(held))
+    })
 }
 
 /// What `remove` did.
@@ -460,7 +705,7 @@ pub fn remove(
             .and_then(Value::as_object)
             .cloned()
             .unwrap_or_default();
-        for (k, v) in written.iter().filter(|(k, _)| *k != REPLACED) {
+        for (k, v) in recorded_keys(&written) {
             if env.get(k) == Some(v) {
                 env.remove(k);
                 keys += 1;
@@ -849,8 +1094,22 @@ mod tests {
         let own = r#"{"env":{"OTEL_EXPORTER_OTLP_ENDPOINT":"https://x"}}"#;
         let beside = r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0","OTEL_LOGS_EXPORTER":"otlp"}}"#;
         let lone = r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}"#;
+        let all_eight = {
+            let env: Map<String, Value> =
+                crate::cc::telemetry::env_for(&crate::usage::collector::State {
+                    port: 47318,
+                    token: "tok".into(),
+                    ..Default::default()
+                })
+                .into_iter()
+                .map(|(k, v)| (k, json!(v)))
+                .collect();
+            json!({ "env": env }).to_string()
+        };
+        // A switch alone now has keys to add, so the question is asked.
         let cases = [
-            (on, Some(ENABLED_LINE)),
+            (on, None),
+            (all_eight.as_str(), Some(ENABLED_LINE)),
             (own, Some(SET_UP_LINE)),
             (beside, Some(OFF_ELSEWHERE_LINE)),
             (lone, None),
@@ -858,6 +1117,7 @@ mod tests {
         ];
         for (i, (settings, expected)) in cases.iter().enumerate() {
             let (home, claude, cwd) = setup(&format!("init-tel-skip-{i}"), settings);
+            write_collector(&home, 47318, "tok");
 
             let got = skip_line_files_only(&home, &claude, &cwd);
 
@@ -866,16 +1126,13 @@ mod tests {
     }
 
     /// `skip_line` without the process environment, so the test machine
-    /// cannot change the answer.
+    /// cannot change the answer. It shares `skip_line_from` and
+    /// `needs_action` with the real one.
     fn skip_line_files_only(home: &Path, claude: &Path, cwd: &Path) -> Option<&'static str> {
-        match state(home, cwd, false) {
-            State::Enabled => Some(ENABLED_LINE),
-            State::SetUpByYou => Some(SET_UP_LINE),
-            State::Unset => None,
-            State::Disabled => {
-                (!can_replace_off_switch(home, claude, cwd, false)).then_some(OFF_ELSEWHERE_LINE)
-            }
-        }
+        let found = state(home, cwd, false);
+        let can_replace =
+            found == State::Disabled && can_replace_off_switch(home, claude, cwd, false);
+        skip_line_from(found, needs_action(home, claude, cwd, false), can_replace)
     }
 
     #[test]
@@ -1128,6 +1385,658 @@ mod tests {
         remove(&home, &settings, 3, false).unwrap();
 
         assert!(!env_of(&claude).contains_key("CLAUDE_CODE_ENABLE_TELEMETRY"));
+    }
+
+    // ---- repair_needed ----
+
+    fn wanted_set() -> Vec<(String, String)> {
+        crate::cc::telemetry::env_for(&crate::usage::collector::State {
+            port: 47318,
+            token: "tok".into(),
+            ..crate::usage::collector::State::default()
+        })
+    }
+
+    fn map(pairs: &[(&str, &str)]) -> Map<String, Value> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), json!(v)))
+            .collect()
+    }
+
+    /// The eight wanted keys with `edits` applied: `Some` sets, `None` removes.
+    fn full_env(edits: &[(&str, Option<&str>)]) -> Map<String, Value> {
+        let mut env: Map<String, Value> = wanted_set()
+            .into_iter()
+            .map(|(k, v)| (k, json!(v)))
+            .collect();
+        for (k, v) in edits {
+            match v {
+                Some(v) => env.insert((*k).to_string(), json!(v)),
+                None => env.remove(*k),
+            };
+        }
+        env
+    }
+
+    fn names(list: &[&str]) -> Repair {
+        Repair::Keys(list.iter().map(|s| (*s).to_string()).collect())
+    }
+
+    const SEVEN: [&str; 7] = [
+        "OTEL_LOGS_EXPORTER",
+        "OTEL_METRICS_EXPORTER",
+        "OTEL_TRACES_EXPORTER",
+        "OTEL_EXPORTER_OTLP_PROTOCOL",
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_HEADERS",
+        "OTEL_METRICS_INCLUDE_ACCOUNT_UUID",
+    ];
+
+    fn decide(env: &Map<String, Value>, record: &Map<String, Value>) -> Repair {
+        repair_needed(env, record, &wanted_set(), false)
+    }
+
+    #[test]
+    fn repair_needed_classifies_each_switch_only_and_record_case() {
+        let on = map(&[("CLAUDE_CODE_ENABLE_TELEMETRY", "1")]);
+        let on_true = map(&[("CLAUDE_CODE_ENABLE_TELEMETRY", "true")]);
+        let none = Map::new();
+        let only_replaced = {
+            let mut m = Map::new();
+            m.insert(
+                REPLACED.to_string(),
+                json!({"CLAUDE_CODE_ENABLE_TELEMETRY": "0"}),
+            );
+            m
+        };
+        assert_eq!(decide(&on, &none), names(&SEVEN));
+        assert_eq!(decide(&on_true, &none), names(&SEVEN));
+        assert_eq!(
+            decide(&on, &only_replaced),
+            names(&SEVEN),
+            "meta only is no record"
+        );
+        // A dead record: nothing it names holds its value.
+        let dead = map(&[("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:1")]);
+        assert_eq!(decide(&on, &dead), names(&SEVEN));
+    }
+
+    #[test]
+    fn repair_needed_with_a_live_record() {
+        let record = full_env(&[]);
+        // a deleted key comes back
+        let env = full_env(&[("OTEL_EXPORTER_OTLP_PROTOCOL", None)]);
+        assert_eq!(
+            decide(&env, &record),
+            names(&["OTEL_EXPORTER_OTLP_PROTOCOL"])
+        );
+        // a moved port: the endpoint still holds the recorded value
+        let old = full_env(&[("OTEL_EXPORTER_OTLP_ENDPOINT", Some("http://127.0.0.1:1111"))]);
+        assert_eq!(
+            repair_needed(&old, &old, &wanted_set(), false),
+            names(&["OTEL_EXPORTER_OTLP_ENDPOINT"])
+        );
+        // the switch recorded as 1, now true, everything else wanted
+        let spelled = full_env(&[("CLAUDE_CODE_ENABLE_TELEMETRY", Some("true"))]);
+        assert_eq!(decide(&spelled, &record), Repair::NotNeeded);
+        // the user changed a recorded key
+        let own = full_env(&[("OTEL_EXPORTER_OTLP_ENDPOINT", Some("https://team"))]);
+        assert_eq!(decide(&own, &record), Repair::Foreign);
+        let console = full_env(&[("OTEL_LOGS_EXPORTER", Some("console"))]);
+        assert_eq!(decide(&console, &record), Repair::Foreign);
+        // an extra OTEL key of the user's is ignored
+        let extra = full_env(&[
+            ("OTEL_RESOURCE_ATTRIBUTES", Some("team=a")),
+            ("OTEL_EXPORTER_OTLP_PROTOCOL", None),
+        ]);
+        assert_eq!(
+            decide(&extra, &record),
+            names(&["OTEL_EXPORTER_OTLP_PROTOCOL"])
+        );
+        // all eight hold the wanted values
+        assert_eq!(decide(&full_env(&[]), &record), Repair::NotNeeded);
+        // the switch was deleted from the file under a live record
+        let no_switch = full_env(&[("CLAUDE_CODE_ENABLE_TELEMETRY", None)]);
+        assert_eq!(
+            decide(&no_switch, &record),
+            names(&["CLAUDE_CODE_ENABLE_TELEMETRY"])
+        );
+    }
+
+    #[test]
+    fn repair_needed_with_a_dead_record_or_none_and_a_full_stale_set() {
+        let none = Map::new();
+        let stale = full_env(&[
+            ("OTEL_EXPORTER_OTLP_ENDPOINT", Some("http://127.0.0.1:1")),
+            (
+                "OTEL_EXPORTER_OTLP_HEADERS",
+                Some("Authorization=Bearer old"),
+            ),
+        ]);
+        let both = names(&["OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_HEADERS"]);
+        assert_eq!(decide(&stale, &none), both);
+        // a dead record names values that are all gone
+        let dead = map(&[("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:9")]);
+        assert_eq!(decide(&stale, &dead), both);
+        // localhost with another port and the wanted token: the endpoint only
+        let local = full_env(&[("OTEL_EXPORTER_OTLP_ENDPOINT", Some("http://localhost:1234"))]);
+        assert_eq!(
+            decide(&local, &none),
+            names(&["OTEL_EXPORTER_OTLP_ENDPOINT"])
+        );
+        // the port bounds and the optional slash are accepted
+        for endpoint in ["http://127.0.0.1:1/", "http://127.0.0.1:65535"] {
+            let env = full_env(&[
+                ("OTEL_EXPORTER_OTLP_ENDPOINT", Some(endpoint)),
+                (
+                    "OTEL_EXPORTER_OTLP_HEADERS",
+                    Some("Authorization=Bearer old"),
+                ),
+            ]);
+            assert_eq!(decide(&env, &none), both, "{endpoint}");
+        }
+        // all eight hold the wanted values with no record
+        assert_eq!(decide(&full_env(&[]), &none), Repair::NotNeeded);
+    }
+
+    #[test]
+    fn repair_needed_leaves_every_other_setup_alone() {
+        let none = Map::new();
+        type Edits<'a> = &'a [(&'a str, Option<&'a str>)];
+        let foreign_edits: &[Edits] = &[
+            &[(
+                "OTEL_EXPORTER_OTLP_ENDPOINT",
+                Some("https://127.0.0.1:4318"),
+            )],
+            &[(
+                "OTEL_EXPORTER_OTLP_ENDPOINT",
+                Some("http://localhost.example.test:4318"),
+            )],
+            &[("OTEL_EXPORTER_OTLP_ENDPOINT", Some("http://127.0.0.1:"))],
+            &[("OTEL_EXPORTER_OTLP_ENDPOINT", Some("http://127.0.0.1:0"))],
+            &[(
+                "OTEL_EXPORTER_OTLP_ENDPOINT",
+                Some("http://127.0.0.1:70000"),
+            )],
+            &[(
+                "OTEL_EXPORTER_OTLP_ENDPOINT",
+                Some("http://127.0.0.1:4318x"),
+            )],
+            &[(
+                "OTEL_EXPORTER_OTLP_ENDPOINT",
+                Some("http://127.0.0.1:4318/v1"),
+            )],
+            &[("OTEL_EXPORTER_OTLP_HEADERS", Some("Authorization=Bearer "))],
+            &[("OTEL_EXPORTER_OTLP_HEADERS", Some("Authorization=Basic x"))],
+            &[("OTEL_EXPORTER_OTLP_PROTOCOL", Some("grpc"))],
+            &[(
+                "OTEL_EXPORTER_OTLP_ENDPOINT",
+                Some("https://collector.example.test"),
+            )],
+            &[("CLAUDE_CODE_ENABLE_TELEMETRY", Some("0"))],
+            &[("CLAUDE_CODE_ENABLE_TELEMETRY", Some(""))],
+            &[("CLAUDE_CODE_ENABLE_TELEMETRY", None)],
+        ];
+        for edits in foreign_edits {
+            assert_eq!(
+                decide(&full_env(edits), &none),
+                Repair::Foreign,
+                "{edits:?}"
+            );
+        }
+        let own_collector = map(&[
+            ("CLAUDE_CODE_ENABLE_TELEMETRY", "1"),
+            ("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318"),
+            ("OTEL_EXPORTER_OTLP_HEADERS", "Authorization=Bearer x"),
+            ("OTEL_LOGS_EXPORTER", "otlp"),
+            ("OTEL_METRICS_EXPORTER", "otlp"),
+        ]);
+        assert_eq!(decide(&own_collector, &none), Repair::Foreign);
+        let dead = map(&[("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:9")]);
+        assert_eq!(decide(&own_collector, &dead), Repair::Foreign);
+        let minimal = map(&[
+            ("CLAUDE_CODE_ENABLE_TELEMETRY", "1"),
+            ("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318"),
+            ("OTEL_LOGS_EXPORTER", "otlp"),
+            ("OTEL_METRICS_EXPORTER", "otlp"),
+        ]);
+        assert_eq!(decide(&minimal, &none), Repair::Foreign);
+        let no_endpoint = map(&[
+            ("CLAUDE_CODE_ENABLE_TELEMETRY", "1"),
+            ("OTEL_LOGS_EXPORTER", "otlp"),
+            ("OTEL_METRICS_EXPORTER", "otlp"),
+        ]);
+        assert_eq!(decide(&no_endpoint, &none), Repair::Foreign);
+        // another source names a telemetry value
+        let on = map(&[("CLAUDE_CODE_ENABLE_TELEMETRY", "1")]);
+        assert_eq!(
+            repair_needed(&on, &none, &wanted_set(), true),
+            Repair::Foreign
+        );
+    }
+
+    // ---- repair in `apply` ----
+
+    fn settings_bytes(claude: &Path) -> Vec<u8> {
+        fs::read(claude.join("settings.json")).unwrap()
+    }
+
+    fn collector_state(home: &Path) -> crate::usage::collector::State {
+        let paths = crate::usage::run::Paths::from_home(home);
+        crate::usage::collector::read_state(&crate::usage::collector::state_path(&paths)).unwrap()
+    }
+
+    fn write_collector(home: &Path, port: u16, token: &str) {
+        let paths = crate::usage::run::Paths::from_home(home);
+        let file = crate::usage::collector::state_path(&paths);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let state = crate::usage::collector::State {
+            port,
+            token: token.into(),
+            ..crate::usage::collector::State::default()
+        };
+        fs::write(file, serde_json::to_vec(&state).unwrap()).unwrap();
+    }
+
+    fn collector_file(home: &Path) -> PathBuf {
+        crate::usage::collector::state_path(&crate::usage::run::Paths::from_home(home))
+    }
+
+    fn record_of(home: &Path) -> Map<String, Value> {
+        load(&marker_path(home)).unwrap()
+    }
+
+    fn set_env_key(claude: &Path, key: &str, value: Option<&str>) {
+        let path = claude.join("settings.json");
+        let mut doc: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let env = doc["env"].as_object_mut().unwrap();
+        match value {
+            Some(v) => env.insert(key.to_string(), json!(v)),
+            None => env.remove(key),
+        };
+        fs::write(&path, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+    }
+
+    const WIRED: crate::init::run::StepStatus = crate::init::run::StepStatus::Wired;
+    const OK: crate::init::run::StepStatus = crate::init::run::StepStatus::AlreadyCorrect;
+    const SKIPPED: crate::init::run::StepStatus = crate::init::run::StepStatus::Skipped;
+
+    fn keys_in(claude: &Path) -> Vec<String> {
+        let mut keys: Vec<String> = env_of(claude)
+            .keys()
+            .filter(|k| crate::usage::telemetry_detect::is_telemetry_var(k))
+            .cloned()
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    fn all_eight() -> Vec<String> {
+        let mut keys: Vec<String> = crate::cc::telemetry::env_for(&Default::default())
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    #[test]
+    fn a_lone_on_switch_gets_the_seven_keys_once_and_uninstall_keeps_the_switch() {
+        let (home, claude, cwd) = setup(
+            "init-tel-switch-only",
+            r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","FOO":"1"}}"#,
+        );
+
+        let first = apply(&home, &claude, &cwd, 1, false, true);
+        let after_first = settings_bytes(&claude);
+        let second = apply(&home, &claude, &cwd, 2, false, true);
+
+        assert_eq!(first.status, WIRED);
+        assert!(
+            first.detail.contains("OTEL_LOGS_EXPORTER"),
+            "{}",
+            first.detail
+        );
+        assert_eq!(keys_in(&claude), all_eight());
+        assert_eq!(second.status, OK);
+        assert_eq!(settings_bytes(&claude), after_first, "byte for byte");
+        let record = record_of(&home);
+        assert!(!record.contains_key("CLAUDE_CODE_ENABLE_TELEMETRY"));
+        assert!(!record.contains_key(REPLACED));
+
+        remove(&home, &claude.join("settings.json"), 3, false).unwrap();
+
+        let env = env_of(&claude);
+        assert_eq!(env["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
+        assert_eq!(env["FOO"], "1");
+        assert_eq!(keys_in(&claude), vec!["CLAUDE_CODE_ENABLE_TELEMETRY"]);
+    }
+
+    #[test]
+    fn a_lone_true_switch_stays_true_through_repair_and_a_moved_port() {
+        let (home, claude, cwd) = setup(
+            "init-tel-true",
+            r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"true"}}"#,
+        );
+
+        let first = apply(&home, &claude, &cwd, 1, false, true);
+        let after_first = settings_bytes(&claude);
+        let second = apply(&home, &claude, &cwd, 2, false, true);
+
+        assert_eq!(first.status, WIRED);
+        assert_eq!(second.status, OK);
+        assert_eq!(settings_bytes(&claude), after_first);
+
+        let mut state = collector_state(&home);
+        state.port = 51234;
+        fs::write(collector_file(&home), serde_json::to_vec(&state).unwrap()).unwrap();
+        let third = apply(&home, &claude, &cwd, 3, false, true);
+
+        let env = env_of(&claude);
+        assert_eq!(third.status, WIRED);
+        assert_eq!(env["OTEL_EXPORTER_OTLP_ENDPOINT"], "http://127.0.0.1:51234");
+        assert_eq!(env["CLAUDE_CODE_ENABLE_TELEMETRY"], "true");
+        let record = record_of(&home);
+        assert!(!record.contains_key("CLAUDE_CODE_ENABLE_TELEMETRY"));
+        assert!(!record.contains_key(REPLACED));
+    }
+
+    #[test]
+    fn a_deleted_key_under_a_live_record_comes_back_and_uninstall_restores_the_off_switch() {
+        let (home, claude, cwd) = setup(
+            "init-tel-deleted-key",
+            r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0","FOO":"1"}}"#,
+        );
+        apply(&home, &claude, &cwd, 1, false, true);
+        set_env_key(&claude, "OTEL_EXPORTER_OTLP_PROTOCOL", None);
+        let before = env_of(&claude);
+
+        let step = apply(&home, &claude, &cwd, 2, false, false);
+
+        let after = env_of(&claude);
+        assert_eq!(step.status, WIRED);
+        assert!(step.detail.contains("OTEL_EXPORTER_OTLP_PROTOCOL"));
+        assert_eq!(after["OTEL_EXPORTER_OTLP_PROTOCOL"], "http/json");
+        let changed: Vec<&String> = after
+            .keys()
+            .filter(|k| before.get(*k) != after.get(*k))
+            .collect();
+        assert_eq!(changed, vec!["OTEL_EXPORTER_OTLP_PROTOCOL"]);
+
+        remove(&home, &claude.join("settings.json"), 3, false).unwrap();
+
+        let env = env_of(&claude);
+        assert_eq!(env["CLAUDE_CODE_ENABLE_TELEMETRY"], "0");
+        assert_eq!(env["FOO"], "1");
+        assert_eq!(keys_in(&claude), vec!["CLAUDE_CODE_ENABLE_TELEMETRY"]);
+    }
+
+    #[test]
+    fn a_live_record_with_a_true_switch_and_a_deleted_key_writes_only_that_key() {
+        let (home, claude, cwd) = setup("init-tel-live-true", r#"{"env":{}}"#);
+        apply(&home, &claude, &cwd, 1, false, true);
+        set_env_key(&claude, "CLAUDE_CODE_ENABLE_TELEMETRY", Some("true"));
+        set_env_key(&claude, "OTEL_EXPORTER_OTLP_PROTOCOL", None);
+
+        let step = apply(&home, &claude, &cwd, 2, false, true);
+
+        let env = env_of(&claude);
+        assert_eq!(step.status, WIRED);
+        assert_eq!(env["CLAUDE_CODE_ENABLE_TELEMETRY"], "true");
+        assert_eq!(env["OTEL_EXPORTER_OTLP_PROTOCOL"], "http/json");
+    }
+
+    #[test]
+    fn a_switch_the_user_respelled_since_the_record_needs_nothing() {
+        let (home, claude, cwd) = setup("init-tel-respelled", r#"{"env":{}}"#);
+        apply(&home, &claude, &cwd, 1, false, true);
+        set_env_key(&claude, "CLAUDE_CODE_ENABLE_TELEMETRY", Some("true"));
+        let before = settings_bytes(&claude);
+
+        let step = apply(&home, &claude, &cwd, 2, false, true);
+
+        assert_eq!(step.status, OK);
+        assert_eq!(step.detail, ALREADY_POINTS_LINE);
+        assert_eq!(settings_bytes(&claude), before);
+    }
+
+    #[test]
+    fn a_full_stale_set_with_no_record_is_repaired_and_uninstall_puts_the_stale_values_back() {
+        let (home, claude, cwd) = setup("init-tel-stale-set", r#"{}"#);
+        write_collector(&home, 47318, "newtok");
+        let mut env = Map::new();
+        for (k, v) in crate::cc::telemetry::env_for(&collector_state(&home)) {
+            env.insert(k, json!(v));
+        }
+        env.insert(
+            "OTEL_EXPORTER_OTLP_ENDPOINT".into(),
+            json!("http://127.0.0.1:1111"),
+        );
+        env.insert(
+            "OTEL_EXPORTER_OTLP_HEADERS".into(),
+            json!("Authorization=Bearer oldtok"),
+        );
+        let doc = json!({ "env": env });
+        fs::write(claude.join("settings.json"), doc.to_string()).unwrap();
+
+        let step = apply(&home, &claude, &cwd, 1, false, true);
+
+        let fixed = env_of(&claude);
+        assert_eq!(step.status, WIRED);
+        assert_eq!(
+            fixed["OTEL_EXPORTER_OTLP_ENDPOINT"],
+            "http://127.0.0.1:47318"
+        );
+        assert_eq!(
+            fixed["OTEL_EXPORTER_OTLP_HEADERS"],
+            "Authorization=Bearer newtok"
+        );
+
+        remove(&home, &claude.join("settings.json"), 2, false).unwrap();
+
+        let back = env_of(&claude);
+        assert_eq!(back["OTEL_EXPORTER_OTLP_ENDPOINT"], "http://127.0.0.1:1111");
+        assert_eq!(
+            back["OTEL_EXPORTER_OTLP_HEADERS"],
+            "Authorization=Bearer oldtok"
+        );
+    }
+
+    #[test]
+    fn no_record_and_all_eight_wanted_keys_is_already_correct_and_writes_nothing() {
+        let (home, claude, cwd) = setup("init-tel-all-eight", r#"{}"#);
+        write_collector(&home, 47318, "tok");
+        let mut env = Map::new();
+        for (k, v) in crate::cc::telemetry::env_for(&collector_state(&home)) {
+            env.insert(k, json!(v));
+        }
+        fs::write(
+            claude.join("settings.json"),
+            json!({ "env": env }).to_string(),
+        )
+        .unwrap();
+        let before = settings_bytes(&claude);
+
+        let step = apply(&home, &claude, &cwd, 1, false, true);
+
+        assert_eq!(step.status, OK);
+        assert_eq!(step.detail, ALREADY_POINTS_LINE);
+        assert!(!marker_path(&home).exists(), "no record is written");
+        assert_eq!(settings_bytes(&claude), before);
+    }
+
+    #[test]
+    fn a_token_change_rewrites_only_the_headers() {
+        let (home, claude, cwd) = setup("init-tel-token", r#"{}"#);
+        apply(&home, &claude, &cwd, 1, false, true);
+        let mut state = collector_state(&home);
+        state.token = "rotated".into();
+        fs::write(collector_file(&home), serde_json::to_vec(&state).unwrap()).unwrap();
+
+        let step = apply(&home, &claude, &cwd, 2, false, true);
+
+        assert_eq!(step.status, WIRED);
+        assert_eq!(
+            env_of(&claude)["OTEL_EXPORTER_OTLP_HEADERS"],
+            "Authorization=Bearer rotated"
+        );
+    }
+
+    #[test]
+    fn a_foreign_setup_is_skipped_and_left_byte_for_byte() {
+        let (home, claude, cwd) = setup(
+            "init-tel-foreign",
+            r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"https://team"}}"#,
+        );
+        let before = settings_bytes(&claude);
+
+        let step = apply(&home, &claude, &cwd, 1, false, true);
+
+        assert_eq!(step.status, SKIPPED);
+        assert!(step
+            .detail
+            .contains("you already have telemetry configured"));
+        assert_eq!(settings_bytes(&claude), before);
+    }
+
+    #[test]
+    fn an_unparsable_settings_file_is_skipped_and_never_asks_for_state() {
+        let (home, claude, cwd) = setup("init-tel-broken", "{ not json");
+
+        let step = apply(&home, &claude, &cwd, 1, false, true);
+
+        assert_eq!(step.status, SKIPPED);
+        assert_eq!(settings_bytes(&claude), b"{ not json");
+        assert!(!collector_file(&home).exists());
+    }
+
+    #[test]
+    fn a_home_with_no_collector_state_gets_it_made_for_a_repair() {
+        let (home, claude, cwd) = setup(
+            "init-tel-no-state",
+            r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1"}}"#,
+        );
+        assert!(!collector_file(&home).exists());
+
+        let step = apply(&home, &claude, &cwd, 1, false, true);
+
+        let state = collector_state(&home);
+        assert_eq!(step.status, WIRED);
+        assert_eq!(
+            env_of(&claude)["OTEL_EXPORTER_OTLP_ENDPOINT"],
+            format!("http://127.0.0.1:{}", state.port)
+        );
+    }
+
+    #[test]
+    fn another_source_means_no_state_is_made_and_nothing_is_written() {
+        let (home, claude, cwd) = setup(
+            "init-tel-elsewhere",
+            r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1"}}"#,
+        );
+        let before = settings_bytes(&claude);
+
+        let step = apply(&home, &claude, &cwd, 1, true, true);
+
+        assert_eq!(step.status, SKIPPED);
+        assert!(!collector_file(&home).exists(), "ensure_state is skipped");
+        assert_eq!(settings_bytes(&claude), before);
+    }
+
+    #[test]
+    fn a_record_that_holds_only_replaced_is_no_record_and_the_switch_stays() {
+        let (home, claude, cwd) = setup(
+            "init-tel-only-replaced",
+            r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1"}}"#,
+        );
+        fs::create_dir_all(marker_path(&home).parent().unwrap()).unwrap();
+        fs::write(
+            marker_path(&home),
+            r#"{"_replaced":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}"#,
+        )
+        .unwrap();
+
+        let step = apply(&home, &claude, &cwd, 1, false, true);
+
+        let record = record_of(&home);
+        assert_eq!(step.status, WIRED);
+        assert_eq!(keys_in(&claude), all_eight());
+        assert_eq!(env_of(&claude)["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
+        assert!(
+            !record.contains_key(REPLACED),
+            "the user's switch is not recorded as replaced: {record:?}"
+        );
+    }
+
+    #[test]
+    fn the_skip_table_covers_state_repair_and_can_replace() {
+        let cases = [
+            (State::Enabled, true, false, None),
+            (State::Enabled, false, false, Some(ENABLED_LINE)),
+            (State::SetUpByYou, true, false, None),
+            (State::SetUpByYou, false, false, Some(SET_UP_LINE)),
+            (State::Unset, false, false, None),
+            (State::Unset, true, true, None),
+            (State::Disabled, false, true, None),
+            (State::Disabled, true, true, None),
+            (State::Disabled, false, false, Some(OFF_ELSEWHERE_LINE)),
+            (State::Disabled, true, false, Some(OFF_ELSEWHERE_LINE)),
+        ];
+        for (state, repair, can_replace, expected) in cases {
+            assert_eq!(
+                skip_line_from(state, repair, can_replace),
+                expected,
+                "{state:?} repair={repair} can_replace={can_replace}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_wizard_asks_when_a_yes_can_repair_and_keeps_the_line_for_a_foreign_setup() {
+        // (settings, collector.json first, expected)
+        let full_stale = r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_LOGS_EXPORTER":"otlp","OTEL_METRICS_EXPORTER":"otlp","OTEL_TRACES_EXPORTER":"none","OTEL_EXPORTER_OTLP_PROTOCOL":"http/json","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:1111","OTEL_EXPORTER_OTLP_HEADERS":"Authorization=Bearer old","OTEL_METRICS_INCLUDE_ACCOUNT_UUID":"false"}}"#;
+        let own = r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"https://team"}}"#;
+        let lone = r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1"}}"#;
+        let cases = [
+            (lone, true, None),
+            (lone, false, None),
+            (full_stale, false, None),
+            (own, true, Some(ENABLED_LINE)),
+        ];
+        for (i, (settings, with_state, expected)) in cases.iter().enumerate() {
+            let (home, claude, cwd) = setup(&format!("init-tel-wizard-{i}"), settings);
+            if *with_state {
+                write_collector(&home, 47318, "tok");
+            }
+            assert_eq!(
+                skip_line_files_only(&home, &claude, &cwd),
+                *expected,
+                "{settings} state={with_state}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_full_correct_set_asks_nothing_but_a_deleted_switch_under_a_live_record_is_asked() {
+        let (home, claude, cwd) = setup("init-tel-wizard-live", r#"{}"#);
+        apply(&home, &claude, &cwd, 1, false, true);
+        assert_eq!(
+            skip_line_files_only(&home, &claude, &cwd),
+            Some(ENABLED_LINE),
+            "all eight keys in place"
+        );
+
+        set_env_key(&claude, "CLAUDE_CODE_ENABLE_TELEMETRY", None);
+
+        assert_eq!(
+            skip_line_files_only(&home, &claude, &cwd),
+            None,
+            "the repair puts the switch back, so the wizard asks"
+        );
+        let step = apply(&home, &claude, &cwd, 2, false, true);
+        assert_eq!(step.status, WIRED);
+        assert_eq!(env_of(&claude)["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
     }
 
     fn text(lines: &[String]) -> String {
