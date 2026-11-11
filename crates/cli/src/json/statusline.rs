@@ -13,7 +13,7 @@ use serde_json::Value;
 use std::sync::LazyLock;
 
 /// Extracts every session field `statusline.sh`'s `eval`-consumed `jq`
-/// output sets: fifteen `key=value` lines, `@sh`-quoted exactly as the real
+/// output sets: eighteen `key=value` lines, `@sh`-quoted exactly as the real
 /// filter would (a numeric field bare, a string field or a missing-field
 /// `""` fallback single-quoted), each line newline-terminated. `pwd_env` is
 /// the `$PWD` fallback used when both `.cwd` and `.workspace.current_dir`
@@ -36,8 +36,8 @@ pub(crate) fn value_text(value: &Value) -> String {
     }
 }
 
-/// The fifteen session fields as typed JSON values, in `eval` order.
-pub(crate) fn session_values(json: &str, pwd_env: &str) -> [(&'static str, Value); 15] {
+/// The eighteen session fields as typed JSON values, in `eval` order.
+pub(crate) fn session_values(json: &str, pwd_env: &str) -> [(&'static str, Value); 18] {
     let parsed: Value = serde_json::from_str(json).unwrap_or(Value::Null);
 
     [
@@ -95,6 +95,18 @@ pub(crate) fn session_values(json: &str, pwd_env: &str) -> [(&'static str, Value
         (
             "wall_ms",
             field_or_empty(&parsed, &["cost", "total_duration_ms"]),
+        ),
+        ("model_id", field_or_empty(&parsed, &["model", "id"])),
+        (
+            "ctx_input_tokens",
+            field_or_empty(
+                &parsed,
+                &["context_window", "current_usage", "input_tokens"],
+            ),
+        ),
+        (
+            "transcript_path",
+            field_or_empty(&parsed, &["transcript_path"]),
         ),
     ]
 }
@@ -394,12 +406,13 @@ mod tests {
         let json = r#"{
             "cwd": "/home/user/proj",
             "session_id": "sess-abc123",
-            "model": {"display_name": "Sonnet 4.5"},
+            "model": {"id": "claude-sonnet-4-5", "display_name": "Sonnet 4.5"},
+            "transcript_path": "/home/user/.claude/projects/p/s.jsonl",
             "context_window": {
                 "used_percentage": 42.5,
                 "total_input_tokens": 12345,
                 "context_window_size": 200000,
-                "current_usage": {"cache_creation_input_tokens": 100, "cache_read_input_tokens": 200}
+                "current_usage": {"input_tokens": 7, "cache_creation_input_tokens": 100, "cache_read_input_tokens": 200}
             },
             "rate_limits": {
                 "five_hour": {"used_percentage": 10, "resets_at": "2026-09-28T12:00:00Z"},
@@ -432,7 +445,11 @@ mod tests {
             "json_thinking='true'\n",
             "cost_usd=0.1234\n",
             "wall_ms=60000\n",
+            "model_id='claude-sonnet-4-5'\n",
+            "ctx_input_tokens=7\n",
+            "transcript_path='/home/user/.claude/projects/p/s.jsonl'\n",
         );
+        assert_eq!(got.lines().count(), 18);
         assert_eq!(got, expected);
     }
 
@@ -461,6 +478,9 @@ mod tests {
             "json_thinking=''\n",
             "cost_usd=''\n",
             "wall_ms=''\n",
+            "model_id=''\n",
+            "ctx_input_tokens=''\n",
+            "transcript_path=''\n",
         );
         assert_eq!(got, expected);
     }

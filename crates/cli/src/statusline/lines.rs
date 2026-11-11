@@ -7,6 +7,7 @@
 
 use super::budget::Segment;
 use super::fmt::*;
+use super::next_cost::{fmt_next, CacheState, NextCost};
 use crate::json::statusline::value_text;
 
 /// The session fields the segments read, as the script's shell variables.
@@ -26,7 +27,9 @@ pub(super) struct Session {
     pub effort: String,
     pub thinking: String,
     pub cost_usd: String,
-    pub wall_ms: String,
+    pub model_id: String,
+    pub ctx_input_tokens: String,
+    pub transcript_path: String,
 }
 
 impl Session {
@@ -49,7 +52,9 @@ impl Session {
                 "json_effort" => s.effort = text,
                 "json_thinking" => s.thinking = text,
                 "cost_usd" => s.cost_usd = text,
-                "wall_ms" => s.wall_ms = text,
+                "model_id" => s.model_id = text,
+                "ctx_input_tokens" => s.ctx_input_tokens = text,
+                "transcript_path" => s.transcript_path = text,
                 _ => {}
             }
         }
@@ -68,6 +73,8 @@ pub(super) struct Opts {
     pub compact_trigger: i64,
     pub home: String,
     pub now: i64,
+    /// Next message estimate, `None` for an unpriced model or an empty context.
+    pub next: Option<NextCost>,
 }
 
 fn render_model(s: &Session, o: &Opts) -> Option<String> {
@@ -148,7 +155,7 @@ fn render_cache_ratio(s: &Session, o: &Opts) -> Option<String> {
     ))
 }
 
-fn render_cost(s: &Session) -> Option<String> {
+fn render_cost(s: &Session, o: &Opts) -> Option<String> {
     if s.cost_usd.is_empty() {
         return None;
     }
@@ -157,9 +164,20 @@ fn render_cost(s: &Session) -> Option<String> {
         return None;
     }
     let mut out = format!("{ORANGE}${cost:.4}{RESET}");
-    if !s.wall_ms.is_empty() {
-        if let Some(rate) = cost_per_min(cost, int_part(&s.wall_ms)) {
-            out.push_str(&format!(" {DIM}(${rate}/min){RESET}"));
+    if let Some(next) = &o.next {
+        match next.state {
+            CacheState::Warm { left_secs } => out.push_str(&format!(
+                " {DIM}(next {}, warm {} left){RESET}",
+                fmt_next(next.warm_usd),
+                fmt_age(left_secs)
+            )),
+            CacheState::Cold => out.push_str(&format!(
+                " {RED}! cold cache, next {}{RESET}",
+                fmt_next(next.cold_usd)
+            )),
+            CacheState::Unknown => {
+                out.push_str(&format!(" {DIM}(next {}){RESET}", fmt_next(next.warm_usd)))
+            }
         }
     }
     Some(out)
@@ -213,7 +231,7 @@ pub(super) fn line_2(s: &Session, o: &Opts) -> Option<String> {
 /// Line 3: cost, cache, 5h quota, session age, 7d rate.
 pub(super) fn line_3(s: &Session, o: &Opts) -> Option<String> {
     join(vec![
-        render_cost(s),
+        render_cost(s, o),
         render_cache_ratio(s, o),
         render_rate_5h(s, o),
         render_session_age(s, o),

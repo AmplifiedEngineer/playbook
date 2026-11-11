@@ -86,7 +86,7 @@ fn payload(cwd: &Path, rest: &str) -> String {
     format!(r#"{{"cwd":"{}"{rest}}}"#, cwd.display())
 }
 
-const FULL: &str = r#""session_id":"sess-full","model":{"display_name":"Opus 4.8"},"effort":{"level":"high"},"thinking":{"enabled":true},"context_window":{"used_percentage":72.5,"total_input_tokens":250000,"context_window_size":1000000,"current_usage":{"cache_creation_input_tokens":10,"cache_read_input_tokens":990}},"cost":{"total_cost_usd":1.2345,"total_duration_ms":600000},"rate_limits":{"five_hour":{"used_percentage":55.4,"resets_at":1000},"seven_day":{"used_percentage":60}}"#;
+const FULL: &str = r#""session_id":"sess-full","model":{"id":"claude-opus-4-8","display_name":"Opus 4.8"},"effort":{"level":"high"},"thinking":{"enabled":true},"context_window":{"used_percentage":72.5,"total_input_tokens":250000,"context_window_size":1000000,"current_usage":{"input_tokens":0,"cache_creation_input_tokens":10,"cache_read_input_tokens":990}},"cost":{"total_cost_usd":1.2345,"total_duration_ms":600000},"rate_limits":{"five_hour":{"used_percentage":55.4,"resets_at":1000},"seven_day":{"used_percentage":60}}"#;
 
 /// A reset time far enough ahead (year 2100) to be open whenever the tests run.
 const WINDOW_STILL_OPEN: i64 = 4_102_444_800;
@@ -112,9 +112,10 @@ fn a_full_session_prints_model_context_and_economics_lines() {
     );
     assert_eq!(lines[1], line2);
     let line3 = format!(
-        "{ORANGE}$1.2345{RESET} {DIM}($0.1235/min){RESET}{sep}{DIM}Cache{RESET} {GREEN}99%{RESET}{sep}{DIM}5h{RESET} {YELLOW}55%{RESET}{sep}{DIM}Rate 7d:{RESET} {YELLOW}60%{RESET}"
+        "{ORANGE}$1.2345{RESET} {DIM}(next <$0.01){RESET}{sep}{DIM}Cache{RESET} {GREEN}99%{RESET}{sep}{DIM}5h{RESET} {YELLOW}55%{RESET}{sep}{DIM}Rate 7d:{RESET} {YELLOW}60%{RESET}"
     );
     assert_eq!(lines[2], line3);
+    assert!(!out.contains("/min"));
 }
 
 #[test]
@@ -1370,4 +1371,126 @@ fn the_local_total_is_reused_within_its_ttl_without_reading_the_database() {
     assert!(hit.last().unwrap().starts_with(&want), "{hit:?}");
     let miss = lines_of(&s, now + LOCAL_TOTAL_TTL);
     assert!(!miss.join("\n").contains("mo budget"), "{miss:?}");
+}
+
+// ---- next message estimate on line 3 ---------------------------------------
+
+const NEXT_NOW: i64 = 1_800_000_000;
+
+/// One transcript record `age` seconds before `NEXT_NOW`.
+fn transcript_record(age: i64, model: &str, write_5m: u64, write_1h: u64, read: u64) -> String {
+    format!(
+        r#"{{"type":"assistant","timestamp":"{}","message":{{"model":"{model}","usage":{{"input_tokens":3,"cache_creation_input_tokens":{},"cache_read_input_tokens":{read},"cache_creation":{{"ephemeral_5m_input_tokens":{write_5m},"ephemeral_1h_input_tokens":{write_1h}}}}}}}}}
+"#,
+        playbook_common::time::iso_utc(NEXT_NOW - age),
+        write_5m + write_1h
+    )
+}
+
+/// Line 3 for a payload with the given model id, usage counts and
+/// transcript. `transcript` is `None` for an empty `transcript_path`,
+/// `Some(None)` for a path to a missing file and `Some(Some(record))` for a
+/// one record file.
+fn next_line(
+    model_id: &str,
+    counts: (i64, i64, i64),
+    transcript: Option<Option<String>>,
+) -> String {
+    let s = Scratch::new();
+    let path = match transcript {
+        None => String::new(),
+        Some(None) => s.0.join("missing.jsonl").display().to_string(),
+        Some(Some(record)) => {
+            let p = s.0.join("t.jsonl");
+            std::fs::write(&p, record).unwrap();
+            p.display().to_string()
+        }
+    };
+    let model = if model_id.is_empty() {
+        String::new()
+    } else {
+        format!(r#""model":{{"id":"{model_id}"}},"#)
+    };
+    let (input, create, read) = counts;
+    let body = payload(
+        &s.0,
+        &format!(
+            r#"{model}"transcript_path":"{path}","context_window":{{"current_usage":{{"input_tokens":{input},"cache_creation_input_tokens":{create},"cache_read_input_tokens":{read}}}}},"cost":{{"total_cost_usd":1.2345}}"#
+        ),
+    );
+    let out = text(&render(&body, &env_for(&s.0), NEXT_NOW));
+    assert!(!out.contains("/min"), "{out:?}");
+    out.lines().nth(1).unwrap_or_default().to_string()
+}
+
+#[test]
+fn line_three_shows_the_next_message_estimate_by_cache_state() {
+    const OPUS: &str = "claude-opus-4-8";
+    let sep = format!("{DIM} | {RESET}");
+    let cost = format!("{ORANGE}$1.2345{RESET}");
+    let cache = format!("{sep}{DIM}Cache{RESET} {GREEN}100%{RESET}");
+    let warm = format!("{cost} {DIM}(next ≥$0.10, warm 1m left){RESET}{cache}");
+    let unknown = format!("{cost} {DIM}(next ≥$0.10){RESET}{cache}");
+    let ctx = (0, 0, 200_000);
+    let rec = |age, model: &str, w5, w1| Some(Some(transcript_record(age, model, w5, w1, 200_000)));
+    let cases: Vec<(&str, String, String)> = vec![
+        (
+            "warm, 5m tier",
+            next_line(OPUS, ctx, rec(240, OPUS, 1000, 0)),
+            warm.clone(),
+        ),
+        (
+            "cold, 5m tier",
+            next_line(OPUS, ctx, rec(600, OPUS, 1000, 0)),
+            format!("{cost} {RED}! cold cache, next ≥$1.25{RESET}{cache}"),
+        ),
+        (
+            "warm, 1h tier",
+            next_line(OPUS, ctx, rec(600, OPUS, 0, 1000)),
+            format!("{cost} {DIM}(next ≥$0.10, warm 50m left){RESET}{cache}"),
+        ),
+        (
+            "transcript file missing",
+            next_line(OPUS, ctx, Some(None)),
+            unknown.clone(),
+        ),
+        (
+            "transcript path empty",
+            next_line(OPUS, ctx, None),
+            unknown.clone(),
+        ),
+        (
+            "model switch",
+            next_line("claude-sonnet-5", ctx, rec(240, OPUS, 0, 0)),
+            format!("{cost} {RED}! cold cache, next ≥$0.50{RESET}{cache}"),
+        ),
+        (
+            "no cache write in the transcript",
+            next_line(OPUS, ctx, rec(240, OPUS, 0, 0)),
+            unknown.clone(),
+        ),
+        (
+            "all counts zero",
+            next_line(OPUS, (0, 0, 0), rec(240, OPUS, 1000, 0)),
+            cost.clone(),
+        ),
+        (
+            "negative input tokens clamp to zero",
+            next_line(OPUS, (-5, 0, 200_000), rec(240, OPUS, 1000, 0)),
+            warm.clone(),
+        ),
+        (
+            "unpriced model",
+            next_line("claude-opus-4-9", ctx, rec(240, "claude-opus-4-9", 1000, 0)),
+            format!("{cost}{cache}"),
+        ),
+        (
+            "no stdin model id falls back to the transcript",
+            next_line("", ctx, rec(240, OPUS, 1000, 0)),
+            warm,
+        ),
+    ];
+    for (name, got, want) in cases {
+        assert_eq!(got, want, "{name}");
+    }
 }

@@ -109,11 +109,6 @@ pub(super) fn cache_color(pct: i64) -> &'static str {
     }
 }
 
-/// Cost burn rate in $/min to 4 decimals, `None` when there is no wall time.
-pub(super) fn cost_per_min(cost: f64, wall_ms: i64) -> Option<String> {
-    (wall_ms > 0).then(|| format!("{:.4}", (cost * 60000.0) / wall_ms as f64))
-}
-
 /// Gap to the autocompact trigger; `None` while usage is under 50%.
 pub(super) fn compact_gap(used: &str, trigger: i64) -> Option<i64> {
     let used = int_part(used);
@@ -253,8 +248,6 @@ mod tests {
         assert_eq!(cache_color(80), GREEN);
         assert_eq!(cache_color(60), YELLOW);
         assert_eq!(cache_color(49), RED);
-        assert_eq!(cost_per_min(0.0, 0), None);
-        assert_eq!(cost_per_min(1.0, 60000).as_deref(), Some("1.0000"));
     }
 
     #[test]

@@ -17,9 +17,6 @@
 //! write even when the last tier was one hour, because the new model's tier
 //! is not known.
 
-// The estimate is wired into the status line in the next change.
-#![allow(dead_code)]
-
 use crate::common::transcript_tail::{CacheTier, LastTurn};
 use crate::usage::pricing::{cost_usd, same_model, Tokens};
 
