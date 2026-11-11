@@ -7,6 +7,7 @@
 
 use super::aggregate::civil_from_days;
 use super::db;
+use super::telemetry_db::RowScope;
 use super::{ToolInvocationEvent, UsageEvent};
 use playbook_store::Connection;
 use std::collections::BTreeMap;
@@ -304,7 +305,7 @@ pub fn load_agents(
     machine: Option<&str>,
 ) -> Result<AgentView, String> {
     let (since, until) = window_seconds(range, now);
-    let rows = super::telemetry_db::agent_groups(conn, since, until, machine)?;
+    let rows = super::telemetry_db::agent_groups(conn, since, until, RowScope::machine(machine))?;
     if rows.is_empty() {
         return transcript_view(conn, crate::ToolKind::Agent, since, until, machine);
     }
@@ -332,7 +333,8 @@ pub fn load_skills(
     machine: Option<&str>,
 ) -> Result<AgentView, String> {
     let (since, until) = window_seconds(range, now);
-    let mut rows = super::telemetry_db::skill_groups(conn, since, until, machine)?;
+    let mut rows =
+        super::telemetry_db::skill_groups(conn, since, until, RowScope::machine(machine))?;
     for row in &mut rows {
         if row.key == HIDDEN_PLUGIN_SKILL {
             row.key = "plugin skills (names hidden)".to_string();
@@ -359,7 +361,13 @@ fn transcript_view(
     until: i64,
     machine: Option<&str>,
 ) -> Result<AgentView, String> {
-    let rows = super::telemetry_db::invocation_groups(conn, kind, since, until, machine)?;
+    let rows = super::telemetry_db::invocation_groups(
+        conn,
+        kind,
+        since,
+        until,
+        RowScope::machine(machine),
+    )?;
     Ok(AgentView {
         rows,
         cost_usd: 0.0,
@@ -389,17 +397,37 @@ pub fn load_health(
     if let Some(period) = super::period::Period::of_range(range) {
         let w = period.windows(now);
         return Ok(HealthView {
-            tools: tool_stats(conn, w.current.start, w.current.end, machine)?,
-            tools_before: tool_stats(conn, w.previous.start, w.previous.end, machine)?,
-            now: health(conn, w.current.start, w.current.end, machine)?,
-            before: Some(health(conn, w.previous.start, w.previous.end, machine)?),
+            tools: tool_stats(
+                conn,
+                w.current.start,
+                w.current.end,
+                RowScope::machine(machine),
+            )?,
+            tools_before: tool_stats(
+                conn,
+                w.previous.start,
+                w.previous.end,
+                RowScope::machine(machine),
+            )?,
+            now: health(
+                conn,
+                w.current.start,
+                w.current.end,
+                RowScope::machine(machine),
+            )?,
+            before: Some(health(
+                conn,
+                w.previous.start,
+                w.previous.end,
+                RowScope::machine(machine),
+            )?),
         });
     }
     let (since, until) = window_seconds(range, now);
     Ok(HealthView {
-        tools: tool_stats(conn, since, until, machine)?,
+        tools: tool_stats(conn, since, until, RowScope::machine(machine))?,
         tools_before: Vec::new(),
-        now: health(conn, since, until, machine)?,
+        now: health(conn, since, until, RowScope::machine(machine))?,
         before: None,
     })
 }
