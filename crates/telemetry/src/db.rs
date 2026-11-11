@@ -340,7 +340,8 @@ pub fn clear_backfilled_files(conn: &Connection) -> Result<(), String> {
 /// Empties the usage history in one transaction: the events, the tool
 /// events and the read progress, so the next ingest reads every transcript
 /// again like a first run. Settings, the budget, the limit readings, the
-/// account names and the telemetry rows stay. A reader sees the history
+/// account names, the account moves and the telemetry rows stay, and a move
+/// labels its events again when they are read. A reader sees the history
 /// before the call or none of it, never a part.
 pub fn reset_usage(conn: &Connection) -> Result<(), String> {
     let tx = playbook_store::Transaction::new_unchecked(
