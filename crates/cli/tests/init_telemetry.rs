@@ -41,7 +41,10 @@ impl Sandbox {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
         // Nothing from the machine running the tests may look like a setup.
         for (name, _) in std::env::vars() {
-            if name == "CLAUDE_CODE_ENABLE_TELEMETRY" || name.starts_with("OTEL_") {
+            if name == "CLAUDE_CODE_ENABLE_TELEMETRY"
+                || name == "IS_DEMO"
+                || name.starts_with("OTEL_")
+            {
                 cmd.env_remove(name);
             }
         }
@@ -398,4 +401,216 @@ fn a_settings_file_created_by_init_is_owner_only() {
         .mode()
         & 0o777;
     assert_eq!(mode, 0o600);
+}
+
+// ---- repair of missing or stale keys, and a blocking IS_DEMO ----
+
+/// Claude Code's managed settings files are read by every telemetry check and
+/// are outside the scratch home. A machine that has one fails here, clearly.
+fn assert_no_managed_settings() {
+    for file in [
+        "/Library/Application Support/ClaudeCode/managed-settings.json",
+        "/etc/claude-code/managed-settings.json",
+    ] {
+        assert!(
+            !Path::new(file).exists(),
+            "{file} exists on this machine and would change what these tests see; move it aside to run them"
+        );
+    }
+}
+
+impl Sandbox {
+    fn write_collector(&self, port: u16, token: &str) {
+        let dir = self.home.join(".config/playbook/data");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("collector.json"),
+            format!(r#"{{"pid":0,"port":{port},"token":"{token}"}}"#),
+        )
+        .unwrap();
+    }
+
+    fn settings_bytes(&self) -> Vec<u8> {
+        fs::read(self.home.join(".claude/settings.json")).unwrap()
+    }
+
+    fn edit_env(&self, key: &str, value: Option<&str>) {
+        let path = self.home.join(".claude/settings.json");
+        let mut doc: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let env = doc["env"].as_object_mut().unwrap();
+        match value {
+            Some(v) => env.insert(key.to_string(), Value::String(v.to_string())),
+            None => env.remove(key),
+        };
+        fs::write(&path, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+    }
+}
+
+const SWITCH_ONLY: &str = r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1"}}"#;
+const ALREADY_CONFIGURED: &str = "you already have telemetry configured, left as it is";
+
+fn otel_keys(env: &serde_json::Map<String, Value>) -> usize {
+    env.keys().filter(|k| k.starts_with("OTEL_")).count()
+}
+
+#[test]
+fn only_telemetry_fills_in_missing_keys_beside_an_on_switch() {
+    assert_no_managed_settings();
+    let sb = Sandbox::new("fill", Some(SWITCH_ONLY));
+    sb.write_collector(47318, "tok");
+
+    let first = sb.run(&["setup", "--only", "telemetry"]);
+    let after_first = sb.settings_bytes();
+    let second = sb.run(&["setup", "--only", "telemetry"]);
+
+    assert!(first.status.success(), "{}", text(&first));
+    let env = sb.env();
+    assert_eq!(otel_keys(&env), 7);
+    assert_eq!(env["OTEL_EXPORTER_OTLP_ENDPOINT"], "http://127.0.0.1:47318");
+    assert_eq!(
+        env["OTEL_EXPORTER_OTLP_HEADERS"],
+        "Authorization=Bearer tok"
+    );
+    assert!(second.status.success(), "{}", text(&second));
+    assert!(text(&second).contains("1 unchanged"), "{}", text(&second));
+    assert_eq!(sb.settings_bytes(), after_first, "byte for byte");
+}
+
+#[test]
+fn only_telemetry_repairs_a_stale_port_and_token_without_a_record() {
+    assert_no_managed_settings();
+    let stale = r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_LOGS_EXPORTER":"otlp","OTEL_METRICS_EXPORTER":"otlp","OTEL_TRACES_EXPORTER":"none","OTEL_EXPORTER_OTLP_PROTOCOL":"http/json","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:1111","OTEL_EXPORTER_OTLP_HEADERS":"Authorization=Bearer old","OTEL_METRICS_INCLUDE_ACCOUNT_UUID":"false"}}"#;
+    let sb = Sandbox::new("stale", Some(stale));
+    sb.write_collector(47318, "newtok");
+
+    let out = sb.run(&["setup", "--only", "telemetry"]);
+
+    assert!(out.status.success(), "{}", text(&out));
+    let env = sb.env();
+    assert_eq!(env["OTEL_EXPORTER_OTLP_ENDPOINT"], "http://127.0.0.1:47318");
+    assert_eq!(
+        env["OTEL_EXPORTER_OTLP_HEADERS"],
+        "Authorization=Bearer newtok"
+    );
+}
+
+#[test]
+fn only_telemetry_follows_a_moved_collector_port() {
+    assert_no_managed_settings();
+    let sb = Sandbox::new("moved", Some("{}"));
+    sb.write_collector(47318, "tok");
+    assert!(sb.run(&["setup", "--only", "telemetry"]).status.success());
+    let before = sb.env();
+    sb.write_collector(51234, "tok");
+
+    let out = sb.run(&["setup", "--only", "telemetry"]);
+    let after_move = sb.settings_bytes();
+    let again = sb.run(&["setup", "--only", "telemetry"]);
+
+    assert!(out.status.success(), "{}", text(&out));
+    let env = sb.env();
+    assert_eq!(env["OTEL_EXPORTER_OTLP_ENDPOINT"], "http://127.0.0.1:51234");
+    let changed: Vec<&String> = env
+        .keys()
+        .filter(|k| before.get(*k) != env.get(*k))
+        .collect();
+    assert_eq!(changed, vec!["OTEL_EXPORTER_OTLP_ENDPOINT"]);
+    assert!(again.status.success());
+    assert_eq!(sb.settings_bytes(), after_move);
+}
+
+#[test]
+fn only_telemetry_puts_back_a_deleted_key_and_uninstall_still_restores() {
+    assert_no_managed_settings();
+    let sb = Sandbox::new(
+        "deleted",
+        Some(r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}"#),
+    );
+    sb.write_collector(47318, "tok");
+    assert!(sb.run(&["setup", "--only", "telemetry"]).status.success());
+    sb.edit_env("OTEL_EXPORTER_OTLP_PROTOCOL", None);
+    assert_eq!(otel_keys(&sb.env()), 6);
+
+    let out = sb.run(&["setup", "--only", "telemetry"]);
+
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(otel_keys(&sb.env()), 7);
+    let gone = sb.run(&["uninstall", "--yes"]);
+    assert!(gone.status.success(), "{}", text(&gone));
+    let env = sb.env();
+    assert_eq!(env["CLAUDE_CODE_ENABLE_TELEMETRY"], "0");
+    assert_eq!(otel_keys(&env), 0);
+}
+
+#[test]
+fn a_session_copy_of_the_switch_does_not_block_repair() {
+    assert_no_managed_settings();
+    let sb = Sandbox::new("copy", Some(SWITCH_ONLY));
+    sb.write_collector(47318, "tok");
+
+    let out = sb.run_with(
+        &["setup", "--only", "telemetry"],
+        &[("CLAUDE_CODE_ENABLE_TELEMETRY", "1")],
+    );
+
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(otel_keys(&sb.env()), 7);
+
+    let other = Sandbox::new("copy-own", Some(SWITCH_ONLY));
+    other.write_collector(47318, "tok");
+    let before = other.settings_bytes();
+
+    let out = other.run_with(
+        &["setup", "--only", "telemetry"],
+        &[("OTEL_LOGS_EXPORTER", "console")],
+    );
+
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(text(&out).contains(ALREADY_CONFIGURED), "{}", text(&out));
+    assert_eq!(other.settings_bytes(), before);
+}
+
+#[test]
+fn a_local_settings_telemetry_value_blocks_repair() {
+    assert_no_managed_settings();
+    let sb = Sandbox::new("local", Some(SWITCH_ONLY));
+    sb.write_collector(47318, "tok");
+    fs::write(
+        sb.home.join(".claude/settings.local.json"),
+        r#"{"env":{"OTEL_LOGS_EXPORTER":"console"}}"#,
+    )
+    .unwrap();
+    let before = sb.settings_bytes();
+
+    let out = sb.run(&["setup", "--only", "telemetry"]);
+
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(text(&out).contains(ALREADY_CONFIGURED), "{}", text(&out));
+    assert_eq!(sb.settings_bytes(), before);
+}
+
+#[test]
+fn yes_repairs_missing_keys_and_no_terminal_without_yes_prints_the_command() {
+    assert_no_managed_settings();
+    let unattended = Sandbox::new("repair-unattended", Some(SWITCH_ONLY));
+    unattended.write_collector(47318, "tok");
+    let before = unattended.settings_bytes();
+
+    let out = unattended.run(&["setup"]);
+
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(unattended.settings_bytes(), before, "nothing is written");
+    assert!(
+        text(&out).contains("telemetry was not turned on"),
+        "{}",
+        text(&out)
+    );
+
+    let yes = Sandbox::new("repair-yes", Some(SWITCH_ONLY));
+    yes.write_collector(47318, "tok");
+
+    let out = yes.run(&["setup", "--yes"]);
+
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(otel_keys(&yes.env()), 7);
 }
