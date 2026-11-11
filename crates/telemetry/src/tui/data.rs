@@ -515,7 +515,8 @@ impl Data {
 
 /// Reads the store and builds the snapshot. Budget, projection, burnup, spend,
 /// tokens and models count every machine of the account. Live, agents, skills,
-/// tools, health, sessions and projects follow the machine.
+/// tools and health follow the account and the machine. Sessions and projects
+/// follow the machine.
 pub fn load(
     conn: &Connection,
     range: Range,
@@ -527,7 +528,10 @@ pub fn load(
     let accounts = account::view(conn, sel)?;
     let machines = machine::view(conn, machine_sel)?;
     let machine = machines.key.as_deref();
-    let scope = RowScope::machine(machine);
+    let scope = RowScope {
+        machine,
+        account: accounts.key.as_deref(),
+    };
     let mut window = match window_start(range, now) {
         Some(since) => db::load_account_events_since(conn, since)?,
         None => db::load_account_events(conn)?,
@@ -716,6 +720,117 @@ mod tests {
                     "agents, {case}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn every_panel_follows_the_account_picked() {
+        let range = Range::LastDays(30);
+        let (machines, accounts) = (2usize, 2usize);
+        // Arrange
+        let conn = fleet(machines, accounts);
+        conn.execute("UPDATE telemetry_requests SET cost_usd = 1.0", [])
+            .unwrap();
+        conn.execute("UPDATE telemetry_requests SET skill_name = 'review'", [])
+            .unwrap();
+
+        // Act and Assert
+        for (sel, expected) in [
+            (AccountSel::Key("acct0".into()), machines as f64),
+            (AccountSel::Key("acct1".into()), machines as f64),
+            (AccountSel::All, (machines * accounts) as f64),
+        ] {
+            let d = load(&conn, range, "", &sel, &MachineSel::All, NOW).unwrap();
+            let case = format!("{:?}", d.accounts.shown);
+            let messages = expected as usize;
+            assert_eq!(d.totals.messages, messages, "header, {case}");
+            assert_eq!(d.live.today.messages, messages, "live today, {case}");
+            assert_eq!(d.agents.cost_usd, expected, "agents, {case}");
+            assert_eq!(d.skills.cost_usd, expected, "skills, {case}");
+            assert_eq!(d.health.now.requests, expected as u64, "health, {case}");
+        }
+    }
+
+    /// `work` owns the first message of `split` and all of `plain`, `home`
+    /// owns the other two messages of `split`. Input tokens stand for the cost: 1, 2, 4 and 8. `ghost` has telemetry and no
+    /// usage event.
+    fn split_session() -> Connection {
+        let conn = db::open_db(&crate::util::scratch_dir("data-split").join("u.db")).unwrap();
+        for (id, session, ts, account, input) in [
+            ("e1", "split", NOW - 300, "work", 1),
+            ("e2", "split", NOW - 200, "home", 2),
+            ("e3", "split", NOW - 100, "home", 4),
+            ("e4", "plain", NOW - 50, "work", 8),
+        ] {
+            let mut e = event(ts, "claude-opus-5", "alpha", 0.0);
+            e.input_tokens = input;
+            e.event_id = id.into();
+            e.session_id = session.into();
+            e.account = account.into();
+            db::upsert_usage_event(&conn, &e).unwrap();
+        }
+        for (session, agent, skill, cost) in [
+            ("split", "a-split", "s-split", 0.5),
+            ("plain", "a-plain", "s-plain", 0.25),
+            ("ghost", "a-ghost", "s-ghost", 0.125),
+        ] {
+            let request = crate::telemetry_db::TelemetryRequest {
+                session_id: session.into(),
+                request_id: session.into(),
+                timestamp: NOW - 100,
+                agent_name: agent.into(),
+                skill_name: skill.into(),
+                cost_usd: cost,
+                ..Default::default()
+            };
+            crate::telemetry_db::insert_request(&conn, &request).unwrap();
+        }
+        conn
+    }
+
+    #[test]
+    fn a_split_session_counts_in_both_accounts_and_an_orphan_only_in_all() {
+        let range = Range::LastDays(30);
+        let keys = |v: &query::AgentView| v.rows.iter().map(|g| g.key.clone()).collect::<Vec<_>>();
+        // Arrange
+        let conn = split_session();
+        let cases = [
+            (
+                AccountSel::Key("work".into()),
+                (2, 9),
+                0.75,
+                vec!["a-plain", "a-split"],
+                vec!["s-plain", "s-split"],
+            ),
+            (
+                AccountSel::Key("home".into()),
+                (2, 6),
+                0.5,
+                vec!["a-split"],
+                vec!["s-split"],
+            ),
+            (
+                AccountSel::All,
+                (4, 15),
+                0.875,
+                vec!["a-ghost", "a-plain", "a-split"],
+                vec!["s-ghost", "s-plain", "s-split"],
+            ),
+        ];
+
+        for (sel, (messages, input), telemetry, agents, skills) in cases {
+            // Act
+            let d = load(&conn, range, "", &sel, &MachineSel::All, NOW).unwrap();
+
+            // Assert
+            let case = d.accounts.shown.clone();
+            assert_eq!(d.totals.messages, messages, "header, {case}");
+            assert_eq!(d.totals.input_tokens, input, "header tokens, {case}");
+            assert_eq!(d.live.today.messages, messages, "live today, {case}");
+            assert_eq!(d.agents.cost_usd, telemetry, "agent cost, {case}");
+            assert_eq!(keys(&d.agents), agents, "agents, {case}");
+            assert_eq!(d.skills.cost_usd, telemetry, "skill cost, {case}");
+            assert_eq!(keys(&d.skills), skills, "skills, {case}");
         }
     }
 
