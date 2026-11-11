@@ -317,7 +317,13 @@ mod tests {
         let restart = Some(MISSING_KEYS);
         let demo = Some(DEMO_BLOCKS);
         // (switch, IS_DEMO, entrypoint, expected)
-        let cases: &[(Option<&str>, Option<&str>, Option<&str>, Option<&str>)] = &[
+        type Case = (
+            Option<&'static str>,
+            Option<&'static str>,
+            Option<&'static str>,
+            Option<&'static str>,
+        );
+        let cases: &[Case] = &[
             (None, None, None, restart),
             (None, Some("1"), Some("cli"), restart),
             (ON, Some("false"), Some("cli"), demo),
