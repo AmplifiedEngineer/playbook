@@ -43,7 +43,13 @@ impl Home {
             .env(TEST_SPAWN_VAR, "1")
             .current_dir(&self.0);
         for (name, _) in std::env::vars() {
-            if name == "CLAUDE_CODE_ENABLE_TELEMETRY" || name.starts_with("OTEL_") {
+            // A Claude Code tool shell passes `IS_DEMO` and the entrypoint to its
+            // children; either one changes which telemetry line the hook prints.
+            if name == "CLAUDE_CODE_ENABLE_TELEMETRY"
+                || name == "IS_DEMO"
+                || name == "CLAUDE_CODE_ENTRYPOINT"
+                || name.starts_with("OTEL_")
+            {
                 cmd.env_remove(name);
             }
         }
