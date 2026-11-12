@@ -1057,9 +1057,6 @@ pub enum Command {
         /// Print the plan and change nothing
         #[arg(long)]
         dry_run: bool,
-        /// Allow a change over 1500 lines
-        #[arg(long)]
-        allow_large: bool,
         /// Ticket key for the branch (`none` turns the ticket rules off)
         #[arg(long)]
         ticket: Option<String>,
@@ -3143,7 +3140,7 @@ pub enum SegmentTopology {
     Single,
 }
 
-/// Naming arguments shared by `segment branch` and `segment resplit`.
+/// Naming arguments of `segment branch`.
 #[derive(Debug, clap::Args)]
 pub struct SegmentNaming {
     /// Conventional commit type for the branch name, such as feat
@@ -3195,39 +3192,15 @@ pub enum SegmentCommand {
     },
     /// Measure a Segment against its base
     ///
-    /// Prints `lines=N files=M over=true|false` for `BASE...HEAD`; `over` is
-    /// true past the limit.
+    /// Prints `lines=N files=M` for `BASE...HEAD`.
     ///
     /// Example: `playbook segment size --base main`
     Size {
         /// Base ref of the Segment
         #[arg(long)]
         base: String,
-        /// Changed lines at which a Segment is over budget
-        #[arg(long, default_value_t = 1500)]
-        limit: u64,
         /// Repo directory to run in. Defaults to the current directory
         #[arg(long)]
         dir: Option<PathBuf>,
-    },
-    /// Cut an over-budget Segment at a Work Unit boundary
-    ///
-    /// Finds the last commit that keeps `BASE...commit` within the limit,
-    /// renames the current branch to `<type>/<plan-slug>-s<N>b-<title>` (it
-    /// keeps every commit) and recreates the original branch name at the split
-    /// commit. Prints `split=none` when the Segment already fits, otherwise
-    /// `split=<sha> trimmed=<branch> excess=<branch>`. Exits 1 when even the
-    /// first commit is over the limit.
-    ///
-    /// Example: `playbook segment resplit --base main --type feat --plan-slug my-plan --n 2 --title "Parser core"`
-    Resplit {
-        #[command(flatten)]
-        naming: SegmentNaming,
-        /// Base ref of the Segment
-        #[arg(long)]
-        base: String,
-        /// Changed lines at which a Segment is over budget
-        #[arg(long, default_value_t = 1500)]
-        limit: u64,
     },
 }

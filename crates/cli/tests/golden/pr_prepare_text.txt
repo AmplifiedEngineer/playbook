@@ -3,7 +3,6 @@ state_dir=<STATE>
 base=main (source: --base flag)
 commits_ahead=1 changed_lines=3 dirty_files=0 test_files_touched=0
 VERDICT dirty: OK - nothing uncommitted
-VERDICT size: OK - 3 lines
 VERDICT tests: NONE - the diff adds no test files or inline test blocks; the readiness criteria expect tests for behaviour changes
 === diff stat ===
  a.txt | 3 +++

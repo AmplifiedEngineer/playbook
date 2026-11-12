@@ -64,9 +64,8 @@ DELIVERY: /playbook:implement splits the plan into PR-sized Segments and, before
 executing, prompts for three things (unless preset by flag or running --auto):
   - PR topology: independent (default, disjoint Segments) | stacked (dependency chain) | single
   - Boundary:    savepoint (default) | pause | land (opt-in, merges each Segment)
-It honors the plan's Segments but re-splits any whose real diff exceeds the
-1500-line hard limit (Segments target under 500). Each Segment becomes one small
-pull request.
+It honors the plan's Segments. Each Segment becomes one pull request, kept as
+small as possible and self-contained by area or feature.
 
 PLANNING: /playbook:implement never designs. If the reference isn't a ready plan, it
 stops and tells you to run /playbook:plan or /playbook:adr first.
@@ -164,7 +163,7 @@ Before proceeding past this gate, run the check. Only continue to Step 4.5 if it
 **1. Resolve Segments.**
 
 - If the plan has a **Segments** table (a `/playbook:plan` plan does), use it: each Segment is an ordered group of Work Units, and the WU table's `Segment` column assigns every WU.
-- If it does NOT (an older plan, an issue, or a spec), **derive** Segments here: pack the Work Units into groups targeting under 500 changed lines (never over the 1500 hard limit), in dependency order, one concern per group where the WU titles make the boundary obvious. A tiny plan may be a single Segment.
+- If it does NOT (an older plan, an issue, or a spec), **derive** Segments here: pack the Work Units into groups that are self-contained by area or feature and as small as possible (tests do not count toward size), in dependency order, one concern per group where the WU titles make the boundary obvious. A tiny plan may be a single Segment.
 
 Either way, confirm the Segment ordering respects the WU `Requires` graph (no forward cross-Segment dependency) before continuing; reorder if needed.
 
@@ -212,23 +211,10 @@ Every Agent prompt MUST include: a pointer to its Work Unit's brief file (Step 5
 4. Pick the base ref. Under `land` (all three topologies): `git fetch origin <default-branch>` and use `origin/<default-branch>`, never the previous Segment's branch (already merged, possibly deleted) and never the stale local default branch. **Stacked**, Segment 2 or later: the previous Segment's branch, or, when it is not local, `git fetch origin <prev-branch>` and `origin/<prev-branch>`. Everything else (**independent**, and stacked Segment 1): the default branch.
 5. `<segment-base>` is `git rev-parse <base ref>`. Run `git switch -c <branch> <segment-base>`.
 
-`<segment-base>` is used by the re-split guard. The base for Segment N's PR is Segment N-1's branch under **stacked** and the default branch under **independent**.
+The base for Segment N's PR is Segment N-1's branch under **stacked** and the default branch under **independent**.
 
 On a **ledger-driven resume** (Step 5 ledger, e.g. after `/clear`, a crash, or a fresh checkout), a Segment branch that already exists is resumed with `git switch`; fetch a stacked previous branch that is not local. Record `Segment id -> branch -> <segment-base> -> WU commit range` in the ledger as you go.
 
-**Re-split guard (MUST, hard limit = 1500 changed lines; Segments target under 500).** After a Segment's WUs are committed, measure it. Intent: segment-size. If the session's tool map lists it, use that command with `<segment-base>`; it prints `lines=N files=M over=true|false`. Otherwise do this: run `git diff --shortstat <segment-base>...HEAD` and add the insertions and deletions; the Segment is over when that sum is above 1500. When it is over, split the Segment at a WU boundary. Intent: segment-resplit. If the session's tool map lists it, use that command with `<segment-base>`, the type, `<plan-slug>`, `N` and the Segment title; it prints `split=<sha> trimmed=<branch> excess=<branch>` and exits 1 when even the first WU commit is over the limit. Otherwise do this:
-
-1. List the Segment's commits oldest first: `git rev-list --reverse --first-parent <segment-base>..HEAD`.
-2. For each, measure `git diff --shortstat <segment-base>...<sha>` the same way. `<split-sha>` is the last commit whose total stays at or under 1500. If even the first is over, stop: the Segment cannot be split at a Work Unit boundary.
-3. Rename the current branch so it keeps every commit: `git branch -m <current-branch> <type>/<plan-slug>-s<N>b-<seg-slug>`.
-4. Recreate the original name at the split point and check it out: `git switch -c <current-branch> <split-sha>`. No branch is reset.
-
-- The new `s<N>b` Segment's `<segment-base>` is `<split-sha>` (under **independent** it still branches off the default branch). Its PR targets the current Segment's branch under stacked, the default branch under independent, or the current Segment's (shared) branch under single. The `b` suffix avoids colliding with a planned `s<N+1>`. **Under single topology this means the re-split adds one follow-up PR** stacked on the shared branch: single still ships one PR normally, but the 1500 hard limit is never breached.
-- **Deliver `s<N>b` as the very next Segment**, before any pre-planned `s<N+1>`, then continue the outer loop. Note the re-split (new Segment id, split point) in the ledger and the final report.
-
-**Under `land`, a re-split defers `s<N>b` (MUST).** The re-split creates `s<N>b` before the current Segment has merged, which is the one place this command creates a later Segment's branch ahead of time. Do NOT open its PR yet. Land the current Segment first, then `git fetch origin <default-branch>`, `git rebase --onto origin/<default-branch> <split-sha> <type>/<plan-slug>-s<N>b-<seg-slug>`, and deliver `s<N>b` as the next Segment with the default branch as its base. Its PR must never target the current Segment's branch, which is merged and likely deleted.
-
-The plan's Segments are the starting point; reality wins at the budget.
 
 **Parallel-by-default scheduler (MUST).** Don't wait for the plan to pre-label groups. Build the WU dependency graph from the `Requires` column and run the acyclicity check (the procedure in Step 6) now, before executing. Then execute in waves until every WU is done:
 
@@ -271,7 +257,7 @@ This is not optional when the commit looks fine. The report is the only place a 
 
 **Verify-by-diff (MUST).** Never take the subagent's word. After a WU returns, confirm the work from git (`git show --stat <sha>`, review the diff against the brief) and the scoped verify. A `DONE` the diff doesn't support is a failure: re-dispatch or stop per Error handling. Git tells you whether the work landed; only the report tells you what the agent observed, so do both.
 
-**Progress ledger.** Record progress in `<implement folder>/<plan-slug>.progress.md`. This folder lives outside the repo checkout (`~/.config/playbook/repos/<owner>/<repo>/implement/`, shared by every checkout and worktree of the repo), so there is nothing to gitignore. At the top, record the resolved Segments and the chosen delivery strategy (topology + boundary + test approach, including "no new tests" when chosen) from Step 4.5. Per Segment, record its id, branch, whether it was re-split, and its PR URL once opened. Per WU, record one of three statuses: `NOT_STARTED` (or the row absent), `IN_PROGRESS` (its base SHA, recorded the moment its first dispatch starts), or `DONE` (its commit range, after squash and integration). On a fresh run or after compaction, read the ledger first: skip WUs recorded `DONE` and Segments already delivered (a paused run resumes from the first Segment without a PR URL); a WU recorded `IN_PROGRESS` routes to the resume procedure below instead of a fresh dispatch.
+**Progress ledger.** Record progress in `<implement folder>/<plan-slug>.progress.md`. This folder lives outside the repo checkout (`~/.config/playbook/repos/<owner>/<repo>/implement/`, shared by every checkout and worktree of the repo), so there is nothing to gitignore. At the top, record the resolved Segments and the chosen delivery strategy (topology + boundary + test approach, including "no new tests" when chosen) from Step 4.5. Per Segment, record its id, branch, and its PR URL once opened. Per WU, record one of three statuses: `NOT_STARTED` (or the row absent), `IN_PROGRESS` (its base SHA, recorded the moment its first dispatch starts), or `DONE` (its commit range, after squash and integration). On a fresh run or after compaction, read the ledger first: skip WUs recorded `DONE` and Segments already delivered (a paused run resumes from the first Segment without a PR URL); a WU recorded `IN_PROGRESS` routes to the resume procedure below instead of a fresh dispatch.
 
 **Under the `land` boundary, each Segment additionally records** (nothing else in this schema changes, and a Segment under **savepoint** or **pause** omits these fields entirely rather than writing them empty): `land:` one of `NOT_STARTED | READY | CI_RUNNING | CI_FIXING | CONFLICT | MERGE_ATTEMPTED | MERGED (<merge-sha>) | PARKED | CI_UNSTABLE`; `review:` which review satisfied the ready-promotion gate, e.g. `implement-step9 (5 lenses, 3 findings fixed)`, plus a line per fix re-review, e.g. `fix-review tier-1 (correctness, 0 findings)`; `ci_fix_attempts: <n>/3` and `ci_rerun_attempts: <n>/2` as two separate counters, since a rerun is not a fix; `merge_attempts:` each attempt with its verbatim outcome, e.g. `--auto -> armed`, `--admin -> refused: <message>`; and, when parked, `parked_reason:` (the verbatim blocking field and refusal message) with `parked_at:` (ISO-8601). A resumed run reads `land:` before doing anything else with that Segment: `MERGED` skips it, `PARKED` routes to Step 10's parked-resume procedure, and anything else re-enters Step 10 at the stage that state names, never at Step 5. First use in a repo, create the implement and worktrees folders (Step 1's storage folders, created if missing), and stop if either cannot be resolved.
 
@@ -335,7 +321,7 @@ This mechanism doesn't apply to Step 8's refinement Work Units: they're synthesi
 
 Report the result: `Cycle check: PASS (N WUs resolve in topological order)` or how a detected cycle was fixed.
 
-**Per Segment (in dependency order), then per Work Unit (or parallel batch) within it:** create the Segment's branch per Step 5's per-Segment setup, run its WUs as below, then apply the Step 5 re-split guard before moving to the next Segment.
+**Per Segment (in dependency order), then per Work Unit (or parallel batch) within it:** create the Segment's branch per Step 5's per-Segment setup, run its WUs as below, then move to the next Segment.
 
 1. Confirm all WUs in the "Requires" column are done.
 2. Dispatch each wave with the Step 5 parallel-by-default scheduler (ready set, safety test, worktree isolation, integration). Don't gate on `Parallel group` annotations; parallelize whatever the safety test allows, sequential only when forced. Within a WU, WU-0 types first, then the RED/GREEN/REFACTOR flow per cycle (or a single subagent for `--no-tdd` or `--no-tests`), delegated to Sonnet.
@@ -377,7 +363,7 @@ Run this pass once. Don't loop. Step 9 is the only review of the diff: this pass
 
 This reviews the IMPLEMENTED work, not the plan: Step 4's adversarial review ran before execution against the plan; this one runs after, against the diff.
 
-**Pick the path (MUST).** Measure the diff this review covers, from the same base the Step 5 re-split guard uses (`<segment-base>`, or the default branch for the whole implemented diff):
+**Pick the path (MUST).** Measure the diff this review covers, from `<segment-base>` (or the default branch for the whole implemented diff):
 
 Intent: review-size. If the session's tool map (printed at session start) lists it, use that command with the base, adding the all-lenses flag when `--all-lenses` was passed; it prints `lines=N files=M path=single|swarm`. Otherwise do this: run `git diff --shortstat <base>...HEAD` and add the insertions and deletions; the path is `single` when that sum is at most 150 and `--all-lenses` was not passed, else `swarm`.
 
@@ -432,7 +418,7 @@ Apply the fixes you hold with HIGH confidence plus every must-fix correctness/se
 - **Stacked:** for each Segment **in order**, invoke `/playbook:pr-create --base <prev-Segment-branch>` on its branch (Segment 1 uses the default branch). Opening in order matters: `/playbook:pr-create` pushes the current branch, so each Segment's branch is on origin by the time the next Segment names it as `--base`. This yields the stacked chain (PR #1 targets the default branch, PR #2 targets Segment 1's branch, and so on). Record each PR URL in the ledger.
 - **Worktree callers:** for every call in this run, put the worktree root (`git rev-parse --show-toplevel`) and branch (`git branch --show-current`) in the prompt of every `/playbook:pr-create` and `/playbook:commit` call, as "Worktree root: <path>, branch: <name>". The commands check them first and stop with `WRONG_DIRECTORY` on a mismatch.
 - **Independent:** invoke `/playbook:pr-create` per Segment branch with the default branch as base.
-- **Single:** in `--auto`, invoke `/playbook:pr-create` once for the whole branch; interactively, leave PR creation to the user (the pre-existing behaviour). If a hard-limit re-split fired (Step 5), the plan now has a shared branch plus one `s<N>b` follow-up branch: open both (follow-up `--base` the shared branch), or in interactive mode point the user at both.
+- **Single:** in `--auto`, invoke `/playbook:pr-create` once for the whole branch; interactively, leave PR creation to the user (the pre-existing behaviour).
 
 These PRs skip `playbook:finish-pull-request`: Steps 8 and 9 already reviewed the code. Promote a PR with `gh pr ready` when the user wants it.
 
@@ -440,7 +426,7 @@ These PRs skip `playbook:finish-pull-request`: Steps 8 and 9 already reviewed th
 
 **Checkpoint before the self-review.** After the PR set is open and before you invoke `/playbook:review --self` on it, and only in ask mode under the **savepoint**, **independent** or **stacked** shapes (not **land**, which continues straight into Step 10, and not **single** without a PR), stop and tell the user: "The PRs are open. To keep this session from compacting on its own midway, run `/compact` now with this focus: `PR #<number> (list every opened PR), plan <plan path>, the self-review is next`." Under **pause**, put this in the same message as that stop. You cannot run `/compact` yourself, so this is a prompt only. When the user replies, run the self-review in the compacted session. In auto mode there is no human, so skip the stop and continue.
 
-**Finish.** Report the applied fixes, the opened PRs (with URLs, bases, and draft state), any re-splits, and the unresolved follow-ups, naming each of the 5 lenses' triage tier alongside its findings (on the single path, one line: "single reviewer, 5 lenses (<count>)"), the same `<lens>: <tier> (<count>)` / `<lens>: skip` shape WU-6 added to `/playbook:review --deep`'s Step 5 `### Reviewers` line: a `full-lens` or `cheap-check` lens shows `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check` for display, not the raw `full-lens`/`cheap-check` value), a `skip` lens shows `<lens>: skip` with no count, e.g. "correctness: full (1) · tests: cheap-check (0) · scope: skip". In interactive mode with the **single** topology chosen, leave PR creation to the user as before; every other topology opens the PRs as above. Under **land**, this step hands off to Step 10 instead of finishing here; the true finish is Step 10's own report once the Segment reads `MERGED` (or `PARKED`). Starting the next feature: run `/clear` before the next `/playbook:plan`, so this run's plan, dispatch history, and fixes don't carry into it.
+**Finish.** Report the applied fixes, the opened PRs (with URLs, bases, and draft state), and the unresolved follow-ups, naming each of the 5 lenses' triage tier alongside its findings (on the single path, one line: "single reviewer, 5 lenses (<count>)"), the same `<lens>: <tier> (<count>)` / `<lens>: skip` shape WU-6 added to `/playbook:review --deep`'s Step 5 `### Reviewers` line: a `full-lens` or `cheap-check` lens shows `<lens>: <tier> (<count>)` (tier written as `full` or `cheap-check` for display, not the raw `full-lens`/`cheap-check` value), a `skip` lens shows `<lens>: skip` with no count, e.g. "correctness: full (1) · tests: cheap-check (0) · scope: skip". In interactive mode with the **single** topology chosen, leave PR creation to the user as before; every other topology opens the PRs as above. Under **land**, this step hands off to Step 10 instead of finishing here; the true finish is Step 10's own report once the Segment reads `MERGED` (or `PARKED`). Starting the next feature: run `/clear` before the next `/playbook:plan`, so this run's plan, dispatch history, and fixes don't carry into it.
 
 ## Step 10: Land the Segment (`--boundary=land` only)
 
@@ -461,8 +447,7 @@ Runs once per Segment, immediately after Step 9 opened that Segment's PR, and MU
 | `--auto`: validation fails after 3 fixes (including Step 8/9 re-validations) | Stop; report; do NOT open any PRs |
 | `--auto`: on the default branch | Create a feature branch before the first commit |
 | `--auto`: commit/push fails | Stop; report (auth, hooks, etc.) |
-| Plan has no Segments (old plan/issue/spec) | Derive Segments targeting under 500 lines (never over 1500) in Step 4.5 |
-| Segment's real diff exceeds the 1500-line hard limit | Re-split at WU boundaries into a new trailing Segment/PR; note it (Step 5) |
+| Plan has no Segments (old plan/issue/spec) | Derive Segments, small and self-contained by area or feature, in Step 4.5 |
 | Interactive, not `--auto`, no strategy flags | Ask the three Step 4.5 questions (topology + boundary + TDD approach), recommend per scope |
 | `--auto` or a strategy flag set | Skip that question; self-select recommended (independent when disjoint, else stacked, + savepoint) and record as assumption |
 | `--no-tests` set, or "No new tests" answered | Skip writing tests; Step 7 still runs the existing suite, type check, and lint; `tests` lens resolves to `skip`; log it in the ledger and each PR body (Step 5, Step 9) |

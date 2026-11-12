@@ -200,13 +200,6 @@ pub const TOOLS: &[Tool] = &[
         "segment size --base main",
     ),
     t(
-        "segment-resplit",
-        "segment",
-        "resplit",
-        "",
-        "segment resplit --type feat --plan-slug p --n 1 --title t --base main",
-    ),
-    t(
         "gate-record",
         "gate",
         "record",

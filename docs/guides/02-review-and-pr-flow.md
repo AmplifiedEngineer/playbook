@@ -183,7 +183,7 @@ playbook deliver --dir ../.worktrees/repo/feature -A \
   --message "fix(api): retry on timeout" --title "fix(api): retry on timeout" --ready
 ```
 
-- It refuses the default branch, a protected branch, a detached HEAD, a change over 1500 lines (override with `--allow-large`), and any title, body or commit message with an em or en dash outside code, AI attribution, a title that is not a conventional commit, or a title over 72 characters.
+- It refuses the default branch, a protected branch, a detached HEAD, and any title, body or commit message with an em or en dash outside code, AI attribution, a title that is not a conventional commit, or a title over 72 characters.
 - With nothing staged and unpushed or rebased commits, it only pushes. A force push uses a lease and happens only after its own rebase.
 - `--auto-merge` verifies the merge queued. `--wait` polls until the PR merges, closes or a required check fails, and names the failing checks.
 - `--dry-run` prints the plan. `--json` prints the report. Exit codes: 0 delivered, 3 refused, 4 rebase conflict, 5 git or gh failure, 6 closed or checks failed, 7 wait timed out, 8 auto-merge not queued, 9 nothing to do.

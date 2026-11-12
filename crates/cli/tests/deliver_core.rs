@@ -14,6 +14,9 @@ use std::time::Duration;
 
 static N: AtomicU64 = AtomicU64::new(0);
 
+/// A diff far past the old 1500 line refusal.
+const LARGE_DIFF_LINES: usize = 2000;
+
 const FAKE_GH: &str = r#"#!/bin/bash
 d="$FAKE_GH_DIR"
 echo "$*" >> "$d/log"
@@ -522,18 +525,14 @@ fn a_branch_with_no_commits_beyond_the_base_has_nothing_to_do() {
 }
 
 #[test]
-fn a_diff_over_the_size_limit_is_refused_unless_allowed() {
+fn a_large_diff_is_delivered_without_an_override() {
     let rig = Rig::new();
-    let mut opts = dirty(&rig);
-    rig.write("big.txt", &"line\n".repeat(30));
-    opts.size_limit = 20;
+    let opts = dirty(&rig);
+    rig.write("big.txt", &"line\n".repeat(LARGE_DIFF_LINES));
 
-    let err = deliver::run(&opts).expect_err("too large");
-    opts.allow_large = true;
-    let allowed = deliver::run(&opts);
+    let delivered = deliver::run(&opts);
 
-    assert_eq!(err.code, exit::REFUSED);
-    assert!(allowed.is_ok());
+    assert!(delivered.is_ok());
 }
 
 #[test]

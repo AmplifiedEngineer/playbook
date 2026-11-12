@@ -50,7 +50,7 @@ Segments are PR-sized increments with one concern each:
 | Seg | Title | Work Units | Requires | Concern | Est. lines |
 ```
 
-A Segment aims for under 500 changed lines, needs a reason above 1000, and never exceeds 1500. The default order is a linear chain, which maps to stacked PRs.
+A Segment is kept as small as possible and self-contained by area or feature. Tests do not count toward its size. The default order is a linear chain, which maps to stacked PRs.
 
 ### Approval prompts before agents run
 
@@ -81,7 +81,7 @@ It runs on Sonnet and never edits files itself. It hands each Work Unit to a sub
 - **PR topology:** stacked (default), independent off the default branch, or a single PR.
 - **Segment boundary:** savepoint commits with PRs opened at the end (default), or pause after each PR.
 
-**Order.** Segments run one at a time, each on its own branch. Inside a Segment, Work Units run in dependency order, and a parallel group runs as concurrent Tasks once the file sets are verified disjoint. If a Segment's real diff passes 1500 lines, it is split again.
+**Order.** Segments run one at a time, each on its own branch. Inside a Segment, Work Units run in dependency order, and a parallel group runs as concurrent Tasks once the file sets are verified disjoint.
 
 **TDD by default.** Each unit runs red, green, refactor in three subagent steps. `--no-tdd` writes tests and code together. `--no-tests` writes no new tests, for config-only or docs-only changes. Auto never picks it.
 
