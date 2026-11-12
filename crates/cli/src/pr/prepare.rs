@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `pr prepare`: every judgment-free step that comes before drafting a PR's
-//! title and body (branch and base, size and test checks, the diff, the
+//! title and body (branch and base, dirty and test checks, the diff, the
 //! ticket), printed as labeled lines the calling command copies verbatim.
 
 use crate::pr::shared::{
