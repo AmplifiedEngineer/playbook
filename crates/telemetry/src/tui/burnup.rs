@@ -739,8 +739,8 @@ mod tests {
             .find(|col| grid.iter().any(|row| row[*col] == Role::Actual))
             .unwrap();
         let top = plot.row(b.total);
-        for row in top..plot.height {
-            assert!(grid[row][last_used] == Role::Actual, "row {row}");
+        for (row, cells) in grid.iter().enumerate().skip(top) {
+            assert!(cells[last_used] == Role::Actual, "row {row}");
         }
     }
 
