@@ -510,7 +510,6 @@ Example: `playbook deliver --dir ../wt -A --message "fix(x): y" --title "fix(x):
 - `--wait`: Wait until the PR merges, closes, or a required check fails
 - `--timeout <TIMEOUT>`: Seconds to wait with `--wait`
 - `--dry-run`: Print the plan and change nothing
-- `--allow-large`: Allow a change over 1500 lines
 - `--ticket <TICKET>`: Ticket key for the branch (`none` turns the ticket rules off)
 - `--issue <ISSUE>`: GitHub issue number the PR handles
 - `--json`: Print JSON instead of text
@@ -1450,7 +1449,7 @@ Example: `playbook sanitize pr-text /tmp/body.md`
 
 Run the git recipes `/playbook:implement` uses for a Segment
 
-Subcommands: `branch`, `resplit`, `size`
+Subcommands: `branch`, `size`
 
 ### `playbook segment branch`
 
@@ -1470,33 +1469,15 @@ Example: `playbook segment branch --type feat --plan-slug my-plan --n 2 --title 
 - `--prev-branch <PREV_BRANCH>`: Previous Segment's branch, for a stacked Segment past the first
 - `--land`: Branch off the fetched origin default branch, at the land boundary
 
-### `playbook segment resplit`
-
-Cut an over-budget Segment at a Work Unit boundary
-
-Finds the last commit that keeps `BASE...commit` within the limit, renames the current branch to `<type>/<plan-slug>-s<N>b-<title>` (it keeps every commit) and recreates the original branch name at the split commit. Prints `split=none` when the Segment already fits, otherwise `split=<sha> trimmed=<branch> excess=<branch>`. Exits 1 when even the first commit is over the limit.
-
-Example: `playbook segment resplit --base main --type feat --plan-slug my-plan --n 2 --title "Parser core"`
-
-- `--type <KIND>`: Conventional commit type for the branch name, such as feat
-- `--plan-slug <PLAN_SLUG>`: Plan slug
-- `--n <N>`: Segment number
-- `--title <TITLE>`: Segment title, kebab-cased and truncated into the branch name
-- `--default-branch <DEFAULT_BRANCH>`: Default branch of the repo
-- `--dir <DIR>`: Repo directory to run in. Defaults to the current directory
-- `--base <BASE>`: Base ref of the Segment
-- `--limit <LIMIT>`: Changed lines at which a Segment is over budget
-
 ### `playbook segment size`
 
 Measure a Segment against its base
 
-Prints `lines=N files=M over=true|false` for `BASE...HEAD`; `over` is true past the limit.
+Prints `lines=N files=M` for `BASE...HEAD`.
 
 Example: `playbook segment size --base main`
 
 - `--base <BASE>`: Base ref of the Segment
-- `--limit <LIMIT>`: Changed lines at which a Segment is over budget
 - `--dir <DIR>`: Repo directory to run in. Defaults to the current directory
 
 ### `playbook sessions`

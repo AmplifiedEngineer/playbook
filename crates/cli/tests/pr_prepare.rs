@@ -48,7 +48,8 @@ fn has_line(out: &str, line: &str) -> bool {
     out.lines().any(|l| l == line)
 }
 
-const OVER_NOTE: &str = "needs explicit justification in the PR body";
+/// A diff far past the old 1500 line refusal.
+const LARGE_DIFF_LINES: usize = 2000;
 
 #[test]
 fn an_open_pr_returns_ok_with_the_redirect_and_runs_no_further_checks() {
@@ -238,51 +239,22 @@ fn zero_commits_ahead_is_a_hard_abort() {
 }
 
 #[test]
-fn size_verdicts_pin_every_threshold_boundary() {
+fn a_large_diff_is_never_refused_and_reports_its_changed_lines() {
     // Arrange
-    let soft =
-        |n: usize| format!("VERDICT size: SOFT - {n} lines is above the 500-line soft limit");
-    let over = |n: usize| {
-        format!(
-            "VERDICT size: OVER - {n} lines is above the 1000-line enforced limit and {OVER_NOTE}"
-        )
-    };
-    let cases: Vec<(usize, String)> = vec![
-        (500, "VERDICT size: OK - 500 lines".to_string()),
-        (501, soft(501)),
-        (1000, soft(1000)),
-        (1001, over(1001)),
-        (1500, over(1500)),
-    ];
-
-    for (lines, expected) in cases {
-        // Act
-        let fx = Fixture::new(&format!("size{lines}"), "feat/x");
-        fx.commit_lines("data.txt", lines);
-        let got = fx
-            .run(&FakeGh::default(), None, None)
-            .expect("within the hard limit");
-
-        // Assert
-        assert!(
-            has_line(&got, &expected),
-            "{lines} lines: expected {expected:?} in\n{got}"
-        );
-    }
-}
-
-#[test]
-fn more_than_1500_lines_is_a_hard_abort_naming_the_limit() {
-    // Arrange
-    let fx = Fixture::new("size1501", "feat/x");
-    fx.commit_lines("data.txt", 1501);
+    let fx = Fixture::new("large", "feat/x");
+    fx.commit_lines("data.txt", LARGE_DIFF_LINES);
 
     // Act
-    let got = fx.run(&FakeGh::default(), None, None);
+    let got = fx
+        .run(&FakeGh::default(), None, None)
+        .expect("size never refuses");
 
     // Assert
-    let err = got.expect_err("over the hard limit");
-    assert!(err.contains("1500-line hard size limit"), "got {err}");
+    assert!(
+        got.contains(&format!("changed_lines={LARGE_DIFF_LINES}")),
+        "{got}"
+    );
+    assert!(!got.contains("VERDICT size"), "{got}");
 }
 
 #[test]
@@ -547,26 +519,14 @@ fn json_an_open_pr_is_pr_exists() {
 }
 
 #[test]
-fn parity_size_limits_pin_the_json_edges() {
-    for (lines, size, refused) in [
-        (500, "OK", false),
-        (501, "SOFT", false),
-        (1000, "SOFT", false),
-        (1001, "OVER", false),
-        (1500, "OVER", false),
-        (1501, "", true),
-    ] {
-        let fx = Fixture::new(&format!("json-size-{lines}"), "feat/x");
-        fx.commit_lines("a.txt", lines);
+fn parity_a_large_diff_has_no_size_check_in_the_json() {
+    let fx = Fixture::new("json-large", "feat/x");
+    fx.commit_lines("a.txt", LARGE_DIFF_LINES);
 
-        let got = json_of(&fx, &FakeGh::default(), Some("main"));
+    let got = json_of(&fx, &FakeGh::default(), Some("main")).expect("size never refuses");
 
-        match (refused, got) {
-            (true, Err(e)) => assert!(e.contains("hard size limit"), "{e}"),
-            (false, Ok(v)) => assert_eq!(v["checks"]["size"], size, "{lines} lines"),
-            (r, g) => panic!("{lines}: refused={r} got {g:?}"),
-        }
-    }
+    assert_eq!(got["changed_lines"], LARGE_DIFF_LINES);
+    assert!(got["checks"].get("size").is_none(), "{got}");
 }
 
 #[test]

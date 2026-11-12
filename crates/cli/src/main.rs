@@ -1235,30 +1235,8 @@ fn real_main() {
                         &args,
                     )
                 }
-                SegmentCommand::Size { base, limit, dir } => {
-                    playbook::segment::size(&dir.unwrap_or_else(|| ".".into()), &base, limit)
-                }
-                SegmentCommand::Resplit {
-                    naming,
-                    base,
-                    limit,
-                } => {
-                    let args = playbook::segment::BranchArgs {
-                        kind: &naming.kind,
-                        plan_slug: &naming.plan_slug,
-                        n: naming.n,
-                        title: &naming.title,
-                        topology: playbook::segment::Topology::Stacked,
-                        default_branch: &naming.default_branch,
-                        prev_branch: None,
-                        land: false,
-                    };
-                    playbook::segment::resplit(
-                        &naming.dir.clone().unwrap_or_else(|| ".".into()),
-                        &base,
-                        &args,
-                        limit,
-                    )
+                SegmentCommand::Size { base, dir } => {
+                    playbook::segment::size(&dir.unwrap_or_else(|| ".".into()), &base)
                 }
             };
             match result {
@@ -2026,7 +2004,6 @@ fn real_main() {
             wait,
             timeout,
             dry_run,
-            allow_large,
             ticket,
             issue,
             json,
@@ -2110,7 +2087,6 @@ fn real_main() {
             opts.auto_merge = auto_merge;
             opts.wait = wait.then(|| std::time::Duration::from_secs(timeout));
             opts.dry_run = dry_run;
-            opts.allow_large = allow_large;
             opts.rules = Some(pr::body_rules::Rules::load(&common::home_dir(), repo_slug));
             opts.ticket = ticket;
             opts.issue = issue;

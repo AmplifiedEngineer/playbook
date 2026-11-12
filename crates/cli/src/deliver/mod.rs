@@ -66,8 +66,6 @@ pub struct Options {
     pub wait: Option<Duration>,
     pub poll: Duration,
     pub dry_run: bool,
-    pub allow_large: bool,
-    pub size_limit: u64,
     /// Branch names refused besides the default branch. A trailing `/*` matches a prefix.
     pub protected: Vec<String>,
     pub git: String,
@@ -103,8 +101,6 @@ impl Options {
             wait: None,
             poll: Duration::from_secs(15),
             dry_run: false,
-            allow_large: false,
-            size_limit: 1500,
             protected: ["main", "master", "develop", "trunk", "release/*"]
                 .map(String::from)
                 .to_vec(),
@@ -195,18 +191,6 @@ impl Report {
         out.push_str(&format!("Outcome: {}\n", self.outcome));
         out
     }
-}
-
-fn lines_changed(numstat: &str) -> u64 {
-    numstat
-        .lines()
-        .map(|l| {
-            l.split('\t')
-                .take(2)
-                .map(|n| n.parse::<u64>().unwrap_or(0))
-                .sum::<u64>()
-        })
-        .sum()
 }
 
 fn default_branch(sys: &Sys) -> String {
@@ -713,25 +697,6 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
         return Err(fail(exit::FAILED, format!("origin/{base} does not exist")));
     }
     report.base = base.clone();
-
-    // Size gate over the staged diff plus what the branch already carries.
-    let cached = sys
-        .git_out(&["diff", "--cached", "--numstat"])
-        .unwrap_or_default();
-    let range = format!("{base_ref}...HEAD");
-    let committed = sys
-        .git_out(&["diff", "--numstat", &range])
-        .unwrap_or_default();
-    let size = lines_changed(&cached) + lines_changed(&committed);
-    if size > opts.size_limit && !opts.allow_large {
-        return Err(fail(
-            exit::REFUSED,
-            format!(
-                "the change is {size} lines, over the {} line limit; split it or pass --allow-large",
-                opts.size_limit
-            ),
-        ));
-    }
 
     // Text gate: the title, the body and every commit title are checked
     // before anything is committed or pushed.

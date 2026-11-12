@@ -236,10 +236,6 @@
     "required": false
   },
   {
-    "intent": "segment-resplit",
-    "required": false
-  },
-  {
     "intent": "segment-size",
     "required": false
   },

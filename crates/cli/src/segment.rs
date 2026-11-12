@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook segment`: the git recipes `/playbook:implement` runs for a
-//! Segment. `branch` puts HEAD on the right branch for the delivery topology,
-//! `size` measures a Segment against its base, and `resplit` cuts an
-//! over-budget Segment at a Work Unit boundary. They live here so the
-//! branch names, the base choice and the cut point are tested code, not
-//! paragraphs the model re-derives each run.
+//! Segment. `branch` puts HEAD on the right branch for the delivery topology
+//! and `size` measures a Segment against its base. They live here so the
+//! branch names and the base choice are tested code, not paragraphs the
+//! model re-derives each run.
 
 use crate::review::size::parse_numstat;
 use std::path::Path;
@@ -36,10 +35,9 @@ pub fn slug(title: &str) -> String {
     out.trim_matches('-').to_string()
 }
 
-/// `<type>/<plan-slug>-s<N><suffix>-<seg-slug>`; `suffix` is `b` for the
-/// excess half of a re-split and empty otherwise.
-pub fn branch_name(kind: &str, plan_slug: &str, n: u32, suffix: &str, title: &str) -> String {
-    format!("{kind}/{plan_slug}-s{n}{suffix}-{}", slug(title))
+/// `<type>/<plan-slug>-s<N>-<seg-slug>`.
+pub fn branch_name(kind: &str, plan_slug: &str, n: u32, title: &str) -> String {
+    format!("{kind}/{plan_slug}-s{n}-{}", slug(title))
 }
 
 /// Longest one git call may run. Generous because fetch and switch can be slow.
@@ -111,7 +109,7 @@ pub fn branch(dir: &Path, a: &BranchArgs<'_>) -> Result<String, String> {
         let sha = git(dir, &["rev-parse", "HEAD"])?;
         return Ok(format!("branch={name} base={sha} base_ref=HEAD"));
     }
-    let name = branch_name(a.kind, a.plan_slug, a.n, "", a.title);
+    let name = branch_name(a.kind, a.plan_slug, a.n, a.title);
     if ref_exists(dir, &format!("refs/heads/{name}")) {
         return Err(format!(
             "branch {name} already exists; resume on it with git switch"
@@ -129,58 +127,10 @@ fn measure(dir: &Path, base: &str, head: &str) -> Result<(u64, u64), String> {
     Ok(parse_numstat(&text))
 }
 
-/// `lines=N files=M over=true|false` for `base...HEAD`.
-pub fn size(dir: &Path, base: &str, limit: u64) -> Result<String, String> {
+/// `lines=N files=M` for `base...HEAD`.
+pub fn size(dir: &Path, base: &str) -> Result<String, String> {
     let (lines, files) = measure(dir, base, "HEAD")?;
-    Ok(format!(
-        "lines={lines} files={files} over={}",
-        lines > limit
-    ))
-}
-
-/// The newest commit of `commits` (oldest first) whose cumulative diff from
-/// `base` stays within `limit`, given each commit's cumulative line count.
-pub fn pick_split(cumulative: &[(String, u64)], limit: u64) -> Option<&str> {
-    cumulative
-        .iter()
-        .take_while(|(_, lines)| *lines <= limit)
-        .last()
-        .map(|(sha, _)| sha.as_str())
-}
-
-/// Cut a Segment that went over `limit` at the last commit that keeps it in
-/// budget: the current branch is renamed to hold the whole run as `s<N>b`,
-/// and the original name is recreated at the split point and checked out.
-/// Prints `split=none` when the Segment fits, otherwise
-/// `split=<sha> trimmed=<branch> excess=<branch>`.
-pub fn resplit(dir: &Path, base: &str, a: &BranchArgs<'_>, limit: u64) -> Result<String, String> {
-    let (total, _) = measure(dir, base, "HEAD")?;
-    if total <= limit {
-        return Ok("split=none".to_string());
-    }
-    let current = git(dir, &["rev-parse", "--abbrev-ref", "HEAD"])?;
-    let commits = git(
-        dir,
-        &[
-            "rev-list",
-            "--reverse",
-            "--first-parent",
-            &format!("{base}..HEAD"),
-        ],
-    )?;
-    let mut cumulative = Vec::new();
-    for sha in commits.lines() {
-        cumulative.push((sha.to_string(), measure(dir, base, sha)?.0));
-    }
-    let Some(split) = pick_split(&cumulative, limit) else {
-        return Err(format!(
-            "the first commit alone is over {limit} changed lines, so the Segment cannot be split at a Work Unit boundary"
-        ));
-    };
-    let excess = branch_name(a.kind, a.plan_slug, a.n, "b", a.title);
-    git(dir, &["branch", "-m", &current, &excess])?;
-    git(dir, &["switch", "-c", &current, split])?;
-    Ok(format!("split={split} trimmed={current} excess={excess}"))
+    Ok(format!("lines={lines} files={files}"))
 }
 
 #[cfg(test)]
@@ -198,25 +148,8 @@ mod tests {
     #[test]
     fn branch_names_follow_the_plan_convention() {
         assert_eq!(
-            branch_name("feat", "my-plan", 2, "", "Parser core"),
+            branch_name("feat", "my-plan", 2, "Parser core"),
             "feat/my-plan-s2-parser-core"
         );
-        assert_eq!(
-            branch_name("feat", "my-plan", 2, "b", "Parser core"),
-            "feat/my-plan-s2b-parser-core"
-        );
-    }
-
-    #[test]
-    fn the_split_is_the_last_commit_inside_the_budget() {
-        let rows = vec![
-            ("a".to_string(), 400),
-            ("b".to_string(), 1400),
-            ("c".to_string(), 1600),
-        ];
-        assert_eq!(pick_split(&rows, 1500), Some("b"));
-        assert_eq!(pick_split(&rows, 1400), Some("b"));
-        assert_eq!(pick_split(&rows, 399), None);
-        assert_eq!(pick_split(&[], 1500), None);
     }
 }

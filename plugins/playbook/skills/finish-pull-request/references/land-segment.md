@@ -148,5 +148,4 @@ That last diff MUST be empty. A squash-merge collapses the branch's internal sha
 | `land`: `gh pr merge` fails with "asynchronous merge REST API" | The PR's base is another open PR's branch, which `land` forbids: report the topology invariant as violated and STOP (Step 10) |
 | `land`: resume lands on a Segment recorded `PARKED` | Re-check `gh pr view <n> --json state,mergedAt,reviewDecision` FIRST. `MERGED` -> continue; `APPROVED` -> re-enter at the merge attempt only; still blocked -> report and stop, redoing nothing (Step 10) |
 | `land`: Segment reads `MERGED` | `git fetch origin <default>`; `git diff origin/<default> <segment-branch> -- <Segment Files>` MUST be empty before Segment N+1's branch is created (Step 10) |
-| `land`: a re-split fired (`s<N>b`) | Don't open `s<N>b`'s PR yet: land the current Segment, then `git rebase --onto origin/<default> <split-sha>` and deliver it against the default branch (Step 5) |
 | `land`: any `gh pr merge` invocation | Never pass `--delete-branch`; it deletes the local branch even when the merge fails (Step 10) |
