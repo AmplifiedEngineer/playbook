@@ -14,13 +14,6 @@ use std::fs;
 use std::path::Path;
 use std::sync::LazyLock;
 
-/// Above this many changed lines a PR is refused outright.
-const HARD_LIMIT: u64 = 1500;
-/// Above this the PR needs written justification.
-const ENFORCED_LIMIT: u64 = 1000;
-/// Above this the PR is flagged as large.
-const SOFT_LIMIT: u64 = 500;
-
 /// Test-file name patterns, anchored with `(^|/)` because git prints
 /// repo-relative paths with no leading slash.
 const TEST_PATH_PATTERN: &str =
@@ -152,11 +145,6 @@ pub fn gather(
 
     let range = format!("{remote_base}...HEAD");
     let changed = changed_lines(&git(&["diff", "--shortstat", &range]).unwrap_or_default());
-    if changed > HARD_LIMIT {
-        return Err(format!(
-            "{changed} changed lines is over the {HARD_LIMIT}-line hard size limit; split the work into smaller PRs"
-        ));
-    }
 
     let dirty = git(&["status", "--porcelain"])
         .map(|out| out.lines().filter(|l| !l.is_empty()).count())
@@ -205,7 +193,6 @@ pub fn render_text(outcome: &Outcome) -> String {
             r.ahead, r.changed, r.dirty, r.tests
         ),
         dirty_verdict(r.dirty),
-        size_verdict(r.changed),
         tests_verdict(r.tests),
     ];
     out.extend(r.fetch_warning.clone());
@@ -218,16 +205,6 @@ pub fn render_text(outcome: &Outcome) -> String {
         format!("ticket={}", r.ticket),
     ]);
     out.join("\n")
-}
-
-fn size_label(changed: u64) -> &'static str {
-    if changed > ENFORCED_LIMIT {
-        "OVER"
-    } else if changed > SOFT_LIMIT {
-        "SOFT"
-    } else {
-        "OK"
-    }
 }
 
 /// Inputs of the JSON form beyond the git facts.
@@ -271,7 +248,6 @@ pub fn render_json(outcome: &Outcome, input: &JsonInput<'_>) -> serde_json::Valu
                 "changed_lines": r.changed, "dirty_files": r.dirty, "tests_touched": r.tests,
                 "checks": {
                     "dirty": if r.dirty > 0 { "WARN" } else { "OK" },
-                    "size": size_label(r.changed),
                     "tests": if r.tests == 0 { "NONE" } else { "OK" },
                 },
                 "ticket": r.ticket, "issue": input.issue, "existing_pr": null,
@@ -413,16 +389,6 @@ fn dirty_verdict(dirty: usize) -> String {
         format!("VERDICT dirty: WARN - {dirty} uncommitted file(s) will NOT be in the PR")
     } else {
         "VERDICT dirty: OK - nothing uncommitted".to_string()
-    }
-}
-
-fn size_verdict(changed: u64) -> String {
-    if changed > ENFORCED_LIMIT {
-        format!("VERDICT size: OVER - {changed} lines is above the {ENFORCED_LIMIT}-line enforced limit and needs explicit justification in the PR body")
-    } else if changed > SOFT_LIMIT {
-        format!("VERDICT size: SOFT - {changed} lines is above the {SOFT_LIMIT}-line soft limit")
-    } else {
-        format!("VERDICT size: OK - {changed} lines")
     }
 }
 

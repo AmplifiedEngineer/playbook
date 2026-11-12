@@ -294,15 +294,15 @@ Between questions, explore the codebase if the answer reveals new areas. Report 
 
 **Knowledge capture (memory).** When exploration reveals a durable convention or gotcha about the codebase (true regardless of this plan), and a project store is present at `~/.config/playbook/memory/<owner>/<repo>/`, persist it as a project memory fact right then: a kebab-case file in `~/.config/playbook/memory/<owner>/<repo>/` with `name`/`description`/`type: project`/`links:`/`anchors:` (to the files). When no project store is present, skip this step silently.
 
-**Work Unit sizing (MUST).** Each WU is one coherent commit: small enough to review on its own, following the `playbook:engineering-standards` size limits and incremental-delivery guidance. Prefer more, smaller WUs over a few large ones; `/playbook:implement` commits each separately. The `Files` column lists production and test files. The `Requires` column is the dependency edge `/playbook:implement` topologically orders and cycle-checks. The `Segment` column names the PR-sized group each WU belongs to (see below).
+**Work Unit sizing (MUST).** Each WU is one coherent commit: small enough to review on its own, following the `playbook:engineering-standards` size rule and incremental-delivery guidance. Prefer more, smaller WUs over a few large ones; `/playbook:implement` commits each separately. The `Files` column lists production and test files. The `Requires` column is the dependency edge `/playbook:implement` topologically orders and cycle-checks. The `Segment` column names the PR-sized group each WU belongs to (see below).
 
 **Segment sizing (MUST).** A Segment groups Work Units into one PR-sized, reviewable increment. Each Segment becomes one pull request, so:
 
 1. **One concern per Segment.** Data layer, service layer, wire-up, and docs are separate Segments, not one, per `playbook:engineering-standards` "one concern per PR".
-2. **Budget (three tiers, from `playbook:engineering-standards`).** Target under 500 changed lines per Segment (soft). A Segment estimated over 1000 (enforced) needs explicit justification in the plan; prefer to split it. Never plan a Segment estimated over 1500 (hard). `/playbook:implement` re-splits at the 1500 hard limit if reality exceeds the estimate.
+2. **Size (from `playbook:engineering-standards`).** Keep each Segment as small as possible and self-contained by area or feature. Prefer one larger Segment that stands on its own over several small ones that add little value, but never plan one so big no one can review it. Tests do not count toward size.
 3. **Ordering respects WU dependencies.** A Segment's WUs may only `Require` WUs in the same or an earlier Segment; no forward cross-Segment dependency. Default to a **linear** Segment chain (`S1 -> S2 -> S3`), which `/playbook:implement` maps to stacked PRs.
 4. **Coverage.** Every WU belongs to exactly one Segment; no WU is left out and none appears in two.
-5. **Suggestions, not law.** These are `/playbook:implement`'s starting point; note in the plan that it may re-split a Segment whose real diff blows the budget. Mark two Segments as parallel-safe only when their file sets are disjoint and neither `Requires` the other.
+5. **Suggestions, not law.** These are `/playbook:implement`'s starting point. Mark two Segments as parallel-safe only when their file sets are disjoint and neither `Requires` the other.
 
 **Parallel-safety (MUST mark explicitly).** Assign a shared `Parallel group` label only when every member of the group:
 
@@ -372,7 +372,7 @@ Produce one self-contained document that `/playbook:implement` can consume direc
 
 ### Segments (suggested PRs)
 Ordered, PR-sized groups of Work Units. One concern each; each Segment becomes one pull request.
-`/playbook:implement` honors these but may re-split a Segment whose real diff exceeds the 1500-line hard limit.
+`/playbook:implement` honors these.
 | Seg | Title | Work Units | Requires | Concern | Est. lines |
 |-----|-------|-----------|----------|---------|-----------|
 | S1 | [title] | WU-0, WU-1, WU-2 | none | [schema + types] | ~180 |
@@ -442,7 +442,7 @@ Spawn a `fact-checker` agent (`subagent_type: playbook:fact-checker`) with the f
 - Downstream consumers of changed code are identified.
 - The test infrastructure the plan assumes actually exists.
 - The Work Unit dependency graph is acyclic, and each Parallel group's WUs have disjoint files with no dependency on each other (the parallel-safe flags are accurate).
-- **Segments are well-formed:** every WU maps to exactly one Segment (full coverage, no WU in two); Segment order respects WU `Requires` (no forward cross-Segment dependency); each Segment's estimate is within budget (FAIL if a planned Segment exceeds the 1500 hard limit, WARN if it exceeds 1000 without justification or exceeds the 500 soft limit); any parallel-marked Segments have disjoint files and no mutual `Requires`.
+- **Segments are well-formed:** every WU maps to exactly one Segment (full coverage, no WU in two); Segment order respects WU `Requires` (no forward cross-Segment dependency); each Segment is self-contained by area or feature (WARN if a planned Segment is too big to review or too small to stand alone); any parallel-marked Segments have disjoint files and no mutual `Requires`.
 
 Returns a structured PASS / FAIL / WARN report. Phase 1 folds a Verification Summary into it (table shape in the quality-gate reference).
 

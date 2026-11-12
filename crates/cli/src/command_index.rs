@@ -330,7 +330,6 @@ pub(crate) const META: &[Meta] = &[
     free("sanitize pr-text"),
     free("segment").for_agents(),
     free("segment branch"),
-    free("segment resplit"),
     ro("segment size"),
     ro("sessions")
         .purpose("List recent sessions with their branch, PR, state and cost")

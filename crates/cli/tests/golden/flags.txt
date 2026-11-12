@@ -567,7 +567,7 @@ arg playbook commit run id=auto long=auto short=- value_names=AUTO possible=true
 arg playbook commit run id=no_signoff long=no-signoff short=- value_names=NO_SIGNOFF possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
 arg playbook commit run id=no_type_check long=no-type-check short=- value_names=NO_TYPE_CHECK possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
 arg playbook commit run id=no_prose_check long=no-prose-check short=- value_names=NO_PROSE_CHECK possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
-command playbook deliver subcommands=- aliases=- groups=Deliver[dir,all,update,staged,message,message_file,title,body,body_file,base,ready,draft,auto_merge,wait,timeout,dry_run,allow_large,ticket,issue,json,branch,auto]
+command playbook deliver subcommands=- aliases=- groups=Deliver[dir,all,update,staged,message,message_file,title,body,body_file,base,ready,draft,auto_merge,wait,timeout,dry_run,ticket,issue,json,branch,auto]
 arg playbook deliver id=dir long=dir short=- value_names=DIR possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 arg playbook deliver id=all long=- short=A value_names=ALL possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=update,staged
 arg playbook deliver id=update long=- short=u value_names=UPDATE possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=staged
@@ -584,7 +584,6 @@ arg playbook deliver id=auto_merge long=auto-merge short=- value_names=AUTO_MERG
 arg playbook deliver id=wait long=wait short=- value_names=WAIT possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
 arg playbook deliver id=timeout long=timeout short=- value_names=TIMEOUT possible=- defaults=1800 aliases=- required=false hidden=false global=false action=Set num_args=- parser=u64 conflicts=-
 arg playbook deliver id=dry_run long=dry-run short=- value_names=DRY_RUN possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
-arg playbook deliver id=allow_large long=allow-large short=- value_names=ALLOW_LARGE possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
 arg playbook deliver id=ticket long=ticket short=- value_names=TICKET possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 arg playbook deliver id=issue long=issue short=- value_names=ISSUE possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 arg playbook deliver id=json long=json short=- value_names=JSON possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
@@ -612,7 +611,7 @@ command playbook review triage-merge subcommands=- aliases=- groups=TriageMerge[
 arg playbook review triage-merge id=lenses long=lenses short=- value_names=LENSES possible=- defaults=- aliases=- required=true hidden=false global=false action=Append num_args=- parser=alloc::string::String conflicts=-
 arg playbook review triage-merge id=tiers long=tiers short=- value_names=TIERS possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 arg playbook review triage-merge id=forced long=force short=- value_names=FORCED possible=- defaults=- aliases=- required=false hidden=false global=false action=Append num_args=- parser=alloc::string::String conflicts=-
-command playbook segment subcommands=branch,size,resplit aliases=- groups=Segment[-]
+command playbook segment subcommands=branch,size aliases=- groups=Segment[-]
 command playbook segment branch subcommands=- aliases=- groups=Branch[-],SegmentNaming[kind,plan_slug,n,title,default_branch,dir]
 arg playbook segment branch id=kind long=type short=- value_names=KIND possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 arg playbook segment branch id=plan_slug long=plan-slug short=- value_names=PLAN_SLUG possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
@@ -623,19 +622,9 @@ arg playbook segment branch id=dir long=dir short=- value_names=DIR possible=- d
 arg playbook segment branch id=topology long=topology short=- value_names=TOPOLOGY possible=stacked,independent,single defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=playbook::SegmentTopology conflicts=-
 arg playbook segment branch id=prev_branch long=prev-branch short=- value_names=PREV_BRANCH possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
 arg playbook segment branch id=land long=land short=- value_names=LAND possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
-command playbook segment size subcommands=- aliases=- groups=Size[base,limit,dir]
+command playbook segment size subcommands=- aliases=- groups=Size[base,dir]
 arg playbook segment size id=base long=base short=- value_names=BASE possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
-arg playbook segment size id=limit long=limit short=- value_names=LIMIT possible=- defaults=1500 aliases=- required=false hidden=false global=false action=Set num_args=- parser=u64 conflicts=-
 arg playbook segment size id=dir long=dir short=- value_names=DIR possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=std::path::PathBuf conflicts=-
-command playbook segment resplit subcommands=- aliases=- groups=Resplit[-],SegmentNaming[kind,plan_slug,n,title,default_branch,dir]
-arg playbook segment resplit id=kind long=type short=- value_names=KIND possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
-arg playbook segment resplit id=plan_slug long=plan-slug short=- value_names=PLAN_SLUG possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
-arg playbook segment resplit id=n long=n short=- value_names=N possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=u32 conflicts=-
-arg playbook segment resplit id=title long=title short=- value_names=TITLE possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
-arg playbook segment resplit id=default_branch long=default-branch short=- value_names=DEFAULT_BRANCH possible=- defaults=main aliases=- required=false hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
-arg playbook segment resplit id=dir long=dir short=- value_names=DIR possible=- defaults=- aliases=- required=false hidden=false global=false action=Set num_args=- parser=std::path::PathBuf conflicts=-
-arg playbook segment resplit id=base long=base short=- value_names=BASE possible=- defaults=- aliases=- required=true hidden=false global=false action=Set num_args=- parser=alloc::string::String conflicts=-
-arg playbook segment resplit id=limit long=limit short=- value_names=LIMIT possible=- defaults=1500 aliases=- required=false hidden=false global=false action=Set num_args=- parser=u64 conflicts=-
 command playbook plans subcommands=- aliases=- groups=Plans[json]
 arg playbook plans id=json long=json short=- value_names=JSON possible=true,false defaults=- aliases=- required=false hidden=false global=false action=SetTrue num_args=- parser=bool conflicts=-
 command playbook json subcommands=bucket-counts,array-length,field,session-fields,graphql-ci-checks,ci-rollup,pr-fields,filter-system-lines,rewrite-session-id,valid-json,field-equals,field-length,raw-string-field,project-field,equal,remove-keys,keys-sorted,add-marker-key,memory-context aliases=- groups=Json[-]

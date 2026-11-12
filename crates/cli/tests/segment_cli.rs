@@ -266,74 +266,13 @@ fn an_existing_segment_branch_is_an_error() {
 }
 
 #[test]
-fn size_counts_changed_lines_and_flags_the_limit() {
+fn size_counts_changed_lines_and_files() {
     let repo = Repo::new("size");
     git_in(&repo.work, &["switch", "-q", "-c", "feat/x"]);
     repo.commit("a.txt", 6);
     repo.commit("b.txt", 5);
 
-    let (_, small, _) = repo.run(&["size", "--base", "main", "--limit", "11"]);
-    let (_, big, _) = repo.run(&["size", "--base", "main", "--limit", "10"]);
+    let (_, out, _) = repo.run(&["size", "--base", "main"]);
 
-    assert_eq!(small, "lines=11 files=2 over=false");
-    assert_eq!(big, "lines=11 files=2 over=true");
-}
-
-#[test]
-fn resplit_cuts_at_the_last_commit_inside_the_budget() {
-    let repo = Repo::new("resplit");
-    git_in(
-        &repo.work,
-        &["switch", "-q", "-c", "feat/my-plan-s2-parser-core"],
-    );
-    repo.commit("a.txt", 4);
-    let keep = repo.commit("b.txt", 4);
-    let tip = repo.commit("c.txt", 4);
-
-    let (code, out, err) = run_with(&repo, "resplit", &["--base", "main", "--limit", "10"]);
-
-    assert_eq!(code, 0, "{err}");
-    assert_eq!(
-        out,
-        format!(
-            "split={keep} trimmed=feat/my-plan-s2-parser-core excess=feat/my-plan-s2b-parser-core"
-        )
-    );
-    assert_eq!(repo.head_branch(), "feat/my-plan-s2-parser-core");
-    assert_eq!(git_in(&repo.work, &["rev-parse", "HEAD"]), keep);
-    assert_eq!(
-        git_in(&repo.work, &["rev-parse", "feat/my-plan-s2b-parser-core"]),
-        tip
-    );
-}
-
-#[test]
-fn resplit_leaves_a_segment_that_fits_alone() {
-    let repo = Repo::new("resplit-fits");
-    git_in(
-        &repo.work,
-        &["switch", "-q", "-c", "feat/my-plan-s2-parser-core"],
-    );
-    repo.commit("a.txt", 4);
-
-    let (code, out, _) = run_with(&repo, "resplit", &["--base", "main", "--limit", "10"]);
-
-    assert_eq!((code, out.as_str()), (0, "split=none"));
-    assert_eq!(repo.head_branch(), "feat/my-plan-s2-parser-core");
-}
-
-#[test]
-fn resplit_refuses_when_the_first_commit_alone_is_over_budget() {
-    let repo = Repo::new("resplit-big");
-    git_in(
-        &repo.work,
-        &["switch", "-q", "-c", "feat/my-plan-s2-parser-core"],
-    );
-    repo.commit("a.txt", 30);
-
-    let (code, _, err) = run_with(&repo, "resplit", &["--base", "main", "--limit", "10"]);
-
-    assert_eq!(code, 1);
-    assert!(err.contains("first commit alone"), "{err}");
-    assert_eq!(repo.head_branch(), "feat/my-plan-s2-parser-core");
+    assert_eq!(out, "lines=11 files=2");
 }

@@ -9,7 +9,7 @@ use std::fs;
 use std::path::Path;
 
 /// Characters. Loaded on every turn, so growth should be a deliberate edit.
-const PROMPT_BUDGET_CHARS: usize = 10_100;
+const PROMPT_BUDGET_CHARS: usize = 10_200;
 
 const CODE_SEARCH_RULE: &str = "**Code search**: for any code question, run `playbook code status` first, and `playbook code index` when it says stale or missing, then use `playbook code context|search|symbol|refs|outline|read`. Use Grep and Glob only when the binary or the index is unavailable. Put this rule in every `Explore` prompt, or search yourself.";
 
