@@ -10,11 +10,11 @@
 //! and review the diff.
 
 use super::app::App;
-use super::data::Data;
-use super::snapshots::fixture_at;
+use super::data::{Data, LimitsView};
+use super::sample;
 use super::theme::{ColorDepth, Theme};
 use super::view::render;
-use crate::query::{live_view, Range};
+use crate::query::{live_view, Range, WeekStart};
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier};
@@ -236,15 +236,23 @@ fn shots() -> Vec<Shot> {
     all
 }
 
-/// The sample data comes only from `fixture_at` and the fixed clock `NOW`, in
+/// The sample data comes only from `sample` and the fixed clock `NOW`, in
 /// UTC. It reads no environment, user name or store.
 fn buffer(shot: &Shot) -> (Buffer, Ground) {
     crate::tz::set(crate::tz::Zone::Utc);
-    let events = fixture_at(NOW);
+    let events = sample::events(NOW);
     let live = live_view(&events, &events, &events, NOW);
     let mut app = App::new(shot.range);
     app.theme = shot.theme;
-    app.data = Some(Data::build(&events, live, NOW, shot.range, ""));
+    let mut data = Data::build(&events, live, NOW, shot.range, "");
+    data.limits = LimitsView::build(
+        &sample::sources(NOW),
+        &events,
+        NOW,
+        WeekStart::Monday,
+        shot.range,
+    );
+    app.data = Some(data);
     (shot.setup)(&mut app);
     let mut terminal = Terminal::new(TestBackend::new(COLS, ROWS)).unwrap();
     terminal.draw(|f| render(f, &app)).unwrap();
