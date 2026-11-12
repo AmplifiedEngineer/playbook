@@ -38,7 +38,7 @@ Use the full name, which trusts only this formula. With no Homebrew, run the ins
 curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh | bash
 ```
 
-Pin a version with `PLAYBOOK_REF=v0.42.0`. Nix, Windows, the plugin on its own and every other route are in the [install guide](docs/guides/00-install.md). Coming from the old org or tap name? See [Moving from the old tap name](docs/guides/00-install.md#moving-from-the-old-tap-name).
+Pin a version with `PLAYBOOK_REF=v0.43.0`. Nix, Windows, the plugin on its own and every other route are in the [install guide](docs/guides/00-install.md). Coming from the old org or tap name? See [Moving from the old tap name](docs/guides/00-install.md#moving-from-the-old-tap-name).
 
 ## First use
 

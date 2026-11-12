@@ -2,6 +2,59 @@
 
 Release notes for playbook: the binary and the plugin in `plugins/playbook`. From 0.34.0 they ship together as one `vX.Y.Z` release with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). Each release has a section named `## playbook <version>`, newest first, which the release pull request adds from the notes that `scripts/release-notes.sh` builds. The sections from 0.33.0 down are plugin releases from before the two lines joined. The binary skips 0.27 to 0.33: it goes from 0.26 to 0.34.0.
 
+## playbook 0.43.0
+
+### Breaking changes
+
+- **plugin**: `/playbook:commit-and-push` is now `/playbook:commit`. ([#1750](https://github.com/AmplifiedEngineer/playbook/pull/1750))
+- **plugin**: `/playbook:quick-review` and `/playbook:deep-review` are removed. Use `/playbook:review --quick` or `--deep`. ([#1759](https://github.com/AmplifiedEngineer/playbook/pull/1759))
+- **size**: The CLI drops `--allow-large` from `playbook deliver` and removes `playbook segment resplit`. `playbook segment size` loses `--limit` and stops printing `over=`, and the pre-flight JSON stops printing `checks.size`. Scripts that use any of these must change. ([#1786](https://github.com/AmplifiedEngineer/playbook/pull/1786))
+
+### Features
+
+- **pbtop**: add up to 8 panels to a tab and arrange them automatically ([#1745](https://github.com/AmplifiedEngineer/playbook/pull/1745))
+- **pbtop**: fold projection into the budget strip and add an hourly chart ([#1749](https://github.com/AmplifiedEngineer/playbook/pull/1749))
+- **plugin**: keep commit-and-push as a deprecated stub ([#1752](https://github.com/AmplifiedEngineer/playbook/pull/1752))
+- **plugin**: rename /playbook:create-pull-request to pr-create ([#1751](https://github.com/AmplifiedEngineer/playbook/pull/1751))
+- **pbtop**: put every chart on the first tab by default ([#1753](https://github.com/AmplifiedEngineer/playbook/pull/1753))
+- **pbtop**: redraw the Budget strip with bars, a pace marker and fewer words ([#1754](https://github.com/AmplifiedEngineer/playbook/pull/1754))
+- **plugin**: rename /playbook:address-pr-comments to pr-comments ([#1755](https://github.com/AmplifiedEngineer/playbook/pull/1755))
+- **plugin**: rename the handoff commands to handoff-save and show ([#1763](https://github.com/AmplifiedEngineer/playbook/pull/1763))
+- **plugin**: rename learn-project and repo-audit to learn and audit ([#1767](https://github.com/AmplifiedEngineer/playbook/pull/1767))
+- **setup**: repair missing or stale telemetry keys ([#1769](https://github.com/AmplifiedEngineer/playbook/pull/1769))
+- **setup**: remove IS\_DEMO that blocks telemetry ([#1770](https://github.com/AmplifiedEngineer/playbook/pull/1770))
+- **statusline**: read the last main turn from a transcript tail ([#1772](https://github.com/AmplifiedEngineer/playbook/pull/1772))
+- **statusline**: estimate the next message cost and cache state ([#1773](https://github.com/AmplifiedEngineer/playbook/pull/1773))
+- **statusline**: show the next message estimate on line 3 ([#1774](https://github.com/AmplifiedEngineer/playbook/pull/1774))
+- **usage**: filter telemetry queries by account ([#1778](https://github.com/AmplifiedEngineer/playbook/pull/1778))
+- **pbtop**: scope every panel by the picked account ([#1779](https://github.com/AmplifiedEngineer/playbook/pull/1779))
+- **usage**: add --account to summary, json and pbtop ([#1780](https://github.com/AmplifiedEngineer/playbook/pull/1780))
+
+### Fixes
+
+- **plugin**: show real checkboxes in the review findings picker ([#1746](https://github.com/AmplifiedEngineer/playbook/pull/1746))
+- **usage**: keep account moves across a usage reset ([#1775](https://github.com/AmplifiedEngineer/playbook/pull/1775))
+- **usage**: repair tab-joined account keys on ingest ([#1776](https://github.com/AmplifiedEngineer/playbook/pull/1776))
+- **telemetry**: stop the false session warning and name IS\_DEMO ([#1768](https://github.com/AmplifiedEngineer/playbook/pull/1768))
+
+### Performance
+
+- **pr**: read the start PR while the stack API answers in pr stack ([#1740](https://github.com/AmplifiedEngineer/playbook/pull/1740))
+
+### Other changes
+
+- docs: show code search and document reading in the README ([#1742](https://github.com/AmplifiedEngineer/playbook/pull/1742))
+- refactor(plugin): retire the git agent ([#1743](https://github.com/AmplifiedEngineer/playbook/pull/1743))
+- test(plugin): add a size budget for commands and skills ([#1747](https://github.com/AmplifiedEngineer/playbook/pull/1747))
+- test(cli): fix the macOS and load sensitive tests ([#1748](https://github.com/AmplifiedEngineer/playbook/pull/1748))
+- refactor(plugin): slim /playbook:pr-comments onto playbook pr comments ([#1757](https://github.com/AmplifiedEngineer/playbook/pull/1757))
+- docs(writing): never hard-wrap prose in markdown ([#1758](https://github.com/AmplifiedEngineer/playbook/pull/1758))
+- test(plugin): guard the skill call graph with a shrink-only list ([#1760](https://github.com/AmplifiedEngineer/playbook/pull/1760))
+- refactor(plugin): rule skills stop loading other skills ([#1761](https://github.com/AmplifiedEngineer/playbook/pull/1761))
+- refactor(plugin): slim handoff-save and handoff-show onto the binary ([#1766](https://github.com/AmplifiedEngineer/playbook/pull/1766))
+- test(usage): pin the token path at session start ([#1777](https://github.com/AmplifiedEngineer/playbook/pull/1777))
+- build(deps): bump rustix to 1.1.6 for RUSTSEC-2026-0486 ([#1787](https://github.com/AmplifiedEngineer/playbook/pull/1787))
+
 ## playbook 0.42.0
 
 ### Features

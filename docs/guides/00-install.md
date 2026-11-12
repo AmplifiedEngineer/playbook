@@ -145,7 +145,7 @@ Pass `--yes` to say yes to every question, including `playbook setup`. Flags go 
 Pin a version with `PLAYBOOK_REF`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh | PLAYBOOK_REF=v0.42.0 bash
+curl -fsSL https://raw.githubusercontent.com/amplifiedengineer/playbook/main/install.sh | PLAYBOOK_REF=v0.43.0 bash
 ```
 
 A release tag installs that release. A branch or commit is refused, because it has no published binary.
@@ -175,7 +175,7 @@ The `pbtop` formula conflicts with the `playbook` formula, because `playbook` ow
 
 A `pbtop` from another source can fall behind `playbook`, for example the install script or an older install next to a newer `playbook`. `playbook doctor check` then prints a WARN row with the version, the path and the command that fixes it. The first command after an upgrade by Homebrew, the install script or a manual download adds the same hint under the "playbook updated from A to B" line, once. When a Claude Code session starts first, its hook takes that line and only `playbook doctor check` shows the hint. The check runs `pbtop --version`, and only in those two places: never in a hook or the status line.
 
-`install-pbtop.sh` needs `bash` and `curl`. It downloads `install.sh` from `main` and runs it in its pbtop mode, which checks the archive like the `playbook` binary (its line in `SHA256SUMS`, the build attestation when `gh` can check it, and `pbtop --version`), installs `pbtop` into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`) and puts that folder on `PATH`. It runs nothing else. To pin a release, set `PLAYBOOK_REF` for `sh`, as in `curl -fsSL .../install-pbtop.sh | PLAYBOOK_REF=v0.42.0 sh`. On a release before 0.35.0 it stops, because those have no `pbtop` archive. The old `install.sh --pbtop` still works for one more release and points to `install-pbtop.sh`.
+`install-pbtop.sh` needs `bash` and `curl`. It downloads `install.sh` from `main` and runs it in its pbtop mode, which checks the archive like the `playbook` binary (its line in `SHA256SUMS`, the build attestation when `gh` can check it, and `pbtop --version`), installs `pbtop` into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`) and puts that folder on `PATH`. It runs nothing else. To pin a release, set `PLAYBOOK_REF` for `sh`, as in `curl -fsSL .../install-pbtop.sh | PLAYBOOK_REF=v0.43.0 sh`. On a release before 0.35.0 it stops, because those have no `pbtop` archive. The old `install.sh --pbtop` still works for one more release and points to `install-pbtop.sh`.
 
 Then run `pbtop`. The [pbtop page](../pbtop.md) covers the flags, the views, the keys and where the data lives. The [crate README](../../crates/telemetry/README.md) covers `cargo` builds.
 
