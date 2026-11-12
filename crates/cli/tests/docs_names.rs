@@ -21,6 +21,7 @@
 //! dispatches before clap (`crates/cli/src/fastpath.rs`).
 
 use clap::{Command, CommandFactory};
+use playbook::renames::{Rename, COMMAND_RENAMES};
 use playbook::Cli;
 use regex::Regex;
 use std::collections::BTreeSet;
@@ -35,6 +36,11 @@ const ALIAS_IS_ERROR: bool = false;
 /// the program name (`"pr finish-context"`). The command rename table adds
 /// its old names here.
 const LEGACY_EXTRA: &[&str] = &[];
+
+/// The legacy paths a rename table adds: each row's old path.
+fn legacy_paths(table: &[Rename]) -> Vec<&'static str> {
+    table.iter().map(|row| row.old).collect()
+}
 
 /// Names a change that is not on main yet will add. They count as legacy
 /// names, so they warn instead of failing. Delete an entry once the command
@@ -415,7 +421,13 @@ fn the_docs_name_only_real_commands() {
     let cli = Cli::command();
     let slash_names = plugin_names();
     let slash_exists = |n: &str| slash_names.contains(n);
-    let legacy: Vec<&str> = LEGACY_EXTRA.iter().chain(PENDING_NAMES).copied().collect();
+    let renamed = legacy_paths(COMMAND_RENAMES);
+    let legacy: Vec<&str> = LEGACY_EXTRA
+        .iter()
+        .chain(PENDING_NAMES)
+        .chain(&renamed)
+        .copied()
+        .collect();
     let rules = Rules {
         root: &cli,
         alias_is_error: ALIAS_IS_ERROR,
@@ -708,5 +720,27 @@ mod synthetic {
         let upgrade = cli.get_subcommands().find(|s| s.get_name() == "upgrade");
         assert!(upgrade.is_some_and(|u| u.get_all_aliases().any(|a| a == "update")));
         assert!(plugin_names().contains("plan"));
+    }
+
+    #[test]
+    fn an_old_path_in_the_rename_table_is_a_legacy_name() {
+        // Arrange
+        let table = [Rename {
+            old: "code find",
+            new: "code search",
+            extra: &[],
+        }];
+        let legacy = legacy_paths(&table);
+        let text = "Run `tool code find foo`.";
+
+        // Act
+        let lax = run(text, false, &legacy);
+        let strict = run(text, true, &legacy);
+
+        // Assert
+        assert!(lax.errors.is_empty(), "{lax:?}");
+        assert_eq!(lax.warnings.len(), 1, "{lax:?}");
+        assert!(lax.warnings[0].contains("legacy name"), "{lax:?}");
+        assert_eq!(strict.errors.len(), 1, "{strict:?}");
     }
 }

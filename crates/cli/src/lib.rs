@@ -94,6 +94,7 @@ pub mod plugin_update;
 pub mod pr;
 pub mod prose;
 pub mod release_notes;
+pub mod renames;
 pub mod review;
 pub mod routing;
 pub mod sanitize;

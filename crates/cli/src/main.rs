@@ -183,7 +183,7 @@ fn real_main() {
         }
         None => {}
     }
-    let cli = playbook::parse::parse_or_exit(&args);
+    let (cli, renamed) = playbook::parse::parse_or_exit(&args);
     // Hooks fail soft, and version, completions, json and commands write nothing under home; every other command refuses to write state relative to
     // the current directory when there is no home.
     if !matches!(
@@ -202,6 +202,11 @@ fn real_main() {
     if let Some(line) = cli
         .command
         .deprecation_notice(std::io::stderr().is_terminal())
+    {
+        eprintln!("{line}");
+    }
+    if let Some(line) =
+        playbook::renames::printable_notice(&args, renamed, std::io::stderr().is_terminal())
     {
         eprintln!("{line}");
     }
