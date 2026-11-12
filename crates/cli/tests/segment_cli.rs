@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook segment branch|size|resplit` against real scratch git repos: the
-//! branch name and base per delivery topology, and the cut point of a
-//! re-split.
+//! `playbook segment branch|size` against real scratch git repos: the branch
+//! name and base per delivery topology, and the size report.
 
 use std::fs;
 use std::path::{Path, PathBuf};
