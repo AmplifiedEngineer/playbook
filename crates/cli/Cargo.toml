@@ -35,11 +35,11 @@ sha2 = "=0.11.0"
 ureq = { version = "=3.4.2", default-features = false, features = ["rustls"] }
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "=1.1.5", default-features = false, features = ["fs", "process", "std", "termios"] }
+rustix = { version = "=1.1.6", default-features = false, features = ["fs", "process", "std", "termios"] }
 signal-hook = { version = "=0.3.18", default-features = false }
 
 [target.'cfg(unix)'.dev-dependencies]
-rustix = { version = "=1.1.5", default-features = false, features = ["fs", "process", "pty", "std"] }
+rustix = { version = "=1.1.6", default-features = false, features = ["fs", "process", "pty", "std"] }
 
 [lints]
 workspace = true
