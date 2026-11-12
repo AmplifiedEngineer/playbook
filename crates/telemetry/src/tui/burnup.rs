@@ -182,7 +182,13 @@ fn cells(b: &Burnup, plot: &Plot) -> Vec<Vec<Role>> {
         } else {
             Role::Half
         };
-        grid[plot.row(value)].fill(role);
+        // A line crosses the used area without erasing it.
+        for cell in grid[plot.row(value)]
+            .iter_mut()
+            .filter(|cell| **cell == Role::Empty)
+        {
+            *cell = role;
+        }
     }
     for (col, at) in times.iter().enumerate().filter(|(_, at)| **at > b.now) {
         if let Some(v) = b.projected_at(*at) {
@@ -682,6 +688,60 @@ mod tests {
             (Some((lo, hi)), Some((lo2, hi2))) => lo2 <= hi + 1 && lo <= hi2 + 1,
             _ => false,
         })
+    }
+
+    /// A monthly dollar limit with a steady daily spend, so the used area
+    /// climbs through the 50 and 80 percent lines.
+    fn climbing_month() -> Burnup {
+        use crate::limits::Origin;
+        const DAY: i64 = 86_400;
+        const DAYS: i64 = 20;
+        const DAILY_USD: f64 = 22.0;
+        const LIMIT_USD: f64 = 600.0;
+        const PERIOD_DAYS: i64 = 30;
+        let events: Vec<crate::UsageEvent> = (0..DAYS)
+            .map(|d| crate::UsageEvent {
+                timestamp: d * DAY + 1,
+                cost_usd: DAILY_USD,
+                ..crate::UsageEvent::default()
+            })
+            .collect();
+        let limit = Limit {
+            unit: Unit::Dollars,
+            period: LimitPeriod::Monthly,
+            origin: Origin::Manual,
+            used: DAILY_USD * DAYS as f64,
+            limit: LIMIT_USD,
+            start: 0,
+            end: PERIOD_DAYS * DAY,
+        };
+        let inputs = crate::burnup::Inputs {
+            events: &events,
+            readings: &[],
+            billed: None,
+            now: DAYS * DAY,
+        };
+        crate::burnup::burnup(&limit, crate::tz::Zone::Utc, inputs).unwrap()
+    }
+
+    #[test]
+    fn a_cutoff_line_does_not_erase_the_used_area_under_it() {
+        // Arrange
+        let b = climbing_month();
+        let plot = Plot::new(&b, 40, 6);
+
+        // Act
+        let grid = cells(&b, &plot);
+
+        // Assert
+        let last_used = (0..plot.width)
+            .rev()
+            .find(|col| grid.iter().any(|row| row[*col] == Role::Actual))
+            .unwrap();
+        let top = plot.row(b.total);
+        for row in top..plot.height {
+            assert!(grid[row][last_used] == Role::Actual, "row {row}");
+        }
     }
 
     #[test]
