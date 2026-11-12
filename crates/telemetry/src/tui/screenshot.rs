@@ -438,6 +438,21 @@ fn every_picture_matches_its_committed_svg() {
     }
 }
 
+/// A picture is published, so it must show no account email, real or made up.
+#[test]
+fn no_picture_shows_an_email_address() {
+    for shot in &shots() {
+        // Arrange
+        let (buf, ground) = buffer(shot);
+
+        // Act
+        let svg = render_svg(&buf, &ground, &shot.label);
+
+        // Assert
+        assert!(!svg.contains('@'), "{} shows an at sign", shot.file);
+    }
+}
+
 #[test]
 fn a_picture_has_one_line_per_terminal_row() {
     // Arrange
