@@ -144,6 +144,7 @@ fn usage_total(line: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::Scratch;
 
     fn record(input: u64, created: u64, read: u64, sidechain: bool) -> String {
         format!(
@@ -194,18 +195,15 @@ mod tests {
     const BIG: u64 = 438_000;
     const SMALL: u64 = 103_000;
 
-    fn transcript(name: &str, lines: &[String]) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("hygiene-{name}-{}", crate::testing::run_id()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("t.jsonl");
-        fs::write(&path, lines.join("\n") + "\n").unwrap();
-        path
+    fn transcript(scratch: &Scratch, lines: &[String]) -> std::path::PathBuf {
+        scratch.write(lines)
     }
 
     #[test]
     fn a_boundary_then_a_user_record_gives_no_size() {
+        let s = Scratch::new("hygiene-user");
         let p = transcript(
-            "user",
+            &s,
             &[record(0, 0, BIG, false), BOUNDARY.into(), USER.into()],
         );
         assert_eq!(context_tokens(&p), None);
@@ -213,12 +211,42 @@ mod tests {
 
     #[test]
     fn an_assistant_record_after_the_boundary_gives_its_size() {
+        let s = Scratch::new("hygiene-after");
         let p = transcript(
-            "after",
+            &s,
             &[
                 record(0, 0, BIG, false),
                 BOUNDARY.into(),
                 USER.into(),
+                record(0, 0, SMALL, false),
+            ],
+        );
+        assert_eq!(context_tokens(&p), Some(SMALL));
+    }
+
+    #[test]
+    fn a_big_turn_after_the_boundary_in_the_same_window_is_the_size() {
+        let s = Scratch::new("hygiene-big-after");
+        let p = transcript(
+            &s,
+            &[
+                record(0, 0, SMALL, false),
+                BOUNDARY.into(),
+                USER.into(),
+                record(0, 0, BIG, false),
+            ],
+        );
+        assert_eq!(context_tokens(&p), Some(BIG));
+    }
+
+    #[test]
+    fn a_big_turn_before_the_boundary_in_the_same_window_is_not_the_size() {
+        let s = Scratch::new("hygiene-big-before");
+        let p = transcript(
+            &s,
+            &[
+                record(0, 0, BIG, false),
+                BOUNDARY.into(),
                 record(0, 0, SMALL, false),
             ],
         );
@@ -237,7 +265,8 @@ mod tests {
             (TAIL_BYTES as usize / 1024) + 16,
         ));
         lines.push(record(0, 0, SMALL, false));
-        let p = transcript("window", &lines);
+        let s = Scratch::new("hygiene-window");
+        let p = transcript(&s, &lines);
         assert_eq!(context_tokens(&p), Some(SMALL));
     }
 }

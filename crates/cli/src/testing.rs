@@ -24,6 +24,32 @@ pub fn write_file(path: &std::path::Path, content: &str) {
     std::fs::write(path, content).unwrap();
 }
 
+/// A scratch folder that is removed on drop, so a failing test cleans up
+/// too.
+#[cfg(test)]
+pub struct Scratch(pub std::path::PathBuf);
+
+#[cfg(test)]
+impl Scratch {
+    pub fn new(tag: &str) -> Self {
+        Scratch(scratch_root(tag))
+    }
+
+    /// Writes `lines` as a JSONL file named `t.jsonl` and returns its path.
+    pub fn write(&self, lines: &[String]) -> std::path::PathBuf {
+        let path = self.0.join("t.jsonl");
+        write_file(&path, &(lines.join("\n") + "\n"));
+        path
+    }
+}
+
+#[cfg(test)]
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// A fresh, created scratch folder named after `tag`.
 #[cfg(test)]
 pub fn scratch_root(tag: &str) -> std::path::PathBuf {
