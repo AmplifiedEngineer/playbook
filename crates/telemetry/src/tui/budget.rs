@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The Budget strip: each known limit as one visual row, then the burn of the
-//! period on screen against the previous one.
+//! The budget lines of the header: each known limit as one visual row, then the
+//! burn of the period on screen against the previous one.
 //!
 //! A limit row reads left to right: the name, a one letter source glyph, a
 //! wide bar with a pace marker, the percent used, the amount, a verdict and
@@ -33,18 +33,14 @@ use crate::limits::{Limit, LimitPeriod, Origin, State, Unit};
 use crate::limits_source::STALE_SECONDS;
 use crate::period::{elapsed_text, Change};
 use crate::query::{clock, day_of, weekday};
-use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Paragraph};
-use ratatui::Frame;
 
-/// Border plus four rows: a limit, its figures, a second limit and the spend
-/// line. Two limits with two lines each would need seven, which a 24 row
-/// screen cannot spare, so the figures of the second limit sit behind `i`.
-pub const HEIGHT: u16 = 6;
-/// The rows inside the border.
-const ROWS: usize = HEIGHT as usize - 2;
+/// The most lines drawn: a limit, its figures, a second limit and the spend
+/// line. Two limits with two lines each would need five before the spend line,
+/// which a 24 row screen cannot spare, so the figures of the second limit sit
+/// behind `i`. Only the lines that exist are drawn, so most views are shorter.
+const ROWS: usize = 4;
 /// The detail view draws a limit row and a figures row for each limit.
 const _: () = assert!(ROWS >= 2 * MAX_LIMITS);
 /// The most limits drawn. The rest are counted in the title.
@@ -820,7 +816,7 @@ fn no_limit_line(pal: &Palette, icon: Icon, width: usize) -> Line<'static> {
     ])
 }
 
-/// The lines inside the border, at most `ROWS`. `detail` shows the figures of
+/// The budget lines, at most `ROWS`. `detail` shows the figures of
 /// every limit and the full notes in place of the spend line.
 fn body(
     data: &Data,
@@ -873,42 +869,24 @@ fn body(
     (lines, hidden_notes)
 }
 
-/// Draws the strip. Nothing is drawn when `area` is empty.
-pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette, icon: Icon, detail: bool) {
-    if area.height == 0 {
-        return;
-    }
-    let v = &data.limits;
-    let edge = fg(pal, pal.box_cpu);
-    let more = v.limits.len().saturating_sub(MAX_LIMITS);
-    let width = usize::from(area.width.saturating_sub(2));
+/// The budget lines of the header and what they could not show.
+pub struct Lines {
+    pub lines: Vec<Line<'static>>,
+    /// Limits past `MAX_LIMITS`, left to `--json`.
+    pub more: usize,
+    /// Notes that did not fit and wait behind `i`.
+    pub hidden_notes: usize,
+}
+
+/// The budget lines for a column `width` wide, at most `ROWS`. A line exists
+/// only for data that exists, so the header never keeps rows for the rest.
+pub fn lines(data: &Data, pal: &Palette, icon: Icon, width: usize, detail: bool) -> Lines {
     let (lines, hidden_notes) = body(data, pal, icon, width, detail);
-    let mut block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(edge)
-        .title(Line::from(vec![
-            Span::styled("\u{2500}\u{2524}", edge),
-            Span::styled("Budget", fg(pal, pal.title)),
-            Span::styled("\u{251c}", edge),
-        ]));
-    let mut note = if more > 0 {
-        format!("{}  +{more} more in --json", crate::tz::label())
-    } else {
-        format!("{}  all projects", crate::tz::label())
-    };
-    if hidden_notes > 0 {
-        let plural = if hidden_notes == 1 { "" } else { "s" };
-        note.push_str(&format!("  {hidden_notes} note{plural}, i"));
+    Lines {
+        lines,
+        more: data.limits.limits.len().saturating_sub(MAX_LIMITS),
+        hidden_notes,
     }
-    block = block.title(
-        Line::from(vec![
-            Span::styled("\u{2524}", edge),
-            Span::styled(note, fg(pal, pal.fg)),
-            Span::styled("\u{251c}\u{2500}", edge),
-        ])
-        .right_aligned(),
-    );
-    frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
 #[cfg(test)]

@@ -1,6 +1,0 @@
-╭─┤Budget├─────────────────────────────────────────────────┤UTC  all projects├─╮
-│No limit   ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  press b to set a monthly budget│
-│5 hour and weekly windows: not on this plan  (i: details)                     │
-│Spend    h this week $3.05 █████░░░░░  last week $6.21 ██████████  -51%       │
-│                                                                              │
-╰──────────────────────────────────────────────────────────────────────────────╯

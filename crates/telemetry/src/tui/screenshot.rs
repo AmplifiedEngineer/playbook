@@ -187,7 +187,7 @@ const VIEWS: &[View] = &[
     },
     View {
         stem: "numbers",
-        label: "pbtop Numbers tab: budget, models and projects",
+        label: "pbtop Numbers tab: models and projects, with the budget in the header",
         setup: numbers,
     },
     View {

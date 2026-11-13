@@ -185,7 +185,7 @@ Tests run against hand-written transcripts in `crates/telemetry/tests/fixtures/u
 
 ## Spending limits and budget headroom
 
-The Budget panel, `--summary` and `--json` (`limits`) show how much of a limit you have used and how fast you are using it. The code is `crates/telemetry/src/limits.rs` (the math) and `crates/telemetry/src/limits_source.rs` (where limits come from). Limits that Claude reports use UTC months. A manual budget and the local spend use the chosen time zone.
+The budget part of the header, `--summary` and `--json` (`limits`) show how much of a limit you have used and how fast you are using it. The code is `crates/telemetry/src/limits.rs` (the math) and `crates/telemetry/src/limits_source.rs` (where limits come from). Limits that Claude reports use UTC months. A manual budget and the local spend use the chosen time zone.
 
 ### Where a limit comes from
 
@@ -208,7 +208,7 @@ Notes:
 
 1. A detected monthly limit: a monthly spend limit from the statusline (behind a gateway), or a cached spend limit fetched after that reading, whatever its age.
 2. With no statusline reading, the cached spend limit at any age.
-3. `usage.budget.monthlyUsd`, only when nothing is detected. It does not draw a bar beside a detected limit. When both are set and differ, the Budget panel adds a line with both amounts and says the detected one applies.
+3. `usage.budget.monthlyUsd`, only when nothing is detected. It does not draw a bar beside a detected limit. When both are set and differ, the header adds a line with both amounts and says the detected one applies.
 
 A cached limit over six hours old, whether it won under item 1 or item 2, is tagged `cached <age> ago, plus this machine since` when the cache has a used amount from this UTC month. The bar then shows that amount plus this machine's messages after the read, because spend only grows within a month. Without such an amount the tag is `limit cached <age> ago, used is this machine only` and the bar is this machine's estimate for the UTC month. A note on the strip, read in full with `i`, shows the amount Claude Code last reported, with its age and the word stale. The tag sits on the figures line under the limit, and the row itself carries a one letter source glyph and a `stale` mark. A manual budget is tagged `manual, local` for the same reason and gets the same note. Once other machines have synced events into `usage_events_remote`, the account scope panels (Budget, Projection, Burnup, Spend, Tokens, Models) and the account list read the `usage_events_all` view, so those events count, and the manual tag reads `manual, all machines`. The machine scope panels keep reading this machine's tables.
 
@@ -273,7 +273,7 @@ For the period on screen (today, this week or this month, this week for other ra
 
 ### Where it shows
 
-- **Terminal view.** The Budget panel sits under the header and needs 36 rows. On a shorter screen it is left out (`--summary` and `--json` have the same numbers). It lists at most two limits, worst first, and says how many more `--json` has. With no known limit it says how to set one. It ignores the project filter: a limit belongs to the account, not to a repo.
+- **Terminal view.** The budget is part of the header, which every tab shows. It sits in a column beside the cost, tokens and messages rows on a wide screen and under them on a narrow one, and draws only the rows it has data for. It is drawn at every size from the 80 by 24 minimum, and a short screen hides tab panels before it touches the header. It lists at most two limits, worst first, and says how many more `--json` has. With no known limit it says how to set one. It ignores the project filter: a limit belongs to the account, not to a repo.
 - **`--summary`.** A "Limits and burn rate" section. After the limits it adds:
   - the amount Claude reports as used next to the local estimate, with its age and a stale marker once it is over 6 hours old (or why the two were not compared);
   - one `<period> crossings` line per limit, with the time each of 50, 80 and 100 percent was or will be crossed;
@@ -380,7 +380,7 @@ What the figure counts:
 
 ### When a limit is reached
 
-The Budget strip says when each limit is reached at your current pace, in the time zone shown in its title (UTC or local). It was a separate Projection panel before, and the math is the same. The strip shows the sooner of the two paces below as `hits it in 2d 4h`, with `(24h)` added when the 24 hour pace is the sooner one, or `safe` when neither reaches the limit before it resets. The older layout word `projection` still loads and draws nothing. A dollar limit has two paces:
+The header says when each limit is reached at your current pace, in the time zone shown in its title (UTC or local). It was a separate Projection panel before, and the math is the same. It shows the sooner of the two paces below as `hits it in 2d 4h`, with `(24h)` added when the 24 hour pace is the sooner one, or `safe` when neither reaches the limit before it resets. The older layout word `projection` still loads and draws nothing. A dollar limit has two paces:
 
 1. The last 24 hours, which follows what you are doing now. When the period started less than 24 hours ago, it uses the spend of the period over the age of the period, so spend from before the period never counts (under one hour of data it says "no pace yet").
 2. The period average since the period began, which is steadier and shows the long view.

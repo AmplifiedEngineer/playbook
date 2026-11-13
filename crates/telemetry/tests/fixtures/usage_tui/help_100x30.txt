@@ -1,7 +1,7 @@
 ╭─┤Agent Budget Dashboard├──┤UTC├──────────────────────────────────────────────────────────────────╮
 │last 30 da╭┤ Help: keys by group ├─────────────────────────────────────────────────────╮          │
-│cost      │Navigation                                                                  │          │
-│tokens    │1 to 6     Focus a panel by its number              all panels              │          │
+│cost      │Navigation                                                                  │hly budget│
+│tokens    │1 to 6     Focus a panel by its number              all panels              │  new     │
 │messages  │Tab        Show the next tab                        all panels              │          │
 ╰──────────│Shift-Tab  Show the previous tab                    all panels              │──────────╯
 ╭─┤¹Spend p│F1 to F12  Show a tab by its number                 all panels              │──────────╮

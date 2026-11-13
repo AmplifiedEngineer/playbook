@@ -507,7 +507,7 @@ pub const BINDINGS: &[Binding] = &[
         ctrl: false,
         shown: "i",
         group: Group::Views,
-        panels: "budget strip",
+        panels: "header",
         text: "Toggle every limit's figures and notes",
         hint: None,
     },

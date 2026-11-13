@@ -1,0 +1,7 @@
+╭─┤Agent Budget Dashboard├──┤UTC├──────────────────────────────────────────────╮
+│last 30 days Aug 5 to Sep 3, 2026  (no previous period to compare)            │
+│cost          $20.27 │ Monthly  c |##----------   24%  ! hits it  stale 1d 22h│
+│tokens        618.8K │ Monthly    left $378                                   │
+│messages          26 │ Spend    h this week $3.05  last week $6.21  -51%      │
+│                     │ 5 hour and weekly windows: not on this plan  (i: detai~│
+╰──────────────────────────────────────────────────────────────────────────────╯

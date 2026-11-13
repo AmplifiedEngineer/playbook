@@ -3,7 +3,7 @@
 
 //! The tab layout of pbtop: which tabs exist and which panels each one shows.
 //! The layout is a plain text line in the `usage.ui.layout` config key, for
-//! example `Charts=spend,tokens;Numbers=models,breakdown,budget,projection`. Anything
+//! example `Charts=spend,tokens;Numbers=models,breakdown,projection`. Anything
 //! that does not parse falls back to the default layout, so a bad value never
 //! stops pbtop from starting.
 
@@ -18,7 +18,6 @@ pub enum PanelId {
     Breakdown,
     Live,
     Sessions,
-    Budget,
     Projection,
     Burnup,
     /// Cost per hour over the last 24 hours.
@@ -36,14 +35,13 @@ pub enum PanelId {
 }
 
 /// Every panel, in the order the layout editor lists them.
-pub const ALL: [PanelId; 18] = [
+pub const ALL: [PanelId; 17] = [
     PanelId::Spend,
     PanelId::Tokens,
     PanelId::Models,
     PanelId::Breakdown,
     PanelId::Live,
     PanelId::Sessions,
-    PanelId::Budget,
     PanelId::Projection,
     PanelId::Burnup,
     PanelId::Hourly,
@@ -67,7 +65,6 @@ impl PanelId {
             PanelId::Breakdown => "breakdown",
             PanelId::Live => "live",
             PanelId::Sessions => "sessions",
-            PanelId::Budget => "budget",
             PanelId::Projection => "projection",
             PanelId::Burnup => "burnup",
             PanelId::Hourly => "hourly",
@@ -91,8 +88,7 @@ impl PanelId {
             PanelId::Breakdown => "projects, agents, skills, tools or health (v switches)",
             PanelId::Live => "sessions with a message in the last 15 minutes",
             PanelId::Sessions => "every session of the period, grouped by day",
-            PanelId::Budget => "limits and how fast you are using them",
-            PanelId::Projection => "retired: the budget strip says when each limit is reached",
+            PanelId::Projection => "retired: the header says when each limit is reached",
             PanelId::Burnup => "how much of a limit is used over its period, with a projection",
             PanelId::Hourly => "cost per hour over the last 24 hours as a chart, with the total",
             PanelId::SpendTotal => "total cost per day as a chart, always this view",
@@ -106,7 +102,7 @@ impl PanelId {
         }
     }
 
-    /// The focusable panel behind this id. The budget strip has none.
+    /// The focusable panel behind this id, `None` for a panel with no focus.
     pub fn panel(self) -> Option<super::sort::Panel> {
         use super::sort::Panel;
         match self {
@@ -123,7 +119,7 @@ impl PanelId {
             | PanelId::BreakdownHealth => Some(Panel::Projects),
             PanelId::Live => Some(Panel::Live),
             PanelId::Sessions => Some(Panel::Sessions),
-            PanelId::Budget | PanelId::Projection | PanelId::Burnup | PanelId::Hourly => None,
+            PanelId::Projection | PanelId::Burnup | PanelId::Hourly => None,
         }
     }
 
@@ -151,10 +147,10 @@ impl PanelId {
         }
     }
 
-    /// Whether the panel takes a cell of the grid. The budget strip draws on
-    /// top and the retired projection word draws nothing, so neither does.
+    /// Whether the panel takes a cell of the grid. The retired projection word
+    /// draws nothing, so it does not.
     pub fn has_cell(self) -> bool {
-        !matches!(self, PanelId::Budget | PanelId::Projection)
+        self != PanelId::Projection
     }
 
     /// A word an old layout may hold that the editor no longer offers.
@@ -210,6 +206,9 @@ pub const MAX_TAB_PANELS: usize = 8;
 const ROW_SEPARATOR: char = '|';
 /// The longest tab name, in characters.
 pub const MAX_NAME: usize = 16;
+/// The word of the budget panel, which is part of the header now. A saved
+/// layout may still list it, and the reader skips it.
+const REMOVED_BUDGET_WORD: &str = "budget";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layout {
@@ -241,10 +240,7 @@ impl Default for Layout {
         Layout {
             tabs: vec![
                 charts,
-                tab(
-                    "Numbers",
-                    &[PanelId::Models, PanelId::Breakdown, PanelId::Budget],
-                ),
+                tab("Numbers", &[PanelId::Models, PanelId::Breakdown]),
                 tab("Sessions", &[PanelId::Live, PanelId::Sessions]),
             ],
         }
@@ -293,9 +289,16 @@ fn parse_rows(name: &str, list: &str) -> Result<(Vec<PanelId>, Option<Vec<u8>>),
     let arranged = lines.len() > 1 || marked;
     let mut panels: Vec<PanelId> = Vec::new();
     let mut rows: Vec<u8> = Vec::new();
+    let mut had_words = false;
     for (i, line) in lines.iter().enumerate() {
         let before = panels.len();
+        let mut skipped = false;
         for word in line.split(',').filter(|w| !w.trim().is_empty()) {
+            if word.trim().eq_ignore_ascii_case(REMOVED_BUDGET_WORD) {
+                skipped = true;
+                had_words = true;
+                continue;
+            }
             let panel = PanelId::parse(word).ok_or_else(|| {
                 format!(
                     "{:?} is not a panel; use {}",
@@ -316,6 +319,9 @@ fn parse_rows(name: &str, list: &str) -> Result<(Vec<PanelId>, Option<Vec<u8>>),
             panels.push(panel);
         }
         let count = panels.len() - before;
+        if skipped && count == 0 {
+            continue;
+        }
         if arranged && count == 0 {
             return Err(format!("row {} of `{name}` is empty", i + 1));
         }
@@ -329,13 +335,13 @@ fn parse_rows(name: &str, list: &str) -> Result<(Vec<PanelId>, Option<Vec<u8>>),
             u8::try_from(count).map_err(|_| format!("row {} of `{name}` is too long", i + 1))?,
         );
     }
-    if panels.is_empty() {
+    if panels.is_empty() && !had_words {
         return Err(format!("the tab `{name}` has no panels"));
     }
     if !arranged {
         return Ok((panels, None));
     }
-    // The budget strip and a retired word take no cell, so they count toward
+    // A retired word takes no cell, so it counts toward
     // neither limit.
     let strip = panels.iter().filter(|p| !p.has_cell()).count();
     let mut rest = panels.as_slice();
@@ -395,6 +401,10 @@ impl Layout {
                 return Err(format!("the tab `{name}` appears twice"));
             }
             let (panels, rows) = parse_rows(name, list)?;
+            // A tab that held only the budget panel has nothing left to show.
+            if panels.is_empty() {
+                continue;
+            }
             tabs.push(Tab {
                 name: name.to_string(),
                 panels,
@@ -503,7 +513,6 @@ mod tests {
                 PanelId::Breakdown,
                 PanelId::Live,
                 PanelId::Sessions,
-                PanelId::Budget,
             ]
         );
     }
@@ -538,10 +547,10 @@ mod tests {
 
     #[test]
     fn a_custom_layout_keeps_its_order_and_names() {
-        let layout = Layout::parse("Money = budget , models ; Live=live").unwrap();
+        let layout = Layout::parse("Money = spend , models ; Live=live").unwrap();
 
         assert_eq!(layout.tabs[0].name, "Money");
-        assert_eq!(layout.tabs[0].panels, [PanelId::Budget, PanelId::Models]);
+        assert_eq!(layout.tabs[0].panels, [PanelId::Spend, PanelId::Models]);
         assert_eq!(layout.tabs[1].panels, [PanelId::Live]);
     }
 
@@ -595,7 +604,7 @@ mod tests {
 
     #[test]
     fn a_tab_with_rows_round_trips() {
-        let text = "A=spend,tokens|burnup|models,live;B=budget";
+        let text = "A=spend,tokens|burnup|models,live;B=hourly";
 
         let layout = Layout::parse(text).unwrap();
 
@@ -639,9 +648,9 @@ mod tests {
 
     #[test]
     fn an_arranged_tab_holds_at_most_eight_panels_and_four_rows() {
-        let eight = "A=spend,tokens|models,live|sessions,budget|projection,burnup";
+        let eight = "A=spend,tokens|models,live|sessions,hourly|projection,burnup";
         let five_rows = "A=spend|tokens|models|live|sessions";
-        let nine = "A=spend,tokens|models,live|sessions,budget|projection,burnup|breakdown";
+        let nine = "A=spend,tokens|models,live|sessions,hourly|projection,burnup|breakdown";
 
         assert!(Layout::parse(eight).is_ok());
         assert!(Layout::parse(five_rows).unwrap_err().contains("4 rows"));
@@ -661,18 +670,18 @@ mod tests {
     fn every_old_layout_string_loads_unchanged() {
         for old in [
             "Charts=spend,tokens",
-            "Money=budget,models;Live=live",
-            "Charts=spend,tokens;Numbers=models,breakdown,budget,projection;Sessions=live,sessions",
+            "Money=spend,models;Live=live",
+            "Charts=spend,tokens;Numbers=models,breakdown,projection;Sessions=live,sessions",
             "T0=spend;T1=spend;T2=spend;T3=spend;T4=spend;T5=spend;T6=spend;T7=spend;T8=spend",
-            "Charts=spend,tokens,burnup;Numbers=models,breakdown,budget,projection;Sessions=live,sessions",
+            "Charts=spend,tokens,burnup;Numbers=models,breakdown,projection;Sessions=live,sessions",
         ] {
             let layout = Layout::parse(old).unwrap();
 
             assert!(layout.tabs.iter().all(|t| t.rows.is_none()), "{old}");
             assert_eq!(layout.to_text(), old);
         }
-        let spaced = Layout::parse("Money = budget , models ; Live=live").unwrap();
-        assert_eq!(spaced.to_text(), "Money=budget,models;Live=live");
+        let spaced = Layout::parse("Money = spend , models ; Live=live").unwrap();
+        assert_eq!(spaced.to_text(), "Money=spend,models;Live=live");
     }
 
     #[test]
@@ -748,11 +757,10 @@ mod tests {
     fn stored_tabs_with_the_old_limits_still_load_and_round_trip() {
         for old in [
             "A=spend,tokens|burnup|models,live",
-            "A=spend,tokens|models,live|sessions,budget|projection,burnup",
-            "Charts=spend.total,spend.model|tokens|burnup;Numbers=models,breakdown,budget,projection;Sessions=live,sessions",
-            "A=spend,tokens,models,breakdown,live,sessions,projection,burnup,budget",
-            "A=spend,tokens,models,breakdown,live,sessions,burnup,projection,budget,spend.total",
-            "A=models,budget,breakdown",
+            "A=spend,tokens|models,live|sessions,hourly|projection,burnup",
+            "Charts=spend.total,spend.model|tokens|burnup;Numbers=models,breakdown,projection;Sessions=live,sessions",
+            "A=spend,tokens,models,breakdown,live,sessions,projection,burnup",
+            "A=spend,tokens,models,breakdown,live,sessions,burnup,projection,spend.total",
             "A=spend,tokens|",
         ] {
             let layout = Layout::parse(old).unwrap();
@@ -763,39 +771,86 @@ mod tests {
     }
 
     #[test]
-    fn the_budget_strip_counts_toward_neither_the_panel_limit_nor_the_row_limit() {
-        let strip_and_eight =
-            "A=budget|spend,tokens|models,live|sessions,projection|burnup,breakdown";
+    fn the_retired_projection_word_counts_toward_neither_the_panel_limit_nor_the_row_limit() {
+        let word_and_eight =
+            "A=projection|spend,tokens|models,live|sessions,hourly|burnup,breakdown";
         let nine =
-            "A=budget|spend,tokens|models,live|sessions,projection|burnup,breakdown|spend.total";
+            "A=projection|spend,tokens|models,live|sessions,hourly|burnup,breakdown|spend.total";
 
-        let layout = Layout::parse(strip_and_eight).unwrap();
+        let layout = Layout::parse(word_and_eight).unwrap();
 
         assert_eq!(layout.tabs[0].panels.len(), 9);
-        assert_eq!(layout.to_text(), strip_and_eight);
+        assert_eq!(layout.to_text(), word_and_eight);
         assert!(Layout::parse(nine).unwrap_err().contains("4 rows"));
     }
 
     #[test]
-    fn the_default_numbers_tab_is_models_breakdown_and_budget() {
+    fn the_default_numbers_tab_is_models_and_breakdown() {
         let layout = Layout::default();
 
         let numbers = &layout.tabs[1];
 
-        assert_eq!(
-            numbers.panels,
-            [PanelId::Models, PanelId::Breakdown, PanelId::Budget]
-        );
+        assert_eq!(numbers.panels, [PanelId::Models, PanelId::Breakdown]);
         assert_eq!(numbers.rows, None);
-        assert!(layout
-            .to_text()
-            .contains("Numbers=models,breakdown,budget;"));
+        assert!(layout.to_text().contains("Numbers=models,breakdown;"));
+    }
+
+    #[test]
+    fn no_default_tab_and_no_picker_entry_holds_the_budget_word() {
+        let text = Layout::default().to_text();
+
+        assert!(!text.contains("budget"), "{text}");
+        assert!(ALL.iter().all(|p| p.word() != "budget"));
+    }
+
+    #[test]
+    fn a_saved_layout_that_lists_the_budget_word_loads_and_skips_it() {
+        // Arrange
+        let saved =
+            "Charts=spend,tokens;Numbers=models,breakdown,budget,projection;Sessions=live,sessions";
+
+        // Act
+        let (layout, warning) = Layout::from_stored(Some(saved));
+
+        // Assert
+        assert_eq!(warning, None);
+        assert_eq!(
+            layout.to_text(),
+            "Charts=spend,tokens;Numbers=models,breakdown,projection;Sessions=live,sessions"
+        );
+    }
+
+    #[test]
+    fn the_budget_word_is_skipped_in_any_place_case_and_row() {
+        for (saved, want) in [
+            ("A=budget,models", "A=models"),
+            ("A=models, Budget ,live", "A=models,live"),
+            (
+                "A=budget|spend,tokens|models,budget",
+                "A=spend,tokens|models",
+            ),
+            ("A=spend|budget|tokens", "A=spend|tokens"),
+            ("A=budget,budget,models", "A=models"),
+        ] {
+            let layout = Layout::parse(saved).unwrap();
+
+            assert_eq!(layout.to_text(), want, "{saved}");
+        }
+    }
+
+    #[test]
+    fn a_tab_that_held_only_the_budget_word_is_left_out_and_a_layout_of_only_it_is_refused() {
+        let kept = Layout::parse("Money=budget;Live=live").unwrap();
+        let none = Layout::parse("Money=budget").unwrap_err();
+
+        assert_eq!(kept.to_text(), "Live=live");
+        assert!(none.contains("no tabs"), "{none}");
     }
 
     #[test]
     fn the_retired_projection_word_still_loads_and_round_trips_as_written() {
         for old in [
-            "Numbers=models,breakdown,budget,projection",
+            "Numbers=models,breakdown,projection",
             "A=spend,tokens|projection",
             "A=projection",
         ] {
@@ -804,7 +859,7 @@ mod tests {
             assert_eq!(layout.to_text(), old);
         }
         assert!(PanelId::Projection.is_retired() && !PanelId::Projection.has_cell());
-        assert!(!PanelId::Budget.has_cell() && PanelId::Hourly.has_cell());
+        assert!(PanelId::Hourly.has_cell());
     }
 
     #[test]

@@ -321,7 +321,7 @@ mod tests {
     /// The three tabs and eight panels of the layout before the burn-up
     /// panel, so these tests do not move with the default.
     const THREE_TABS: &str =
-        "Charts=spend,tokens;Numbers=models,breakdown,budget,projection;Sessions=live,sessions";
+        "Charts=spend,tokens;Numbers=models,breakdown,projection;Sessions=live,sessions";
 
     fn editor() -> Editor {
         Editor::new(&Layout::parse(THREE_TABS).unwrap(), 0)
@@ -883,11 +883,7 @@ mod tests {
     }
 
     fn add_a_grid_panel(e: &mut Editor) {
-        let at = e.available().iter().position(|p| *p != PanelId::Budget);
         e.key(KeyCode::Char('a'));
-        for _ in 0..at.unwrap_or(0) {
-            e.key(KeyCode::Char('j'));
-        }
         e.key(KeyCode::Enter);
     }
 
@@ -909,7 +905,7 @@ mod tests {
             assert_eq!(e.layout.tabs[0].panels.len(), MAX_TAB_PANELS, "{text}");
             assert_eq!(
                 e.message.as_deref(),
-                Some("A tab holds at most 8 panels besides the budget strip"),
+                Some("A tab holds at most 8 panels"),
                 "{text}"
             );
         }
@@ -932,33 +928,15 @@ mod tests {
     }
 
     #[test]
-    fn adding_the_budget_strip_puts_it_first_beside_eight_panels_and_it_does_not_move() {
+    fn the_picker_never_offers_the_budget_word() {
         // Arrange
-        let text = "A=spend,tokens,models,breakdown,live,sessions,burnup,projection";
-        let mut e = Editor::new(&Layout::parse(text).unwrap(), 0);
-        let at = e
-            .available()
-            .iter()
-            .position(|p| *p == PanelId::Budget)
-            .unwrap();
+        let e = editor();
 
         // Act
-        e.key(KeyCode::Char('a'));
-        for _ in 0..at {
-            e.key(KeyCode::Char('j'));
-        }
-        e.key(KeyCode::Enter);
-        let slot = e.slot;
-        press_all(&mut e, "L");
-        press_all(&mut e, "J");
-        press_all(&mut e, "f");
+        let words: Vec<&str> = e.available().iter().map(|p| p.word()).collect();
 
         // Assert
-        assert_eq!(e.layout.tabs[0].panels[0], PanelId::Budget);
-        assert_eq!(e.layout.tabs[0].panels.len(), 9);
-        assert_eq!(slot, 0);
-        assert_eq!(e.layout.tabs[0].rows, None);
-        assert!(e.message.as_deref().unwrap().contains("budget strip"));
+        assert!(!words.contains(&"budget"));
     }
 
     #[test]

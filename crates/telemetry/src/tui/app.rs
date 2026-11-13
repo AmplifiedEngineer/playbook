@@ -162,7 +162,7 @@ pub struct App {
     pub help: Option<usize>,
     /// The budget window, when it is open.
     pub budget_popup: Option<super::budget_popup::BudgetPopup>,
-    /// The budget strip shows the figures of every limit and the full notes.
+    /// The header's budget lines show the figures of every limit and the full notes.
     pub budget_detail: bool,
     /// True while the window that asks before deleting the usage history is open.
     pub reset_popup: bool,
@@ -600,6 +600,7 @@ impl App {
         let id = self.chart_slot(panel)?;
         let area = view::panel_rect(
             self.area,
+            view::header_height(self, self.area.width),
             self.tab_ids(),
             self.tab_rows(),
             self.layout.tabs.len() > 1,
@@ -812,8 +813,8 @@ impl App {
     /// Runs one command.
     fn run(&mut self, cmd: Cmd, code: KeyCode) -> Effect {
         let focus = self.focus;
-        // A tab with no focusable panel (only the budget strip) has nothing
-        // for the row, sort and view keys to act on.
+        // A tab with no focusable panel (a tab of only the retired projection
+        // word) has nothing for the row, sort and view keys to act on.
         let acts_on_focus = matches!(
             cmd,
             Cmd::CursorLeft
