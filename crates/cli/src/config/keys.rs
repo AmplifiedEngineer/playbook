@@ -88,6 +88,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "review.suggest.untestedLines",
     "security.defaults",
     "usage.theme",
+    "usage.maskAccount",
     "usage.weekStart",
     "usage.timeZone",
     "usage.refreshSeconds",
@@ -254,6 +255,7 @@ pub fn is_user_key(key: &str) -> bool {
 /// list stays local, so a new key never leaks by default.
 pub const SHARED_KEYS: &[&str] = &[
     "usage.theme",
+    "usage.maskAccount",
     "usage.weekStart",
     "usage.timeZone",
     "usage.budget.monthlyUsd",
@@ -447,6 +449,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "review.suggest.untestedLines" => Some(Value::Number(150.into())),
         "security.defaults" => Some(Value::Bool(false)),
         "usage.theme" => Some(Value::String("default".to_string())),
+        "usage.maskAccount" => Some(Value::Bool(false)),
         "usage.weekStart" => Some(Value::String("monday".to_string())),
         "usage.timeZone" => Some(Value::String("local".to_string())),
         "usage.refreshSeconds" => Some(Value::Number(5.into())),

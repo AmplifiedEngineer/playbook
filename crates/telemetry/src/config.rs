@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(test)]
 pub const KEYS: &[&str] = &[
     "usage.theme",
+    "usage.maskAccount",
     "usage.weekStart",
     "usage.timeZone",
     "usage.refreshSeconds",
@@ -39,6 +40,7 @@ pub const KEYS: &[&str] = &[
 pub fn default_value(key: &str) -> Option<Value> {
     Some(match key {
         "usage.theme" => Value::from("default"),
+        "usage.maskAccount" => Value::from(false),
         "usage.weekStart" => Value::from("monday"),
         "usage.timeZone" => Value::from("local"),
         "usage.refreshSeconds" => Value::from(5),
@@ -85,8 +87,10 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
             Some(text) if text.len() <= MAX_STATE_BYTES => Ok(()),
             _ => Err(format!("expected text of at most {MAX_STATE_BYTES} bytes")),
         },
-        "usage.autoIngest" if !value.is_boolean() => Err("expected true or false".into()),
-        "usage.autoIngest" => Ok(()),
+        "usage.autoIngest" | "usage.maskAccount" if !value.is_boolean() => {
+            Err("expected true or false".into())
+        }
+        "usage.autoIngest" | "usage.maskAccount" => Ok(()),
         _ => match value.as_f64() {
             Some(n) if n >= 0.0 => Ok(()),
             _ => Err("expected a number of zero or more".into()),

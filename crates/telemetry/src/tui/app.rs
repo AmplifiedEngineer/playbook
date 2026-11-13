@@ -129,6 +129,8 @@ pub struct App {
     pub filter: String,
     /// Which account the numbers belong to.
     pub account: AccountSel,
+    /// The header shows an unnamed email account cut to its domain.
+    pub mask_account: bool,
     /// Which machine the machine panels belong to.
     pub machine: MachineSel,
     /// The last store error, shown in the header until the next good refresh.
@@ -196,6 +198,8 @@ pub enum Effect {
     SaveBudget(f64),
     /// Clear the stored layout and screen setup, then call `reset_done`.
     ResetPrefs,
+    /// Store the account mask choice, so the next start opens with it.
+    SaveMaskAccount(bool),
     /// Delete the usage history and read the transcripts again.
     ResetUsage,
 }
@@ -214,6 +218,7 @@ impl App {
             week_start: WeekStart::default(),
             filter: String::new(),
             account: AccountSel::default(),
+            mask_account: false,
             machine: MachineSel::default(),
             error: None,
             quit: false,
@@ -831,6 +836,10 @@ impl App {
             Cmd::Quit => self.quit = true,
             Cmd::Theme if !self.no_color => self.theme = self.theme.next(),
             Cmd::Theme => {}
+            Cmd::MaskAccount => {
+                self.mask_account = !self.mask_account;
+                return Effect::SaveMaskAccount(self.mask_account);
+            }
             Cmd::Today => return self.set_range(Range::Today),
             Cmd::Week => return self.set_range(Range::ThisWeek(self.week_start)),
             Cmd::LastWeek => return self.set_range(Range::LastWeek(self.week_start)),
@@ -1146,6 +1155,22 @@ mod tests {
         assert_eq!(app.theme, Theme::Spectrum);
         app.key(press(KeyCode::Char('t')));
         assert_eq!(app.theme, Theme::Dark);
+    }
+
+    #[test]
+    fn the_mask_key_flips_the_mask_and_asks_to_store_it() {
+        let mut app = App::new(Range::All);
+        assert!(!app.mask_account);
+        assert_eq!(
+            app.key(press(KeyCode::Char('@'))),
+            Effect::SaveMaskAccount(true)
+        );
+        assert!(app.mask_account);
+        assert_eq!(
+            app.key(press(KeyCode::Char('@'))),
+            Effect::SaveMaskAccount(false)
+        );
+        assert!(!app.mask_account);
     }
 
     #[test]
@@ -2054,6 +2079,7 @@ mod tests {
             PrevTab,
             GoTab,
             Theme,
+            MaskAccount,
             Today,
             Week,
             LastWeek,

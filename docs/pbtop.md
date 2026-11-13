@@ -141,6 +141,7 @@ Regenerate with: UPDATE_REFERENCE=1 cargo test -p playbook --test docs_pbtop_key
 |---|---|---|
 | `v` | Next view of the focused panel | Spend, Projects |
 | `t` | Next color theme (off with NO_COLOR) | all panels |
+| `@` | Mask the account email (screenshots) | all panels |
 | `p` | Open the full screen Sessions list | all panels |
 | `e` | Edit the tabs and the panels on each | all panels |
 | `?` | Show this help | all panels |
@@ -279,6 +280,7 @@ Live means a session whose last message is no older than 15 minutes.
 | Key | Default | What it does |
 |---|---|---|
 | `usage.theme` | `default` | The color theme. Choices are `default`, `spectrum`, `dark`, `light` and `mono`. `t` cycles them. |
+| `usage.maskAccount` | `false` | `true` cuts an unnamed email account in the header to `@` and its domain name, for screenshots. `@` flips it inside the view and stores the choice, which then wins over the config value on the next start. With no config store yet, the choice lasts for the run. |
 | `usage.weekStart` | `monday` | The first day of the week. |
 | `usage.timeZone` | `local` | `local` or `utc`. |
 | `usage.refreshSeconds` | `5` | Seconds between reads. |

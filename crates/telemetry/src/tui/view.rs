@@ -798,7 +798,7 @@ fn zone_note(app: &App) -> String {
     let Some(data) = app.data.as_ref() else {
         return zone;
     };
-    [&data.accounts.shown, &data.machines.shown]
+    [data.accounts.label(app.mask_account), &data.machines.shown]
         .into_iter()
         .filter(|name| !name.is_empty())
         .fold(zone, |note, name| format!("{note}, {name}"))
