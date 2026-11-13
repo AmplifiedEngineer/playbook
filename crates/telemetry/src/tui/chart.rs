@@ -13,7 +13,7 @@
 
 use super::data::{DayPoint, Slots};
 use super::fmt::{axis_money, axis_tokens, compact, fit, money, WEEKDAYS};
-use super::scale::Axis;
+use super::scale::{Axis, ROW_EIGHTHS};
 use super::theme::{Fill, Ink, Palette, SERIES};
 use crate::aggregate::date_key;
 use crate::query::weekday;
@@ -183,6 +183,9 @@ pub struct Geometry {
     /// For each bar, its first column in the plot and the columns it takes,
     /// with its gap.
     pub cells: Vec<(u16, u16)>,
+    /// The columns every bar fills. The columns left over from the cells go
+    /// into the gaps, so only the gaps differ.
+    pub bar: u16,
 }
 
 impl Geometry {
@@ -230,6 +233,10 @@ impl Geometry {
                 })
                 .collect()
         };
+        // Every bar is as wide as the narrowest cell less its gap of one;
+        // crowded bars of one column keep it.
+        let narrowest = cells.iter().map(|c| c.1).min().unwrap_or(1);
+        let bar = narrowest.saturating_sub(1).max(1);
         // A weekday label needs its own column and a gap, so crowded bars
         // (a month in a narrow panel) go without the row.
         let roomy = cells.iter().all(|c| c.1 >= 2);
@@ -254,6 +261,7 @@ impl Geometry {
             inner,
             per,
             cells,
+            bar,
         }
     }
 
@@ -266,13 +274,9 @@ impl Geometry {
         self.plot.x + self.cells[i].0
     }
 
-    /// The columns the bar itself fills: its cell less a gap of one when the
-    /// cell is wider than a column.
-    pub fn bar_width(&self, i: usize) -> u16 {
-        match self.cells[i].1 {
-            0 | 1 => self.cells[i].1,
-            w => w - 1,
-        }
+    /// The columns the bar itself fills, the same for every bar.
+    pub fn bar_width(&self) -> u16 {
+        self.bar
     }
 
     /// The columns from the plot start to the end of the last bar.
@@ -280,7 +284,7 @@ impl Geometry {
         self.cells
             .len()
             .checked_sub(1)
-            .map_or(0, |i| usize::from(self.cells[i].0 + self.bar_width(i)))
+            .map_or(0, |i| usize::from(self.cells[i].0 + self.bar_width()))
     }
 }
 
@@ -822,14 +826,21 @@ fn draw_axis(buf: &mut Buffer, plot: &Plot, pal: &Palette) {
         return;
     }
     let guide = Style::default().fg(pal.color(pal.div_line));
-    let mid = p.height / 2;
+    // Each label sits on the row where a bar of its value ends, so a bar
+    // that equals a label reaches that label.
     let rows: Vec<(u16, f64)> = match p.height {
         1 => vec![(0, plot.axis.max)],
         2 => vec![(0, plot.axis.max), (1, 0.0)],
-        h => vec![(0, plot.axis.max), (mid, plot.axis.max / 2.0), (h - 1, 0.0)],
+        _ => plot
+            .axis
+            .ticks()
+            .into_iter()
+            .rev()
+            .map(|v| (plot.axis.row_of(v, p.height), v))
+            .collect(),
     };
     if p.height >= MIN_PLOT {
-        for row in [0, mid] {
+        for (row, _) in rows.iter().take(2) {
             for x in p.x..p.x + p.width {
                 buf[(x, p.y + row)].set_char('\u{2504}').set_style(guide);
             }
@@ -869,13 +880,15 @@ fn draw_bars(buf: &mut Buffer, plot: &Plot, view: &View, pal: &Palette) {
             pal.graded(view.fill, pct)
         };
         let x0 = geo.x_of(i);
-        for col in 0..geo.bar_width(i) {
+        for col in 0..geo.bar_width() {
             let x = x0 + col;
             if x >= p.x + p.width {
                 break;
             }
             for r in 0..p.height {
-                let eighths = levels.saturating_sub(usize::from(r) * 8).min(8);
+                let eighths = levels
+                    .saturating_sub(usize::from(r) * ROW_EIGHTHS)
+                    .min(ROW_EIGHTHS);
                 if eighths == 0 {
                     break;
                 }
@@ -947,7 +960,7 @@ fn draw_stacked(buf: &mut Buffer, plot: &Plot, slots: &Slots, pal: &Palette) {
             let main = inside
                 .iter()
                 .copied()
-                .max_by_key(|k| (overlap(*k), std::cmp::Reverse(*k)))
+                .max_by_key(|k| (overlap(*k), *k))
                 .unwrap_or(0);
             let eighths = hi - lo;
             let (glyph, style) = match (pal.mono, inside.as_slice()) {
@@ -969,7 +982,7 @@ fn draw_stacked(buf: &mut Buffer, plot: &Plot, slots: &Slots, pal: &Palette) {
                 ),
             };
             let y = p.y + p.height - 1 - r;
-            for col in 0..geo.bar_width(i) {
+            for col in 0..geo.bar_width() {
                 let x = geo.x_of(i) + col;
                 if x < p.x + p.width {
                     buf[(x, y)].set_char(glyph).set_style(style);
@@ -987,6 +1000,7 @@ pub fn series_ink(pal: &Palette, slot: usize) -> Ink {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::scale::HALF_ROW;
     use crate::tui::theme::{ColorDepth, Theme};
 
     fn pal() -> Palette {
@@ -1119,6 +1133,78 @@ mod tests {
     }
 
     #[test]
+    fn every_bar_has_the_same_width_whatever_the_panel_width() {
+        for panel_width in 30..140 {
+            for days in [7, 14, 30] {
+                let g = Geometry::new(Rect::new(0, 0, panel_width, 10), days, 4);
+                let plot_width = g.plot.width;
+                let first = g.bar_width();
+                let mut end = 0;
+                let narrowest = g.cells.iter().map(|c| c.1).min().unwrap_or(1);
+                assert_eq!(first, narrowest.saturating_sub(1).max(1));
+                for i in 0..g.bars() {
+                    let (from, cell) = g.cells[i];
+                    assert!(from >= end, "cells overlap at {panel_width}/{days}");
+                    assert!(from + g.bar_width() <= from + cell);
+                    end = from + cell;
+                }
+                assert!(
+                    g.span() <= usize::from(plot_width),
+                    "{panel_width} wide, {days} days"
+                );
+                // Gaps differ by at most one column.
+                let gaps: Vec<u16> = g.cells.iter().map(|c| c.1 - g.bar_width()).collect();
+                let (lo, hi) = (gaps.iter().min().unwrap(), gaps.iter().max().unwrap());
+                assert!(hi - lo <= 1, "{panel_width} wide, {days} days: {gaps:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_month_in_a_panel_of_three_point_something_columns_per_day_keeps_equal_bars() {
+        // 38 inner columns less a 6 column gutter is 32 columns for 30 days.
+        // Make it 3.x columns per day: 100 columns of plot for 30 days.
+        let g = Geometry::new(Rect::new(0, 0, 108, 10), 30, 4);
+        assert_eq!(g.plot.width, 100);
+        assert!(g.cells.iter().any(|c| c.1 == 3) && g.cells.iter().any(|c| c.1 == 4));
+        assert_eq!(g.bar_width(), 2);
+    }
+
+    #[test]
+    fn a_bar_equal_to_an_axis_label_ends_on_that_labels_row() {
+        for height in [1u16, 2, 3, 4, 5, 6, 7, 8, 9, 12] {
+            let panel = Rect::new(0, 0, 40, height + 6);
+            // Peak 400 gives the axis 0, 200, 400.
+            for (value, label) in [(400.0, "$400"), (200.0, "$200")] {
+                let series = series(&[value, 400.0]);
+                let (plot, buf) = draw(panel, &series, None);
+                let p = plot.geo.plot;
+                if p.height < 3 && value < 400.0 {
+                    continue; // two rows or fewer carry no middle label
+                }
+                let label_row = (p.y..p.y + p.height)
+                    .find(|y| row(&buf, *y).contains(label))
+                    .unwrap_or_else(|| panic!("no {label} at plot height {}", p.height));
+                let x = plot.geo.x_of(0);
+                let top = (p.y..p.y + p.height)
+                    .find(|y| buf[(x, *y)].symbol() != " " && buf[(x, *y)].symbol() != "\u{2504}")
+                    .expect("a bar");
+                assert_eq!(top, label_row, "{label} at plot height {}", p.height);
+                if value == 400.0 {
+                    // The top label sits in the middle of its row, so the
+                    // bar that equals it ends in the middle of that row.
+                    assert_eq!(
+                        buf[(x, top)].symbol(),
+                        EIGHTHS[HALF_ROW - 1].to_string(),
+                        "plot height {}",
+                        p.height
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn bars_share_the_plot_so_the_chart_fills_its_width() {
         // 38 inner columns less a 6 column axis gutter leaves 32.
         let g = |days| Geometry::new(Rect::new(0, 0, 40, 10), days, 4);
@@ -1130,12 +1216,12 @@ mod tests {
         let seven = g(7);
         assert_eq!(widths(&seven).iter().sum::<u16>(), 32);
         assert!(widths(&seven).iter().all(|w| (4..=5).contains(w)));
-        assert_eq!(seven.bar_width(0), seven.cells[0].1 - 1, "a gap of one");
-        assert_eq!(thirty.bar_width(0), 1, "no gap at one column");
+        assert_eq!(seven.bar_width(), seven.cells[0].1 - 1, "a gap of one");
+        assert_eq!(thirty.bar_width(), 1, "no gap at one column");
         // A few days get a fixed width and do not stretch into slabs.
         let one = g(1);
         assert_eq!(one.cells, vec![(0, MAX_CELL as u16)]);
-        assert_eq!(one.bar_width(0), MAX_CELL as u16 - 1);
+        assert_eq!(one.bar_width(), MAX_CELL as u16 - 1);
         // Bars never overlap and never leave the plot.
         for days in 1..200 {
             let g = g(days);
@@ -1207,8 +1293,15 @@ mod tests {
                 .filter(|r| buf[(x, p.y + h - 1 - r)].symbol() == "\u{2588}")
                 .count()
         };
-        assert_eq!(filled(col(1)), usize::from(h));
-        assert_eq!(filled(col(0)), usize::from(h) / 2);
+        // The top is the middle of the top row, where the $5 label is: the
+        // peak bar has a half block there, and $2.5 ends at half of that scale.
+        let scale = usize::from(h) * ROW_EIGHTHS - HALF_ROW;
+        assert_eq!(filled(col(1)), usize::from(h) - 1);
+        assert_eq!(
+            buf[(col(1), p.y)].symbol(),
+            EIGHTHS[HALF_ROW - 1].to_string()
+        );
+        assert_eq!(filled(col(0)), scale / 2 / ROW_EIGHTHS);
     }
 
     #[test]
@@ -1544,7 +1637,8 @@ mod tests {
         assert!(('\u{2581}'..='\u{2587}').contains(&edge.symbol().chars().next().unwrap()));
         assert_eq!(cell(0).fg, opus);
         assert_eq!(cell(h - 1).fg, sonnet);
-        assert_eq!(cell(h - 1).symbol(), "\u{2588}");
+        assert_eq!(cell(h - 1).symbol(), EIGHTHS[HALF_ROW - 1].to_string());
+        assert_eq!(cell(h - 2).symbol(), "\u{2588}");
     }
 
     #[test]
@@ -1572,7 +1666,8 @@ mod tests {
         let (p, h) = (plot.geo.plot, plot.geo.plot.height);
         let x = plot.geo.x_of(0);
         let low = buf[(x, p.y + h - 1)].symbol().to_string();
-        let high = buf[(x, p.y)].symbol().to_string();
+        // The top row is a half block, so the pattern shows one row below.
+        let high = buf[(x, p.y + 1)].symbol().to_string();
         assert_eq!(low, PATTERNS[slots.slot("opus")].to_string());
         assert_eq!(high, PATTERNS[slots.slot("sonnet")].to_string());
         assert_ne!(low, high);

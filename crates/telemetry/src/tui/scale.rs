@@ -28,6 +28,12 @@ pub fn nice_ceiling(value: f64) -> f64 {
     step * scale
 }
 
+/// Eighths of a cell in one row of the plot.
+pub const ROW_EIGHTHS: usize = 8;
+/// Half a row in eighths. An axis label sits on the middle of its text row,
+/// so the top of the scale is the middle of the top row, not its edge.
+pub const HALF_ROW: usize = ROW_EIGHTHS / 2;
+
 /// The vertical axis: zero at the bottom, `max` at the top.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Axis {
@@ -47,14 +53,24 @@ impl Axis {
         [0.0, self.max / 2.0, self.max]
     }
 
-    /// Eighths of a cell a value fills in a plot `rows` cells high. Anything
-    /// above zero shows at least one eighth, so a small day is never blank.
+    /// Eighths of a cell a value fills in a plot `rows` cells high. Zero is
+    /// the bottom edge of the bottom row and `max` is the middle of the top
+    /// row, where its label is. Anything above zero shows at least one eighth,
+    /// so a small day is never blank.
     pub fn levels(self, value: f64, rows: u16) -> usize {
-        let total = usize::from(rows) * 8;
+        let total = (usize::from(rows) * ROW_EIGHTHS).saturating_sub(HALF_ROW);
         if value <= 0.0 || !value.is_finite() || total == 0 {
             return 0;
         }
         (((value / self.max) * total as f64).round() as usize).clamp(1, total)
+    }
+
+    /// The row, counted from the top of a plot `rows` high, where a bar of
+    /// `value` ends. A label for that value goes on this row.
+    pub fn row_of(self, value: f64, rows: u16) -> u16 {
+        let top_of_bar = self.levels(value, rows).saturating_sub(1) / ROW_EIGHTHS;
+        rows.saturating_sub(1)
+            .saturating_sub(u16::try_from(top_of_bar).unwrap_or(u16::MAX))
     }
 }
 
@@ -122,11 +138,24 @@ mod tests {
     #[test]
     fn levels_scale_to_eighths_and_a_small_value_keeps_one() {
         let axis = Axis { max: 100.0 };
-        assert_eq!(axis.levels(100.0, 2), 16);
-        assert_eq!(axis.levels(50.0, 2), 8);
+        assert_eq!(axis.levels(100.0, 2), 12);
+        assert_eq!(axis.levels(50.0, 2), 6);
         assert_eq!(axis.levels(0.001, 2), 1);
         assert_eq!(axis.levels(0.0, 2), 0);
-        assert_eq!(axis.levels(500.0, 2), 16);
+        assert_eq!(axis.levels(500.0, 2), 12);
         assert_eq!(axis.levels(5.0, 0), 0);
+    }
+
+    #[test]
+    fn a_label_row_is_the_row_where_a_bar_of_its_value_ends() {
+        let axis = Axis { max: 100.0 };
+        // Five rows: 36 eighths at the top, 18 in the middle.
+        assert_eq!(axis.levels(100.0, 5), 36);
+        assert_eq!(axis.row_of(100.0, 5), 0);
+        assert_eq!(axis.row_of(50.0, 5), 2);
+        assert_eq!(axis.row_of(0.0, 5), 4);
+        assert_eq!(axis.row_of(100.0, 2), 0);
+        assert_eq!(axis.row_of(50.0, 2), 1);
+        assert_eq!(axis.row_of(0.0, 2), 1);
     }
 }

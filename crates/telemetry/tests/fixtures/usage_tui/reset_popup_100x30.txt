@@ -7,10 +7,10 @@
 ╭─┤¹Spend per day, USD├─┤v view: total├──────────╮╭─┤²Tokens per day├──────────────────────────────╮
 │total $20.27  peak $6.01 on 08-25  avg $0.68/day││total 618.8K  peak 47.6K on 08-14  avg 20.6K/day│
 │Thu 2026-09-03 today  $1.25  2 msgs  47.6K tok  ││Thu 2026-09-03 today  47.6K tok  $1.25  2 msgs  │
-│ $8┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄││ 50K┤┄┄┄┄┄┄┄┄┄┄┄┄▆┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▆┄┄┄┄┄┄┄┄┄▆┄┄▆┄│
-│   │                             █              ││    │            █               █         █  █ │
-│ $4┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╭┤ Reset usage ├───────────────────────────────────────────╮▇┄┄┄█┄▇▇┄┄▇▇┄┄█┄┄█┄│
-│ $0┤▁▆▁  ▃ ▁▂ ▂  ▁█│Delete the stored usage history and read it again from the│█   █ ██  ██  █  █ │
+│ $8┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄││ 50K┤┄┄┄┄┄┄┄┄┄┄┄┄▃┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▃┄┄┄┄┄┄┄┄┄▃┄┄▃┄│
+│   │                             ▅              ││    │            █               █         █  █ │
+│ $4┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╭┤ Reset usage ├───────────────────────────────────────────╮▅┄┄┄█┄▅▅┄┄▅▅┄┄█┄┄█┄│
+│ $0┤▁▅▁  ▃ ▁▂ ▁  ▁▇│Delete the stored usage history and read it again from the│█   █ ██  ██  █  █ │
 │    5 7  9  11 13 1│session transcripts, as on a first run?                   │ 23   26  29  1  3 │
 ╰───────────────────│The budget, the limit readings, the account names and the │───────────────────╯
 ╭─┤³Models├─────────│layout stay.                                              │s├─────────────────╮

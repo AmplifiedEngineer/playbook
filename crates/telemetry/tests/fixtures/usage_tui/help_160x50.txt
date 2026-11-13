@@ -13,15 +13,15 @@
 ╭─┤¹Spend per day, USD├─┤v view: total├──│PgUp       Move five rows up                        tables                  │────────────────────────────────────────╮
 │total $20.27  peak $6.01 on 08-25  avg $│Home, g    First row, or first day of a chart       tables, charts          │ 20.6K/day                              │
 │Thu 2026-09-03 today  $1.25  2 msgs  47.│End, G     Last row, or last day of a chart         tables, charts          │  2 msgs                                │
-│ $8┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│Left, h    Move the chart cursor one bar back       charts                  │┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▅▅┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▅▅┄┄┄▅▅┄│
-│   │                                    │Right, l   Move the chart cursor one bar forward    charts                  │               ██               ██   ██ │
-│   │                                    │                                                                            │               ██               ██   ██ │
-│   │                                    │Periods                                                                     │               ██               ██   ██ │
-│ $4┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│d          Show today                               all panels              │┄▂┄▂┄▂▂┄▂┄┄┄┄┄┄██┄▂┄▂┄┄┄┄▂┄▂▂┄┄┄██┄┄┄██┄│
-│   │                                    │w          Show this week                           all panels              │ █ █ ██ █      ██ █ █    █ ██   ██   ██ │
-│   │                        ▁▁          │W          Show last week                           all panels              │ █ █ ██ █      ██ █ █    █ ██   ██   ██ │
-│   │  ▅                     ██   ▄▄     │m          Show this month                          all panels              │ █ █ ██ █      ██ █ █    █ ██   ██   ██ │
-│ $0┤▂ █ ▁▁   ▇▇ ▁ ▅▅ ▄    ▂ ██ ▁ ██   ▁▁│M          Show last month                          all panels              │ █ █ ██ █      ██ █ █    █ ██   ██   ██ │
+│ $8┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│Left, h    Move the chart cursor one bar back       charts                  │┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▁┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▁┄┄┄┄▁┄┄│
+│   │                                    │Right, l   Move the chart cursor one bar forward    charts                  │               █                █    █  │
+│   │                                    │                                                                            │               █                █    █  │
+│   │                                    │Periods                                                                     │               █                █    █  │
+│ $4┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│d          Show today                               all panels              │┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄█┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄█┄┄┄┄█┄┄│
+│   │                                    │w          Show this week                           all panels              │ █ █ █  █      █  █ █    █ █    █    █  │
+│   │                                    │W          Show last week                           all panels              │ █ █ █  █      █  █ █    █ █    █    █  │
+│   │  ▄                     █    ▃      │m          Show this month                          all panels              │ █ █ █  █      █  █ █    █ █    █    █  │
+│ $0┤▂ █ ▁    ▇  ▁ ▅  ▃    ▂ █  ▁ █    ▁ │M          Show last month                          all panels              │ █ █ █  █      █  █ █    █ █    █    █  │
 │    W T F  S S  M T  W T  F S  S M  T W │a          Show all time                            all panels              │ W T F  S S  M T  W T F  S S  M T  W T  │
 │    5   7    9    11   13   15   17   19│r          Switch between today and this week       all panels              │ 19  21   23   25   27   29   31   2 3  │
 ╰────────────────────────────────────────│z          Switch between local time and UTC        all panels              │────────────────┤tokens low ■■■■■ high├─╯
