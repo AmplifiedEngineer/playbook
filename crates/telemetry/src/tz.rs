@@ -81,6 +81,12 @@ impl Zone {
         format!("{:02}:{:02}:{:02}", s / 3600, s % 3600 / 60, s % 60)
     }
 
+    /// `HH:MM` of `ts` on this zone's wall clock, for narrow places.
+    pub fn hour_minute(self, ts: i64) -> String {
+        let s = self.second_of_day(ts);
+        format!("{:02}:{:02}", s / 3600, s % 3600 / 60)
+    }
+
     /// `YYYY-MM-DDTHH:MM:SS` plus `Z` or a `+HH:MM` offset. A negative `ts`
     /// reads as the epoch.
     pub fn iso(self, ts: i64) -> String {
@@ -374,6 +380,8 @@ mod tests {
         assert_eq!(EAST_5H.iso(ts), "2023-11-15T03:13:20+05:00");
         assert_eq!(WEST_3H.iso(ts), "2023-11-14T19:13:20-03:00");
         assert_eq!(Zone::Utc.iso(ts), "2023-11-14T22:13:20Z");
+        assert_eq!(EAST_5H.hour_minute(ts), "03:13");
+        assert_eq!(WEST_3H.hour_minute(ts), "19:13");
     }
 
     #[test]

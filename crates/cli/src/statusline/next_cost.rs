@@ -10,15 +10,18 @@
 //! previous reply and the new prompt to the cache and pays for its output,
 //! none of which is known here.
 //!
-//! Cache state, in order of checks: no last turn is `Unknown`; a model switch
-//! is `Cold` (a new model starts a new cache); no cache tier found is
-//! `Unknown`; otherwise the age of the last turn against the tier's TTL. A
-//! model switch is the one case that prices the cold figure at the 5 minute
-//! write even when the last tier was one hour, because the new model's tier
-//! is not known.
+//! Cache state, in order of checks: a model switch seen in the transcript is
+//! `Cold` (a new model starts a new cache). Then, when Claude Code sends its
+//! `prompt_cache` object on stdin, that object decides (see
+//! [`PromptCache`]). Without it (older Claude Code): no last turn is
+//! `Unknown`, no cache tier found is `Unknown`, otherwise the age of the last
+//! turn against the tier's TTL. A model switch is the one case that prices
+//! the cold figure at the 5 minute write even when the last tier was one
+//! hour, because the new model's tier is not known.
 
 use crate::common::transcript_tail::{CacheTier, LastTurn};
 use crate::usage::pricing::{cost_usd, same_model, Tokens};
+use serde_json::Value;
 
 /// Lifetime of a five minute cache write.
 const FIVE_MINUTE_TTL_SECS: i64 = 300;
@@ -43,12 +46,90 @@ pub(super) struct NextCost {
     pub state: CacheState,
 }
 
+/// The `prompt_cache` object Claude Code sends on stdin (v2.1.251 and later),
+/// documented at code.claude.com/docs/en/statusline under "Prompt cache
+/// fields". Every field is optional here, so a missing or odd one falls back.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct PromptCache {
+    /// Whether the cached prefix is still within its TTL.
+    pub warm: Option<bool>,
+    /// Whether any response this session reported cache tokens.
+    pub caching_observed: Option<bool>,
+    /// The lifetime of the current cached prefix.
+    pub ttl: Option<CacheTier>,
+    /// When the cached prefix goes cold, epoch seconds. `None` when the last
+    /// response reported no cache tokens.
+    pub expires_at: Option<i64>,
+    /// Tokens the next request writes again if the cache has gone cold.
+    pub recache_tokens_if_cold: Option<u64>,
+}
+
+/// The `ttl` text of a five minute cache.
+const TTL_FIVE_MINUTES: &str = "5m";
+/// The `ttl` text of a one hour cache.
+const TTL_ONE_HOUR: &str = "1h";
+
+impl PromptCache {
+    /// The `prompt_cache` object of the statusline input, `None` when the
+    /// input is not JSON or has no such object.
+    pub(super) fn from_statusline(input: &str) -> Option<PromptCache> {
+        let root: Value = serde_json::from_str(input).ok()?;
+        let p = root.get("prompt_cache")?.as_object()?;
+        Some(PromptCache {
+            warm: p.get("warm").and_then(Value::as_bool),
+            caching_observed: p.get("caching_observed").and_then(Value::as_bool),
+            ttl: match p.get("ttl").and_then(Value::as_str) {
+                Some(TTL_FIVE_MINUTES) => Some(CacheTier::FiveMinutes),
+                Some(TTL_ONE_HOUR) => Some(CacheTier::OneHour),
+                _ => None,
+            },
+            expires_at: p.get("expires_at").and_then(Value::as_i64),
+            recache_tokens_if_cold: p.get("recache_tokens_if_cold").and_then(Value::as_u64),
+        })
+    }
+
+    /// The cache state at `now`: `Unknown` when the session never saw cache
+    /// tokens (caching is off or not reported), `Cold` when Claude Code says
+    /// the cache is not warm or its expiry passed, else `Warm` until expiry.
+    /// `None` when the object lacks what is needed to decide.
+    fn state(&self, now: i64) -> Option<CacheState> {
+        if self.caching_observed == Some(false) {
+            return Some(CacheState::Unknown);
+        }
+        match (self.warm?, self.expires_at) {
+            (false, _) => Some(CacheState::Cold),
+            (true, Some(at)) if at > now => Some(CacheState::Warm {
+                left_secs: at - now,
+            }),
+            (true, Some(_)) => Some(CacheState::Cold),
+            (true, None) => None,
+        }
+    }
+}
+
+/// The price of writing `tokens` to the cache at `tier`.
+fn write_usd(model: &str, tier: CacheTier, tokens: u64) -> Option<f64> {
+    let t = match tier {
+        CacheTier::FiveMinutes => Tokens {
+            cache_write_5m: tokens,
+            ..Tokens::default()
+        },
+        CacheTier::OneHour => Tokens {
+            cache_write_1h: tokens,
+            ..Tokens::default()
+        },
+    };
+    cost_usd(model, &t)
+}
+
 /// Estimate for the next message, or `None` for an unpriced model or an empty
-/// context. An empty `model_id` falls back to the last turn's model.
+/// context. An empty `model_id` falls back to the last turn's model. `cache`
+/// is the stdin `prompt_cache` object; without it the transcript decides.
 pub(super) fn estimate(
     model_id: &str,
     context_tokens: u64,
     last: Option<&LastTurn>,
+    cache: Option<&PromptCache>,
     now: i64,
 ) -> Option<NextCost> {
     if context_tokens == 0 {
@@ -67,20 +148,8 @@ pub(super) fn estimate(
             ..Tokens::default()
         },
     )?;
-    let write_1h = cost_usd(
-        model,
-        &Tokens {
-            cache_write_1h: context_tokens,
-            ..Tokens::default()
-        },
-    )?;
-    let cold_5m = cost_usd(
-        model,
-        &Tokens {
-            cache_write_5m: context_tokens,
-            ..Tokens::default()
-        },
-    )?;
+    let write_1h = write_usd(model, CacheTier::OneHour, context_tokens)?;
+    let cold_5m = write_usd(model, CacheTier::FiveMinutes, context_tokens)?;
     let next = |cold_usd, state| {
         Some(NextCost {
             warm_usd,
@@ -89,12 +158,21 @@ pub(super) fn estimate(
         })
     };
 
+    if last.is_some_and(|l| !same_model(model, &l.model)) {
+        return next(cold_5m, CacheState::Cold);
+    }
+    if let Some(state) = cache.and_then(|c| c.state(now)) {
+        let cache = cache.copied().unwrap_or_default();
+        let tier = cache
+            .ttl
+            .or(last.and_then(|l| l.tier))
+            .unwrap_or(CacheTier::FiveMinutes);
+        let tokens = cache.recache_tokens_if_cold.unwrap_or(context_tokens);
+        return next(write_usd(model, tier, tokens)?, state);
+    }
     let Some(last) = last else {
         return next(cold_5m, CacheState::Unknown);
     };
-    if !same_model(model, &last.model) {
-        return next(cold_5m, CacheState::Cold);
-    }
     let Some(tier) = last.tier else {
         return next(cold_5m, CacheState::Unknown);
     };
@@ -323,7 +401,7 @@ mod tests {
             },
         ];
         for row in rows {
-            let got = estimate(row.model_id, row.tokens, row.last.as_ref(), NOW)
+            let got = estimate(row.model_id, row.tokens, row.last.as_ref(), None, NOW)
                 .unwrap_or_else(|| panic!("{}: no estimate", row.name));
             assert_eq!(got.state, row.state, "{}", row.name);
             assert!(
@@ -344,22 +422,123 @@ mod tests {
     #[test]
     fn an_unpriced_model_or_zero_tokens_gives_none() {
         let l = last("claude-opus-4-9", Some(CacheTier::FiveMinutes), 10);
-        assert_eq!(estimate("claude-opus-4-9", CTX, Some(&l), NOW), None);
-        assert_eq!(estimate("", CTX, None, NOW), None);
+        assert_eq!(estimate("claude-opus-4-9", CTX, Some(&l), None, NOW), None);
+        assert_eq!(estimate("", CTX, None, None, NOW), None);
         let l = last(OPUS, Some(CacheTier::FiveMinutes), 10);
-        assert_eq!(estimate(OPUS, 0, Some(&l), NOW), None);
+        assert_eq!(estimate(OPUS, 0, Some(&l), None, NOW), None);
         // The price table matches plain names only, so a prefixed stdin id is
         // unpriced and shows no estimate.
         assert_eq!(
-            estimate("us.anthropic.claude-opus-4-8-v1:0", CTX, Some(&l), NOW),
+            estimate(
+                "us.anthropic.claude-opus-4-8-v1:0",
+                CTX,
+                Some(&l),
+                None,
+                NOW
+            ),
             None
         );
+    }
+
+    fn stdin_cache(body: &str) -> PromptCache {
+        PromptCache::from_statusline(&format!(r#"{{"prompt_cache":{{{body}}}}}"#)).unwrap()
+    }
+
+    #[test]
+    fn the_stdin_cache_object_parses_and_tolerates_odd_fields() {
+        let c = stdin_cache(
+            r#""warm":true,"caching_observed":true,"ttl":"1h","expires_at":5,"recache_tokens_if_cold":9"#,
+        );
+        assert_eq!(
+            c,
+            PromptCache {
+                warm: Some(true),
+                caching_observed: Some(true),
+                ttl: Some(CacheTier::OneHour),
+                expires_at: Some(5),
+                recache_tokens_if_cold: Some(9),
+            }
+        );
+        let odd = stdin_cache(r#""warm":"yes","ttl":"2h","expires_at":null"#);
+        assert_eq!(odd, PromptCache::default());
+        assert_eq!(PromptCache::from_statusline(r#"{"cost":{}}"#), None);
+        assert_eq!(PromptCache::from_statusline("not json"), None);
+    }
+
+    #[test]
+    fn the_stdin_cache_object_wins_over_the_transcript() {
+        // The transcript says 60 seconds are left; stdin says 45.
+        let l = last(OPUS, Some(CacheTier::FiveMinutes), 240);
+        let c = stdin_cache(&format!(
+            r#""warm":true,"caching_observed":true,"ttl":"5m","expires_at":{}"#,
+            NOW + 45
+        ));
+        let got = estimate(OPUS, CTX, Some(&l), Some(&c), NOW).unwrap();
+        assert_eq!(got.state, warm(45));
+        assert!(
+            close(got.warm_usd, 0.10) && close(got.cold_usd, 1.25),
+            "{got:?}"
+        );
+    }
+
+    #[test]
+    fn a_cold_stdin_cache_prices_the_recache_tokens_at_the_ttl_write() {
+        // 100,000 tokens at the 1h write: 100,000 x $5 x 2 / 1M = $1.00.
+        for body in [
+            format!(
+                r#""warm":false,"ttl":"1h","expires_at":{},"recache_tokens_if_cold":100000"#,
+                NOW - 10
+            ),
+            format!(r#""warm":true,"ttl":"1h","expires_at":{NOW},"recache_tokens_if_cold":100000"#),
+        ] {
+            let got = estimate(OPUS, CTX, None, Some(&stdin_cache(&body)), NOW).unwrap();
+            assert_eq!(got.state, CacheState::Cold, "{body}");
+            assert!(close(got.cold_usd, 1.00), "{body}: {got:?}");
+        }
+    }
+
+    #[test]
+    fn no_expiry_with_a_cold_cache_is_cold_at_the_context_size() {
+        let c = stdin_cache(
+            r#""warm":false,"caching_observed":true,"ttl":"5m","expires_at":null,"recache_tokens_if_cold":null"#,
+        );
+        let got = estimate(OPUS, CTX, None, Some(&c), NOW).unwrap();
+        assert_eq!(got.state, CacheState::Cold);
+        assert!(close(got.cold_usd, 1.25), "{got:?}");
+    }
+
+    #[test]
+    fn a_stdin_cache_that_cannot_decide_falls_back_to_the_transcript() {
+        let l = last(OPUS, Some(CacheTier::FiveMinutes), 240);
+        // Warm with no expiry says nothing about time left.
+        let c = stdin_cache(r#""warm":true,"expires_at":null"#);
+        let got = estimate(OPUS, CTX, Some(&l), Some(&c), NOW).unwrap();
+        assert_eq!(got.state, warm(60));
+    }
+
+    #[test]
+    fn caching_never_seen_is_unknown_not_cold() {
+        let c = stdin_cache(r#""warm":false,"caching_observed":false,"expires_at":null"#);
+        let got = estimate(OPUS, CTX, None, Some(&c), NOW).unwrap();
+        assert_eq!(got.state, CacheState::Unknown);
+    }
+
+    #[test]
+    fn a_model_switch_is_cold_even_when_stdin_says_warm() {
+        let l = last("claude-sonnet-5", Some(CacheTier::OneHour), 10);
+        let c = stdin_cache(&format!(
+            r#""warm":true,"ttl":"1h","expires_at":{}"#,
+            NOW + 600
+        ));
+        let got = estimate(OPUS, CTX, Some(&l), Some(&c), NOW).unwrap();
+        assert_eq!(got.state, CacheState::Cold);
+        assert!(close(got.cold_usd, 1.25), "{got:?}");
     }
 
     #[test]
     fn an_unpriced_model_returns_none_before_any_switch_check() {
         let l = last(OPUS, Some(CacheTier::FiveMinutes), 10);
-        assert_eq!(estimate("claude-opus-4-9", CTX, Some(&l), NOW), None);
+        assert_eq!(estimate("claude-opus-4-9", CTX, Some(&l), None, NOW), None);
     }
 
     #[test]

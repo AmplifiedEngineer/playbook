@@ -401,6 +401,29 @@ fn expand(path: &str, home: &Path) -> String {
     path.replace("$HOME", &home)
 }
 
+/// The layer 5 row for a status line that runs playbook: a pass, or a warning
+/// when its refresh interval drifted from the one setup writes.
+fn playbook_status_line_row(settings: &Path) -> Row {
+    use crate::init::statusline::{refresh_is_current, REFRESH_INTERVAL_SECS, REFRESH_KEY};
+    let line = fs::read_to_string(settings)
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v.get("statusLine").cloned())
+        .unwrap_or_default();
+    if refresh_is_current(&line) {
+        return Row::new("5", Level::Pass, "status line runs `playbook statusline`");
+    }
+    let found = line
+        .get(REFRESH_KEY)
+        .map_or_else(|| "missing".to_string(), |v| v.to_string());
+    Row::new(
+        "5",
+        Level::Warn,
+        format!("status line {REFRESH_KEY} is {found}, playbook sets {REFRESH_INTERVAL_SECS}"),
+    )
+    .hint("run `playbook setup`, which sets it")
+}
+
 fn layer5(env: &Env) -> Option<Row> {
     let cmd = field::statusline_command(&env.settings());
     let cmd = cmd.trim();
@@ -411,12 +434,8 @@ fn layer5(env: &Env) -> Option<Row> {
             "no status line configured (opt-in)",
         ));
     }
-    if cmd == "playbook statusline" {
-        return Some(Row::new(
-            "5",
-            Level::Pass,
-            "status line runs `playbook statusline`",
-        ));
+    if cmd == crate::init::statusline::RUST_COMMAND {
+        return Some(playbook_status_line_row(&env.settings()));
     }
     if [
         "bash $HOME/.config/playbook/statusline.sh",

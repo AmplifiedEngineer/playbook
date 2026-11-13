@@ -405,6 +405,55 @@ fn init_rewrites_the_old_statusline_command_even_when_base_is_missing() {
     assert_eq!(status_line_command(&claude_home), "playbook statusline");
 }
 
+/// The refresh interval `playbook setup` writes on its own status line.
+const PLAYBOOK_REFRESH: u64 = playbook::init::statusline::REFRESH_INTERVAL_SECS;
+
+/// `statusLine` after a setup run over a user file holding `line`, with a
+/// merge baseline that matches the shipped template from an older release.
+fn status_line_after_setup(name: &str, line: Value) -> Value {
+    let home = scratch_home(name);
+    let claude_home = claude_home_of(&home);
+    write_json(
+        &claude_home.join(".settings.base.json"),
+        &json!({"statusLine": {"type": "command", "command": "playbook statusline", "refreshInterval": 30}}),
+    );
+    write_json(
+        &claude_home.join("settings.json"),
+        &json!({ "statusLine": line }),
+    );
+    assert!(run(&base_paths(&home)).ok());
+    read_json(&claude_home.join("settings.json"))["statusLine"].clone()
+}
+
+#[test]
+fn setup_sets_the_refresh_interval_on_its_own_status_line_whatever_it_was() {
+    for (name, refresh) in [
+        ("sl-refresh-missing", None),
+        ("sl-refresh-30", Some(30)),
+        ("sl-refresh-1", Some(1)),
+    ] {
+        let mut line = json!({"type": "command", "command": "playbook statusline"});
+        if let Some(r) = refresh {
+            line["refreshInterval"] = json!(r);
+        }
+        let after = status_line_after_setup(name, line);
+        assert_eq!(
+            after["refreshInterval"],
+            json!(PLAYBOOK_REFRESH),
+            "{refresh:?}"
+        );
+        assert_eq!(after["command"], "playbook statusline");
+    }
+}
+
+#[test]
+fn setup_leaves_the_refresh_interval_of_a_foreign_status_line_alone() {
+    let line =
+        json!({"type": "command", "command": "bash $HOME/my-statusline.sh", "refreshInterval": 30});
+    let after = status_line_after_setup("sl-refresh-foreign", line.clone());
+    assert_eq!(after, line);
+}
+
 #[test]
 fn init_leaves_a_custom_statusline_command_alone() {
     // Arrange

@@ -130,6 +130,6 @@
   "statusLine": {
     "type": "command",
     "command": "playbook statusline",
-    "refreshInterval": 30
+    "refreshInterval": 5
   }
 }

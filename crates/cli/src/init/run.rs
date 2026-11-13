@@ -743,10 +743,27 @@ fn seed_or_merge_settings(
         );
     }
     match merge::merge(&base_path, &template_path, settings_path, &base_path, None) {
-        Ok(outcome) => finish_merge(settings_path, &outcome, epoch),
+        Ok(mut outcome) => match own_refresh_interval(&mut outcome) {
+            Ok(()) => finish_merge(settings_path, &outcome, epoch),
+            Err(err) => StepReport::failed("settings", err),
+        },
         Err(merge::MergeError::Validation(err)) => StepReport::failed("settings", err.to_string()),
         Err(merge::MergeError::Io(err)) => StepReport::failed("settings", err.to_string()),
     }
+}
+
+/// Playbook owns the refresh interval of its own status line, so a value the
+/// three-way merge kept as a customisation, or a missing one, is replaced.
+fn own_refresh_interval(outcome: &mut merge::MergeOutcome) -> Result<(), String> {
+    let mut merged: serde_json::Value =
+        serde_json::from_str(&outcome.stdout).map_err(|e| e.to_string())?;
+    let changed = merged
+        .get_mut("statusLine")
+        .is_some_and(crate::init::statusline::set_refresh);
+    if changed {
+        outcome.stdout = serde_json::to_string_pretty(&merged).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// Drop from the recorded base every top-level key the template no longer
@@ -902,6 +919,9 @@ fn merge_filtered(
                 }
             }
             outcome.stdout = serde_json::to_string_pretty(&merged).map_err(|e| e.to_string())?;
+        }
+        if filters.statusline {
+            own_refresh_interval(&mut outcome)?;
         }
         if !filters.hooks {
             let mut merged: serde_json::Value =

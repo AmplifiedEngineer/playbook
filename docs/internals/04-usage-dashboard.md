@@ -321,20 +321,39 @@ A seat billed by usage has no 5 hour or 7 day window. It has a monthly dollar li
 
 | State | Text |
 |---|---|
-| Pace passes the limit | `! $986/$1500 mo, cap in 1d` |
-| Limit reached | `! $1600/$1500 mo CAP HIT` |
-| Pace stays under | `$410/$1500 mo, on pace` |
-| Pace lands near the limit | `$1200/$1500 mo, near cap` |
-| Under an hour into the month | `$986/$1500 mo` |
-| Cache older than six hours | `$986/$1500 mo (10d14h old)` |
+| Pace passes the limit | `! acct $986 / $1,500 mo, cap in 1d` |
+| Limit reached | `! acct $1,600 / $1,500 mo CAP HIT` |
+| Pace stays under | `acct $410 / $1,500 mo, on pace` |
+| Pace lands near the limit | `acct $1,200 / $1,500 mo, near cap` |
+| Under an hour into the month | `acct $986 / $1,500 mo` |
+| Cache older than six hours | `acct $986 / $1,500 mo (10d14h old)` |
 
+- **This chat.** Beside a figure Claude reports, the segment before it shows this chat's cost, `cost.total_cost_usd` from stdin, as `chat $1.20 | acct $412 / $1,000 mo, on pace`. It is left out when the chat has cost nothing yet, and beside the local figure, which is not the account's. It is the first segment dropped on a narrow terminal, since line 3 already shows the same cost.
+- **No personal data.** Only the dollar amounts are read from the config file. The email, names and ids next to them are never shown.
 - **Which source wins.** The amount used and the limit come from the first source that has them: the statusline reading when it carries dollars and was read within six hours (a Claude apps gateway sends it), then the cache. The cache must have been fetched this UTC month and not in the future, because a figure from last month says nothing about this one. With neither, a monthly budget falls back to this machine's usage database (see "A budget alone"); without a budget the segment is left out, and so is a figure of zero used.
 - **A stale cache.** Claude Code writes the cache when it fetches usage, and the `/usage` view does that, so it can be days old. After six hours (`STALE_SECONDS`) the figure is still shown, because spend only grows within a month, but with its age and without a projection. It is red only when the amount already passed the limit.
 - **Your own budget.** `usage.budget.monthlyUsd` replaces the limit when it is lower than the one Claude reports, and the text then says `mo budget` instead of `mo`. A higher budget changes nothing.
 - **A budget alone.** With no gateway reading and no cache figure, a monthly budget is measured against this machine's cost for the UTC calendar month, read from the usage database, and the text says `mo budget (local)` because other machines are not counted. All accounts on the machine are summed. The total is kept for 10 seconds (`LOCAL_TOTAL_CACHE_SECONDS`) in `monthly-local-total` under the statusline cache folder, the database is opened read only and never created, and if it is missing or busy the segment is left out.
 - **Not the whole account.** Apart from the local figure, the amount comes from Claude Code, not from this machine's transcripts. Whether it counts the whole organization or only your seat is not documented, so the line never calls it the organization total.
 - **No 5 hour note.** When the data has no 5 hour window the line says nothing about it.
-- **Narrow terminals.** The words after the figure go first, then the whole segment. The 7 day alarm is kept.
+- **Narrow terminals.** The words after the figure go first, then the chat cost, then the whole segment. The 7 day alarm is kept.
+
+#### Where each window lands on line 3
+
+Line 3 shows each window's percent and, once the window has run for an hour, where it lands at its reset if use goes on at the same pace. The pace maths is the same as line 4 and the Budget strip.
+
+| Line 3 reads | Meaning |
+|---|---|
+| `5h 42% → 88% at 14:00` | The 5 hour window is at 42 percent and lands at 88 when it resets at 14:00. |
+| `7d 31% → 70%` | The 7 day window is at 31 percent and lands at 70 when it resets. |
+| `5h 42% (4h30m left)` | The 5 hour window has no projection: it is under an hour old, or it has reached its cap. |
+| `Rate 7d: 60%` | No pace yet, or the window has no reset time. Shown above 50 percent only. |
+
+- **Colour.** The projection is red past 100 percent, yellow from 80 and green below. A projection past the cap also gets a red `!` alarm on line 4.
+- **Reached windows.** A window at its cap shows no projection. The 7 day window shows only its percent and the 5 hour window adds the time left to reset. Line 4 says `CAP HIT`.
+- **Large numbers.** A projection over 999 percent is written `>999%`.
+- **Clock.** The reset time uses `PLAYBOOK_TELEMETRY_TZ` (`utc` or `local`) and is local time otherwise.
+- **When it is absent.** Without `rate_limits` on stdin (an API key, Bedrock, Vertex, or before the first reply) the window segments are left out.
 
 `playbook usage doctor` prints the same decision under "What the statusline budget line will show": where the figure comes from and how old it is, the limit in force and why, and the order the sources are tried. `--raw` adds the numbers behind each choice. The plain output stays short.
 
@@ -352,9 +371,10 @@ Line 3 of the statusline shows what the next message will cost at least, and war
 What the figure counts:
 
 - **A lower bound.** It prices only the input side of the context the session already holds. The next message also writes the previous reply and the new prompt to the cache and pays for its output, so the message costs more than the figure. The figure rounds down to the cent, and a value under one cent shows as `<$0.01`.
-- **Where the numbers come from.** The token counts and the model id come from the statusline input. The time of the last request and the cache tier (5 minutes or 1 hour) come from the tail of the session transcript, which the statusline reads on each render (at most 2.25 MiB). The tier is the one of the last cache write the session made. A cache read refreshes the cache lifetime, so the countdown starts at the last request.
-- **Refresh.** The seed sets the statusline to refresh every 30 seconds, which keeps the countdown current while you are idle. Without a refresh interval the countdown stays stale until the next event.
-- **Model switch.** A different model starts a new cache, so a switch shows the cold warning. Its price uses the 5 minute write, because the tier of the new model's cache is not known.
+- **Where the numbers come from.** The token counts and the model id come from the statusline input. The cache state comes from the `prompt_cache` object Claude Code sends on stdin (v2.1.251 and later): `warm`, `ttl`, `expires_at` and `recache_tokens_if_cold`. The countdown is `expires_at` minus now, and under a minute it shows seconds (`warm 45s left`). The cold figure prices `recache_tokens_if_cold` at the write price of `ttl`. The cache is cold when `warm` is false or `expires_at` has passed, and unknown when `caching_observed` is false (caching off or not reported).
+- **Older Claude Code.** Without `prompt_cache`, or when it is warm with no `expires_at`, the time of the last request and the cache tier (5 minutes or 1 hour) come from the tail of the session transcript, which the statusline reads on each render (at most 2.25 MiB). The tier is the one of the last cache write the session made. A cache read refreshes the cache lifetime, so the countdown starts at the last request.
+- **Refresh.** `playbook setup` sets `statusLine.refreshInterval` to 5 seconds whenever the status line runs `playbook statusline`, replacing any other value, so the countdown keeps ticking while you are idle. A status line that runs another command is left alone. `playbook doctor` warns on layer 5 when the interval differs. Without a refresh interval the countdown stays stale until the next event.
+- **Model switch.** A different model starts a new cache, so a switch seen in the transcript shows the cold warning even when `prompt_cache` says warm. Its price uses the 5 minute write, because the tier of the new model's cache is not known.
 - **Not seen.** A tool call or subagent that runs longer than the cache lifetime turns the line red during the turn, because the transcript records a message only when it ends. A change to the system prompt also breaks the cache, and the estimate cannot see it.
 - **Prices.** They come from the same table as the usage dashboard (`crates/telemetry/src/pricing.rs`). A model that is not in the table shows no estimate.
 

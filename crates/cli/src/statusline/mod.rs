@@ -13,10 +13,13 @@ pub(crate) mod gh;
 mod git;
 mod lines;
 mod next_cost;
+mod projection;
 mod telemetry;
 
 use crate::common::slug::slugify;
 use crate::json::statusline as pr_json;
+use crate::usage::limits_source::Snapshot;
+use crate::usage::tz::{self, Zone};
 use fmt::*;
 use lines::{Opts, Session};
 use serde_json::Value;
@@ -366,10 +369,10 @@ fn logical_pwd(env: &Env) -> String {
     }
 }
 
-/// The next message estimate from the stdin counts and the transcript tail.
-/// The transcript is read only when `transcript_path` is set, and the stdin
-/// model id wins over the transcript's.
-fn next_message(session: &Session, now: i64) -> Option<next_cost::NextCost> {
+/// The next message estimate from the stdin counts, the stdin `prompt_cache`
+/// object and the transcript tail. The transcript is read only when
+/// `transcript_path` is set, and the stdin model id wins over the transcript's.
+fn next_message(input: &str, session: &Session, now: i64) -> Option<next_cost::NextCost> {
     let count = |text: &str| u64::try_from(int_part(text).max(0)).unwrap_or(0);
     let context_tokens = count(&session.ctx_input_tokens)
         + count(&session.cache_create)
@@ -379,7 +382,14 @@ fn next_message(session: &Session, now: i64) -> Option<next_cost::NextCost> {
             crate::common::transcript_tail::last_main_turn(Path::new(&session.transcript_path))
         })
         .flatten();
-    next_cost::estimate(&session.model_id, context_tokens, last.as_ref(), now)
+    let cache = next_cost::PromptCache::from_statusline(input);
+    next_cost::estimate(
+        &session.model_id,
+        context_tokens,
+        last.as_ref(),
+        cache.as_ref(),
+        now,
+    )
 }
 
 /// Renders the whole status line for `input`, as the bytes to print.
@@ -499,8 +509,17 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
         .get("CLAUDE_CONFIG_DIR")
         .map_or_else(|| PathBuf::from(&home), PathBuf::from)
         .join(".claude.json");
-    let budget = budget::build(input, now, &claude_json, Path::new(&home), &cache_dir);
-    let next = next_message(&session, now);
+    let snapshot = Snapshot::from_statusline(input, now);
+    let chat_usd = session.cost_usd.trim().parse().unwrap_or(0.0);
+    let budget = budget::build(
+        snapshot.as_ref(),
+        chat_usd,
+        now,
+        &claude_json,
+        Path::new(&home),
+        &cache_dir,
+    );
+    let next = next_message(input, &session, now);
     let opts = Opts {
         show_model: env.flag("STATUSLINE_SHOW_MODEL"),
         show_context: env.flag("STATUSLINE_SHOW_CONTEXT"),
@@ -515,6 +534,11 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
         home,
         now,
         next,
+        projections: projection::build(snapshot.as_ref(), now),
+        zone: env
+            .get(tz::ENV_VAR)
+            .and_then(Zone::parse)
+            .unwrap_or(Zone::Local),
     };
     for line in [
         lines::line_2(&session, &opts),
