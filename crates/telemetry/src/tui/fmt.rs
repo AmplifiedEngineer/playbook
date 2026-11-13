@@ -6,16 +6,28 @@
 /// `$1,234.56`.
 pub fn money(usd: f64) -> String {
     let cents = (usd.abs() * 100.0).round() as u64;
-    let whole = (cents / 100).to_string();
-    let mut grouped = String::new();
-    for (i, c) in whole.chars().enumerate() {
-        if i > 0 && (whole.len() - i).is_multiple_of(3) {
-            grouped.push(',');
-        }
-        grouped.push(c);
-    }
     let sign = if usd < 0.0 && cents > 0 { "-" } else { "" };
-    format!("{sign}${grouped}.{:02}", cents % 100)
+    format!("{sign}${}.{:02}", grouped(cents / 100), cents % 100)
+}
+
+/// `$1,235`: rounded to the whole dollar.
+pub fn money_whole(usd: f64) -> String {
+    let dollars = usd.abs().round() as u64;
+    let sign = if usd < 0.0 && dollars > 0 { "-" } else { "" };
+    format!("{sign}${}", grouped(dollars))
+}
+
+/// `1,234,567`: digits in groups of three.
+fn grouped(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// `950`, `1.2K`, `3.4M`, `5.6B`.
@@ -165,6 +177,16 @@ mod tests {
         assert_eq!(money(1_000_000.0), "$1,000,000.00");
         assert_eq!(money(-0.001), "$0.00");
         assert_eq!(money(-5.5), "-$5.50");
+    }
+
+    #[test]
+    fn whole_money_groups_thousands_and_rounds_to_the_dollar() {
+        assert_eq!(money_whole(0.0), "$0");
+        assert_eq!(money_whole(986.4), "$986");
+        assert_eq!(money_whole(1500.0), "$1,500");
+        assert_eq!(money_whole(1_234_567.5), "$1,234,568");
+        assert_eq!(money_whole(-0.4), "$0");
+        assert_eq!(money_whole(-1234.0), "-$1,234");
     }
 
     #[test]

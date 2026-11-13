@@ -8,7 +8,9 @@
 use super::budget::Segment;
 use super::fmt::*;
 use super::next_cost::{fmt_next, CacheState, NextCost};
+use super::projection::{Projection, Projections};
 use crate::json::statusline::value_text;
+use crate::usage::tz::Zone;
 
 /// The session fields the segments read, as the script's shell variables.
 #[derive(Debug, Default, Clone)]
@@ -75,6 +77,15 @@ pub(super) struct Opts {
     pub now: i64,
     /// Next message estimate, `None` for an unpriced model or an empty context.
     pub next: Option<NextCost>,
+    /// Where each window lands at its reset at the current pace.
+    pub projections: Projections,
+    /// The zone the reset clock is shown in.
+    pub zone: Zone,
+}
+
+/// ` → 75%`, the projection after a window's percent.
+fn projected(p: Projection) -> String {
+    format!(" {DIM}→{RESET} {}{}{RESET}", p.color(), p.text())
 }
 
 fn render_model(s: &Session, o: &Opts) -> Option<String> {
@@ -192,6 +203,12 @@ fn render_rate_5h(s: &Session, o: &Opts) -> Option<String> {
         rl_color(&s.rl_5h),
         round0(&s.rl_5h)
     );
+    if let Some(p) = o.projections.five_hour {
+        out.push_str(&projected(p));
+        let at = o.zone.hour_minute(p.resets_at);
+        out.push_str(&format!(" {DIM}at {at}{RESET}"));
+        return Some(out);
+    }
     if !s.rl_5h_reset.is_empty() {
         // A non-integer reset is an arithmetic error in the script, which
         // drops the whole segment rather than only the countdown.
@@ -207,6 +224,14 @@ fn render_rate_5h(s: &Session, o: &Opts) -> Option<String> {
 fn render_rate_7d(s: &Session, o: &Opts) -> Option<String> {
     if !o.show_rate_limits || s.rl_7d.is_empty() {
         return None;
+    }
+    if let Some(p) = o.projections.seven_day {
+        return Some(format!(
+            "{DIM}7d{RESET} {}{}%{RESET}{}",
+            rl_color(&s.rl_7d),
+            round0(&s.rl_7d),
+            projected(p)
+        ));
     }
     let v: f64 = s.rl_7d.trim().parse().unwrap_or(0.0);
     (v > 50.0).then(|| {
@@ -248,33 +273,39 @@ fn joined_width(texts: &[&str]) -> usize {
     texts.iter().map(|t| t.chars().count()).sum::<usize>() + gaps
 }
 
-/// Line 4: budget projections, fitted to `width` columns. Fitting works on the
-/// plain texts, before any colour is added. When the line is too wide the
-/// lowest priority segments first take their short form, then the lowest
-/// priority segments are dropped. The most important segment always stays.
-/// `None` when there is nothing to say.
+/// Line 4: budget projections, fitted to `width` columns. Segments show in
+/// the order given. Fitting works on the plain texts, before any colour is
+/// added. When the line is too wide the lowest priority segments first take
+/// their short form, then the lowest priority segments are dropped. The most
+/// important segment always stays. `None` when there is nothing to say.
 pub(super) fn line_4(segments: &[Segment], width: usize) -> Option<String> {
-    let mut ordered: Vec<&Segment> = segments.iter().collect();
-    ordered.sort_by_key(|s| s.priority);
-    let mut texts: Vec<&str> = ordered.iter().map(|s| s.text.as_str()).collect();
-    let fits = |texts: &[&str]| joined_width(texts) <= width;
-    for (i, segment) in ordered.iter().enumerate().rev() {
+    let mut texts: Vec<Option<&str>> = segments.iter().map(|s| Some(s.text.as_str())).collect();
+    let mut by_priority: Vec<usize> = (0..segments.len()).collect();
+    by_priority.sort_by_key(|&i| segments[i].priority);
+    let fits = |texts: &[Option<&str>]| {
+        let shown: Vec<&str> = texts.iter().flatten().copied().collect();
+        joined_width(&shown) <= width
+    };
+    for &i in by_priority.iter().rev() {
         if fits(&texts) {
             break;
         }
-        if let Some(short) = &segment.short {
-            texts[i] = short;
+        if let Some(short) = &segments[i].short {
+            texts[i] = Some(short);
         }
     }
-    while texts.len() > 1 && !fits(&texts) {
-        texts.pop();
+    for &i in by_priority.iter().skip(1).rev() {
+        if fits(&texts) {
+            break;
+        }
+        texts[i] = None;
     }
-    let parts: Vec<String> = ordered
+    let parts: Vec<String> = segments
         .iter()
         .zip(&texts)
-        .map(|(segment, text)| {
+        .filter_map(|(segment, text)| {
             let color = if segment.alarm { RED } else { DIM };
-            format!("{color}{text}{RESET}")
+            text.map(|text| format!("{color}{text}{RESET}"))
         })
         .collect();
     (!parts.is_empty()).then(|| parts.join(&sep()))
@@ -329,8 +360,7 @@ mod tests {
 
     #[test]
     fn the_line_shrinks_from_the_lowest_priority_up() {
-        // The input order does not matter, priority does.
-        let segments = [stand_in(), seven_day()];
+        let segments = [seven_day(), stand_in()];
         let rows = [
             (120, "! 7d CAP HIT | stand-in 12345"),
             (29, "! 7d CAP HIT | stand-in 12345"),
@@ -339,6 +369,19 @@ mod tests {
             (22, "! 7d CAP HIT"),
             (5, "! 7d CAP HIT"),
             (0, "! 7d CAP HIT"),
+        ];
+        for (width, want) in rows {
+            assert_eq!(plain(&segments, width).as_deref(), Some(want), "{width}");
+        }
+    }
+
+    #[test]
+    fn segments_keep_their_input_order_while_priority_picks_what_goes() {
+        let segments = [stand_in(), seven_day()];
+        let rows = [
+            (120, "stand-in 12345 | ! 7d CAP HIT"),
+            (23, "stand-in | ! 7d CAP HIT"),
+            (22, "! 7d CAP HIT"),
         ];
         for (width, want) in rows {
             assert_eq!(plain(&segments, width).as_deref(), Some(want), "{width}");

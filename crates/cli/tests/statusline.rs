@@ -381,6 +381,7 @@ fn env_with_columns(home: &Path, columns: Option<&str>) -> Env {
         ("CLAUDE_CONFIG_DIR", home),
         ("PWD", home),
         ("PATH", ""),
+        ("PLAYBOOK_TELEMETRY_TZ", "utc"),
     ];
     if let Some(c) = columns {
         pairs.push(("COLUMNS", c));
@@ -394,16 +395,18 @@ fn session_age_and_the_five_hour_countdown_use_the_given_clock() {
     let dir = telemetry_dir(&s.0, "age");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("start-ts"), "1000\n").unwrap();
+    // The window is under an hour old, so it has no pace and shows the
+    // countdown rather than a projection.
     let body = payload(
         &s.0,
-        r#""session_id":"age","rate_limits":{"five_hour":{"used_percentage":10,"resets_at":10000}}"#,
+        r#""session_id":"age","rate_limits":{"five_hour":{"used_percentage":10,"resets_at":20000}}"#,
     );
     let out = text(&render(&body, &env_for(&s.0), 1000 + 3660));
     assert!(
         out.contains("Up\x1b[0m \x1b[38;2;166;227;161m1h1m"),
         "{out:?}"
     );
-    assert!(out.contains("(1h29m left)"), "{out:?}");
+    assert!(out.contains("(4h15m left)"), "{out:?}");
     let young = text(&render(&body, &env_for(&s.0), 1000 + 599));
     assert!(!young.contains("Up"));
 }
@@ -934,15 +937,20 @@ fn a_seven_day_pace_past_the_cap_names_the_time_left() {
     // 60 percent after 3 of 7 days is 20 percent a day, so 40 left lasts 2 days.
     let lines = seven_day_lines(60.0, 3 * DAY_SECS, None);
     assert_eq!(lines.last().unwrap(), "! 7d cap in 2d", "{lines:?}");
-    assert_eq!(lines[1], "Rate 7d: 60%");
+    assert_eq!(lines[1], "7d 60% → 140%");
 }
 
 #[test]
 fn a_seven_day_window_within_the_cap_adds_no_line() {
-    // Only the first line prints, so a fourth would show as a longer output.
-    for (used, elapsed) in [(0.0, 3 * DAY_SECS), (49.9, 3 * DAY_SECS + DAY_SECS / 2)] {
+    // Line 1 and the line 3 projection print, so a fourth would show as a
+    // longer output.
+    for (used, elapsed, projection) in [
+        (0.0, 3 * DAY_SECS, "7d 0% → 0%"),
+        (49.9, 3 * DAY_SECS + DAY_SECS / 2, "7d 50% → 100%"),
+    ] {
         let lines = seven_day_lines(used, elapsed, None);
-        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(lines[1], projection, "{lines:?}");
     }
 }
 
@@ -1081,7 +1089,7 @@ fn a_fresh_enterprise_cache_on_pace_to_pass_the_limit_alarms_with_the_time_left(
     let lines = enterprise(None, HOUR_SECS);
     assert_eq!(
         lines.last().unwrap(),
-        "! $986/$1500 mo, cap in 1d",
+        "! acct $986 / $1,500 mo, cap in 1d",
         "{lines:?}"
     );
 }
@@ -1091,13 +1099,13 @@ fn a_lower_own_budget_is_the_limit_and_says_so() {
     let lines = enterprise(Some(1000), HOUR_SECS);
     assert_eq!(
         lines.last().unwrap(),
-        "! $986/$1000 mo budget, cap in <1m",
+        "! acct $986 / $1,000 mo budget, cap in <1m",
         "{lines:?}"
     );
     let lines = enterprise(Some(900), HOUR_SECS);
     assert_eq!(
         lines.last().unwrap(),
-        "! $986/$900 mo budget CAP HIT",
+        "! acct $986 / $900 mo budget CAP HIT",
         "{lines:?}"
     );
 }
@@ -1107,13 +1115,13 @@ fn a_stale_cache_shows_its_age_and_makes_no_projection() {
     let lines = enterprise(None, STALE_AGE);
     assert_eq!(
         lines.last().unwrap(),
-        "$986/$1500 mo (10d14h old)",
+        "acct $986 / $1,500 mo (10d14h old)",
         "{lines:?}"
     );
     let lines = enterprise(Some(1000), STALE_AGE);
     assert_eq!(
         lines.last().unwrap(),
-        "$986/$1000 mo budget (10d14h old)",
+        "acct $986 / $1,000 mo budget (10d14h old)",
         "{lines:?}"
     );
 }
@@ -1124,7 +1132,7 @@ fn a_stale_cache_over_an_own_budget_still_says_the_cap_was_hit() {
     let lines = enterprise(Some(900), STALE_AGE);
     assert_eq!(
         lines.last().unwrap(),
-        "! $986/$900 mo budget CAP HIT (10d14h old)",
+        "! acct $986 / $900 mo budget CAP HIT (10d14h old)",
         "{lines:?}"
     );
 }
@@ -1191,7 +1199,10 @@ fn a_gateway_figure_on_stdin_wins_over_the_cache() {
     );
     let lines = monthly_lines(Some(ENTERPRISE_CACHE), None, &members, now, None);
     assert!(
-        lines.last().unwrap().starts_with("! $410/$500 mo, cap in"),
+        lines
+            .last()
+            .unwrap()
+            .starts_with("! acct $410 / $500 mo, cap in"),
         "{lines:?}"
     );
 }
@@ -1207,12 +1218,12 @@ fn the_monthly_figure_drops_its_words_before_the_seven_day_alarm_goes() {
     let wide = monthly_lines(Some(ENTERPRISE_CACHE), None, &members, now, None);
     assert_eq!(
         wide.last().unwrap(),
-        &format!("{seven} | ! $986/$1500 mo, cap in 1d")
+        &format!("{seven} | ! acct $986 / $1,500 mo, cap in 1d")
     );
-    let narrow = monthly_lines(Some(ENTERPRISE_CACHE), None, &members, now, Some("36"));
+    let narrow = monthly_lines(Some(ENTERPRISE_CACHE), None, &members, now, Some("42"));
     assert_eq!(
         narrow.last().unwrap(),
-        &format!("{seven} | ! $986/$1500 mo")
+        &format!("{seven} | ! acct $986 / $1,500 mo")
     );
     let tight = monthly_lines(Some(ENTERPRISE_CACHE), None, &members, now, Some("20"));
     assert_eq!(tight.last().unwrap(), seven);
@@ -1227,7 +1238,11 @@ fn a_gateway_figure_needs_no_config_file_and_ignores_a_corrupt_one() {
     );
     for cache in [None, Some("{not json")] {
         let lines = monthly_lines(cache, None, &members, now, None);
-        assert_eq!(lines.last().unwrap(), "! $600/$500 mo CAP HIT", "{lines:?}");
+        assert_eq!(
+            lines.last().unwrap(),
+            "! acct $600 / $500 mo CAP HIT",
+            "{lines:?}"
+        );
     }
 }
 
@@ -1248,7 +1263,7 @@ fn the_config_file_is_found_under_claude_config_dir_or_else_home() {
         ("HOME", home),
         ("CLAUDE_CONFIG_DIR", cfg.to_str().unwrap()),
     ]);
-    assert_eq!(moved, "! $986/$1500 mo, cap in 1d");
+    assert_eq!(moved, "! acct $986 / $1,500 mo, cap in 1d");
     // With the variable unset the file is looked for under HOME, where it is not.
     let unset = last(vec![("HOME", home)]);
     assert_ne!(unset, moved);
@@ -1265,7 +1280,7 @@ fn a_cache_is_paced_from_its_fetch_time_not_from_now() {
     let lines = monthly_lines(Some(&big), None, "", FETCHED + 6 * HOUR_SECS, None);
     assert_eq!(
         lines.last().unwrap(),
-        "! $986/$13000 mo, cap in 25d",
+        "! acct $986 / $13,000 mo, cap in 25d",
         "{lines:?}"
     );
 }
@@ -1336,7 +1351,7 @@ fn the_claude_cache_keeps_priority_over_local_spend() {
     let lines = lines_of(&s, FETCHED + HOUR_SECS);
     assert_eq!(
         lines.last().unwrap(),
-        "! $986/$1000 mo budget, cap in <1m",
+        "! acct $986 / $1,000 mo budget, cap in <1m",
         "{lines:?}"
     );
 }
@@ -1351,7 +1366,7 @@ fn the_gateway_reading_keeps_priority_over_local_spend() {
     );
     let body = payload(&s.0, &members);
     let out = strip_ansi(&text(&render(&body, &env_for(&s.0), now)));
-    assert!(out.contains("$410/$500 mo"), "{out}");
+    assert!(out.contains("acct $410 / $500 mo"), "{out}");
     assert!(!out.contains("(local)"), "{out}");
 }
 
@@ -1493,4 +1508,186 @@ fn line_three_shows_the_next_message_estimate_by_cache_state() {
     for (name, got, want) in cases {
         assert_eq!(got, want, "{name}");
     }
+}
+
+// ---- line 3: where each window lands at its reset --------------------------
+
+/// The line 3 text of a payload that carries only `rate_limits` members: the
+/// second line, since line 2 has nothing to say.
+fn window_line(members: &str) -> String {
+    let lines = budget_lines(members, None);
+    lines.get(1).cloned().unwrap_or_default()
+}
+
+/// The coloured output for the given `rate_limits` members at a fixed clock.
+fn coloured(members: &str) -> String {
+    let s = Scratch::new();
+    let body = payload(&s.0, &format!(r#""rate_limits":{{{members}}}"#));
+    text(&render(&body, &env_for(&s.0), BUDGET_NOW))
+}
+
+#[test]
+fn the_five_hour_window_shows_where_it_lands_and_when_it_resets() {
+    // 30 percent after 2 hours is 15 an hour, so 3 more hours land at 75.
+    // The clock is 13:46 UTC, so the window resets at 16:46.
+    let line = window_line(&window("five_hour", 30.0, 2 * 3600, FIVE_HOURS_SECS));
+    assert_eq!(line, "5h 30% → 75% at 16:46");
+}
+
+#[test]
+fn the_seven_day_window_shows_where_it_lands_even_when_low() {
+    // 30 percent after 3 days is 10 a day, so 4 more days land at 70.
+    let line = window_line(&window("seven_day", 30.0, 3 * DAY_SECS, SEVEN_DAYS_SECS));
+    assert_eq!(line, "7d 30% → 70%");
+}
+
+#[test]
+fn both_windows_project_side_by_side() {
+    let members = format!(
+        "{},{}",
+        window("five_hour", 30.0, 2 * 3600, FIVE_HOURS_SECS),
+        window("seven_day", 30.0, 3 * DAY_SECS, SEVEN_DAYS_SECS),
+    );
+    assert_eq!(
+        window_line(&members),
+        "5h 30% → 75% at 16:46 | 7d 30% → 70%"
+    );
+}
+
+#[test]
+fn a_projection_past_the_cap_is_red_and_one_under_it_is_not() {
+    // 60 percent after 2 hours lands at 150.
+    let over = coloured(&window("five_hour", 60.0, 2 * 3600, FIVE_HOURS_SECS));
+    assert!(over.contains(&format!("{RED}150%{RESET}")), "{over:?}");
+    let under = coloured(&window("five_hour", 30.0, 2 * 3600, FIVE_HOURS_SECS));
+    assert!(!under.contains(RED), "{under:?}");
+}
+
+#[test]
+fn a_very_large_projection_is_capped_in_the_text() {
+    // 50 percent after 1 hour of 7 days lands far past any useful number.
+    let line = window_line(&window("seven_day", 50.0, 3600, SEVEN_DAYS_SECS));
+    assert_eq!(line, "7d 50% → >999%");
+}
+
+#[test]
+fn a_window_under_an_hour_in_keeps_the_countdown_and_no_projection() {
+    let line = window_line(&window("five_hour", 30.0, 1800, FIVE_HOURS_SECS));
+    assert_eq!(line, "5h 30% (4h30m left)");
+}
+
+#[test]
+fn a_reached_window_shows_no_projection() {
+    let lines = seven_day_lines(100.0, 3 * DAY_SECS, None);
+    assert!(!lines.join("\n").contains('→'), "{lines:?}");
+}
+
+#[test]
+fn no_rate_limits_means_no_window_segments() {
+    let line = window_line("");
+    assert!(!line.contains("5h") && !line.contains("7d"), "{line:?}");
+}
+
+// ---- line 4: this chat beside the account spend ---------------------------
+
+/// A payload member with this chat's cost.
+fn chat_cost(usd: f64) -> String {
+    format!(r#""cost":{{"total_cost_usd":{usd}}}"#)
+}
+
+/// Colour-stripped lines for the Enterprise cache fixture and `members` an
+/// hour after its fetch.
+fn enterprise_with(members: &str, columns: Option<&str>) -> Vec<String> {
+    monthly_lines(
+        Some(ENTERPRISE_CACHE),
+        None,
+        members,
+        FETCHED + HOUR_SECS,
+        columns,
+    )
+}
+
+#[test]
+fn the_chat_cost_sits_before_the_account_spend_and_limit() {
+    let lines = enterprise_with(&chat_cost(1.2), None);
+    assert_eq!(
+        lines.last().unwrap(),
+        "chat $1.20 | ! acct $986 / $1,500 mo, cap in 1d",
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn the_chat_cost_sits_beside_a_gateway_figure() {
+    let now = FETCHED + HOUR_SECS;
+    let members = format!(
+        r#"{},"rate_limits":{{"spend_limit":{{"used_percentage":41,"resets_at":{},"used_usd":412,"limit_usd":1000,"period":"monthly"}}}}"#,
+        chat_cost(1.2),
+        now + 27 * DAY_SECS
+    );
+    let lines = monthly_lines(None, None, &members, now, None);
+    // 412 dollars two days into the month is on pace to pass 1,000.
+    assert_eq!(
+        lines.last().unwrap(),
+        "chat $1.20 | ! acct $412 / $1,000 mo, cap in 3d",
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn a_narrow_terminal_shortens_the_account_words_then_drops_the_chat() {
+    let at = |columns: &str| {
+        enterprise_with(&chat_cost(1.2), Some(columns))
+            .last()
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(at("47"), "chat $1.20 | ! acct $986 / $1,500 mo, cap in 1d");
+    assert_eq!(at("46"), "chat $1.20 | ! acct $986 / $1,500 mo");
+    assert_eq!(at("36"), "chat $1.20 | ! acct $986 / $1,500 mo");
+    assert_eq!(at("35"), "! acct $986 / $1,500 mo");
+}
+
+#[test]
+fn no_account_figure_means_no_chat_segment() {
+    let lines = monthly_lines(None, None, &chat_cost(1.2), FETCHED + HOUR_SECS, None);
+    assert!(!lines.join("\n").contains("chat"), "{lines:?}");
+}
+
+#[test]
+fn a_zero_chat_cost_leaves_only_the_account_figure() {
+    let lines = enterprise_with(&chat_cost(0.0), None);
+    assert_eq!(
+        lines.last().unwrap(),
+        "! acct $986 / $1,500 mo, cap in 1d",
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn local_spend_against_a_manual_budget_gets_no_chat_segment() {
+    let (s, _) = local_home(true);
+    let body = payload(&s.0, &chat_cost(1.2));
+    let out = strip_ansi(&text(&render(&body, &env_for(&s.0), FETCHED + HOUR_SECS)));
+    assert!(out.contains("(local)"), "{out}");
+    assert!(!out.contains("chat"), "{out}");
+}
+
+#[test]
+fn the_account_segment_never_shows_the_email_or_names_in_the_config_file() {
+    let with_person = ENTERPRISE_CACHE.replacen(
+        r#""oauthAccount":{"#,
+        r#""oauthAccount":{"emailAddress":"sentinel@example.com","displayName":"Sentinel Person","organizationName":"Sentinel Org","#,
+        1,
+    );
+    let out = monthly_lines(
+        Some(&with_person),
+        None,
+        &chat_cost(1.2),
+        FETCHED + HOUR_SECS,
+        None,
+    )
+    .join("\n");
+    assert!(out.contains("acct $986"), "{out}");
+    assert!(!out.contains("Sentinel") && !out.contains('@'), "{out}");
 }

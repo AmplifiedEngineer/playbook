@@ -12,6 +12,7 @@ use crate::usage::limits_source::{manual_budgets, Snapshot};
 use crate::usage::local_total::LocalTotal;
 use crate::usage::monthly_use::{detect, monthly_use, MonthlyUse, Source};
 use crate::usage::plan::{self, Account};
+use crate::usage::tui::fmt::{money, money_whole};
 use std::path::Path;
 
 /// The file under the statusline cache folder that holds the month's local
@@ -28,6 +29,9 @@ pub const PRIORITY_FIVE_HOUR: u8 = 2;
 
 /// Kept after the 7 day segment and before the 5 hour one.
 pub const PRIORITY_MONTHLY: u8 = 1;
+
+/// This chat's cost goes first on a narrow terminal: line 3 already shows it.
+pub const PRIORITY_CHAT: u8 = 3;
 
 /// The longest Claude config file the statusline reads. A larger file is
 /// skipped, so the line stays cheap whatever Claude Code keeps in there.
@@ -46,30 +50,50 @@ pub struct Segment {
     pub alarm: bool,
 }
 
-/// The segments for the statusline input at `now`. `claude_json` is Claude
-/// Code's config file, read only when stdin carries no monthly dollar figure,
-/// and `home` is where the manual budget is kept. Empty when nothing is worth
-/// saying, which is the usual case.
+/// The segments for the statusline reading at `now`, in the order they show:
+/// the 7 day window, this chat's cost, the monthly dollars, the 5 hour window.
+/// `chat_usd` is this chat's cost, shown only beside an account figure that
+/// Claude reports. `claude_json` is Claude Code's config file, read only when
+/// stdin carries no monthly dollar figure, and `home` is where the manual
+/// budget is kept. Empty when nothing is worth saying, which is the usual case.
 pub fn build(
-    input: &str,
+    snapshot: Option<&Snapshot>,
+    chat_usd: f64,
     now: i64,
     claude_json: &Path,
     home: &Path,
     cache_dir: &Path,
 ) -> Vec<Segment> {
-    let snapshot = Snapshot::from_statusline(input, now);
-    let mut out = snapshot.as_ref().map_or_else(Vec::new, |s| windows(s, now));
-    out.extend(monthly(
-        snapshot.as_ref(),
-        now,
-        claude_json,
-        home,
-        cache_dir,
-    ));
-    out
+    let window = |period| snapshot.and_then(|s| window(s, period, now));
+    let monthly = monthly(snapshot, now, claude_json, home, cache_dir);
+    let figure = monthly.as_ref().and_then(|m| monthly_segment(m, now));
+    let by_claude = monthly.is_some_and(|m| m.source != Source::Local);
+    let chat = figure
+        .as_ref()
+        .filter(|_| by_claude)
+        .and_then(|_| chat(chat_usd));
+    [
+        window(LimitPeriod::SevenDay),
+        chat,
+        figure,
+        window(LimitPeriod::FiveHour),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
-/// The monthly dollar segment: the amount Claude reports (stdin, else the
+/// `chat $1.20`, this chat's cost, or `None` when it has cost nothing yet.
+fn chat(usd: f64) -> Option<Segment> {
+    (usd.is_finite() && usd > 0.0).then(|| Segment {
+        text: format!("chat {}", money(usd)),
+        short: None,
+        priority: PRIORITY_CHAT,
+        alarm: false,
+    })
+}
+
+/// The monthly dollar figure: the amount Claude reports (stdin, else the
 /// config file cache) against the lower of its limit and the manual budget,
 /// or with only a manual budget, this machine's cost for the month.
 fn monthly(
@@ -78,7 +102,7 @@ fn monthly(
     claude_json: &Path,
     home: &Path,
     cache_dir: &Path,
-) -> Option<Segment> {
+) -> Option<MonthlyUse> {
     let mut account = Account::default();
     if detect(snapshot, &account, now).is_none() {
         account = plan::read_limited(claude_json, MAX_CONFIG_BYTES).unwrap_or_default();
@@ -87,10 +111,9 @@ fn monthly(
         db: usage_db(home),
         cache: Some(cache_dir.join(LOCAL_TOTAL_FILE)),
     };
-    let figure = monthly_use(snapshot, &account, &manual_budgets(home), now, || {
+    monthly_use(snapshot, &account, &manual_budgets(home), now, || {
         local.month_used(now)
-    })?;
-    monthly_segment(&figure, now)
+    })
 }
 
 /// The words for a monthly figure. A stale cache projects nothing: it only
@@ -108,7 +131,14 @@ fn monthly_segment(m: &MonthlyUse, now: i64) -> Option<Segment> {
         (_, true) => "mo budget",
         (_, false) => "mo",
     };
-    let figure = format!("${:.0}/${:.0} {label}", m.limit.used, m.limit.limit);
+    let figure = match m.source {
+        Source::Local => format!("${:.0}/${:.0} {label}", m.limit.used, m.limit.limit),
+        Source::Statusline | Source::Cache { .. } => format!(
+            "acct {} / {} {label}",
+            money_whole(m.limit.used),
+            money_whole(m.limit.limit)
+        ),
+    };
     let exceeded = headroom.state == State::Exceeded;
     let (words, alarm, short_ok) = match (m.source, headroom.state) {
         (Source::Cache { age, fresh: false }, _) => {
@@ -140,26 +170,25 @@ fn monthly_segment(m: &MonthlyUse, now: i64) -> Option<Segment> {
     })
 }
 
-/// The 7 day and 5 hour segments of the statusline reading.
-fn windows(snapshot: &Snapshot, now: i64) -> Vec<Segment> {
-    snapshot
+/// The 7 day or 5 hour segment of the statusline reading, when that window is
+/// reached or on pace to be.
+fn window(snapshot: &Snapshot, period: LimitPeriod, now: i64) -> Option<Segment> {
+    let priority = match period {
+        LimitPeriod::SevenDay => PRIORITY_SEVEN_DAY,
+        LimitPeriod::FiveHour => PRIORITY_FIVE_HOUR,
+        _ => return None,
+    };
+    let limit = snapshot
         .limits(now)
-        .iter()
-        .filter_map(|limit| {
-            let priority = match limit.period {
-                LimitPeriod::SevenDay => PRIORITY_SEVEN_DAY,
-                LimitPeriod::FiveHour => PRIORITY_FIVE_HOUR,
-                _ => return None,
-            };
-            let headroom = limit.headroom(now)?;
-            let brief = brief(limit, &headroom, now)?;
-            // A brief is only given for a cap that is hit or on pace to be.
-            Some(Segment {
-                text: format!("{ALARM_MARK}{}", brief.text),
-                short: None,
-                priority,
-                alarm: true,
-            })
-        })
-        .collect()
+        .into_iter()
+        .find(|l| l.period == period)?;
+    let headroom = limit.headroom(now)?;
+    let brief = brief(&limit, &headroom, now)?;
+    // A brief is only given for a cap that is hit or on pace to be.
+    Some(Segment {
+        text: format!("{ALARM_MARK}{}", brief.text),
+        short: None,
+        priority,
+        alarm: true,
+    })
 }

@@ -13,10 +13,13 @@ pub(crate) mod gh;
 mod git;
 mod lines;
 mod next_cost;
+mod projection;
 mod telemetry;
 
 use crate::common::slug::slugify;
 use crate::json::statusline as pr_json;
+use crate::usage::limits_source::Snapshot;
+use crate::usage::tz::{self, Zone};
 use fmt::*;
 use lines::{Opts, Session};
 use serde_json::Value;
@@ -499,7 +502,16 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
         .get("CLAUDE_CONFIG_DIR")
         .map_or_else(|| PathBuf::from(&home), PathBuf::from)
         .join(".claude.json");
-    let budget = budget::build(input, now, &claude_json, Path::new(&home), &cache_dir);
+    let snapshot = Snapshot::from_statusline(input, now);
+    let chat_usd = session.cost_usd.trim().parse().unwrap_or(0.0);
+    let budget = budget::build(
+        snapshot.as_ref(),
+        chat_usd,
+        now,
+        &claude_json,
+        Path::new(&home),
+        &cache_dir,
+    );
     let next = next_message(&session, now);
     let opts = Opts {
         show_model: env.flag("STATUSLINE_SHOW_MODEL"),
@@ -515,6 +527,11 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
         home,
         now,
         next,
+        projections: projection::build(snapshot.as_ref(), now),
+        zone: env
+            .get(tz::ENV_VAR)
+            .and_then(Zone::parse)
+            .unwrap_or(Zone::Local),
     };
     for line in [
         lines::line_2(&session, &opts),
