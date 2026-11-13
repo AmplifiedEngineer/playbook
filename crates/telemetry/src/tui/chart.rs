@@ -960,7 +960,7 @@ fn draw_stacked(buf: &mut Buffer, plot: &Plot, slots: &Slots, pal: &Palette) {
             let main = inside
                 .iter()
                 .copied()
-                .max_by_key(|k| (overlap(*k), std::cmp::Reverse(*k)))
+                .max_by_key(|k| (overlap(*k), *k))
                 .unwrap_or(0);
             let eighths = hi - lo;
             let (glyph, style) = match (pal.mono, inside.as_slice()) {
@@ -1140,8 +1140,9 @@ mod tests {
                 let plot_width = g.plot.width;
                 let first = g.bar_width();
                 let mut end = 0;
+                let narrowest = g.cells.iter().map(|c| c.1).min().unwrap_or(1);
+                assert_eq!(first, narrowest.saturating_sub(1).max(1));
                 for i in 0..g.bars() {
-                    assert_eq!(g.bar_width(), first, "{panel_width} wide, {days} days");
                     let (from, cell) = g.cells[i];
                     assert!(from >= end, "cells overlap at {panel_width}/{days}");
                     assert!(from + g.bar_width() <= from + cell);
@@ -1171,13 +1172,16 @@ mod tests {
 
     #[test]
     fn a_bar_equal_to_an_axis_label_ends_on_that_labels_row() {
-        for height in [3u16, 4, 5, 6, 7, 8, 9, 12] {
+        for height in [1u16, 2, 3, 4, 5, 6, 7, 8, 9, 12] {
             let panel = Rect::new(0, 0, 40, height + 6);
             // Peak 400 gives the axis 0, 200, 400.
             for (value, label) in [(400.0, "$400"), (200.0, "$200")] {
                 let series = series(&[value, 400.0]);
                 let (plot, buf) = draw(panel, &series, None);
                 let p = plot.geo.plot;
+                if p.height < 3 && value < 400.0 {
+                    continue; // two rows or fewer carry no middle label
+                }
                 let label_row = (p.y..p.y + p.height)
                     .find(|y| row(&buf, *y).contains(label))
                     .unwrap_or_else(|| panic!("no {label} at plot height {}", p.height));

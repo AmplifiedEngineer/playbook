@@ -154,6 +154,8 @@ mod tests {
         assert_eq!(axis.row_of(100.0, 5), 0);
         assert_eq!(axis.row_of(50.0, 5), 2);
         assert_eq!(axis.row_of(0.0, 5), 4);
-        assert_eq!(axis.row_of(100.0, 1), 0);
+        assert_eq!(axis.row_of(100.0, 2), 0);
+        assert_eq!(axis.row_of(50.0, 2), 1);
+        assert_eq!(axis.row_of(0.0, 2), 1);
     }
 }
