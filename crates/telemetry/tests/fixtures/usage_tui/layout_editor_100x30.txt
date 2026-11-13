@@ -9,14 +9,14 @@
 │Thu 2026-0│                                                                            │7.6K tok  │
 │ $8┤┄┄┄┄┄┄│ [> spend.total                      ][  spend.model                      ] │┄┄┄┄┄┄┄┄┄┄│
 │ $4┤┄┄┄┄┄┄│ [  tokens                           ][  hourly                           ] │┄┄┄┄┄┄┄┄┄┄│
-│ $0┤▁▄▁  ▂│ [  burnup                                                                ] │ ▃▂  ▅  ▄ │
+│ $0┤▁▄▁  ▂│ [  burnup                                                                ] │ ▂▂  ▅  ▃ │
 │    5 7  9│                                                                            │ 29 31  3 │
 ╰┤peak $6.0│                                                                            │ haiku-5├─╯
 ╭─┤²Tokens │                                                                            │────┤UTC├─╮
 │total 618.│                                                                            │          │
 │Thu 2026-0│                                                                            │          │
-│ 50K┤┄┄┄┄┄│                                                                            │┄┄┄┄┄┄┄┄▃┄│
-│ 25K┤▃▃▃┄┄│ spend.total: total cost per day as a chart, always this view               │┄┄┄┄┄┄┄┄█┄│
+│ 50K┤┄┄┄┄┄│                                                                            │┄┄┄┄┄┄┄┄┄┄│
+│ 25K┤▂▂▂┄┄│ spend.total: total cost per day as a chart, always this view               │┄┄┄┄┄┄┄┄█┄│
 │   0┤███  │                                                                            │        █ │
 │     5   8│ Left/Right tab   h/l j/k move cursor   H/J/K/L move panel   f width        │0  22 0 1 │
 ╰──────────│ a add   d remove   u undo   < > move tab   n new   x delete   r rename     │ haiku-5├─╯

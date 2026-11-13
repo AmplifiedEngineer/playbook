@@ -9,14 +9,14 @@
 │Thu 2026-0│                                                                            │7.6K tok  │
 │ $8┤┄┄┄┄┄┄│ Add after burnup   enter add   esc back   j/k choose                       │┄┄┄┄┄┄┄┄┄┄│
 │ $4┤┄┄┄┄┄┄│ > spend              cost per day as a chart or a daily table              │┄┄┄┄┄┄┄┄┄┄│
-│ $0┤▁▄▁  ▂│   models             cost and tokens per model                             │ ▃▂  ▅  ▄ │
+│ $0┤▁▄▁  ▂│   models             cost and tokens per model                             │ ▂▂  ▅  ▃ │
 │    5 7  9│   breakdown          projects, agents, skills, tools or health (v switches)│ 29 31  3 │
 ╰┤peak $6.0│   live               sessions with a message in the last 15 minutes        │ haiku-5├─╯
 ╭─┤²Tokens │   sessions           every session of the period, grouped by day           │────┤UTC├─╮
 │total 618.│   budget             limits and how fast you are using them                │          │
 │Thu 2026-0│   spend.daily        cost per day as a table, always this view             │          │
-│ 50K┤┄┄┄┄┄│   breakdown.projects cost per project, always this view                    │┄┄┄┄┄┄┄┄▃┄│
-│ 25K┤▃▃▃┄┄│ spend.total: total cost per day as a chart, always this view               │┄┄┄┄┄┄┄┄█┄│
+│ 50K┤┄┄┄┄┄│   breakdown.projects cost per project, always this view                    │┄┄┄┄┄┄┄┄┄┄│
+│ 25K┤▂▂▂┄┄│ spend.total: total cost per day as a chart, always this view               │┄┄┄┄┄┄┄┄█┄│
 │   0┤███  │                                                                            │        █ │
 │     5   8│ Left/Right tab   h/l j/k move cursor   H/J/K/L move panel   f width        │0  22 0 1 │
 ╰──────────│ a add   d remove   u undo   < > move tab   n new   x delete   r rename     │ haiku-5├─╯

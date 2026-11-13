@@ -7,10 +7,10 @@
 ╭─┤¹Spend p│F1 to F12  Show a tab by its number                 all panels              │──────────╮
 │total $20.│]          Focus the next panel of the tab          all panels              │ 20.6K/day│
 │Thu 2026-0│[          Focus the previous panel of the tab      all panels              │  2 msgs  │
-│ $8┤┄┄┄┄┄┄│Down, j    Select the next row                      tables                  │┄┄┄┄┄▆┄┄▆┄│
+│ $8┤┄┄┄┄┄┄│Down, j    Select the next row                      tables                  │┄┄┄┄┄▃┄┄▃┄│
 │   │      │Up, k      Select the previous row                  tables                  │     █  █ │
-│ $4┤┄┄┄┄┄┄│PgDn       Move five rows down                      tables                  │┄▇▇┄┄█┄┄█┄│
-│ $0┤▁▆▁  ▃│PgUp       Move five rows up                        tables                  │ ██  █  █ │
+│ $4┤┄┄┄┄┄┄│PgDn       Move five rows down                      tables                  │┄▅▅┄┄█┄┄█┄│
+│ $0┤▁▅▁  ▃│PgUp       Move five rows up                        tables                  │ ██  █  █ │
 │    5 7  9│Home, g    First row, or first day of a chart       tables, charts          │ 29  1  3 │
 ╰──────────│End, G     Last row, or last day of a chart         tables, charts          │■■■ high├─╯
 ╭─┤³Models├│Left, h    Move the chart cursor one bar back       charts                  │──────────╮
