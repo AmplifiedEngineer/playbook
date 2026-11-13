@@ -1734,3 +1734,71 @@ fn the_account_segment_never_shows_the_email_or_names_in_the_config_file() {
     assert!(out.contains("acct $986"), "{out}");
     assert!(!out.contains("Sentinel") && !out.contains('@'), "{out}");
 }
+
+// ---- line 3: the cache state Claude Code sends on stdin --------------------
+
+/// Line 3, colour stripped, at `NEXT_NOW` for an Opus session with a 200,000
+/// token context, the `prompt_cache` members given (none when `None`), and a
+/// transcript whose last 5 minute cache write was 240 seconds ago, which on
+/// its own says 1 minute is left.
+fn stdin_cache_line(prompt_cache: Option<&str>) -> String {
+    let s = Scratch::new();
+    let path = s.0.join("t.jsonl");
+    let record = transcript_record(240, "claude-opus-4-8", 1000, 0, 200_000);
+    std::fs::write(&path, record).unwrap();
+    let cache = prompt_cache.map_or(String::new(), |c| format!(r#","prompt_cache":{{{c}}}"#));
+    let body = payload(
+        &s.0,
+        &format!(
+            r#""model":{{"id":"claude-opus-4-8"}},"transcript_path":"{}","context_window":{{"current_usage":{{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":200000}}}},"cost":{{"total_cost_usd":1.2345}}{cache}"#,
+            path.display()
+        ),
+    );
+    let out = strip_ansi(&text(&render(&body, &env_for(&s.0), NEXT_NOW)));
+    out.lines().nth(1).unwrap_or_default().to_string()
+}
+
+#[test]
+fn a_warm_stdin_cache_counts_down_in_seconds_under_a_minute() {
+    let line = stdin_cache_line(Some(&format!(
+        r#""warm":true,"caching_observed":true,"ttl":"5m","expires_at":{},"recache_tokens_if_cold":200000"#,
+        NEXT_NOW + 45
+    )));
+    assert!(
+        line.starts_with("$1.2345 (next ≥$0.10, warm 45s left)"),
+        "{line:?}"
+    );
+}
+
+#[test]
+fn a_cold_stdin_cache_prices_its_recache_tokens_at_the_ttl_write() {
+    // 100,000 tokens at the Opus 1h write price is $1.00.
+    let line = stdin_cache_line(Some(&format!(
+        r#""warm":false,"caching_observed":true,"ttl":"1h","expires_at":{},"recache_tokens_if_cold":100000"#,
+        NEXT_NOW - 10
+    )));
+    assert!(
+        line.starts_with("$1.2345 ! cold cache, next ≥$1.00"),
+        "{line:?}"
+    );
+}
+
+#[test]
+fn a_stdin_cache_with_no_expiry_is_cold_at_the_context_size() {
+    let line = stdin_cache_line(Some(
+        r#""warm":false,"caching_observed":true,"ttl":"5m","expires_at":null,"recache_tokens_if_cold":null"#,
+    ));
+    assert!(
+        line.starts_with("$1.2345 ! cold cache, next ≥$1.25"),
+        "{line:?}"
+    );
+}
+
+#[test]
+fn without_a_stdin_cache_the_transcript_decides() {
+    let line = stdin_cache_line(None);
+    assert!(
+        line.starts_with("$1.2345 (next ≥$0.10, warm 1m left)"),
+        "{line:?}"
+    );
+}
