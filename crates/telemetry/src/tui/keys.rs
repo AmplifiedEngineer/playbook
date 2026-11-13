@@ -368,7 +368,7 @@ pub const BINDINGS: &[Binding] = &[
         shown: "o",
         group: Group::Views,
         panels: ALL_PANELS,
-        text: "Mask or show the account email",
+        text: "Mask the account email, and save it",
         hint: None,
     },
     Binding {

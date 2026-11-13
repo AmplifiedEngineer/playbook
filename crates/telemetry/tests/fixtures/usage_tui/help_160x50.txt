@@ -29,7 +29,7 @@
 │name                                    │Views                                                                       │         msgs  tokens     cost▼ share   │
 │■ opus-5                                │v          Next view of the focused panel           Spend, Projects         │           10  238.0K    $11.85 ■■■■■···│
 │■ sonnet-5                              │t          Next color theme (off with NO_COLOR)     all panels              │            9  214.2K     $8.25 ■■■·····│
-│■ haiku-5                               │o          Mask or show the account email           all panels              │            7  166.6K     $0.17 ········│
+│■ haiku-5                               │o          Mask the account email, and save it      all panels              │            7  166.6K     $0.17 ········│
 │                                        │p          Open the full screen Sessions list       all panels              │                                        │
 │                                        │e          Edit the tabs and the panels on each     all panels              │                                        │
 │                                        │?          Show this help                           all panels              │                                        │
