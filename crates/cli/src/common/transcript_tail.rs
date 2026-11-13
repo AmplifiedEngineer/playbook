@@ -47,13 +47,18 @@ pub struct LastTurn {
 pub fn last_main_turn(path: &Path) -> Option<LastTurn> {
     let mut file = File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
-    let first = scan(&read_window(&mut file, len, TAIL_FIRST_BYTES)?);
-    if matches!(&first, Some(turn) if turn.tier.is_some()) || len <= TAIL_FIRST_BYTES {
+    let (first, hit_boundary) = scan(&read_window(&mut file, len, TAIL_FIRST_BYTES)?);
+    // A boundary ends the search: nothing before it counts, so a larger
+    // window would only read turns that are not wanted.
+    if hit_boundary
+        || matches!(&first, Some(turn) if turn.tier.is_some())
+        || len <= TAIL_FIRST_BYTES
+    {
         return first;
     }
     // A failed second read keeps what the first window found.
     read_window(&mut file, len, TAIL_CAP_BYTES)
-        .and_then(|body| scan(&body))
+        .and_then(|body| scan(&body).0)
         .or(first)
 }
 
@@ -88,12 +93,12 @@ pub fn is_compact_boundary(line: &str) -> bool {
 
 /// Walks the lines newest first, stopping at a compaction boundary. `at` and
 /// `model` come from the newest counted record, `tier` from the newest one
-/// that wrote cache.
-fn scan(body: &str) -> Option<LastTurn> {
+/// that wrote cache. The flag is true when the walk stopped at a boundary.
+fn scan(body: &str) -> (Option<LastTurn>, bool) {
     let mut turn: Option<LastTurn> = None;
     for line in body.lines().rev() {
         if is_compact_boundary(line) {
-            break;
+            return (turn, true);
         }
         let Some((at, model, tier)) = counted(line) else {
             continue;
@@ -107,7 +112,7 @@ fn scan(body: &str) -> Option<LastTurn> {
             break;
         }
     }
-    turn
+    (turn, false)
 }
 
 /// A record counts when it is a main-session assistant message with input
@@ -141,36 +146,7 @@ fn counted(line: &str) -> Option<(i64, String, Option<CacheTier>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-
-    /// A per-test scratch directory, removed on drop so a failing test
-    /// cleans up too.
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "transcript-tail-{name}-{}",
-                crate::testing::run_id()
-            ));
-            std::fs::create_dir_all(&dir).unwrap();
-            Scratch(dir)
-        }
-
-        fn write(&self, lines: &[String]) -> PathBuf {
-            let path = self.0.join("t.jsonl");
-            let mut text = lines.join("\n");
-            text.push('\n');
-            std::fs::write(&path, text).unwrap();
-            path
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
+    use crate::testing::Scratch;
 
     const T0: &str = "2026-11-10T22:56:49.046Z";
     const T0_EPOCH: i64 = 1_794_351_409;
@@ -376,5 +352,85 @@ mod tests {
             assistant(T1, "claude-opus-4-8", 0, 0, 100, false),
         ]);
         assert_eq!(last_main_turn(&p), turn(T1_EPOCH, None));
+    }
+
+    /// Enough padding to push a record out of the first window.
+    const PAST_FIRST_WINDOW_BYTES: usize = TAIL_FIRST_BYTES as usize + 1024;
+
+    #[test]
+    fn a_boundary_behind_the_first_window_hides_the_older_tier() {
+        let s = Scratch::new("boundary-second-window");
+        let mut lines = vec![
+            rec(T0, 0, 500),
+            COMPACT_BOUNDARY.to_string(),
+            assistant(T1, "claude-opus-4-8", 0, 0, 100, false),
+        ];
+        lines.extend(user_lines(PAST_FIRST_WINDOW_BYTES));
+        let p = s.write(&lines);
+        assert!(std::fs::metadata(&p).unwrap().len() > TAIL_FIRST_BYTES);
+        assert_eq!(last_main_turn(&p), turn(T1_EPOCH, None));
+    }
+
+    #[test]
+    fn a_boundary_behind_the_first_window_with_no_reply_gives_none() {
+        let s = Scratch::new("boundary-second-window-none");
+        let mut lines = vec![rec(T0, 0, 500), COMPACT_BOUNDARY.to_string()];
+        lines.extend(user_lines(PAST_FIRST_WINDOW_BYTES));
+        let p = s.write(&lines);
+        assert_eq!(last_main_turn(&p), None);
+    }
+
+    #[test]
+    fn a_walk_that_reaches_the_boundary_reports_it() {
+        let body = [rec(T0, 0, 500), COMPACT_BOUNDARY.to_string()].join("\n");
+        assert_eq!(scan(&body), (None, true));
+        let body = [COMPACT_BOUNDARY.to_string(), rec(T1, 0, 0)].join("\n");
+        assert_eq!(scan(&body), (turn(T1_EPOCH, None), true));
+        assert!(!scan(&rec(T0, 500, 0)).1);
+    }
+
+    #[test]
+    fn a_boundary_record_is_detected() {
+        assert!(is_compact_boundary(COMPACT_BOUNDARY));
+        assert!(is_compact_boundary(&format!("  {COMPACT_BOUNDARY}\r\n")));
+        let with_metadata = r#"{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"auto"}}"#;
+        assert!(is_compact_boundary(with_metadata));
+    }
+
+    #[test]
+    fn text_that_only_mentions_the_boundary_is_not_one() {
+        let user = r#"{"type":"user","message":{"content":"what is a compact_boundary?"}}"#;
+        let quoted = serde_json::json!({
+            "type": "user",
+            "message": {"content": COMPACT_BOUNDARY},
+        })
+        .to_string();
+        let assistant_line = r#"{"type":"assistant","subtype":"compact_boundary"}"#;
+        let other_subtype = r#"{"type":"system","subtype":"compact_boundary_x"}"#;
+        let wrong_type =
+            r#"{"type":"system","subtype":"informational","content":"compact_boundary"}"#;
+        for line in [
+            user,
+            quoted.as_str(),
+            assistant_line,
+            other_subtype,
+            wrong_type,
+        ] {
+            assert!(!is_compact_boundary(line), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_malformed_or_empty_line_is_not_a_boundary() {
+        for line in [
+            "",
+            "   ",
+            "compact_boundary",
+            r#"{"type":"system","subtype":"compact_boundary""#,
+            r#"["compact_boundary"]"#,
+            r#"{"type":1,"subtype":"compact_boundary"}"#,
+        ] {
+            assert!(!is_compact_boundary(line), "{line}");
+        }
     }
 }

@@ -294,6 +294,13 @@ impl Env {
         path
     }
 
+    /// A transcript of `lines`, one JSON record each.
+    fn transcript_of(&self, name: &str, lines: &[String]) -> PathBuf {
+        let path = self.home.join(name);
+        fs::write(&path, lines.join("\n") + "\n").unwrap();
+        path
+    }
+
     fn prompt(&self, sid: &str, transcript: &Path) -> (i32, String) {
         let payload = format!(
             r#"{{"hook_event_name":"UserPromptSubmit","session_id":"{sid}","transcript_path":"{}"}}"#,
@@ -368,6 +375,37 @@ fn a_crossing_fires_once_with_a_short_message_naming_the_save_command() {
     assert!(msg.contains("needs the SessionStart hook"), "{msg}");
     assert!(!msg.contains("to resume from the handoff"), "{msg}");
     assert_eq!(second.trim(), "", "must not fire again at the same level");
+}
+
+fn assistant_line(tokens: u64) -> String {
+    format!(
+        r#"{{"type":"assistant","isSidechain":false,"message":{{"usage":{{"input_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":{tokens}}}}}}}"#
+    )
+}
+
+#[test]
+fn after_a_compaction_the_hook_is_silent_until_a_big_reply_follows() {
+    let env = Env::new("hy-compact");
+    let boundary = r#"{"type":"system","subtype":"compact_boundary"}"#.to_string();
+    let user = r#"{"type":"user","message":{"content":"hi"}}"#.to_string();
+    let mut lines = vec![assistant_line(BIG), boundary.clone(), user];
+
+    // The big turn sits before the compaction, so it must not fire.
+    let t = env.transcript_of("t.jsonl", &lines);
+    let (code, out) = env.prompt("sess1", &t);
+    assert_eq!((code, out.trim()), (0, ""));
+
+    // A small reply after the compaction stays silent.
+    lines.push(assistant_line(100_000));
+    let t = env.transcript_of("t.jsonl", &lines);
+    let (code, out) = env.prompt("sess1", &t);
+    assert_eq!((code, out.trim()), (0, ""));
+
+    // A big reply after the compaction fires.
+    lines.push(assistant_line(BIG));
+    let t = env.transcript_of("t.jsonl", &lines);
+    let (_, out) = env.prompt("sess1", &t);
+    assert!(out.contains("handoff save --session sess1"), "{out}");
 }
 
 #[test]
