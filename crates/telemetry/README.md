@@ -94,6 +94,7 @@ Settings are playbook's own, from the global tier of its config store (`~/.confi
 | Key | Default | Values |
 | --- | --- | --- |
 | `usage.theme` | `default` | `default`, `spectrum`, `dark`, `light`, `mono` |
+| `usage.maskAccount` | `false` | true or false |
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
 | `usage.timeZone` | `local` | `local`, `utc`. Under `playbook`, a `playbook config` key. Pbtop reads it only from the `usage` object of `config.json`, and only when no config store exists |
 | `usage.refreshSeconds` | `5` | number |

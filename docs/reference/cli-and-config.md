@@ -56,6 +56,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `review.suggest.untestedLines` | `150` | a number, see the config keys page for the range |
 | `security.defaults` | `false` | `true`, `false` |
 | `usage.theme` | `default` | `default`, `spectrum`, `dark`, `light`, `mono` |
+| `usage.maskAccount` | `false` | `true`, `false` |
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
 | `usage.timeZone` | `local` | `local`, `utc` |
 | `usage.refreshSeconds` | `5` | a number, see the config keys page for the range |

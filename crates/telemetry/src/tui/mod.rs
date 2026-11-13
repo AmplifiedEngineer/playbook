@@ -45,11 +45,16 @@ use super::query::Range;
 use super::run::Paths;
 use app::{App, Effect};
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use serde_json::Value;
 use sessions_view::SessionsView;
+use std::path::Path;
 use std::time::{Duration, Instant};
 use theme::{ColorDepth, Theme};
 use ui_state::{Autosave, Flushed};
 use worker::{Update, Worker};
+
+/// The config key that holds whether the account email is masked.
+const MASK_ACCOUNT_KEY: &str = "usage.maskAccount";
 
 /// How long the loop waits for a key before it checks for new data.
 const TICK: Duration = Duration::from_millis(200);
@@ -63,6 +68,22 @@ fn start_theme(no_color: bool) -> Theme {
     crate::host::config_value_now("usage.theme")
         .and_then(|value| value.as_str().and_then(Theme::parse))
         .unwrap_or_default()
+}
+
+/// Whether the header masks an unnamed email account: the choice pbtop stored
+/// (app tier), else the `usage.maskAccount` config key, which is off unless set.
+fn start_mask_account(home: &Path) -> bool {
+    crate::config::resolve(home, MASK_ACCOUNT_KEY)
+        .and_then(|value| value.as_bool())
+        .unwrap_or_default()
+}
+
+/// Stores the mask choice. A missing config store keeps it for this run only,
+/// with nothing to tell the user; a failed write is the one thing worth a note.
+fn save_mask_account(home: &Path, mask: bool) -> Option<String> {
+    crate::config::save_app(home, MASK_ACCOUNT_KEY, &Value::from(mask))
+        .err()
+        .map(|e| format!("Account mask not saved: {e}"))
 }
 
 /// The range to open on: the `--range` flag, else the stored one, else this
@@ -158,6 +179,7 @@ fn event_loop(
     // NO_COLOR counts when it is set to anything but empty.
     app.no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
     app.theme = start_theme(app.no_color);
+    app.mask_account = start_mask_account(&home);
     let env = |k: &str| std::env::var(k).ok();
     app.icon = icon::Icon::detect(
         app.no_color,
@@ -216,6 +238,11 @@ fn event_loop(
                     Effect::SaveBudget(usd) => {
                         app.note = Some(save_budget(&home, usd));
                         worker.ask(app.range, &app.filter, &app.account, &app.machine);
+                    }
+                    Effect::SaveMaskAccount(mask) => {
+                        if let Some(why) = save_mask_account(&home, mask) {
+                            app.note = Some(why);
+                        }
                     }
                     Effect::ResetUsage => worker.reset(),
                     Effect::ResetPrefs => {
@@ -381,6 +408,94 @@ mod tests {
             range: range.map(str::to_string),
             ..Default::default()
         }
+    }
+
+    fn store(tag: &str) -> std::path::PathBuf {
+        let home = crate::util::scratch_dir(tag);
+        let data = crate::config::root(&home).join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let conn = playbook_store::Connection::open(playbook_data::config::db_in(&data)).unwrap();
+        conn.execute_batch(playbook_data::config::SCHEMA_SQL)
+            .unwrap();
+        home
+    }
+
+    #[test]
+    fn the_mask_is_off_when_nothing_is_set() {
+        let home = store("mask-default");
+
+        assert!(!start_mask_account(&home));
+    }
+
+    #[test]
+    fn the_config_key_turns_the_mask_on() {
+        let home = store("mask-config");
+        let db = playbook_data::config::db_in(&crate::config::root(&home).join("data"));
+        playbook_store::Connection::open(db)
+            .unwrap()
+            .execute(
+                "INSERT INTO config VALUES ('global','',?1,'true',1)",
+                [MASK_ACCOUNT_KEY],
+            )
+            .unwrap();
+
+        assert!(start_mask_account(&home));
+    }
+
+    #[test]
+    fn a_toggle_is_stored_and_wins_over_the_config_key_on_the_next_start() {
+        let home = store("mask-toggle");
+        let db = playbook_data::config::db_in(&crate::config::root(&home).join("data"));
+        playbook_store::Connection::open(db)
+            .unwrap()
+            .execute(
+                "INSERT INTO config VALUES ('global','',?1,'true',1)",
+                [MASK_ACCOUNT_KEY],
+            )
+            .unwrap();
+        let mut app = App::new(Range::All);
+        app.mask_account = start_mask_account(&home);
+
+        let Effect::SaveMaskAccount(mask) = app.key(ratatui::crossterm::event::KeyEvent::from(
+            ratatui::crossterm::event::KeyCode::Char('o'),
+        )) else {
+            panic!("the mask key must ask to store the choice");
+        };
+        let note = save_mask_account(&home, mask);
+
+        assert_eq!(note, None);
+        assert!(!app.mask_account);
+        assert!(!start_mask_account(&home));
+    }
+
+    #[test]
+    fn without_a_config_store_the_toggle_writes_nothing_and_says_nothing() {
+        let home = crate::util::scratch_dir("mask-no-store");
+
+        let note = save_mask_account(&home, true);
+
+        assert_eq!(note, None);
+        assert!(!crate::config::root(&home).join("data").exists());
+        assert!(!start_mask_account(&home));
+    }
+
+    #[test]
+    fn a_failed_write_says_the_mask_was_not_saved() {
+        let home = crate::util::scratch_dir("mask-failed-write");
+        let data = crate::config::root(&home).join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(
+            playbook_data::config::db_in(&data),
+            b"not a database at all",
+        )
+        .unwrap();
+
+        let note = save_mask_account(&home, true);
+
+        assert!(
+            note.is_some_and(|n| n.starts_with("Account mask not saved:")),
+            "a store that cannot be opened must say so"
+        );
     }
 
     #[test]

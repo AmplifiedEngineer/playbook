@@ -141,6 +141,7 @@ Regenerate with: UPDATE_REFERENCE=1 cargo test -p playbook --test docs_pbtop_key
 |---|---|---|
 | `v` | Next view of the focused panel | Spend, Projects |
 | `t` | Next color theme (off with NO_COLOR) | all panels |
+| `o` | Mask the account email, and save it | all panels |
 | `p` | Open the full screen Sessions list | all panels |
 | `e` | Edit the tabs and the panels on each | all panels |
 | `?` | Show this help | all panels |

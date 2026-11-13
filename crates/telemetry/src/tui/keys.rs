@@ -12,6 +12,7 @@ use ratatui::crossterm::event::KeyCode;
 pub enum Cmd {
     Quit,
     Theme,
+    MaskAccount,
     Today,
     Week,
     LastWeek,
@@ -359,6 +360,16 @@ pub const BINDINGS: &[Binding] = &[
         panels: ALL_PANELS,
         text: "Next color theme (off with NO_COLOR)",
         hint: hint("t", "theme", 12, 2),
+    },
+    Binding {
+        cmd: Cmd::MaskAccount,
+        keys: &[c('o')],
+        ctrl: false,
+        shown: "o",
+        group: Group::Views,
+        panels: ALL_PANELS,
+        text: "Mask the account email, and save it",
+        hint: None,
     },
     Binding {
         cmd: Cmd::Account,

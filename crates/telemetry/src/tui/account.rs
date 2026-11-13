@@ -9,6 +9,9 @@ use crate::account::UNKNOWN_ACCOUNT;
 use crate::{ToolInvocationEvent, UsageEvent};
 use playbook_store::Connection;
 
+/// The header text when every account is shown.
+const ALL_ACCOUNTS: &str = "all accounts";
+
 /// What the user picked.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum AccountSel {
@@ -24,10 +27,25 @@ pub enum AccountSel {
 pub struct AccountsView {
     /// The key whose events are shown, `None` for all accounts.
     pub key: Option<String>,
-    /// The name for the header, empty when the store holds no events.
+    /// The name for the header, empty when the store holds no events. An
+    /// unnamed email account shows its full address.
     pub shown: String,
+    /// The header name with an unnamed email account cut to its domain, for
+    /// screenshots. Equal to `shown` for every other account.
+    pub masked: String,
     /// Every account with events as `(key, name)`, newest activity first.
     pub choices: Vec<(String, String)>,
+}
+
+impl AccountsView {
+    /// The header name, masked or not.
+    pub fn label(&self, mask: bool) -> &str {
+        if mask {
+            &self.masked
+        } else {
+            &self.shown
+        }
+    }
 }
 
 impl AccountSel {
@@ -77,19 +95,24 @@ pub fn view(conn: &Connection, sel: &AccountSel) -> Result<AccountsView, String>
         .map(|a| (a.key, a.name))
         .collect();
     let key = sel.resolve(&choices);
-    let shown = match (&key, choices.is_empty()) {
-        (_, true) => String::new(),
-        (None, _) => "all accounts".to_string(),
-        (Some(k), _) => header_label(k, &crate::account_store::display(&choices, k), &choices),
+    let (shown, masked) = match (&key, choices.is_empty()) {
+        (_, true) => (String::new(), String::new()),
+        (None, _) => (ALL_ACCOUNTS.to_string(), ALL_ACCOUNTS.to_string()),
+        (Some(k), _) => {
+            let name = crate::account_store::display(&choices, k);
+            let masked = header_label(k, &name, &choices);
+            (name, masked)
+        }
     };
     Ok(AccountsView {
         key,
         shown,
+        masked,
         choices,
     })
 }
 
-/// The header text for `key`. An unnamed email key shows only `@` and its first
+/// The masked header text for `key`. An unnamed email key shows only `@` and its first
 /// domain label, which keeps the address out of screenshots. When two unnamed
 /// keys cut to the same text, each gets its place among them, so cycling
 /// accounts still changes the header.
@@ -166,6 +189,18 @@ mod tests {
         assert_eq!(label("home"), "home");
         assert_eq!(label(UNKNOWN_ACCOUNT), UNKNOWN_ACCOUNT);
         assert_eq!(label("@x.com"), "@x.com");
+    }
+
+    #[test]
+    fn the_view_label_is_the_full_email_unless_the_mask_is_on() {
+        let view = AccountsView {
+            shown: "dev@example.com".into(),
+            masked: "@example".into(),
+            ..AccountsView::default()
+        };
+
+        assert_eq!(view.label(false), "dev@example.com");
+        assert_eq!(view.label(true), "@example");
     }
 
     #[test]

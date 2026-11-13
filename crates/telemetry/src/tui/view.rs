@@ -798,7 +798,7 @@ fn zone_note(app: &App) -> String {
     let Some(data) = app.data.as_ref() else {
         return zone;
     };
-    [&data.accounts.shown, &data.machines.shown]
+    [data.accounts.label(app.mask_account), &data.machines.shown]
         .into_iter()
         .filter(|name| !name.is_empty())
         .fold(zone, |note, name| format!("{note}, {name}"))
@@ -1155,6 +1155,25 @@ mod tests {
             ratatui::crossterm::event::KeyModifiers::NONE,
         ));
         assert!(screen(&app, 120, 30).contains("v view: agents"));
+    }
+
+    #[test]
+    fn the_header_shows_the_full_email_until_the_mask_is_on() {
+        let mut app = app_with(&[event("claude-opus-5", "alpha", 1.0)]);
+        if let Some(d) = app.data.as_mut() {
+            d.accounts.shown = "dev@example.com".to_string();
+            d.accounts.masked = "@example".to_string();
+        }
+
+        let open = screen(&app, 120, 30);
+        app.mask_account = true;
+        let masked = screen(&app, 120, 30);
+
+        assert!(open.contains("dev@example.com"), "{open}");
+        assert!(
+            masked.contains("@example") && !masked.contains("dev@"),
+            "{masked}"
+        );
     }
 
     #[test]

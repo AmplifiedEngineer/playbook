@@ -617,6 +617,7 @@ mod tests {
         let range = Range::LastDays(30);
         let shown = |sel: &AccountSel| {
             let d = load(&conn, range, "", sel, &MachineSel::default(), NOW).unwrap();
+            assert_eq!(d.accounts.masked, d.accounts.shown);
             (d.totals.messages, d.accounts.shown.clone())
         };
 
@@ -640,7 +641,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unnamed_email_account_shows_only_its_domain_in_the_header() {
+    fn an_unnamed_email_account_carries_its_full_and_its_masked_header_name() {
         let conn = two_accounts();
         let mut e = event(NOW - 50, "claude-opus-5", "alpha", 1.0);
         e.account = "igor@getdigital.com.br".to_string();
@@ -654,7 +655,10 @@ mod tests {
             NOW,
         )
         .unwrap();
-        assert_eq!(d.accounts.shown, "@getdigital");
+        assert_eq!(d.accounts.shown, "igor@getdigital.com.br");
+        assert_eq!(d.accounts.masked, "@getdigital");
+        assert_eq!(d.accounts.label(false), "igor@getdigital.com.br");
+        assert_eq!(d.accounts.label(true), "@getdigital");
     }
 
     /// One event and one telemetry request per machine and account pair. The
