@@ -639,6 +639,24 @@ mod tests {
         assert_eq!(d.accounts.choices[0].0, "work");
     }
 
+    #[test]
+    fn an_unnamed_email_account_shows_only_its_domain_in_the_header() {
+        let conn = two_accounts();
+        let mut e = event(NOW - 50, "claude-opus-5", "alpha", 1.0);
+        e.account = "igor@getdigital.com.br".to_string();
+        db::upsert_usage_event(&conn, &e).unwrap();
+        let d = load(
+            &conn,
+            Range::LastDays(30),
+            "",
+            &AccountSel::Latest,
+            &MachineSel::default(),
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(d.accounts.shown, "@getdigital");
+    }
+
     /// One event and one telemetry request per machine and account pair. The
     /// first machine is this one, the others are stamped with their own ids.
     fn fleet(machines: usize, accounts: usize) -> Connection {
