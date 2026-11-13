@@ -17,6 +17,42 @@ pub fn playbook_statusline_path(home: &Path) -> PathBuf {
 /// The command that renders the status line with the Rust binary.
 pub const RUST_COMMAND: &str = "playbook statusline";
 
+/// Seconds between status line runs while Claude Code is idle. Short enough
+/// that the prompt cache countdown visibly ticks down.
+pub const REFRESH_INTERVAL_SECS: u64 = 5;
+
+/// The key under `statusLine` that sets how often it runs while idle.
+pub const REFRESH_KEY: &str = "refreshInterval";
+
+/// Whether a `statusLine` object runs playbook's renderer.
+pub(crate) fn runs_playbook(status_line: &serde_json::Value) -> bool {
+    status_line
+        .get("command")
+        .and_then(|c| c.as_str())
+        .is_some_and(|c| c.trim() == RUST_COMMAND)
+}
+
+/// Whether a `statusLine` object that runs playbook has the interval playbook
+/// sets. Always true for a status line that is not playbook's.
+pub(crate) fn refresh_is_current(status_line: &serde_json::Value) -> bool {
+    !runs_playbook(status_line)
+        || status_line.get(REFRESH_KEY).and_then(|v| v.as_u64()) == Some(REFRESH_INTERVAL_SECS)
+}
+
+/// Sets `refreshInterval` to [`REFRESH_INTERVAL_SECS`] on a `statusLine`
+/// object that runs playbook, whatever it was. Playbook owns that interval.
+/// Any other status line is left alone. `true` when the object changed.
+pub(crate) fn set_refresh(status_line: &mut serde_json::Value) -> bool {
+    if refresh_is_current(status_line) {
+        return false;
+    }
+    let Some(map) = status_line.as_object_mut() else {
+        return false;
+    };
+    map.insert(REFRESH_KEY.to_string(), REFRESH_INTERVAL_SECS.into());
+    true
+}
+
 /// Whether `command` runs the playbook-installed `statusline.sh` through an
 /// interpreter. A custom script elsewhere, or any extra argument, is not it.
 pub(crate) fn is_legacy_command(command: &str, home: &Path) -> bool {
@@ -70,6 +106,9 @@ pub fn migrate_legacy_command(
         return Ok(false);
     }
     *command = serde_json::Value::String(RUST_COMMAND.to_string());
+    if let Some(line) = value.get_mut("statusLine") {
+        set_refresh(line);
+    }
     let body = serde_json::to_string_pretty(&value).map_err(io::Error::other)?;
     // A symlinked settings.json (stow, chezmoi) stays a symlink.
     let target = fs::canonicalize(settings_path)?;
@@ -90,4 +129,58 @@ fn unpin_base_status_line(base_path: &Path) -> io::Result<()> {
     }
     let body = serde_json::to_string_pretty(&base).map_err(io::Error::other)?;
     crate::common::atomic::write_atomic(base_path, format!("{body}\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn line(refresh: Option<serde_json::Value>) -> serde_json::Value {
+        let mut v = json!({"type": "command", "command": RUST_COMMAND});
+        if let Some(r) = refresh {
+            v[REFRESH_KEY] = r;
+        }
+        v
+    }
+
+    #[test]
+    fn any_interval_on_playbooks_status_line_becomes_the_playbook_one() {
+        for refresh in [None, Some(json!(30)), Some(json!(1)), Some(json!("x"))] {
+            let mut v = line(refresh.clone());
+            assert!(set_refresh(&mut v), "{refresh:?}");
+            assert_eq!(v[REFRESH_KEY], json!(REFRESH_INTERVAL_SECS), "{refresh:?}");
+            assert!(refresh_is_current(&v));
+        }
+    }
+
+    #[test]
+    fn the_playbook_interval_is_left_as_it_is() {
+        let mut v = line(Some(json!(REFRESH_INTERVAL_SECS)));
+        assert!(!set_refresh(&mut v));
+    }
+
+    #[test]
+    fn a_status_line_that_does_not_run_playbook_is_left_alone() {
+        for refresh in [None, Some(30)] {
+            let mut v = json!({"type": "command", "command": "bash ~/mine.sh"});
+            if let Some(r) = refresh {
+                v[REFRESH_KEY] = json!(r);
+            }
+            let before = v.clone();
+            assert!(!set_refresh(&mut v));
+            assert_eq!(v, before);
+            assert!(refresh_is_current(&v));
+        }
+    }
+
+    #[test]
+    fn the_seed_settings_use_the_same_interval() {
+        let seed: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../seed/settings.shared.json")).unwrap();
+        assert_eq!(
+            seed["statusLine"][REFRESH_KEY],
+            json!(REFRESH_INTERVAL_SECS)
+        );
+    }
 }

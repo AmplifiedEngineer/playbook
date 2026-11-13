@@ -2187,7 +2187,12 @@ mod tests {
         assert_eq!(command_of(&path), "playbook statusline");
         let v: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(v["statusLine"]["refreshInterval"], 30);
+        // The rewrite repairs the object, so the old 30 second interval comes
+        // down to the playbook one; other keys stay.
+        assert_eq!(
+            v["statusLine"]["refreshInterval"],
+            crate::init::statusline::REFRESH_INTERVAL_SECS
+        );
         assert_eq!(v["model"], "x");
     }
 

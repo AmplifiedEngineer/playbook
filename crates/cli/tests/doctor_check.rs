@@ -146,7 +146,8 @@ fn guard_settings(pre: &[&str], post: &[&str]) -> String {
 
 const PAUSED: &str = r#""enabledPlugins":{"playbook@amplifiedengineer":false}"#;
 
-const STATUS: &str = r#""statusLine":{"type":"command","command":"playbook statusline"}"#;
+const STATUS: &str =
+    r#""statusLine":{"type":"command","command":"playbook statusline","refreshInterval":5}"#;
 
 fn paused_settings() -> String {
     let live = guard_settings(&GUARDS, &["commit-message-sanitizer"]);
@@ -465,14 +466,41 @@ fn statusline(b: &Box, cmd: &str) {
     ));
 }
 
+/// The refresh interval `playbook setup` writes on its own status line.
+const PLAYBOOK_REFRESH: u64 = playbook::init::statusline::REFRESH_INTERVAL_SECS;
+
+fn playbook_statusline(b: &Box, refresh: Option<&str>) {
+    let refresh = refresh.map_or(String::new(), |r| format!(r#","refreshInterval":{r}"#));
+    b.settings(&format!(
+        r#"{{"statusLine":{{"type":"command","command":"playbook statusline"{refresh}}}}}"#
+    ));
+}
+
 #[test]
 fn l5_the_binary_status_line_passes() {
     let b = Box::new("l5r");
-    statusline(&b, "playbook statusline");
+    playbook_statusline(&b, Some(&PLAYBOOK_REFRESH.to_string()));
     assert_eq!(
         layer(&b.run(&[], "/bin/zsh", None), "5")[0]["level"],
         "PASS"
     );
+}
+
+#[test]
+fn l5_a_drifted_or_missing_refresh_interval_warns() {
+    for (refresh, found) in [
+        (Some("30"), "is 30"),
+        (Some("1"), "is 1"),
+        (None, "is missing"),
+    ] {
+        let b = Box::new("l5i");
+        playbook_statusline(&b, refresh);
+        let t = text(&layer(&b.run(&[], "/bin/zsh", None), "5"));
+        assert!(
+            t.starts_with("WARN") && t.contains(found),
+            "{refresh:?}: {t}"
+        );
+    }
 }
 
 #[test]
