@@ -21,6 +21,9 @@ const TAIL_FIRST_BYTES: u64 = 256 * 1024;
 /// none that wrote cache. Same size as the tail in `hooks::context_hygiene`.
 const TAIL_CAP_BYTES: u64 = 2 * 1024 * 1024;
 
+/// `subtype` of the system record that marks a compaction.
+const COMPACT_BOUNDARY_SUBTYPE: &str = "compact_boundary";
+
 /// How long a cache write stays readable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheTier {
@@ -72,11 +75,26 @@ fn read_window(file: &mut File, len: u64, cap: u64) -> Option<String> {
     }
 }
 
-/// Walks the lines newest first. `at` and `model` come from the newest
-/// counted record, `tier` from the newest one that wrote cache.
+/// Whether the line is the record Claude Code writes when it compacts the
+/// conversation. Turns before it describe a context that no longer exists.
+pub fn is_compact_boundary(line: &str) -> bool {
+    // Cheap check first: most lines are not boundaries and need no parse.
+    line.contains(COMPACT_BOUNDARY_SUBTYPE)
+        && serde_json::from_str::<Value>(line.trim()).is_ok_and(|record| {
+            record.get("type").and_then(Value::as_str) == Some("system")
+                && record.get("subtype").and_then(Value::as_str) == Some(COMPACT_BOUNDARY_SUBTYPE)
+        })
+}
+
+/// Walks the lines newest first, stopping at a compaction boundary. `at` and
+/// `model` come from the newest counted record, `tier` from the newest one
+/// that wrote cache.
 fn scan(body: &str) -> Option<LastTurn> {
     let mut turn: Option<LastTurn> = None;
     for line in body.lines().rev() {
+        if is_compact_boundary(line) {
+            break;
+        }
         let Some((at, model, tier)) = counted(line) else {
             continue;
         };
@@ -172,6 +190,8 @@ mod tests {
             write_5m + write_1h
         )
     }
+
+    const COMPACT_BOUNDARY: &str = r#"{"type":"system","subtype":"compact_boundary"}"#;
 
     fn rec(ts: &str, write_5m: u64, write_1h: u64) -> String {
         assistant(ts, "claude-opus-4-8", write_5m, write_1h, 100, false)
@@ -334,5 +354,27 @@ mod tests {
             last_main_turn(&p),
             turn(T0_EPOCH, Some(CacheTier::FiveMinutes))
         );
+    }
+
+    #[test]
+    fn a_compaction_boundary_hides_the_turns_before_it() {
+        let s = Scratch::new("boundary");
+        let p = s.write(&[
+            rec(T0, 0, 500),
+            COMPACT_BOUNDARY.to_string(),
+            user_lines(1)[0].clone(),
+        ]);
+        assert_eq!(last_main_turn(&p), None);
+    }
+
+    #[test]
+    fn a_turn_after_the_boundary_is_found_without_the_older_tier() {
+        let s = Scratch::new("after-boundary");
+        let p = s.write(&[
+            rec(T0, 0, 500),
+            COMPACT_BOUNDARY.to_string(),
+            assistant(T1, "claude-opus-4-8", 0, 0, 100, false),
+        ]);
+        assert_eq!(last_main_turn(&p), turn(T1_EPOCH, None));
     }
 }

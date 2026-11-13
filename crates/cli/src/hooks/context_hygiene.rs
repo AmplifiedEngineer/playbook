@@ -12,7 +12,7 @@
 //!
 //! The size is the input side of the last main-session assistant message in
 //! the transcript (fresh, cache-written and cache-read input tokens). Only
-//! the tail of the transcript is read. Any problem (no transcript, bad JSON,
+//! the tail of the transcript is read, and only back to the last compaction. Any problem (no transcript, bad JSON,
 //! no usage found) means silence, never an error.
 //!
 //! The state file `hygiene-level` in the session directory holds the last
@@ -21,6 +21,7 @@
 //! a session that shrinks and grows again is nudged again. The next session
 //! start loads the handoff the nudge asked for when the SessionStart hook runs (see `crate::handoff`).
 
+use crate::common::transcript_tail::is_compact_boundary;
 use crate::common::{emit_prompt_context, home_dir, session_dir, session_id, Payload};
 use serde_json::Value;
 use std::fs::{self, File};
@@ -99,8 +100,9 @@ fn crossed(state: &Path, tokens: u64, threshold: u64) -> bool {
     level > stored
 }
 
-/// Input tokens of the newest main-session assistant message in the
-/// transcript at `path`, or `None` when it cannot be read or has none.
+/// Input tokens of the newest main-session assistant message after the last
+/// compaction in the transcript at `path`, or `None` when it cannot be read
+/// or has none.
 pub fn context_tokens(path: &Path) -> Option<u64> {
     let mut file = File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
@@ -115,7 +117,12 @@ pub fn context_tokens(path: &Path) -> Option<u64> {
     } else {
         &text
     };
-    body.lines().rev().find_map(usage_total)
+    // Stop at a compaction: the turns before it describe a context that no
+    // longer exists, so there is no figure until a reply follows it.
+    body.lines()
+        .rev()
+        .take_while(|line| !is_compact_boundary(line))
+        .find_map(usage_total)
 }
 
 fn usage_total(line: &str) -> Option<u64> {
@@ -180,5 +187,57 @@ mod tests {
         let msg = message(999_999, "0123456789abcdef0123456789abcdef0123");
         assert!(msg.chars().count() < 400, "{}", msg.chars().count());
         assert!(msg.contains("playbook handoff save --session"));
+    }
+
+    const BOUNDARY: &str = r#"{"type":"system","subtype":"compact_boundary"}"#;
+    const USER: &str = r#"{"type":"user","message":{"content":"hi"}}"#;
+    const BIG: u64 = 438_000;
+    const SMALL: u64 = 103_000;
+
+    fn transcript(name: &str, lines: &[String]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("hygiene-{name}-{}", crate::testing::run_id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.jsonl");
+        fs::write(&path, lines.join("\n") + "\n").unwrap();
+        path
+    }
+
+    #[test]
+    fn a_boundary_then_a_user_record_gives_no_size() {
+        let p = transcript(
+            "user",
+            &[record(0, 0, BIG, false), BOUNDARY.into(), USER.into()],
+        );
+        assert_eq!(context_tokens(&p), None);
+    }
+
+    #[test]
+    fn an_assistant_record_after_the_boundary_gives_its_size() {
+        let p = transcript(
+            "after",
+            &[
+                record(0, 0, BIG, false),
+                BOUNDARY.into(),
+                USER.into(),
+                record(0, 0, SMALL, false),
+            ],
+        );
+        assert_eq!(context_tokens(&p), Some(SMALL));
+    }
+
+    #[test]
+    fn a_boundary_outside_the_tail_window_still_applies() {
+        let filler = format!(
+            r#"{{"type":"user","message":{{"content":"{}"}}}}"#,
+            "x".repeat(1024)
+        );
+        let mut lines = vec![record(0, 0, BIG, false), BOUNDARY.into()];
+        lines.extend(std::iter::repeat_n(
+            filler,
+            (TAIL_BYTES as usize / 1024) + 16,
+        ));
+        lines.push(record(0, 0, SMALL, false));
+        let p = transcript("window", &lines);
+        assert_eq!(context_tokens(&p), Some(SMALL));
     }
 }
