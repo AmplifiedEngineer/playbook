@@ -363,12 +363,12 @@ pub const BINDINGS: &[Binding] = &[
     },
     Binding {
         cmd: Cmd::MaskAccount,
-        keys: &[c('@')],
+        keys: &[c('o')],
         ctrl: false,
-        shown: "@",
+        shown: "o",
         group: Group::Views,
         panels: ALL_PANELS,
-        text: "Mask the account email (screenshots)",
+        text: "Mask or show the account email",
         hint: None,
     },
     Binding {

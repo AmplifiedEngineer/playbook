@@ -382,6 +382,8 @@ mod tests {
         assert!(validate("usage.ui.state", &Value::from(fits)).is_ok());
         assert!(validate("usage.ui.state", &Value::from(long)).is_err());
         assert!(validate("usage.ui.state", &Value::from(5)).is_err());
+        assert!(validate("usage.maskAccount", &Value::from(true)).is_ok());
+        assert!(validate("usage.maskAccount", &Value::from("yes")).is_err());
     }
 
     #[test]

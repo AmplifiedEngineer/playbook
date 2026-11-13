@@ -194,13 +194,13 @@ mod tests {
     #[test]
     fn the_view_label_is_the_full_email_unless_the_mask_is_on() {
         let view = AccountsView {
-            shown: "igor@getdigital.com.br".into(),
-            masked: "@getdigital".into(),
+            shown: "dev@example.com".into(),
+            masked: "@example".into(),
             ..AccountsView::default()
         };
 
-        assert_eq!(view.label(false), "igor@getdigital.com.br");
-        assert_eq!(view.label(true), "@getdigital");
+        assert_eq!(view.label(false), "dev@example.com");
+        assert_eq!(view.label(true), "@example");
     }
 
     #[test]

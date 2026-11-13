@@ -617,6 +617,7 @@ mod tests {
         let range = Range::LastDays(30);
         let shown = |sel: &AccountSel| {
             let d = load(&conn, range, "", sel, &MachineSel::default(), NOW).unwrap();
+            assert_eq!(d.accounts.masked, d.accounts.shown);
             (d.totals.messages, d.accounts.shown.clone())
         };
 

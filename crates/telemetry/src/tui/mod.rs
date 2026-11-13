@@ -457,7 +457,7 @@ mod tests {
         app.mask_account = start_mask_account(&home);
 
         let Effect::SaveMaskAccount(mask) = app.key(ratatui::crossterm::event::KeyEvent::from(
-            ratatui::crossterm::event::KeyCode::Char('@'),
+            ratatui::crossterm::event::KeyCode::Char('o'),
         )) else {
             panic!("the mask key must ask to store the choice");
         };
@@ -477,6 +477,25 @@ mod tests {
         assert_eq!(note, None);
         assert!(!crate::config::root(&home).join("data").exists());
         assert!(!start_mask_account(&home));
+    }
+
+    #[test]
+    fn a_failed_write_says_the_mask_was_not_saved() {
+        let home = crate::util::scratch_dir("mask-failed-write");
+        let data = crate::config::root(&home).join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(
+            playbook_data::config::db_in(&data),
+            b"not a database at all",
+        )
+        .unwrap();
+
+        let note = save_mask_account(&home, true);
+
+        assert!(
+            note.is_some_and(|n| n.starts_with("Account mask not saved:")),
+            "a store that cannot be opened must say so"
+        );
     }
 
     #[test]

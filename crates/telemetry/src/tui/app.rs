@@ -1162,12 +1162,12 @@ mod tests {
         let mut app = App::new(Range::All);
         assert!(!app.mask_account);
         assert_eq!(
-            app.key(press(KeyCode::Char('@'))),
+            app.key(press(KeyCode::Char('o'))),
             Effect::SaveMaskAccount(true)
         );
         assert!(app.mask_account);
         assert_eq!(
-            app.key(press(KeyCode::Char('@'))),
+            app.key(press(KeyCode::Char('o'))),
             Effect::SaveMaskAccount(false)
         );
         assert!(!app.mask_account);

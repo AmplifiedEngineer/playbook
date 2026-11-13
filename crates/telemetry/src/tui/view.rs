@@ -1158,6 +1158,25 @@ mod tests {
     }
 
     #[test]
+    fn the_header_shows_the_full_email_until_the_mask_is_on() {
+        let mut app = app_with(&[event("claude-opus-5", "alpha", 1.0)]);
+        if let Some(d) = app.data.as_mut() {
+            d.accounts.shown = "dev@example.com".to_string();
+            d.accounts.masked = "@example".to_string();
+        }
+
+        let open = screen(&app, 120, 30);
+        app.mask_account = true;
+        let masked = screen(&app, 120, 30);
+
+        assert!(open.contains("dev@example.com"), "{open}");
+        assert!(
+            masked.contains("@example") && !masked.contains("dev@"),
+            "{masked}"
+        );
+    }
+
+    #[test]
     fn the_help_window_fits_every_supported_size_and_names_the_panels() {
         for (w, h) in [(80, 24), (100, 30), (160, 60)] {
             let mut app = app_with(&[event("claude-opus-5", "alpha", 1.0)]);
