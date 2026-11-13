@@ -2002,7 +2002,7 @@ fn the_header_keeps_no_row_for_budget_data_that_does_not_exist() {
     // Stacked, only the lines that exist are added: no limit, the note on the
     // missing windows and the spend.
     assert_eq!(stacked(&none), 2 + 1 + 3 + 3);
-    assert!(stacked(&two) > stacked(&none));
+    assert_eq!(stacked(&two), 2 + 1 + 3 + 4);
     // No data yet: the border and one line.
     assert_eq!(
         crate::tui::view::header_height(&App::new(Range::All), 150),

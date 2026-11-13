@@ -43,7 +43,7 @@ use ratatui::text::{Line, Span};
 const ROWS: usize = 4;
 /// The detail view draws a limit row and a figures row for each limit.
 const _: () = assert!(ROWS >= 2 * MAX_LIMITS);
-/// The most limits drawn. The rest are counted in the title.
+/// The most limits drawn. The rest are counted in the header's bottom border.
 const MAX_LIMITS: usize = 2;
 /// The width of the name column, so the bars of all rows start together.
 const NAME_WIDTH: usize = 8;
@@ -1111,7 +1111,7 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_grows_with_the_strip_until_its_cap() {
+    fn the_bar_grows_with_the_header_width_until_its_cap() {
         let l = limit(50.0);
         let v = view_with(vec![l.clone()]);
         let bar = |w: usize| {

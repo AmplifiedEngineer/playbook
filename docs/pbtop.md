@@ -79,7 +79,7 @@ A tab with no row layout of its own draws this grid, which the editor edits as i
 
 A tab keeps its own rows only when you set them with `f` (split or join a row) or when the stored value has a `|`. Then adding fills the last row that has room, opens a new row while the tab has fewer than 4, and otherwise fills the first row with room. Old stored layouts load and save as written.
 
-A short screen keeps every row at 5 lines or more. When the rows do not fit, the tab draws the rows that do and hides the panels of the others. The footer then says how many panels are hidden and how many screen rows show all of them, for example `2 panels hidden, 28 rows show all`. The header takes 6 rows on a wide screen when it has a period to compare and fewer budget lines than metric rows, and more when its budget lines stack or run past three, so the number moves a little with the screen. The header is never left out: it is drawn at every size from the 80 by 24 minimum, and the panels give way to it. At 150 by 44 every count from 1 to 8 fits.
+A short screen keeps every row at 5 lines or more. When the rows do not fit, the tab draws the rows that do and hides the panels of the others. The footer then says how many panels are hidden and how many screen rows show all of them, for example `2 panels hidden, 28 rows show all`. The header takes 6 rows on a wide screen while the budget has three lines or fewer, and more when the budget has four or the rows stack, so the number moves a little with the screen. The header is never left out: it is drawn at every size from the 80 by 24 minimum, and the panels give way to it. At 150 by 44 every count from 1 to 8 fits.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/pbtop/layout-editor-dark.svg">
@@ -263,7 +263,7 @@ The letter after the name says where the limit comes from:
 
 The figures line spells the source out, for example `manual, local` or `cached 1d 22h ago, plus this machine since`.
 
-A limit that Claude Code reports wins over a manual budget. A manual monthly budget covers the calendar month in your chosen time zone, and the spend is the estimated cost from your history. A weekly budget starts on the day in `usage.weekStart`. With no limit at all, the strip shows an empty bar and says to press `b`.
+A limit that Claude Code reports wins over a manual budget. A manual monthly budget covers the calendar month in your chosen time zone, and the spend is the estimated cost from your history. A weekly budget starts on the day in `usage.weekStart`. With no limit at all, the header shows an empty bar and says to press `b`.
 
 Notes about the numbers go in one dim line, or in the bottom border of the header as a count when there is no room for the line. They are a missing 5 hour or weekly window, a manual budget beside a detected one, and the figure Claude Code last reported. Press `i` to read each in full. `--json` carries the same text.
 

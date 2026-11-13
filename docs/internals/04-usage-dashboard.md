@@ -64,7 +64,7 @@ The keys, with what each does, are on the [pbtop page](../pbtop.md#keys). That t
 | Key | Action |
 |---|---|
 | `X` | Reset the usage history. A window asks first; `y` (or `Y`) deletes, and any other key cancels. The events, the tool events and the read progress are deleted in one transaction, so another reader sees the old history or none, never half. The worker then reads every transcript again like a first run, newest first, and the panels fill while the footer shows the progress. The budget, the limit readings, the account names, the applied account moves, the telemetry rows and the layout stay, and the events you moved get their moved account again when they are read. |
-| `u`, `U` | Pick the account. The view opens on the account of the newest event, and the title names it (a name set with `playbook usage account name`, else the account key). `u` steps to the next account, then to all accounts, then back to the newest. `U` jumps to all accounts and back. The totals, the charts and the budget panel count only the account shown. The live, agents, skills and health panels keep only the telemetry rows of sessions that have an event with that account, so they follow the account too. `playbook usage --account <KEY_OR_NAME>` opens the view on that account. |
+| `u`, `U` | Pick the account. The view opens on the account of the newest event, and the title names it (a name set with `playbook usage account name`, else the account key). `u` steps to the next account, then to all accounts, then back to the newest. `U` jumps to all accounts and back. The totals, the charts and the budget in the header count only the account shown. The live, agents, skills and health panels keep only the telemetry rows of sessions that have an event with that account, so they follow the account too. `playbook usage --account <KEY_OR_NAME>` opens the view on that account. |
 | `x` | Pick the machine for the machine panels. The view opens on this machine, and the title names it after the account (the name set with `playbook usage machine`, or the first eight characters of another machine's id). `x` steps to each other machine that wrote events, newest first, then to all machines, then back to this one. With one machine `x` changes nothing and says so. Live, agents, skills, tools, health, sessions and projects follow the pick. Budget, projection, burnup, spend, tokens and models count every machine of the account shown. The pick is saved in `usage.ui.state` and a stored value that cannot be read means this machine. |
 | `/` | Type a filter, a case insensitive substring of model, repo, branch or session id. `Enter` applies it, `Esc` cancels, `Backspace` edits. While you type, every key is text, so `q` and `r` do not quit or change the range until you press `Enter` or `Esc`. |
 
@@ -210,7 +210,7 @@ Notes:
 2. With no statusline reading, the cached spend limit at any age.
 3. `usage.budget.monthlyUsd`, only when nothing is detected. It does not draw a bar beside a detected limit. When both are set and differ, the header adds a line with both amounts and says the detected one applies.
 
-A cached limit over six hours old, whether it won under item 1 or item 2, is tagged `cached <age> ago, plus this machine since` when the cache has a used amount from this UTC month. The bar then shows that amount plus this machine's messages after the read, because spend only grows within a month. Without such an amount the tag is `limit cached <age> ago, used is this machine only` and the bar is this machine's estimate for the UTC month. A note on the strip, read in full with `i`, shows the amount Claude Code last reported, with its age and the word stale. The tag sits on the figures line under the limit, and the row itself carries a one letter source glyph and a `stale` mark. A manual budget is tagged `manual, local` for the same reason and gets the same note. Once other machines have synced events into `usage_events_remote`, the account scope panels (Budget, Projection, Burnup, Spend, Tokens, Models) and the account list read the `usage_events_all` view, so those events count, and the manual tag reads `manual, all machines`. The machine scope panels keep reading this machine's tables.
+A cached limit over six hours old, whether it won under item 1 or item 2, is tagged `cached <age> ago, plus this machine since` when the cache has a used amount from this UTC month. The bar then shows that amount plus this machine's messages after the read, because spend only grows within a month. Without such an amount the tag is `limit cached <age> ago, used is this machine only` and the bar is this machine's estimate for the UTC month. A note in the header, read in full with `i`, shows the amount Claude Code last reported, with its age and the word stale. The tag sits on the figures line under the limit, and the row itself carries a one letter source glyph and a `stale` mark. A manual budget is tagged `manual, local` for the same reason and gets the same note. Once other machines have synced events into `usage_events_remote`, the account scope panels (the budget in the header, Burnup, Spend, Tokens, Models) and the account list read the `usage_events_all` view, so those events count, and the manual tag reads `manual, all machines`. The machine scope panels keep reading this machine's tables.
 
 Cache rules:
 
@@ -220,7 +220,7 @@ Cache rules:
 - The cache is read again only when the file changes, and a half written file keeps the last good reading.
 - The period of the cached limit is assumed to be the calendar month.
 
-**Plan name.** It comes from the rate limit tier names in the config file. The two tiers seen on Max accounts are recognized as Max. An account whose organizationType is claude_enterprise, or whose seatTier names enterprise, is Enterprise: the panels hide the 5 hour and weekly windows and say the whole limit is the monthly extra usage budget. Everything else shows as "Unknown plan". When a plan has no 5 hour and weekly windows, the Budget (when it has room) and Projection panels say "5 hour and weekly windows: not available for this plan" and add that Pro and Max get them from the playbook statusline. An unknown plan, such as Pro, gets the same text. On a Max plan with no reading yet they say a reading appears after a session with the playbook statusline. Run `playbook usage doctor` to see which sources exist on a machine.
+**Plan name.** It comes from the rate limit tier names in the config file. The two tiers seen on Max accounts are recognized as Max. An account whose organizationType is claude_enterprise, or whose seatTier names enterprise, is Enterprise: the panels hide the 5 hour and weekly windows and say the whole limit is the monthly extra usage budget. Everything else shows as "Unknown plan". When a plan has no 5 hour and weekly windows, the header says "5 hour and weekly windows: not on this plan" and add that Pro and Max get them from the playbook statusline. An unknown plan, such as Pro, gets the same text. On a Max plan with no reading yet they say a reading appears after a session with the playbook statusline. Run `playbook usage doctor` to see which sources exist on a machine.
 
 **Manual budget.** It covers the calendar month or week in the chosen time zone (the week starts on `usage.weekStart`). The spend is the estimated cost from your local history, not your bill. Set it with `playbook config set --global usage.budget.monthlyUsd 200`. `0` means no budget.
 
@@ -302,7 +302,7 @@ For the period on screen (today, this week or this month, this week for other ra
 
 ### The statusline budget line
 
-When the 7 day or 5 hour window is reached, or its pace reaches the cap before it resets, the statusline prints a fourth line. It uses the same pace maths as the Budget strip and reads only the `rate_limits` the statusline already receives on stdin, so it adds no network call and no database scan.
+When the 7 day or 5 hour window is reached, or its pace reaches the cap before it resets, the statusline prints a fourth line. It uses the same pace maths as the budget in the header and reads only the `rate_limits` the statusline already receives on stdin, so it adds no network call and no database scan.
 
 | Window | Reached | On pace to reach it |
 |---|---|---|
@@ -340,7 +340,7 @@ A seat billed by usage has no 5 hour or 7 day window. It has a monthly dollar li
 
 #### Where each window lands on line 3
 
-Line 3 shows each window's percent and, once the window has run for an hour, where it lands at its reset if use goes on at the same pace. The pace maths is the same as line 4 and the Budget strip.
+Line 3 shows each window's percent and, once the window has run for an hour, where it lands at its reset if use goes on at the same pace. The pace maths is the same as line 4 and the budget in the header.
 
 | Line 3 reads | Meaning |
 |---|---|
@@ -380,12 +380,12 @@ What the figure counts:
 
 ### When a limit is reached
 
-The header says when each limit is reached at your current pace, in the time zone shown in its title (UTC or local). It was a separate Projection panel before, and the math is the same. It shows the sooner of the two paces below as `hits it in 2d 4h`, with `(24h)` added when the 24 hour pace is the sooner one, or `safe` when neither reaches the limit before it resets. The older layout word `projection` still loads and draws nothing. A dollar limit has two paces:
+The header says when each limit is reached at your current pace, in the time zone shown in the header title (UTC or local). It was a separate Projection panel before, and the math is the same. It shows the sooner of the two paces below as `hits it in 2d 4h`, with `(24h)` added when the 24 hour pace is the sooner one, or `safe` when neither reaches the limit before it resets. The older layout word `projection` still loads and draws nothing. A dollar limit has two paces:
 
 1. The last 24 hours, which follows what you are doing now. When the period started less than 24 hours ago, it uses the spend of the period over the age of the period, so spend from before the period never counts (under one hour of data it says "no pace yet").
 2. The period average since the period began, which is steadier and shows the long view.
 
-A limit that is a percentage of a window (the 5 hour and weekly windows of a plan) has the window average only, because the window has no per day cost. The strip shows no clause for a limit that is reached already (its state says so) or when no pace is known yet. With no limit known, the strip shows an empty bar and says to press `b`.
+A limit that is a percentage of a window (the 5 hour and weekly windows of a plan) has the window average only, because the window has no per day cost. The header shows no clause for a limit that is reached already (its state says so) or when no pace is known yet. With no limit known, the strip shows an empty bar and says to press `b`.
 
 ### The burn-up panel
 
