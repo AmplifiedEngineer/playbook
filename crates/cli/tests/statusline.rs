@@ -1588,6 +1588,49 @@ fn no_rate_limits_means_no_window_segments() {
     assert!(!line.contains("5h") && !line.contains("7d"), "{line:?}");
 }
 
+/// Line 3, colour stripped, for a session with the given transcript record
+/// and both windows on pace: the 5 hour window at 30 percent after 2 hours
+/// and the 7 day one at 30 percent after 3 days, at `NEXT_NOW`.
+fn cache_and_projection_line(record: String) -> String {
+    let s = Scratch::new();
+    let path = s.0.join("t.jsonl");
+    std::fs::write(&path, record).unwrap();
+    let body = payload(
+        &s.0,
+        &format!(
+            r#""model":{{"id":"claude-opus-4-8"}},"transcript_path":"{}","context_window":{{"current_usage":{{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":200000}}}},"cost":{{"total_cost_usd":1.2345}},"rate_limits":{{"five_hour":{{"used_percentage":30,"resets_at":{}}},"seven_day":{{"used_percentage":30,"resets_at":{}}}}}"#,
+            path.display(),
+            NEXT_NOW + 3 * 3600,
+            NEXT_NOW + 4 * DAY_SECS
+        ),
+    );
+    let out = strip_ansi(&text(&render(&body, &env_for(&s.0), NEXT_NOW)));
+    out.lines().nth(1).unwrap_or_default().to_string()
+}
+
+/// Asserts `line` holds `cache` and then the two projections, in that order.
+fn assert_cache_before_projections(line: &str, cache: &str) {
+    let projections = "5h 30% → 75% at 11:00 | 7d 30% → 70%";
+    let at_cache = line.find(cache);
+    let at_projections = line.find(projections);
+    assert!(at_cache.is_some() && at_projections.is_some(), "{line:?}");
+    assert!(at_cache < at_projections, "{line:?}");
+}
+
+#[test]
+fn a_warm_cache_stays_on_line_three_before_the_projections() {
+    let line =
+        cache_and_projection_line(transcript_record(240, "claude-opus-4-8", 1000, 0, 200_000));
+    assert_cache_before_projections(&line, "(next ≥$0.10, warm 1m left)");
+}
+
+#[test]
+fn a_cold_cache_stays_on_line_three_before_the_projections() {
+    let line =
+        cache_and_projection_line(transcript_record(600, "claude-opus-4-8", 1000, 0, 200_000));
+    assert_cache_before_projections(&line, "! cold cache, next ≥$1.25");
+}
+
 // ---- line 4: this chat beside the account spend ---------------------------
 
 /// A payload member with this chat's cost.
