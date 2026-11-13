@@ -1583,6 +1583,19 @@ fn a_reached_window_shows_no_projection() {
 }
 
 #[test]
+fn a_reached_five_hour_window_keeps_percent_and_countdown_without_projection() {
+    let text = five_hour_lines(100.0, 2 * 3600).join("\n");
+    assert!(text.contains("100%") && text.contains("left"), "{text:?}");
+    assert!(!text.contains('→'), "{text:?}");
+}
+
+#[test]
+fn a_window_just_under_the_cap_still_projects() {
+    let text = five_hour_lines(99.9, 2 * 3600).join("\n");
+    assert!(text.contains('→'), "{text:?}");
+}
+
+#[test]
 fn no_rate_limits_means_no_window_segments() {
     let line = window_line("");
     assert!(!line.contains("5h") && !line.contains("7d"), "{line:?}");

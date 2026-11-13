@@ -346,11 +346,11 @@ Line 3 shows each window's percent and, once the window has run for an hour, whe
 |---|---|
 | `5h 42% → 88% at 14:00` | The 5 hour window is at 42 percent and lands at 88 when it resets at 14:00. |
 | `7d 31% → 70%` | The 7 day window is at 31 percent and lands at 70 when it resets. |
-| `5h 42% (4h30m left)` | The window is under an hour old, so there is no pace yet. |
+| `5h 42% (4h30m left)` | The 5 hour window has no projection: it is under an hour old, or it has reached its cap. |
 | `Rate 7d: 60%` | No pace yet, or the window has no reset time. Shown above 50 percent only. |
 
 - **Colour.** The projection is red past 100 percent, yellow from 80 and green below. A projection past the cap also gets a red `!` alarm on line 4.
-- **Reached windows.** A window at its cap shows only its percent; line 4 says `CAP HIT`.
+- **Reached windows.** A window at its cap shows no projection. The 7 day window shows only its percent and the 5 hour window adds the time left to reset. Line 4 says `CAP HIT`.
 - **Large numbers.** A projection over 999 percent is written `>999%`.
 - **Clock.** The reset time uses `PLAYBOOK_TELEMETRY_TZ` (`utc` or `local`) and is local time otherwise.
 - **When it is absent.** Without `rate_limits` on stdin (an API key, Bedrock, Vertex, or before the first reply) the window segments are left out.
