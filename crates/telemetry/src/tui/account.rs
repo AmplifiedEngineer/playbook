@@ -80,13 +80,28 @@ pub fn view(conn: &Connection, sel: &AccountSel) -> Result<AccountsView, String>
     let shown = match (&key, choices.is_empty()) {
         (_, true) => String::new(),
         (None, _) => "all accounts".to_string(),
-        (Some(k), _) => crate::account_store::display(&choices, k),
+        (Some(k), _) => header_label(k, &crate::account_store::display(&choices, k)),
     };
     Ok(AccountsView {
         key,
         shown,
         choices,
     })
+}
+
+/// Cuts an unnamed email key to `@` and its first domain label, which keeps
+/// the address out of screenshots. A name the user set shows as is.
+fn header_label(key: &str, name: &str) -> String {
+    if name != key {
+        return name.to_string();
+    }
+    match key.split_once('@') {
+        Some((local, domain)) if !local.is_empty() && !domain.is_empty() => {
+            let host = domain.split('.').next().unwrap_or(domain);
+            format!("@{host}")
+        }
+        _ => name.to_string(),
+    }
 }
 
 /// Drops the events of other accounts. `None` keeps everything.
@@ -111,6 +126,26 @@ mod tests {
         [("work", "Work"), ("home", "home"), ("unknown", "unknown")]
             .map(|(k, n)| (k.to_string(), n.to_string()))
             .to_vec()
+    }
+
+    #[test]
+    fn an_unnamed_email_account_shows_only_its_domain_name() {
+        assert_eq!(
+            header_label("igor@getdigital.com.br", "igor@getdigital.com.br"),
+            "@getdigital"
+        );
+        assert_eq!(header_label("a@example.com", "a@example.com"), "@example");
+    }
+
+    #[test]
+    fn named_plain_and_unknown_accounts_show_unchanged() {
+        assert_eq!(header_label("igor@getdigital.com.br", "Work"), "Work");
+        assert_eq!(header_label("home", "home"), "home");
+        assert_eq!(
+            header_label(UNKNOWN_ACCOUNT, UNKNOWN_ACCOUNT),
+            UNKNOWN_ACCOUNT
+        );
+        assert_eq!(header_label("@x.com", "@x.com"), "@x.com");
     }
 
     #[test]
