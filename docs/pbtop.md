@@ -27,7 +27,7 @@ The terminal view opens on this week compared with last week. Without a terminal
 | Flag | What it does |
 |---|---|
 | `--range <name>` | Picks the range: `today`, `week`, `last-week`, `month`, `last-month`, `30d`, `60d`, `90d` or `all`. |
-| `--summary` | Prints the text summary and exits. It covers every recorded session unless you give `--range`. |
+| `--summary` | Prints the text summary and exits. It covers every recorded session unless you give `--range`. It masks the account like the header when `usage.maskAccount` is on. |
 | `--json` | Prints the totals, the groups and the live view as JSON. The default range is `30d`. |
 | `--utc`, `--local` | Group days and show times in UTC or in your local zone. Local is the default. |
 

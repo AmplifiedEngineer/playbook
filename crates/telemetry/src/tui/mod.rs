@@ -72,7 +72,7 @@ fn start_theme(no_color: bool) -> Theme {
 
 /// Whether the header masks an unnamed email account: the choice pbtop stored
 /// (app tier), else the `usage.maskAccount` config key, which is off unless set.
-fn start_mask_account(home: &Path) -> bool {
+pub(crate) fn start_mask_account(home: &Path) -> bool {
     crate::config::resolve(home, MASK_ACCOUNT_KEY)
         .and_then(|value| value.as_bool())
         .unwrap_or_default()
