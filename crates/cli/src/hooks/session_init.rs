@@ -97,6 +97,7 @@ pub fn run(payload: &Payload) {
         clear_auto_state(&dir);
     }
     clear_statusline_cache();
+    record_session_start(payload, &home);
     ensure_telemetry_collector();
     // Headless runs (CI, `claude -p`) have no stale worktrees, no person to nudge,
     // and no handoff to consume: they get the tool map and the auto mode note,
@@ -157,6 +158,37 @@ pub fn run(payload: &Payload) {
     );
 
     emit(&system_message, &extra_context);
+}
+
+/// Record this session in `sessions.db` and mark the older silent sessions of
+/// the same directory as crashed. A database error is dropped: a hook that
+/// blocks a session is worse than a missing label.
+fn record_session_start(payload: &Payload, home: &str) {
+    let id = payload.field(".session_id");
+    let Ok(cwd) = std::env::current_dir() else {
+        return;
+    };
+    if id.is_empty() {
+        return;
+    }
+    let place =
+        crate::sessions::links::place_of(Some(cwd.to_string_lossy().into_owned()), Path::new(home));
+    let branch = git_branch();
+    let info = crate::sessions::store::StartInfo {
+        id: id.clone(),
+        cwd: place.cwd,
+        repo: crate::sessions::links::repo_of(&cwd).map(|p| p.to_string_lossy().into_owned()),
+        worktree: place.worktree,
+        branch: (!branch.is_empty() && branch != "HEAD").then_some(branch),
+        convention: (!place.convention.is_empty()).then(|| place.convention.to_string()),
+    };
+    let now = crate::common::time::now_secs();
+    let Ok(conn) = crate::sessions::store::open() else {
+        return;
+    };
+    let cwd = cwd.to_string_lossy();
+    let _ = crate::sessions::store::start(&conn, &info, now)
+        .and_then(|_| crate::sessions::store::mark_crashed(&conn, &cwd, &id, now));
 }
 
 /// Runs the safe migrations when this binary is newer than the version

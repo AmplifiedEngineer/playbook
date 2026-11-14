@@ -7,6 +7,7 @@
 //! transaction that upgrades from read to write fails at once with
 //! SQLITE_BUSY in WAL mode, and `busy_timeout` does not retry it.
 
+use super::ACTIVE_SECONDS;
 use crate::common::atomic::make_db_file_private;
 use crate::common::sqlite::{retry_busy, OPEN_BUDGET};
 use playbook_store::{params, schema, Connection};
@@ -115,36 +116,102 @@ pub(crate) fn open() -> Result<Connection, String> {
     open_at(&playbook_data::data_dir().join(DB_NAME))
 }
 
+/// Run `f` in a `BEGIN IMMEDIATE` transaction: a deferred one that upgrades
+/// from read to write fails at once with SQLITE_BUSY, and `busy_timeout` does
+/// not retry it.
+fn immediate<T>(
+    conn: &Connection,
+    f: impl FnOnce(&Connection) -> playbook_store::Result<T>,
+) -> playbook_store::Result<T> {
+    conn.execute_batch("BEGIN IMMEDIATE")?;
+    match f(conn).and_then(|v| conn.execute_batch("COMMIT").map(|()| v)) {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            // The original error is the one worth reporting.
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
 /// Record a session start, returning the number of rows changed. A resumed
-/// session keeps `started_at`, takes the new place, and drops its pull request
-/// link when the branch changed, so it never keeps the link of an earlier
-/// directory. One upsert statement, so there is no read to write upgrade.
+/// session keeps `started_at`, takes the new place, leaves the ended, crashed
+/// and closed states (a closed row gets a `reopened` event), and drops its pull
+/// request link when the branch changed, so it never keeps the link of an
+/// earlier directory.
 pub(crate) fn start(conn: &Connection, info: &StartInfo, now: i64) -> Result<usize, String> {
-    conn.execute(
-        "INSERT INTO sessions (session_id, cwd, repo, worktree, branch, convention, started_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-         ON CONFLICT(session_id) DO UPDATE SET
-             cwd = excluded.cwd,
-             repo = excluded.repo,
-             worktree = excluded.worktree,
-             convention = excluded.convention,
-             pr_number = CASE WHEN sessions.branch IS excluded.branch THEN sessions.pr_number END,
-             pr_kind = CASE WHEN sessions.branch IS excluded.branch THEN sessions.pr_kind END,
-             pr_checked_at = CASE WHEN sessions.branch IS excluded.branch THEN sessions.pr_checked_at END,
-             pr_head_oid = CASE WHEN sessions.branch IS excluded.branch THEN sessions.pr_head_oid END,
-             pr_base = CASE WHEN sessions.branch IS excluded.branch THEN sessions.pr_base END,
-             branch = excluded.branch",
-        params![
-            info.id,
-            info.cwd,
-            info.repo,
-            info.worktree,
-            info.branch,
-            info.convention,
-            now
-        ],
-    )
+    immediate(conn, |conn| {
+        conn.execute(
+            "INSERT INTO session_events (session_id, at, kind)
+             SELECT session_id, ?2, 'reopened' FROM sessions
+             WHERE session_id = ?1 AND closed_at IS NOT NULL",
+            params![info.id, now],
+        )?;
+        conn.execute(
+            "INSERT INTO sessions (session_id, cwd, repo, worktree, branch, convention, started_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(session_id) DO UPDATE SET
+                 cwd = excluded.cwd,
+                 repo = excluded.repo,
+                 worktree = excluded.worktree,
+                 convention = excluded.convention,
+                 ended_at = NULL,
+                 end_reason = NULL,
+                 crashed_at = NULL,
+                 closed_at = NULL,
+                 closed_reason = NULL,
+                 pr_number = CASE WHEN sessions.branch IS excluded.branch THEN sessions.pr_number END,
+                 pr_kind = CASE WHEN sessions.branch IS excluded.branch THEN sessions.pr_kind END,
+                 pr_checked_at = CASE WHEN sessions.branch IS excluded.branch THEN sessions.pr_checked_at END,
+                 pr_head_oid = CASE WHEN sessions.branch IS excluded.branch THEN sessions.pr_head_oid END,
+                 pr_base = CASE WHEN sessions.branch IS excluded.branch THEN sessions.pr_base END,
+                 branch = excluded.branch",
+            params![
+                info.id,
+                info.cwd,
+                info.repo,
+                info.worktree,
+                info.branch,
+                info.convention,
+                now
+            ],
+        )
+    })
     .map_err(|e| format!("failed to record the start of session {}: {e}", info.id))
+}
+
+/// The filter for the rows of `cwd` other than the caller's that are still open and whose
+/// last event is older than `ACTIVE_SECONDS`. `?1` is `cwd`, `?2` the caller's
+/// id and `?3` `now`.
+const CRASHED_CANDIDATES: &str = "WHERE cwd = ?1 AND session_id != ?2
+      AND ended_at IS NULL AND crashed_at IS NULL AND closed_at IS NULL
+      AND ?3 - MAX(COALESCE(started_at, 0), COALESCE(last_prompt_at, 0),
+                   COALESCE(last_stop_at, 0)) > ?4";
+
+/// Mark every other open row of `cwd` that has been silent for more than
+/// `ACTIVE_SECONDS` as crashed, with one `crashed` event each. Returns the
+/// number of rows marked.
+pub(crate) fn mark_crashed(
+    conn: &Connection,
+    cwd: &str,
+    caller_id: &str,
+    now: i64,
+) -> Result<usize, String> {
+    immediate(conn, |conn| {
+        let args = params![cwd, caller_id, now, ACTIVE_SECONDS];
+        conn.execute(
+            &format!(
+                "INSERT INTO session_events (session_id, at, kind)
+                 SELECT session_id, ?3, 'crashed' FROM sessions {CRASHED_CANDIDATES}"
+            ),
+            args,
+        )?;
+        conn.execute(
+            &format!("UPDATE sessions SET crashed_at = ?3 {CRASHED_CANDIDATES}"),
+            args,
+        )
+    })
+    .map_err(|e| format!("failed to mark crashed sessions of {cwd}: {e}"))
 }
 
 #[cfg(test)]
@@ -344,6 +411,162 @@ mod tests {
 
         // Assert
         assert_eq!((first, second), (1, 1));
+    }
+
+    const ACTIVE: i64 = crate::sessions::ACTIVE_SECONDS;
+
+    fn open_db(tag: &str) -> Connection {
+        open_at(&scratch_dir(tag).join("sessions.db")).expect("open")
+    }
+
+    fn crashed_at(conn: &Connection, id: &str) -> Option<i64> {
+        conn.query_row(
+            "SELECT crashed_at FROM sessions WHERE session_id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .expect("row")
+    }
+
+    fn events_of(conn: &Connection, kind: &str) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM session_events WHERE kind = ?1",
+            [kind],
+            |r| r.get(0),
+        )
+        .expect("count")
+    }
+
+    #[test]
+    fn mark_crashed_sets_the_row_when_its_last_event_is_over_the_active_window() {
+        // Arrange
+        let conn = open_db("sessions-crash-901");
+        start(&conn, &info("s0", "a", "/proj"), 1000).expect("start");
+
+        // Act
+        mark_crashed(&conn, "/proj", "s1", 1000 + ACTIVE + 1).expect("mark");
+
+        // Assert
+        assert_eq!(crashed_at(&conn, "s0"), Some(1000 + ACTIVE + 1));
+        assert_eq!(events_of(&conn, "crashed"), 1);
+    }
+
+    #[test]
+    fn mark_crashed_leaves_a_row_at_or_inside_the_active_window() {
+        for now in [1000 + ACTIVE, 1000 + ACTIVE - 1] {
+            // Arrange
+            let conn = open_db("sessions-crash-edge");
+            start(&conn, &info("s0", "a", "/proj"), 1000).expect("start");
+
+            // Act
+            mark_crashed(&conn, "/proj", "s1", now).expect("mark");
+
+            // Assert
+            assert_eq!(crashed_at(&conn, "s0"), None, "now = {now}");
+        }
+    }
+
+    #[test]
+    fn mark_crashed_uses_the_newest_of_the_three_event_times() {
+        // Arrange
+        let conn = open_db("sessions-crash-newest");
+        start(&conn, &info("s0", "a", "/proj"), 1000).expect("start");
+        conn.execute(
+            "UPDATE sessions SET last_stop_at = 5000 WHERE session_id = 's0'",
+            [],
+        )
+        .expect("stop");
+
+        // Act
+        mark_crashed(&conn, "/proj", "s1", 5000 + ACTIVE).expect("mark");
+
+        // Assert
+        assert_eq!(crashed_at(&conn, "s0"), None);
+    }
+
+    #[test]
+    fn mark_crashed_skips_rows_that_are_ended_closed_crashed_elsewhere_or_the_caller() {
+        // Arrange
+        let conn = open_db("sessions-crash-skip");
+        for id in ["ended", "closed", "crashed", "other", "s1"] {
+            let cwd = if id == "other" { "/elsewhere" } else { "/proj" };
+            start(&conn, &info(id, "a", cwd), 1000).expect("start");
+        }
+        conn.execute(
+            "UPDATE sessions SET ended_at = 1 WHERE session_id = 'ended'",
+            [],
+        )
+        .expect("ended");
+        conn.execute(
+            "UPDATE sessions SET closed_at = 1 WHERE session_id = 'closed'",
+            [],
+        )
+        .expect("closed");
+        conn.execute(
+            "UPDATE sessions SET crashed_at = 7 WHERE session_id = 'crashed'",
+            [],
+        )
+        .expect("crashed");
+
+        // Act
+        mark_crashed(&conn, "/proj", "s1", 1000 + ACTIVE + 1).expect("mark");
+
+        // Assert
+        let changed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sessions WHERE crashed_at IS NOT NULL AND crashed_at != 7",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!((changed, events_of(&conn, "crashed")), (0, 0));
+    }
+
+    #[test]
+    fn start_on_a_crashed_or_ended_row_clears_both_marks() {
+        // Arrange
+        let conn = open_db("sessions-resume");
+        start(&conn, &info("s0", "a", "/proj"), 1000).expect("start");
+        conn.execute(
+            "UPDATE sessions SET crashed_at = 5, ended_at = 6, end_reason = 'logout'",
+            [],
+        )
+        .expect("mark");
+
+        // Act
+        start(&conn, &info("s0", "a", "/proj"), 2000).expect("resume");
+
+        // Assert
+        let (crashed, ended): (Option<i64>, Option<i64>) = conn
+            .query_row("SELECT crashed_at, ended_at FROM sessions", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .expect("row");
+        assert_eq!((crashed, ended), (None, None));
+    }
+
+    #[test]
+    fn start_on_a_closed_row_reopens_it_and_logs_one_event() {
+        // Arrange
+        let conn = open_db("sessions-reopen");
+        start(&conn, &info("s0", "a", "/proj"), 1000).expect("start");
+        conn.execute(
+            "UPDATE sessions SET closed_at = 5, closed_reason = 'landed'",
+            [],
+        )
+        .expect("close");
+
+        // Act
+        start(&conn, &info("s0", "a", "/proj"), 2000).expect("resume");
+
+        // Assert
+        let (closed, reason): (Option<i64>, Option<String>) = conn
+            .query_row("SELECT closed_at, closed_reason FROM sessions", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .expect("row");
+        assert_eq!((closed, reason), (None, None));
+        assert_eq!(events_of(&conn, "reopened"), 1);
     }
 
     /// Runs `ITERATIONS` hook writes (open, `start`, close, each timed) while a

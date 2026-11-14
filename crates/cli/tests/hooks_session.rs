@@ -2530,3 +2530,226 @@ fn session_init_names_the_setup_command_for_a_pending_settings_change() {
     );
     assert_eq!(fs::read(&settings).unwrap(), before);
 }
+
+// ---------------------------------------------------------------------------
+// session-init: the sessions.db row
+// ---------------------------------------------------------------------------
+
+/// A last event this far before the call is past `ACTIVE_SECONDS` (900) by a
+/// wide margin, because the hook reads the real clock.
+const STALE_BY_SECS: i64 = 5000;
+/// A last event this recent is far inside `ACTIVE_SECONDS`.
+const RECENT_BY_SECS: i64 = 5;
+
+/// A scratch host: temporary `HOME`, `XDG_CONFIG_HOME`, git config and a fake
+/// `gh` that exits 1, first on `PATH`, so a stray `gh` call fails the lookup
+/// and never reaches the host or the network. Folders are canonicalized
+/// because `current_dir()` returns the resolved path.
+struct Host {
+    home: PathBuf,
+    xdg: PathBuf,
+    git_config: PathBuf,
+    bin: PathBuf,
+    proj: PathBuf,
+}
+
+impl Host {
+    fn new(tag: &str) -> Host {
+        let root = fs::canonicalize(scratch_dir(tag)).expect("canonical root");
+        let bin = root.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let gh = bin.join("gh");
+        fs::write(&gh, "#!/bin/sh\nexit 1\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
+        let proj = root.join("proj");
+        fs::create_dir_all(&proj).unwrap();
+        let git_config = root.join("gitconfig");
+        fs::write(&git_config, "").unwrap();
+        Host {
+            home: root.join("home"),
+            xdg: root.join("xdg"),
+            git_config,
+            bin,
+            proj,
+        }
+    }
+
+    fn db_path(&self) -> PathBuf {
+        self.home
+            .join(".config")
+            .join("playbook")
+            .join("data")
+            .join("sessions.db")
+    }
+
+    fn runtime_dir(&self, id: &str) -> PathBuf {
+        self.home
+            .join(".config")
+            .join("playbook")
+            .join("runtime")
+            .join(id)
+    }
+
+    fn session_init(&self, id: &str) -> Outcome {
+        fs::create_dir_all(&self.home).unwrap();
+        let path = format!(
+            "{}:{}",
+            self.bin.display(),
+            env::var("PATH").unwrap_or_default()
+        );
+        run_hook(
+            "session-init",
+            &self.proj,
+            &self.home,
+            &format!(r#"{{"session_id":"{id}"}}"#),
+            &[
+                ("XDG_CONFIG_HOME", self.xdg.to_str().unwrap()),
+                ("GIT_CONFIG_GLOBAL", self.git_config.to_str().unwrap()),
+                ("GIT_CONFIG_NOSYSTEM", "1"),
+                ("PATH", &path),
+            ],
+        )
+    }
+
+    /// Seed a row with the given last event, in `cwd`, through the store's own
+    /// schema (an empty hook run creates it).
+    fn seed(&self, id: &str, cwd: &Path, started_at: i64) {
+        if !self.db_path().exists() {
+            self.session_init("seed-schema");
+            assert!(
+                self.db_path().exists(),
+                "session-init created no sessions.db"
+            );
+        }
+        let conn = playbook_store::Connection::open(self.db_path()).expect("open db");
+        conn.execute(
+            "INSERT INTO sessions (session_id, cwd, started_at) VALUES (?1, ?2, ?3)",
+            playbook_store::params![id, cwd.to_str().unwrap(), started_at],
+        )
+        .expect("seed row");
+    }
+
+    fn crashed_at(&self, id: &str) -> Option<i64> {
+        let conn = playbook_store::Connection::open(self.db_path()).expect("open db");
+        conn.query_row(
+            "SELECT crashed_at FROM sessions WHERE session_id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .expect("row")
+    }
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+}
+
+#[test]
+fn a_session_start_writes_one_row_with_its_directory() {
+    // Arrange
+    let host = Host::new("row");
+
+    // Act
+    let before = unix_now();
+    let outcome = host.session_init("s1");
+    let after = unix_now();
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "{}", outcome.stderr);
+    let conn = playbook_store::Connection::open(host.db_path()).expect("open db");
+    let (count, cwd, started_at): (i64, String, i64) = conn
+        .query_row(
+            "SELECT COUNT(*), MAX(cwd), MAX(started_at) FROM sessions WHERE session_id = 's1'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("row");
+    assert_eq!(count, 1);
+    assert_eq!(cwd, host.proj.to_str().unwrap());
+    assert!((before..=after).contains(&started_at), "{started_at}");
+}
+
+#[test]
+fn an_open_row_stale_in_the_same_directory_is_marked_crashed() {
+    // Arrange
+    let host = Host::new("crash-stale");
+    host.seed("s0", &host.proj, unix_now() - STALE_BY_SECS);
+
+    // Act
+    host.session_init("s1");
+
+    // Assert
+    assert!(host.crashed_at("s0").is_some());
+}
+
+#[test]
+fn an_open_row_active_in_the_same_directory_is_not_marked_crashed() {
+    // Arrange
+    let host = Host::new("crash-recent");
+    host.seed("s0", &host.proj, unix_now() - RECENT_BY_SECS);
+
+    // Act
+    host.session_init("s1");
+
+    // Assert
+    assert_eq!(host.crashed_at("s0"), None);
+}
+
+/// The files a healthy `session-init` leaves in `runtime/<id>/`.
+const RUNTIME_FILES: [&str; 9] = [
+    "start-ts",
+    "search-count",
+    "tool-count",
+    "edit-count",
+    "edits.jsonl",
+    "seen-reads",
+    "read-state.jsonl",
+    "capture-crossings",
+    "hygiene-level",
+];
+
+fn file_names(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .expect("runtime dir")
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn a_healthy_database_leaves_the_runtime_files_in_place() {
+    // Arrange
+    let host = Host::new("runtime-healthy");
+
+    // Act
+    let outcome = host.session_init("s1");
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "{}", outcome.stderr);
+    let mut want: Vec<String> = RUNTIME_FILES.iter().map(|s| s.to_string()).collect();
+    want.sort();
+    assert_eq!(file_names(&host.runtime_dir("s1")), want);
+}
+
+#[test]
+fn a_corrupt_database_changes_neither_the_exit_code_nor_the_runtime_files() {
+    // Arrange
+    let host = Host::new("runtime-corrupt");
+    fs::create_dir_all(host.db_path().parent().unwrap()).unwrap();
+    fs::write(host.db_path(), "not a database").unwrap();
+
+    // Act
+    let outcome = host.session_init("s1");
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "{}", outcome.stderr);
+    let mut want: Vec<String> = RUNTIME_FILES.iter().map(|s| s.to_string()).collect();
+    want.sort();
+    assert_eq!(file_names(&host.runtime_dir("s1")), want);
+}

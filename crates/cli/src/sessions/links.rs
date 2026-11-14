@@ -89,6 +89,20 @@ pub fn place_of(cwd: Option<String>, home: &Path) -> Place {
     }
 }
 
+/// The root of the repository that holds `dir`: the parent of the common git
+/// dir. `None` outside a repository, in a bare one, or when the git dir lives
+/// apart from the working tree, because none of those has a root to name.
+pub fn repo_of(dir: &Path) -> Option<PathBuf> {
+    let out = git::output(
+        dir,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
+    Path::new(&out)
+        .ends_with(".git")
+        .then(|| Path::new(&out).parent().map(Path::to_path_buf))
+        .flatten()
+}
+
 /// `(toplevel, is_linked_worktree)` from the three lines of
 /// `git rev-parse --show-toplevel --git-dir --git-common-dir`.
 pub fn parse_rev_parse(out: &str) -> Option<(String, bool)> {
@@ -227,6 +241,69 @@ mod tests {
         assert_eq!(transcript_cwd(&dir, "abc"), Some("/w/x".into()));
         assert_eq!(transcript_cwd(&dir, "missing"), None);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn git_init(dir: &Path, extra: &[&str]) {
+        let status = Command::new("git")
+            .args(["-c", "init.defaultBranch=main", "init", "--quiet"])
+            .args(extra)
+            .arg(dir)
+            .status()
+            .expect("git");
+        assert!(status.success());
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("pb-repo-of-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::canonicalize(dir).unwrap()
+    }
+
+    #[test]
+    fn a_directory_inside_a_repository_has_that_repository_as_its_root() {
+        // Arrange
+        let root = scratch("inside");
+        git_init(&root, &[]);
+        let sub = root.join("a");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        // Act
+        let repo = repo_of(&sub);
+
+        // Assert
+        assert_eq!(repo, Some(root.clone()));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_directory_outside_any_repository_has_no_root() {
+        // Arrange
+        let dir = scratch("outside");
+
+        // Act
+        let repo = repo_of(&dir);
+
+        // Assert
+        assert_eq!(repo, None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_repository_with_a_separate_git_dir_has_no_root() {
+        // Arrange
+        let root = scratch("separate");
+        let work = root.join("work");
+        let git = root.join("elsewhere");
+        std::fs::create_dir_all(&work).unwrap();
+        git_init(&work, &[&format!("--separate-git-dir={}", git.display())]);
+
+        // Act
+        let repo = repo_of(&work);
+
+        // Assert
+        assert_eq!(repo, None);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
