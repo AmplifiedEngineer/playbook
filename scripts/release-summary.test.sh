@@ -580,6 +580,7 @@ notes_job_gaps() {
     'environment: release-notes' \
     'continue-on-error: true' \
     'needs: [plan, publish]' \
+    "if: \${{ !cancelled() && needs.publish.result == 'success' }}" \
     'attestations: read' \
     'scripts/release-summary.sh apply'; do
     grep -qF -- "$want" <<<"$block" || echo "notes job lacks: $want"
@@ -604,6 +605,15 @@ mkdir "$TMP/wf"
 grep -v 'continue-on-error: true' "$WORKFLOW_DIR/release.yml" > "$TMP/wf/release.yml"
 gaps="$(notes_job_gaps "$TMP/wf/release.yml" "$TMP/wf")"
 grep -qF 'notes job lacks: continue-on-error: true' <<<"$gaps" || fail "workflow check did not catch a missing continue-on-error: $gaps"
+
+# W1b. A second job that reads the secret must be caught.
+mkdir "$TMP/wf2"
+{
+  cat "$WORKFLOW_DIR/release.yml"
+  printf '  leaky:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo "${{ secrets.ANTHROPIC_API_KEY }}"\n'
+} > "$TMP/wf2/release.yml"
+gaps="$(notes_job_gaps "$TMP/wf2/release.yml" "$TMP/wf2")"
+grep -qF 'release.yml: job leaky reads secrets.ANTHROPIC_API_KEY' <<<"$gaps" || fail "workflow check did not catch a second job reading the secret: $gaps"
 
 # W2. The real workflow passes.
 gaps="$(notes_job_gaps "$WORKFLOW_DIR/release.yml" "$WORKFLOW_DIR")"

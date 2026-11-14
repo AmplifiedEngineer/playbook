@@ -784,7 +784,7 @@ jobs:
     if: ${{ !cancelled() && needs.publish.result == 'success' }}
     environment: release-notes
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30 # the request timeout times its tries
     continue-on-error: true
     permissions:
       contents: write # gh release edit rewrites the release body
