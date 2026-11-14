@@ -911,7 +911,7 @@ fn a_leftover_variants_folder_of_a_dead_session_is_removed_on_launch() {
     // crowded real temp dir would slow every launch in this file.
     let out = e.launch(&["fresh"]);
     assert!(out.status.success(), "{out:?}");
-    assert!(!old.exists(), "the harness TMPDIR should be the empty tmp dir");
+    assert!(!old.exists(), "the leftover folder survived: the launch did not scan the harness tmp dir, or the cleanup broke");
 }
 
 #[test]
