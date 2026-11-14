@@ -116,7 +116,7 @@ pub fn view(conn: &Connection, sel: &AccountSel) -> Result<AccountsView, String>
 /// domain label, which keeps the address out of screenshots. When two unnamed
 /// keys cut to the same text, each gets its place among them, so cycling
 /// accounts still changes the header.
-fn header_label(key: &str, name: &str, choices: &[(String, String)]) -> String {
+pub(crate) fn header_label(key: &str, name: &str, choices: &[(String, String)]) -> String {
     let Some(label) = email_cut(key, name) else {
         return name.to_string();
     };

@@ -44,10 +44,24 @@ fn tool_list(out: &mut String, title: &str, counts: &[(String, u64)]) {
     }
 }
 
-pub fn render(usage: &[UsageEvent], tools: &[ToolInvocationEvent]) -> String {
+/// The accounts as `(key, name)` pairs. Passing them to a render function
+/// masks the account table the way the pbtop header does.
+pub type MaskChoices<'a> = Option<&'a [(String, String)]>;
+
+/// Rewrites each account key to its header text, so an unnamed email shows only
+/// its first domain label. Named accounts keep their name.
+fn mask_accounts(groups: &mut [Group], choices: &[(String, String)]) {
+    for group in groups {
+        let name = crate::account_store::display(choices, &group.key);
+        group.key = crate::tui::account::header_label(&group.key, &name, choices);
+    }
+}
+
+pub fn render(usage: &[UsageEvent], tools: &[ToolInvocationEvent], mask: MaskChoices) -> String {
     scoped(
         usage,
         tools,
+        mask,
         "across all recorded sessions",
         crate::util::time::now_secs(),
     )
@@ -59,6 +73,7 @@ pub fn render_range(
     tools: &[ToolInvocationEvent],
     range: Range,
     now: i64,
+    mask: MaskChoices,
 ) -> String {
     let all_usage = usage;
     let (usage, tools) = in_range(usage, tools, now, range);
@@ -78,7 +93,7 @@ pub fn render_range(
             scope.replace("across all recorded sessions", "recorded")
         );
     }
-    let mut out = scoped(&usage, &tools, &scope, now);
+    let mut out = scoped(&usage, &tools, mask, &scope, now);
     if let Some(period) = Period::of_range(range) {
         out.push_str(&comparison_text(&Comparison::of(all_usage, now, period)));
     }
@@ -137,7 +152,13 @@ fn comparison_text(c: &Comparison) -> String {
     out
 }
 
-fn scoped(usage: &[UsageEvent], tools: &[ToolInvocationEvent], scope: &str, now: i64) -> String {
+fn scoped(
+    usage: &[UsageEvent],
+    tools: &[ToolInvocationEvent],
+    mask: MaskChoices,
+    scope: &str,
+    now: i64,
+) -> String {
     if usage.is_empty() && tools.is_empty() {
         return format!("{EMPTY_MESSAGE}\n");
     }
@@ -174,7 +195,11 @@ fn scoped(usage: &[UsageEvent], tools: &[ToolInvocationEvent], scope: &str, now:
         Dimension::Effort,
         Dimension::Account,
     ] {
-        group_table(&mut out, dim.label(), &group_usage(usage, dim));
+        let mut groups = group_usage(usage, dim);
+        if let (Dimension::Account, Some(choices)) = (dim, mask) {
+            mask_accounts(&mut groups, choices);
+        }
+        group_table(&mut out, dim.label(), &groups);
     }
     tool_list(&mut out, "Top skills", &count_tools(tools, ToolKind::Skill));
     tool_list(&mut out, "Top agents", &count_tools(tools, ToolKind::Agent));
@@ -187,7 +212,7 @@ mod tests {
 
     #[test]
     fn empty_input_prints_the_empty_message() {
-        assert_eq!(render(&[], &[]), format!("{EMPTY_MESSAGE}\n"));
+        assert_eq!(render(&[], &[], None), format!("{EMPTY_MESSAGE}\n"));
     }
 
     #[test]
@@ -209,7 +234,7 @@ mod tests {
             ..UsageEvent::default()
         };
 
-        let text = render(&[event], &[]);
+        let text = render(&[event], &[], None);
 
         assert!(text.contains("1 messages, $0.1294 estimated cost"));
         let row = text
@@ -232,12 +257,12 @@ mod tests {
         };
         event.apply_pricing();
 
-        let text = render(&[event], &[]);
+        let text = render(&[event], &[], None);
 
         assert!(text.contains(
             "Note: 1 messages are unpriced (no known price for claude-future-9); they count as $0."
         ));
-        assert!(!render(&[], &[]).contains("unpriced"));
+        assert!(!render(&[], &[], None).contains("unpriced"));
     }
 
     #[test]
@@ -253,7 +278,7 @@ mod tests {
         };
         let events = [event(now - 60, 3.0), event(now - 86_400 - 60, 1.0)];
 
-        let text = render_range(&events, &[], Range::Today, now);
+        let text = render_range(&events, &[], Range::Today, now, None);
 
         assert!(
             text.contains(
@@ -264,7 +289,7 @@ mod tests {
         assert!(text.contains("+2.0000 (+200.0%)"), "{text}");
         assert!(text.contains("+0 (+0.0%)"), "{text}");
         // A range that is not a period has no comparison.
-        let all = render_range(&events, &[], Range::LastDays(30), now);
+        let all = render_range(&events, &[], Range::LastDays(30), now, None);
         assert!(!all.contains("Compared with"), "{all}");
     }
 
@@ -278,7 +303,71 @@ mod tests {
             cost_usd: 1.0,
             ..UsageEvent::default()
         }];
-        let text = render_range(&events, &[], Range::Today, now);
+        let text = render_range(&events, &[], Range::Today, now, None);
         assert!(text.contains("+1.0000 (n/a)"), "{text}");
+    }
+
+    fn account_event(key: &str) -> UsageEvent {
+        UsageEvent {
+            event_id: key.into(),
+            account: key.into(),
+            model: "claude-sonnet-5".into(),
+            ..UsageEvent::default()
+        }
+    }
+
+    fn named(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(k, n)| (k.to_string(), n.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn mask_on_cuts_an_unnamed_email_to_its_first_domain_label() {
+        let events = [account_event("dev@example.com")];
+        let choices = named(&[("dev@example.com", "dev@example.com")]);
+
+        let text = render(&events, &[], Some(&choices));
+
+        assert!(text.contains("@example"), "{text}");
+        assert!(!text.contains("dev@example.com"), "{text}");
+    }
+
+    #[test]
+    fn mask_on_numbers_two_keys_that_cut_to_the_same_label() {
+        let events = [
+            account_event("a@example.com"),
+            account_event("b@example.org"),
+        ];
+        let choices = named(&[
+            ("a@example.com", "a@example.com"),
+            ("b@example.org", "b@example.org"),
+        ]);
+
+        let text = render(&events, &[], Some(&choices));
+
+        assert!(
+            text.contains("@example (1)") && text.contains("@example (2)"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn mask_off_keeps_the_full_email_key() {
+        let text = render(&[account_event("dev@example.com")], &[], None);
+
+        assert!(text.contains("dev@example.com"), "{text}");
+    }
+
+    #[test]
+    fn mask_on_shows_a_named_account_in_full() {
+        let events = [account_event("dev@example.com")];
+        let choices = named(&[("dev@example.com", "Work")]);
+
+        let text = render(&events, &[], Some(&choices));
+
+        assert!(text.contains("Work"), "{text}");
+        assert!(!text.contains("dev@example.com"), "{text}");
     }
 }
