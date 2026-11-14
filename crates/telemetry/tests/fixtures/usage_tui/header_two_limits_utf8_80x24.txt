@@ -1,0 +1,7 @@
+╭─┤📺  Agent Budget Dashboard├──┤UTC├───────────────────────────────────────────╮
+│last 30 days Aug 5 to Sep 3, 2026  (no previous period to compare)            │
+│cost          $20.27 │ 5 hour   m ████│█░░░░░░   50%  ▲ hits it in 2h 0m      │
+│tokens        618.8K │ 5 hour     left 50%      pace +10pt   measured         │
+│messages          26 │ 7 day    m ████░│░░░░░░   30%  ● ok  safe  resets in 4d│
+│                     │ Spend    h this week $3.05  last week $6.21  -51%      │
+╰──────────────────────────────────────────────────────────┤+1 more in --json├─╯

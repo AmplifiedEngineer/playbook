@@ -120,7 +120,7 @@ struct DayAcc {
     models: BTreeMap<String, f64>,
 }
 
-/// The Budget panel: the known limits and the burn rate of the period on
+/// The budget lines of the header: the known limits and the burn rate of the period on
 /// screen. Account wide: the project filter does not apply.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LimitsView {

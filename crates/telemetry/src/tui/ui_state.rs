@@ -451,12 +451,12 @@ mod tests {
     fn a_saved_layout_is_read_back_on_the_next_load() {
         let home = store("ui-save-layout");
 
-        let wrote = save_layout(&home, "Money=budget;Live=live").unwrap();
+        let wrote = save_layout(&home, "Money=spend;Live=live").unwrap();
         let (layout, warning) = load_layout(&home);
 
         assert!(wrote);
         assert!(warning.is_none());
-        assert_eq!(layout.to_text(), "Money=budget;Live=live");
+        assert_eq!(layout.to_text(), "Money=spend;Live=live");
     }
 
     fn after(start: Instant, ms: u64) -> Instant {
@@ -634,7 +634,7 @@ mod tests {
     #[test]
     fn resetting_the_layout_clears_the_saved_layout() {
         let home = store("ui-reset-layout");
-        save_layout(&home, "Money=budget").unwrap();
+        save_layout(&home, "Money=spend").unwrap();
 
         save_layout(&home, "").unwrap();
 
@@ -648,7 +648,7 @@ mod tests {
     fn a_reset_empties_the_layout_and_the_state_and_leaves_the_theme() {
         // Arrange
         let home = store("ui-reset-both");
-        save_layout(&home, "Money=budget").unwrap();
+        save_layout(&home, "Money=spend").unwrap();
         save(&home, &UiState::parse(r#"{"range":"30d"}"#));
         crate::config::save_app(&home, "usage.theme", &Value::from("dark")).unwrap();
 
@@ -740,7 +740,7 @@ mod tests {
     fn saving_a_layout_without_a_config_store_reports_that_nothing_was_written() {
         let home = crate::util::scratch_dir("ui-save-nostore");
 
-        let wrote = save_layout(&home, "Money=budget").unwrap();
+        let wrote = save_layout(&home, "Money=spend").unwrap();
 
         assert!(!wrote);
     }

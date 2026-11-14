@@ -35,15 +35,15 @@ The terminal view opens on this week compared with last week. Without a terminal
 
 The screen needs at least 80 columns and 24 rows. Below that it says so and draws nothing else. The pictures here use 150 columns and 44 rows, and show sample data.
 
-Every tab has a header with the range, the cost, the tokens and the messages. For today, this week and this month it compares them with the previous period. A tab bar sits under it. `F1` to `F3` pick a tab, and the default layout has three.
+Every tab has a header with the range, the cost, the tokens and the messages. For today, this week and this month it compares them with the previous period. The header also carries the budget, beside the comparison on a wide screen and under it on a narrow one. When it stacks, the comparison takes one row. The tab bar sits under the header. `F1` to `F3` pick a tab, and the default layout has three.
 
 **Charts.** Every chart: spend per day and spend per day by model side by side, tokens per day and the Hourly chart side by side, with a burn-up panel below. The Hourly chart shows the cost of each of the last 24 hours with the total in its title. It has no data in the sample, because the sample sets no limit.
 
-**Numbers.** The Budget strip, the models table and the projects table. Each limit on the Budget strip also says when it reaches the limit at the current pace, so a separate Projection panel is gone.
+**Numbers.** The models table and the projects table. Each limit in the header also says when it reaches the limit at the current pace, so a separate Projection panel is gone.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/pbtop/numbers-dark.svg">
-  <img src="images/pbtop/numbers-light.svg" alt="pbtop Numbers tab: budget, models and projects, sample data">
+  <img src="images/pbtop/numbers-light.svg" alt="pbtop Numbers tab: models and projects under the header, sample data">
 </picture>
 
 **Sessions tab.** Live sessions, which have a message in the last 15 minutes, and every session of the range grouped by day.
@@ -62,7 +62,7 @@ Every tab has a header with the range, the cost, the tokens and the messages. Fo
 
 **Layout editor.** `e` opens a window to add, move and remove tabs and panels. Each change applies and saves at once. The `usage.ui.layout` key holds the result.
 
-Adding a panel takes one action: press `a`, choose the panel and press Enter. The panel lands in the next free place, and the tab arranges itself. A tab holds up to 8 panels, and the editor refuses a ninth with a message. The `budget` strip is not one of the 8: it always sits at the top of the tab across the full width, takes no cell of the grid, and cannot be moved. Adding it puts it first in the list, and the editor shows it on its own line at the top.
+Adding a panel takes one action: press `a`, choose the panel and press Enter. The panel lands in the next free place, and the tab arranges itself. A tab holds up to 8 panels, and the editor refuses a ninth with a message. The budget is not a panel: it is part of the header, which every tab shows, so the editor does not offer it. A saved layout that lists `budget` loads and skips the word; a tab left empty is dropped.
 
 A tab with no row layout of its own draws this grid, which the editor edits as it is:
 
@@ -79,7 +79,7 @@ A tab with no row layout of its own draws this grid, which the editor edits as i
 
 A tab keeps its own rows only when you set them with `f` (split or join a row) or when the stored value has a `|`. Then adding fills the last row that has room, opens a new row while the tab has fewer than 4, and otherwise fills the first row with room. Old stored layouts load and save as written.
 
-A short screen keeps every row at 5 lines or more. When the rows do not fit, the tab draws the rows that do and hides the panels of the others. The footer then says how many panels are hidden and how many screen rows show all of them, for example `2 panels hidden, 28 rows show all`. The screen needs 28 rows for 8 panels on a tab without a budget strip, so the 80 by 24 minimum shows 6. At 150 by 44 every count from 1 to 8 fits, with the budget strip as well. The strip itself needs 24 rows on a tab with up to 3 other panels and 36 rows on a bigger one. On a shorter screen the strip drops out and the panels stay.
+A short screen keeps every row at 5 lines or more. When the rows do not fit, the tab draws the rows that do and hides the panels of the others. The footer then says how many panels are hidden and how many screen rows show all of them, for example `2 panels hidden, 28 rows show all`. The header is never left out, so the panels give way to it. At 150 by 44 every count from 1 to 8 fits.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/pbtop/layout-editor-dark.svg">
@@ -145,7 +145,7 @@ Regenerate with: UPDATE_REFERENCE=1 cargo test -p playbook --test docs_pbtop_key
 | `p` | Open the full screen Sessions list | all panels |
 | `e` | Edit the tabs and the panels on each | all panels |
 | `?` | Show this help | all panels |
-| `i` | Toggle every limit's figures and notes | budget strip |
+| `i` | Toggle every limit's figures and notes | header |
 
 **Sorting**
 
@@ -228,7 +228,7 @@ The cost is an estimate at API prices. It is not what a subscription plan bills.
 
 ## Limits
 
-The Budget strip compares your use with a limit. It is six rows tall and sits at the top of a tab.
+The budget part of the header compares your use with a limit. It has up to four rows, three on a narrow screen, and only the rows with data are drawn. `i` shows all of them. The `N notes, i` border hint shows only when `i` reveals them.
 
 ```
 Monthly  c ████│█████████░░░░░░░░░░░░░░░░░░░   24%  $120 of $500  ▲ hits it in 6d 13h  resets in 27d (Thu 10-01)
@@ -263,9 +263,9 @@ The letter after the name says where the limit comes from:
 
 The figures line spells the source out, for example `manual, local` or `cached 1d 22h ago, plus this machine since`.
 
-A limit that Claude Code reports wins over a manual budget. A manual monthly budget covers the calendar month in your chosen time zone, and the spend is the estimated cost from your history. A weekly budget starts on the day in `usage.weekStart`. With no limit at all, the strip shows an empty bar and says to press `b`.
+A limit that Claude Code reports wins over a manual budget. A manual monthly budget covers the calendar month in your chosen time zone, and the spend is the estimated cost from your history. A weekly budget starts on the day in `usage.weekStart`. With no limit at all, the header shows an empty bar and says to press `b`.
 
-Notes about the numbers go in one dim line, or in the strip title as a count when there is no room for the line. They are a missing 5 hour or weekly window, a manual budget beside a detected one, and the figure Claude Code last reported. Press `i` to read each in full. `--json` carries the same text.
+Notes about the numbers go in one dim line, or in the bottom border of the header as a count when there is no room for the line. They are a missing 5 hour or weekly window, a manual budget beside a detected one, and the figure Claude Code last reported. Press `i` to read each in full. `--json` carries the same text.
 
 The time to the limit needs at least one hour of elapsed time in the period. The [internals page](internals/04-usage-dashboard.md#the-math) has the math, and `playbook usage doctor` lists which limit sources exist on this machine.
 
@@ -286,7 +286,7 @@ Live means a session whose last message is no older than 15 minutes.
 | `usage.telemetry` | `auto` | `off` stops Playbook from pointing sessions at the receiver. |
 | `usage.budget.monthlyUsd` | `0` | A manual monthly budget. `0` means none. |
 | `usage.budget.weeklyUsd` | `0` | The same for the week. |
-| `usage.ui.layout` | empty | The tabs and panels, up to 8 panels per tab besides the budget strip. Empty means the three default tabs. |
+| `usage.ui.layout` | empty | The tabs and panels, up to 8 panels per tab. Empty means the three default tabs. |
 
 Set one with `playbook config set --global usage.theme dark`. The [config keys page](reference/config-keys.md) has the rest. Three environment variables matter too:
 

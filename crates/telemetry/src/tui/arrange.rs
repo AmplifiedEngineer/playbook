@@ -12,11 +12,11 @@
 
 use super::layout::{auto_rows, PanelId, Tab, MAX_ROWS, MAX_ROW_PANELS, MAX_TAB_PANELS};
 
-/// Why the budget strip cannot be moved: it always takes the top line.
-const STRIP_PINNED: &str = "The budget strip stays at the top";
+/// Why a retired word cannot be moved: it takes no place on the screen.
+const NO_CELL: &str = "That word takes no place on the screen";
 
 /// The cells of the tab as it is drawn: the size of each row and, for each
-/// cell in screen order, the index of its panel. The budget strip has no cell
+/// cell in screen order, the index of its panel. A retired word has no cell
 /// wherever the list holds it, so it is left out and the rows match the grid.
 fn cells(tab: &Tab) -> (Vec<u8>, Vec<usize>) {
     let cells: Vec<usize> = tab
@@ -44,7 +44,7 @@ fn cells(tab: &Tab) -> (Vec<u8>, Vec<usize>) {
 }
 
 /// The panel indices of each row as the tab is drawn. A panel with no cell,
-/// the budget strip of an automatic tab, is in no row.
+/// a retired word, is in no row.
 pub fn grid(tab: &Tab) -> Vec<Vec<usize>> {
     let (rows, cells) = cells(tab);
     let mut next = cells.into_iter();
@@ -75,7 +75,7 @@ fn cell_of(cells: &[usize], slot: usize) -> Result<usize, String> {
     cells
         .iter()
         .position(|i| *i == slot)
-        .ok_or_else(|| STRIP_PINNED.to_string())
+        .ok_or_else(|| NO_CELL.to_string())
 }
 
 /// Swaps the panel with its neighbour in the same row.
@@ -134,42 +134,8 @@ fn drop_retired(tab: &mut Tab, mut slot: usize) -> usize {
     slot.min(tab.panels.len() - 1)
 }
 
-/// Puts the budget strip first in the list and, in an arranged tab, on a row of
-/// its own ahead of the grid rows. The strip draws on top either way, so the
-/// tab looks as before. Returns where the panel at `slot` is afterwards.
-fn settle(tab: &mut Tab, slot: usize) -> usize {
-    let slot = drop_retired(tab, slot);
-    let Some(at) = tab.panels.iter().position(|p| *p == PanelId::Budget) else {
-        return slot;
-    };
-    let lone_first = tab.rows.as_ref().is_none_or(|r| r.first() == Some(&1));
-    if at == 0 && lone_first {
-        return slot;
-    }
-    if let Some(rows) = &mut tab.rows {
-        let (row, _) = locate(rows, at);
-        rows[row] -= 1;
-        if rows[row] == 0 {
-            rows.remove(row);
-        }
-        rows.insert(0, 1);
-    }
-    tab.panels.remove(at);
-    tab.panels.insert(0, PanelId::Budget);
-    match slot.cmp(&at) {
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Less => slot + 1,
-        std::cmp::Ordering::Greater => slot,
-    }
-}
-
-/// The leading panels and rows that belong to the strip of a settled tab.
-fn strip_lead(tab: &Tab) -> (usize, usize) {
-    let strip = usize::from(tab.panels.first() == Some(&PanelId::Budget));
-    (strip, if tab.rows.is_some() { strip } else { 0 })
-}
-
-/// The panels of the tab that take a cell, which is every panel but the strip.
+/// The panels of the tab that take a cell, which is every panel but a retired
+/// word.
 pub fn grid_count(tab: &Tab) -> usize {
     tab.panels.iter().filter(|p| p.has_cell()).count()
 }
@@ -183,16 +149,15 @@ pub fn toggle_width(tab: &mut Tab, slot: usize) -> Result<usize, String> {
         ));
     }
     let mut work = tab.clone();
-    let slot = settle(&mut work, slot);
-    let (strip, lead) = strip_lead(&work);
-    if slot < strip {
-        return Err(STRIP_PINNED.to_string());
+    let slot = drop_retired(&mut work, slot);
+    if !work.panels[slot].has_cell() {
+        return Err(NO_CELL.to_string());
     }
     let mut rows = match &work.rows {
-        Some(rows) => rows[lead..].to_vec(),
-        None => auto_rows(work.panels.len() - strip),
+        Some(rows) => rows.clone(),
+        None => auto_rows(work.panels.len()),
     };
-    let (row, _) = locate(&rows, slot - strip);
+    let (row, _) = locate(&rows, slot);
     if usize::from(rows[row]) == MAX_ROW_PANELS {
         if rows.len() >= MAX_ROWS {
             return Err(format!("At most {MAX_ROWS} rows"));
@@ -208,9 +173,7 @@ pub fn toggle_width(tab: &mut Tab, slot: usize) -> Result<usize, String> {
     } else {
         return Err("No row of one panel beside it to share with".to_string());
     }
-    let mut all = vec![1; strip];
-    all.extend(rows);
-    work.rows = Some(all);
+    work.rows = Some(rows);
     *tab = work;
     Ok(slot)
 }
@@ -236,41 +199,29 @@ fn free_place(rows: &[u8]) -> (usize, Option<usize>) {
 /// next free place of an arranged one.
 pub fn insert_point(tab: &Tab) -> usize {
     let mut work = tab.clone();
-    settle(&mut work, 0);
-    let (strip, lead) = strip_lead(&work);
+    drop_retired(&mut work, 0);
     match &work.rows {
         None => work.panels.len(),
-        Some(rows) => strip + free_place(&rows[lead..]).0,
+        Some(rows) => free_place(rows).0,
     }
 }
 
-/// Adds `panel` in the next free place, so one action fills the tab. The budget
-/// strip goes first and takes no cell. Any other panel goes at the end of an
-/// automatic tab, whose grid then reflows, and in an arranged tab at the end of
-/// the last row with room, or on a row of its own. A tab holds at most
-/// `MAX_TAB_PANELS` panels besides the strip.
+/// Adds `panel` in the next free place, so one action fills the tab. It goes at
+/// the end of an automatic tab, whose grid then reflows, and in an arranged tab
+/// at the end of the last row with room, or on a row of its own. A tab holds at
+/// most `MAX_TAB_PANELS` panels.
 pub fn add(tab: &mut Tab, panel: PanelId) -> Result<usize, String> {
     if tab.panels.contains(&panel) {
         return Err(format!("{} is already on the tab", panel.word()));
     }
-    if panel == PanelId::Budget {
-        tab.panels.insert(0, panel);
-        if let Some(rows) = &mut tab.rows {
-            rows.insert(0, 1);
-        }
-        return Ok(0);
-    }
     if grid_count(tab) >= MAX_TAB_PANELS {
-        return Err(format!(
-            "A tab holds at most {MAX_TAB_PANELS} panels besides the budget strip"
-        ));
+        return Err(format!("A tab holds at most {MAX_TAB_PANELS} panels"));
     }
-    settle(tab, 0);
+    drop_retired(tab, 0);
     let at = insert_point(tab);
-    let (_, lead) = strip_lead(tab);
     if let Some(rows) = &mut tab.rows {
-        match free_place(&rows[lead..]).1 {
-            Some(row) => rows[lead + row] += 1,
+        match free_place(rows).1 {
+            Some(row) => rows[row] += 1,
             None => rows.push(1),
         }
     }
@@ -540,10 +491,7 @@ mod tests {
 
             // Assert
             assert_eq!(t.panels.len(), MAX_TAB_PANELS);
-            assert_eq!(
-                ninth,
-                Err("A tab holds at most 8 panels besides the budget strip".to_string())
-            );
+            assert_eq!(ninth, Err("A tab holds at most 8 panels".to_string()));
             assert_eq!(t.panels.len(), 8);
         }
     }
@@ -559,60 +507,6 @@ mod tests {
         // Assert
         assert!(again.is_err());
         assert_eq!(one.panels.len(), 2);
-    }
-
-    #[test]
-    fn the_budget_strip_goes_first_beside_eight_panels_and_takes_no_cell() {
-        // Arrange
-        let mut automatic = tab("A=spend,tokens,models,breakdown,live,sessions,burnup,hourly");
-        let mut arranged = tab("A=spend,tokens|models,breakdown|live,sessions|burnup,hourly");
-
-        // Act
-        let auto_at = add(&mut automatic, PanelId::Budget);
-        let arranged_at = add(&mut arranged, PanelId::Budget);
-
-        // Assert
-        assert_eq!((auto_at, arranged_at), (Ok(0), Ok(0)));
-        assert_eq!(automatic.panels[0], PanelId::Budget);
-        assert_eq!(automatic.panels.len(), 9);
-        assert_eq!(arranged.rows, Some(vec![1, 2, 2, 2, 2]));
-        assert_eq!(grid(&arranged).len(), 4);
-        assert_eq!(grid(&automatic).len(), 4);
-    }
-
-    #[test]
-    fn a_panel_added_beside_the_strip_keeps_the_strip_first_and_alone() {
-        // Arrange
-        let mut t = tab("A=models,budget|breakdown,live");
-
-        // Act
-        let at = add(&mut t, PanelId::Sessions);
-
-        // Assert
-        assert_eq!(
-            words(&t),
-            ["budget", "models", "breakdown", "live", "sessions"]
-        );
-        assert_eq!(at, Ok(4));
-        assert_eq!(t.rows, Some(vec![1, 1, 2, 1]));
-    }
-
-    #[test]
-    fn the_strip_cannot_move_and_moving_other_panels_leaves_it_first() {
-        // Arrange
-        let mut t = tab("A=budget,models,breakdown");
-
-        // Act
-        let side = move_sideways(&mut t, 0, 1);
-        let down = move_vertically(&mut t, 0, 1);
-        let toggle = toggle_width(&mut t, 0);
-        let moved = move_vertically(&mut t, 1, 1);
-
-        // Assert
-        assert!(side.is_err() && down.is_err() && toggle.is_err());
-        assert_eq!(moved, Ok(2));
-        assert_eq!(words(&t), ["budget", "breakdown", "models"]);
-        assert_eq!(t.rows, None);
     }
 
     #[test]
@@ -645,46 +539,17 @@ mod tests {
     }
 
     #[test]
-    fn moves_in_an_automatic_tab_skip_the_budget_strip_wherever_it_is_listed() {
+    fn moves_in_an_automatic_tab_skip_the_retired_word_wherever_it_is_listed() {
         // Arrange
-        let mut t = tab("A=models,breakdown,budget,hourly");
+        let mut t = tab("A=models,breakdown,projection,hourly");
 
         // Act
         let down = move_vertically(&mut t, 0, 1);
 
         // Assert
         assert_eq!(down, Ok(3));
-        assert_eq!(words(&t), ["hourly", "breakdown", "budget", "models"]);
+        assert_eq!(words(&t), ["hourly", "breakdown", "projection", "models"]);
         assert!(move_sideways(&mut t, 2, 1).is_err());
-    }
-
-    #[test]
-    fn the_width_toggle_moves_the_budget_strip_first_and_keeps_it_out_of_the_grid() {
-        // Arrange
-        let mut t = tab("A=models,budget,breakdown,hourly");
-
-        // Act
-        let to = toggle_width(&mut t, 0);
-
-        // Assert
-        assert_eq!(to, Ok(1));
-        assert_eq!(t.rows, Some(vec![1, 1, 1, 1]));
-        assert_eq!(words(&t), ["budget", "models", "breakdown", "hourly"]);
-    }
-
-    #[test]
-    fn the_width_toggle_does_not_join_a_row_with_the_budget_strip() {
-        // Arrange
-        let mut t = tab("A=models,budget");
-
-        // Act
-        let on_panel = toggle_width(&mut t, 0);
-        let on_strip = toggle_width(&mut t, 1);
-
-        // Assert
-        assert!(on_panel.is_err() && on_strip.is_err());
-        assert_eq!(t.rows, None);
-        assert_eq!(words(&t), ["models", "budget"]);
     }
 
     #[test]
@@ -703,7 +568,7 @@ mod tests {
     #[test]
     fn a_retired_word_takes_no_cell_and_the_editor_drops_it_on_the_first_change() {
         // Arrange
-        let mut t = tab("A=models,breakdown,budget,projection");
+        let mut t = tab("A=models,breakdown,projection");
 
         // Act
         let before = grid(&t);
@@ -711,8 +576,8 @@ mod tests {
 
         // Assert
         assert_eq!(before, vec![vec![0], vec![1]]);
-        assert_eq!(added, Ok(3));
-        assert_eq!(words(&t), ["budget", "models", "breakdown", "hourly"]);
+        assert_eq!(added, Ok(2));
+        assert_eq!(words(&t), ["models", "breakdown", "hourly"]);
         assert_eq!(t.rows, None);
     }
 

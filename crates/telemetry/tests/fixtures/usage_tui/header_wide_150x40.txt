@@ -1,0 +1,7 @@
+╭─┤Agent Budget Dashboard├──┤UTC├────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│this month Sep 1 to Sep 3 until 01:46  vs  last month Aug 1 to Aug 3 until 01:46  (same span 2d 1h)                                                 │
+│cost           $3.05   vs      $0.00      +$3.05      new │ 5 hour   m ##########|##-------------   50%  ! hits it in 2h 0m  resets in 3h 0m (04:46)│
+│tokens         95.2K   vs          0      +95.2K      new │ 5 hour     left 50%      pace +10pt   allow 16.7%/h 400.0%/d  proj 125.0%   measured    │
+│messages           4   vs          0          +4      new │ 7 day    m ########---|--------------   30%  + ok  safe  resets in 4d (Mon 09-07)       │
+│                                                          │ Spend    h this month $3.05 ##########  last month $0.00 ----------  new                │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤+1 more in --json├─╯

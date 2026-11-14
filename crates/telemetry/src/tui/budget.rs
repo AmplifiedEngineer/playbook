@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The Budget strip: each known limit as one visual row, then the burn of the
-//! period on screen against the previous one.
+//! The budget lines of the header: each known limit as one visual row, then the
+//! burn of the period on screen against the previous one.
 //!
 //! A limit row reads left to right: the name, a one letter source glyph, a
 //! wide bar with a pace marker, the percent used, the amount, a verdict and
@@ -33,21 +33,21 @@ use crate::limits::{Limit, LimitPeriod, Origin, State, Unit};
 use crate::limits_source::STALE_SECONDS;
 use crate::period::{elapsed_text, Change};
 use crate::query::{clock, day_of, weekday};
-use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Paragraph};
-use ratatui::Frame;
 
-/// Border plus four rows: a limit, its figures, a second limit and the spend
-/// line. Two limits with two lines each would need seven, which a 24 row
-/// screen cannot spare, so the figures of the second limit sit behind `i`.
-pub const HEIGHT: u16 = 6;
-/// The rows inside the border.
-const ROWS: usize = HEIGHT as usize - 2;
+/// The most lines drawn: a limit, its figures, a second limit and the spend
+/// line. Two limits with two lines each would need five before the spend line,
+/// which a 24 row screen cannot spare, so the figures of the second limit sit
+/// behind `i`. Only the lines that exist are drawn, so most views are shorter.
+const ROWS: usize = 4;
+/// The most lines under the metrics of a header that stacks on a short screen.
+/// With two limits the figures of the first sit behind `i`, which always draws
+/// up to `ROWS`.
+pub const STACKED_ROWS: usize = 3;
 /// The detail view draws a limit row and a figures row for each limit.
 const _: () = assert!(ROWS >= 2 * MAX_LIMITS);
-/// The most limits drawn. The rest are counted in the title.
+/// The most limits drawn. The rest are counted in the header's bottom border.
 const MAX_LIMITS: usize = 2;
 /// The width of the name column, so the bars of all rows start together.
 const NAME_WIDTH: usize = 8;
@@ -820,7 +820,7 @@ fn no_limit_line(pal: &Palette, icon: Icon, width: usize) -> Line<'static> {
     ])
 }
 
-/// The lines inside the border, at most `ROWS`. `detail` shows the figures of
+/// The budget lines, at most `ROWS`. `detail` shows the figures of
 /// every limit and the full notes in place of the spend line.
 fn body(
     data: &Data,
@@ -828,7 +828,9 @@ fn body(
     icon: Icon,
     width: usize,
     detail: bool,
+    cap: usize,
 ) -> (Vec<Line<'static>>, usize) {
+    let cap = if detail { ROWS } else { cap.min(ROWS) };
     let v = &data.limits;
     let all_notes = notes(pal, v, data.now);
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -841,21 +843,25 @@ fn body(
         .map(|l| total(&limit_tail(pal, icon, l, data.now, v, width)))
         .max()
         .unwrap_or(0);
+    // The figures of the first limit and the spend line share what is left of
+    // `cap`; a short cap gives the spend line the row, and `i` shows the
+    // figures of every limit.
+    let first_figures = shown.len() + 2 <= cap;
     for (i, l) in shown.iter().enumerate() {
         lines.push(limit_line(pal, icon, l, data.now, v, width, tail_width));
-        if i == 0 || detail {
+        if detail || (i == 0 && first_figures) {
             lines.push(figures_line(pal, l, data.now, v, width));
         }
     }
     let mut hidden_notes = all_notes.len();
     if detail {
         for note in &all_notes {
-            if lines.len() < ROWS {
+            if lines.len() < cap {
                 lines.push(Line::styled(fit(&note.full, width), fg(pal, note.ink)));
                 hidden_notes -= 1;
             }
         }
-        if lines.len() < ROWS {
+        if lines.len() < cap {
             lines.push(burn_line(pal, icon, v, width));
         }
     } else {
@@ -864,51 +870,40 @@ fn body(
             hidden_notes = 0;
         }
         lines.push(burn_line(pal, icon, v, width));
-        if hidden_notes > 0 && lines.len() < ROWS {
+        if hidden_notes > 0 && lines.len() < cap {
             lines.push(status_line(pal, &all_notes, width));
             hidden_notes = 0;
         }
     }
-    lines.truncate(ROWS);
+    lines.truncate(cap);
     (lines, hidden_notes)
 }
 
-/// Draws the strip. Nothing is drawn when `area` is empty.
-pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette, icon: Icon, detail: bool) {
-    if area.height == 0 {
-        return;
+/// The budget lines of the header and what they could not show.
+pub struct Lines {
+    pub lines: Vec<Line<'static>>,
+    /// Limits past `MAX_LIMITS`, left to `--json`.
+    pub more: usize,
+    /// Notes that did not fit and wait behind `i`.
+    pub hidden_notes: usize,
+}
+
+/// The budget lines for a column `width` wide, at most `cap` and `ROWS`. A line exists
+/// only for data that exists, so the header never keeps rows for the rest.
+pub fn lines(
+    data: &Data,
+    pal: &Palette,
+    icon: Icon,
+    width: usize,
+    detail: bool,
+    cap: usize,
+) -> Lines {
+    let (lines, hidden_notes) = body(data, pal, icon, width, detail, cap);
+    Lines {
+        lines,
+        more: data.limits.limits.len().saturating_sub(MAX_LIMITS),
+        hidden_notes,
     }
-    let v = &data.limits;
-    let edge = fg(pal, pal.box_cpu);
-    let more = v.limits.len().saturating_sub(MAX_LIMITS);
-    let width = usize::from(area.width.saturating_sub(2));
-    let (lines, hidden_notes) = body(data, pal, icon, width, detail);
-    let mut block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(edge)
-        .title(Line::from(vec![
-            Span::styled("\u{2500}\u{2524}", edge),
-            Span::styled("Budget", fg(pal, pal.title)),
-            Span::styled("\u{251c}", edge),
-        ]));
-    let mut note = if more > 0 {
-        format!("{}  +{more} more in --json", crate::tz::label())
-    } else {
-        format!("{}  all projects", crate::tz::label())
-    };
-    if hidden_notes > 0 {
-        let plural = if hidden_notes == 1 { "" } else { "s" };
-        note.push_str(&format!("  {hidden_notes} note{plural}, i"));
-    }
-    block = block.title(
-        Line::from(vec![
-            Span::styled("\u{2524}", edge),
-            Span::styled(note, fg(pal, pal.fg)),
-            Span::styled("\u{251c}\u{2500}", edge),
-        ])
-        .right_aligned(),
-    );
-    frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
 #[cfg(test)]
@@ -1133,7 +1128,7 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_grows_with_the_strip_until_its_cap() {
+    fn the_bar_grows_with_the_header_width_until_its_cap() {
         let l = limit(50.0);
         let v = view_with(vec![l.clone()]);
         let bar = |w: usize| {

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The projection of each limit, which the Budget strip shows: one plain line
+//! The projection of each limit, which the budget in the header shows: one plain line
 //! saying when it will be reached at the current pace, or that it will not be
 //! reached in this period. A spending budget shows two paces side by side, the last 24
 //! hours and the average of the period, so a recent spike and a steady month
@@ -95,7 +95,7 @@ fn paces(l: &Limit, recent_cost: f64, now: i64) -> Vec<Pace> {
         return Vec::new();
     };
     let remaining = h.remaining;
-    // Like the Budget panel, wait for an hour of the period before projecting.
+    // Like the budget lines, wait for an hour of the period before projecting.
     let avg = h
         .avg_per_day
         .filter(|_| h.elapsed_seconds >= MIN_PROJECTION_SECONDS);
@@ -154,7 +154,7 @@ pub fn lines(limits: &[Limit], recent_cost: f64, now: i64) -> Vec<String> {
     limits.iter().map(|l| line(l, recent_cost, now)).collect()
 }
 
-/// What the budget strip says about a limit's future: when it is reached, by
+/// What the header says about a limit's future: when it is reached, by
 /// the sooner of the paces, or that the period or window ends first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reach {

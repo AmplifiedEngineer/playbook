@@ -257,8 +257,8 @@ fn the_daily_table_at_100x30() {
 fn a_model_wears_the_same_color_in_the_table_and_the_stacked_bars() {
     use crate::tui::app::SpendView;
     let a = with_spend_view(Theme::Standard, SpendView::ByModel);
-    let buf = buffer(&a, 100, 30);
-    let p = panels();
+    let buf = buffer(&a, 100, 40);
+    let p = panels_at(40);
     let data = a.data.as_ref().unwrap();
     let pal = Theme::Standard.palette(ColorDepth::True);
     // The Models panel is sorted by cost: opus, sonnet, haiku.
@@ -378,7 +378,7 @@ fn plan_snapshot() -> Snapshot {
 }
 
 #[test]
-fn the_budget_panel_shows_the_plan_windows_as_measured() {
+fn the_header_shows_the_plan_windows_as_measured() {
     let a = with_limits(
         app(Theme::Standard),
         Some(&plan_snapshot()),
@@ -393,7 +393,7 @@ fn the_budget_panel_shows_the_plan_windows_as_measured() {
 }
 
 #[test]
-fn the_budget_panel_shows_a_manual_limit_and_says_so() {
+fn the_header_shows_a_manual_limit_and_says_so() {
     let a = with_limits(
         app(Theme::Standard),
         None,
@@ -407,7 +407,7 @@ fn the_budget_panel_shows_a_manual_limit_and_says_so() {
 }
 
 #[test]
-fn the_budget_panel_says_how_to_set_a_limit_when_none_is_known() {
+fn the_header_says_how_to_set_a_limit_when_none_is_known() {
     let text = draw(&app(Theme::Standard), 100, 36);
     check("budget_unknown_100x36", &text);
     assert!(text.contains("No limit"));
@@ -415,14 +415,13 @@ fn the_budget_panel_says_how_to_set_a_limit_when_none_is_known() {
 }
 
 #[test]
-fn the_budget_panel_is_left_out_of_a_short_screen() {
-    for (w, h) in [(80, 24), (100, 30), (100, 35)] {
+fn the_budget_is_drawn_in_the_header_at_every_supported_size() {
+    for (w, h) in [(80, 24), (100, 30), (100, 36), (150, 50)] {
         assert!(
-            !draw(&app(Theme::Standard), w, h).contains("\u{2524}Budget\u{251c}"),
+            draw(&app(Theme::Standard), w, h).contains("press b to set a monthly budget"),
             "{w}x{h}"
         );
     }
-    assert!(draw(&app(Theme::Standard), 100, 36).contains("\u{2524}Budget\u{251c}"));
 }
 
 #[test]
@@ -448,10 +447,10 @@ fn the_state_wears_the_error_color_when_the_limit_will_be_exceeded() {
         Range::ThisWeek(WeekStart::Monday),
     );
     let buf = buffer(&a, 100, 36);
-    let row = crate::tui::view::layout(ratatui::layout::Rect::new(0, 0, 100, 36))
-        .budget
-        .y
-        + 1;
+    let row = draw(&a, 100, 36)
+        .lines()
+        .position(|l| l.contains("hits"))
+        .expect("the first limit row says when it is hit") as u16;
     let cells: Vec<&str> = (0..100).map(|x| buf[(x, row)].symbol()).collect();
     let at = cells
         .windows(4)
@@ -542,7 +541,12 @@ fn footer_and_header_text_use_the_main_text_color_not_the_dim_graph_color() {
 }
 
 fn panels() -> crate::tui::view::Panels {
-    crate::tui::view::layout(ratatui::layout::Rect::new(0, 0, 100, 30))
+    panels_at(30)
+}
+
+fn panels_at(height: u16) -> crate::tui::view::Panels {
+    let header = crate::tui::view::header_height(&app(Theme::Standard), 100);
+    crate::tui::view::layout(ratatui::layout::Rect::new(0, 0, 100, height), header)
 }
 
 #[test]
@@ -622,8 +626,8 @@ fn the_selected_row_of_the_focused_panel_is_highlighted() {
 
 #[test]
 fn meters_use_the_gradient_and_the_dim_color_for_the_rest() {
-    let buf = buffer(&app(Theme::Standard), 100, 30);
-    let p = panels();
+    let buf = buffer(&app(Theme::Standard), 100, 40);
+    let p = panels_at(40);
     let first = p.models.y + 2;
     // The haiku share is tiny: a dim dot at the end of its row.
     let (x, y) = find(&buf, "\u{b7}", first + 2);
@@ -720,13 +724,13 @@ fn agents_app(with_telemetry: bool) -> App {
 
 #[test]
 fn the_agents_view_lists_cost_per_agent_and_the_telemetry_share() {
-    let text = draw(&agents_app(true), 100, 30);
+    let text = draw(&agents_app(true), 100, 40);
     assert!(
         text.contains("Agents") && text.contains("reviewer"),
         "{text}"
     );
     assert!(text.contains("source telemetry"), "{text}");
-    check("agents_100x30", &text);
+    check("agents_100x40", &text);
 }
 
 #[test]
@@ -912,7 +916,7 @@ fn transcript_counts_carry_a_marker_and_show_a_dash_for_what_they_cannot_know() 
             ..ToolStat::default()
         },
     ];
-    let text = draw(&a, 100, 30);
+    let text = draw(&a, 100, 40);
     let row = |name: &str| text.lines().find(|l| l.contains(name)).unwrap().to_string();
     assert!(!text.contains("telemetry is off"), "{text}");
     assert!(text.contains("source telemetry + transcripts"), "{text}");
@@ -952,13 +956,13 @@ fn a_transcript_only_tool_has_no_previous_average_to_compare() {
 #[test]
 fn the_health_view_shows_errors_retries_busy_time_and_cache_hit_against_the_previous_period() {
     use crate::tui::app::ProjectsView;
-    let text = draw(&health_app(true, ProjectsView::Health), 100, 30);
+    let text = draw(&health_app(true, ProjectsView::Health), 100, 40);
     assert!(
         text.contains("Health") && text.contains("Retries"),
         "{text}"
     );
     // A tall terminal shows every figure, the cache hit rate from transcripts too.
-    // The budget strip takes 6 rows, so every figure needs 52.
+    // The header takes the rows of the budget lines, so every figure needs 52.
     let tall = draw(&health_app(true, ProjectsView::Health), 160, 52);
     assert!(
         tall.contains("Cache hit")
@@ -966,7 +970,7 @@ fn the_health_view_shows_errors_retries_busy_time_and_cache_hit_against_the_prev
             && tall.contains("Lines changed"),
         "{tall}"
     );
-    check("health_100x30", &text);
+    check("health_100x40", &text);
 }
 
 #[test]
@@ -1169,7 +1173,7 @@ fn a_pinned_breakdown_slot_without_the_focus_does_not_scroll_with_its_sibling() 
 }
 
 #[test]
-fn the_numbers_tab_shows_the_tables_and_the_budget_at_100x30() {
+fn the_numbers_tab_shows_the_tables_under_the_header_at_100x30() {
     check("tab_numbers_100x30", &draw(&tabbed(1), 100, 30));
 }
 
@@ -1205,7 +1209,7 @@ fn the_layout_editor_picker_at_100x30() {
 }
 
 #[test]
-fn the_budget_strip_says_when_each_limit_is_reached_at_the_current_pace() {
+fn the_header_says_when_each_limit_is_reached_at_the_current_pace() {
     let mut a = with_limits(
         tabbed(1),
         Some(&plan_snapshot()),
@@ -1357,7 +1361,7 @@ fn a_fresh_reported_figure_is_the_bar_itself_and_adds_no_line() {
 }
 
 #[test]
-fn with_no_limit_and_no_windows_the_budget_strip_says_what_is_missing() {
+fn with_no_limit_and_no_windows_the_header_says_what_is_missing() {
     let a = with_sources(tabbed(1), &Sources::default(), Range::LastDays(30));
 
     let text = draw(&a, 140, 40);
@@ -1725,7 +1729,7 @@ fn the_charts_tab_draws_the_burnup_on_its_own_row_at_140x40() {
 }
 
 #[test]
-fn the_charts_tab_at_the_smallest_screen_shows_the_burnup_table() {
+fn the_charts_tab_at_the_smallest_screen_shows_the_budget_and_every_panel() {
     let a = with_limits(
         tabbed(0),
         None,
@@ -1735,7 +1739,8 @@ fn the_charts_tab_at_the_smallest_screen_shows_the_burnup_table() {
 
     let text = draw(&a, 80, 24);
 
-    assert!(text.contains("Burn-up"), "{text}");
+    assert!(text.contains("Monthly"), "{text}");
+    assert!(!text.contains("hidden"), "{text}");
     check("tab_charts_80x24", &text);
 }
 
@@ -1835,22 +1840,18 @@ fn the_charted_burnup_is_the_most_used_limit_else_the_spend_alone() {
     assert_eq!(none.charted(), Some(&spend));
 }
 
-/// The rows of the Budget strip alone, from its top border to its bottom one.
-fn strip(a: &App, width: u16, height: u16) -> String {
-    let top = crate::tui::view::place(
-        ratatui::layout::Rect::new(0, 0, width, height),
-        &a.layout.tabs[a.tab].panels,
-        None,
-        true,
-    )
-    .budget;
-    assert_eq!(top.height, crate::tui::budget::HEIGHT, "{width}x{height}");
-    draw(a, width, height)
-        .lines()
-        .skip(usize::from(top.y))
-        .take(usize::from(top.height))
-        .map(|l| format!("{l}\n"))
-        .collect()
+/// The rows of the header alone, from its top border to its bottom one.
+fn header_rows(a: &App, width: u16, height: u16) -> String {
+    let text = draw(a, width, height);
+    let rows = usize::from(crate::tui::view::header_height(a, width));
+    assert!(
+        text.lines()
+            .nth(rows - 1)
+            .unwrap_or("")
+            .starts_with('\u{2570}'),
+        "the header is {rows} rows at {width}x{height}:\n{text}"
+    );
+    text.lines().take(rows).map(|l| format!("{l}\n")).collect()
 }
 
 /// The numbers tab with the sources of one budget scenario.
@@ -1881,7 +1882,7 @@ fn over_pace() -> Sources {
 /// Each scenario at the two sizes the design is drawn for, in ASCII and in
 /// UTF-8 glyphs.
 #[test]
-fn the_budget_strip_in_each_scenario_at_80x24_and_150x44() {
+fn the_header_in_each_scenario_at_80x24_and_150x44() {
     let scenarios = [
         ("one_limit", enterprise_sources(600)),
         ("two_limits", two_limits()),
@@ -1893,7 +1894,10 @@ fn the_budget_strip_in_each_scenario_at_80x24_and_150x44() {
         for (w, h) in [(80, 24), (150, 44)] {
             for (icon, tag) in [(Icon::Off, "ascii"), (Icon::Wide, "utf8")] {
                 let a = numbers_with(sources, icon, false);
-                check(&format!("strip_{name}_{tag}_{w}x{h}"), &strip(&a, w, h));
+                check(
+                    &format!("header_{name}_{tag}_{w}x{h}"),
+                    &header_rows(&a, w, h),
+                );
             }
         }
     }
@@ -1906,19 +1910,19 @@ fn the_detail_key_shows_the_figures_of_both_limits_and_the_full_notes() {
     let normal = numbers_with(&sources, Icon::Off, false);
     let detail = numbers_with(&sources, Icon::Off, true);
 
-    let (short, long) = (strip(&normal, 150, 44), strip(&detail, 150, 44));
+    let (short, long) = (header_rows(&normal, 150, 44), header_rows(&detail, 150, 44));
 
     assert_eq!(short.matches("left ").count(), 1, "{short}");
     assert_eq!(long.matches("left ").count(), 2, "{long}");
     assert!(long.contains("7 day      left"), "{long}");
-    check("strip_detail_two_limits_150x44", &long);
+    check("header_detail_two_limits_150x44", &long);
 }
 
 #[test]
-fn the_strip_has_no_wide_text_clauses_left() {
+fn the_header_has_no_wide_text_clauses_left() {
     let a = numbers_with(&two_limits(), Icon::Off, false);
 
-    let text = strip(&a, 150, 44);
+    let text = header_rows(&a, 150, 44);
 
     for gone in [
         "reaches the limit in",
@@ -1928,4 +1932,172 @@ fn the_strip_has_no_wide_text_clauses_left() {
     ] {
         assert!(!text.contains(gone), "{gone}: {text}");
     }
+}
+
+/// The sample app on the Charts tab with the plan windows and a monthly limit,
+/// over a period that has a previous one to compare with.
+fn header_app() -> App {
+    with_sources(tabbed(0), &two_limits(), Range::CurrentMonth)
+}
+
+#[test]
+fn the_header_holds_the_budget_beside_the_comparison_on_a_wide_screen() {
+    let a = header_app();
+
+    let text = header_rows(&a, 150, 40);
+
+    let rows: Vec<&str> = text.lines().collect();
+    assert_eq!(rows.len(), 7, "{text}");
+    assert!(
+        rows[2].contains("cost") && rows[2].contains("5 hour"),
+        "{text}"
+    );
+    assert!(rows[2..6].iter().all(|r| r.contains('\u{2502}')), "{text}");
+    check("header_wide_150x40", &text);
+}
+
+#[test]
+fn the_header_stacks_the_budget_under_the_comparison_on_a_narrow_screen() {
+    let a = header_app();
+
+    let text = header_rows(&a, 80, 24);
+
+    let at = |word: &str| text.lines().position(|l| l.contains(word)).unwrap();
+    assert!(at("msgs") < at("5 hour"), "{text}");
+    assert!(
+        !text
+            .lines()
+            .any(|l| l.contains("cost") && l.contains("5 hour")),
+        "{text}"
+    );
+    check("header_stacked_80x24", &text);
+}
+
+#[test]
+fn the_default_charts_tab_with_a_previous_period_hides_no_panel_at_every_stacked_width() {
+    use crate::tui::view::{header_height, place};
+    let week = Range::ThisWeek(WeekStart::Monday);
+    let none = with_limits(tabbed(0), None, &[], week);
+    let one = with_sources(tabbed(0), &over_pace(), week);
+    let two = with_sources(tabbed(0), &two_limits(), week);
+
+    // 80 is the least width; the header stacks up to 105.
+    for width in [80u16, 91, 92, 100, 105] {
+        let area = ratatui::layout::Rect::new(0, 0, width, 24);
+        for (name, a) in [
+            ("no limit", &none),
+            ("one limit", &one),
+            ("two limits", &two),
+        ] {
+            assert!(a.data.as_ref().unwrap().comparison.is_some(), "{name}");
+            let placed = place(
+                area,
+                header_height(a, width),
+                a.tab_ids(),
+                a.tab_rows(),
+                a.layout.tabs.len() > 1,
+            );
+            assert_eq!(
+                placed.hidden,
+                None,
+                "{name} at {width}x24:\n{}",
+                draw(a, width, 24)
+            );
+        }
+    }
+}
+
+#[test]
+fn a_stacked_header_folds_the_comparison_into_one_row_and_keeps_every_figure() {
+    let a = with_sources(tabbed(0), &two_limits(), Range::ThisWeek(WeekStart::Monday));
+
+    let text = header_rows(&a, 80, 24);
+
+    let row = text.lines().find(|l| l.contains("cost")).unwrap();
+    for word in ["cost", "tokens", "msgs", " vs "] {
+        assert!(row.contains(word), "{word}: {text}");
+    }
+    assert_eq!(
+        text.lines().filter(|l| l.contains("tokens")).count(),
+        1,
+        "{text}"
+    );
+    // The spend line keeps its row; the figures of the first limit wait behind
+    // i, which shows them.
+    assert!(text.contains("Spend"), "{text}");
+    assert!(!text.contains("left 50%"), "{text}");
+    let mut a = a;
+    a.budget_detail = true;
+    assert!(header_rows(&a, 80, 24).contains("left 50%"));
+}
+
+#[test]
+fn the_notes_hint_shows_when_pressing_i_reveals_the_note() {
+    let mut a = with_sources(
+        tabbed(0),
+        &enterprise_sources(600),
+        Range::ThisWeek(WeekStart::Monday),
+    );
+
+    let short = header_rows(&a, 80, 24);
+    a.budget_detail = true;
+    let long = header_rows(&a, 80, 24);
+
+    assert!(short.contains("1 note, i"), "{short}");
+    assert!(long.contains("not available"), "{long}");
+    assert!(!long.contains("note, i"), "{long}");
+}
+
+#[test]
+fn the_notes_hint_is_dropped_when_pressing_i_would_not_show_the_notes() {
+    let mut a = numbers_with(&two_limits(), Icon::Off, false);
+    a.data.as_mut().unwrap().limits.windows_note = Some("windows are not on this plan");
+
+    for detail in [false, true] {
+        a.budget_detail = detail;
+        let text = header_rows(&a, 150, 44);
+        assert!(!text.contains("note"), "detail {detail}: {text}");
+        assert!(!text.contains(", i"), "detail {detail}: {text}");
+    }
+}
+
+#[test]
+fn the_header_splits_into_two_columns_exactly_when_the_budget_column_fits() {
+    let a = header_app();
+    let split = |w: u16| {
+        let text = header_rows(&a, w, 40);
+        text.lines()
+            .any(|l| l.contains("cost") && l.contains("5 hour"))
+    };
+
+    // The widest metric row is 57 cells, the gap 3 and the budget 44, plus the
+    // two borders.
+    assert!(!split(105));
+    assert!(split(106));
+}
+
+#[test]
+fn the_header_keeps_no_row_for_budget_data_that_does_not_exist() {
+    let wide = |a: &App| crate::tui::view::header_height(a, 150);
+    let stacked = |a: &App| crate::tui::view::header_height(a, 80);
+    let none = with_limits(tabbed(0), None, &[], Range::CurrentMonth);
+    let two = header_app();
+
+    // Side by side the three metric rows set the height while the budget has
+    // up to three lines, and only a fourth line adds a row.
+    assert_eq!(wide(&none), 2 + 1 + 3);
+    assert_eq!(wide(&two), 2 + 1 + 4);
+    // Stacked at 80 columns the comparison is one row and the budget has at
+    // most three lines: no limit, the note on the missing windows and the
+    // spend, or the two limits with the figures of the first.
+    assert_eq!(stacked(&none), 2 + 1 + 1 + 3);
+    assert_eq!(
+        stacked(&two),
+        2 + 1 + 1 + crate::tui::budget::STACKED_ROWS as u16
+    );
+    // No data yet: the border and one line.
+    assert_eq!(
+        crate::tui::view::header_height(&App::new(Range::All), 150),
+        3
+    );
 }

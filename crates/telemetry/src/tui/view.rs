@@ -32,8 +32,6 @@ pub const MIN_HEIGHT: u16 = 24;
 #[derive(Debug, PartialEq, Eq)]
 pub struct Panels {
     pub header: Rect,
-    /// Empty on a short screen.
-    pub budget: Rect,
     pub spend: Rect,
     pub tokens: Rect,
     pub models: Rect,
@@ -43,26 +41,12 @@ pub struct Panels {
     pub footer: Rect,
 }
 
-/// The header holds the comparison: a context line and one row each for cost,
-/// tokens and messages, between two borders.
-const HEADER_HEIGHT: u16 = 6;
-
-/// The screen height from which the Budget panel is drawn.
-const BUDGET_MIN_ROWS: u16 = 36;
-
 /// Header and footer are fixed. The rest is three rows: graphs, breakdowns,
-/// live and sessions, each split in two columns.
-pub fn layout(area: Rect) -> Panels {
-    // The budget panel needs room: it is left out below 36 rows, which keeps
-    // the common 24 and 30 row screens as they were.
-    let budget_height = if area.height >= BUDGET_MIN_ROWS {
-        budget::HEIGHT
-    } else {
-        0
-    };
-    let [header, budget, body, footer] = Layout::vertical([
-        Constraint::Length(HEADER_HEIGHT),
-        Constraint::Length(budget_height),
+/// live and sessions, each split in two columns. `header` is the header's
+/// height, from `header_height`.
+pub fn layout(area: Rect, header: u16) -> Panels {
+    let [header, body, footer] = Layout::vertical([
+        Constraint::Length(header),
         Constraint::Min(1),
         Constraint::Length(1),
     ])
@@ -83,7 +67,6 @@ pub fn layout(area: Rect) -> Panels {
     let (live, sessions) = halves(live);
     Panels {
         header,
-        budget,
         spend,
         tokens,
         models,
@@ -100,9 +83,7 @@ pub struct Placed {
     pub header: Rect,
     /// Empty when the layout has one tab.
     pub tabbar: Rect,
-    /// Empty when the tab has no budget panel or the screen is short.
-    pub budget: Rect,
-    /// Each panel of the tab with its place, budget excluded.
+    /// Each panel of the tab with its place.
     pub panels: Vec<(PanelId, Rect)>,
     /// What a short body left out, `None` when every panel has its place.
     pub hidden: Option<Hidden>,
@@ -116,10 +97,6 @@ pub struct Hidden {
     /// The screen height at which every panel of the grid fits.
     pub needs_height: u16,
 }
-
-/// The screen height of a tabbed layout from which the budget strip is drawn.
-/// A tab can be all about the budget, so this is lower than the classic one.
-const TAB_BUDGET_MIN_ROWS: u16 = 24;
 
 /// Splits `body` into bands, each a `(columns, weight)` pair: one wide panel
 /// or two side by side.
@@ -171,8 +148,10 @@ fn grid(body: Rect, n: usize) -> (Vec<Rect>, usize) {
 /// The least body height per row for an arranged tab to be drawn as arranged.
 const MIN_ROW_HEIGHT: u16 = 5;
 
-/// The panel count of each row once the budget strip and the retired
-/// projection word, which have no cell in the body, are taken out. A row that held only the strip disappears.
+/// The panel count of each row once the panels with no cell in the body, which
+/// are the retired projection word, are taken out. A row that held only such a
+/// panel disappears. The filter is `has_cell`, so any future panel without a
+/// cell drops out the same way.
 fn body_rows(ids: &[PanelId], rows: &[u8]) -> Vec<usize> {
     let mut ids = ids.iter();
     rows.iter()
@@ -186,30 +165,23 @@ fn body_rows(ids: &[PanelId], rows: &[u8]) -> Vec<usize> {
         .collect()
 }
 
-/// Places the header, the optional tab bar, the budget strip, the panels of
-/// a tab and the footer on `area`. A layout with one tab keeps the classic
-/// screen: no tab bar, and the budget strip from 36 rows as before. `rows` is
-/// the size of each row of an arranged tab; `None`, or a body too short for
-/// the rows, gives the automatic grid, which leaves out the rows that do not
-/// fit and reports them in `hidden`.
-pub fn place(area: Rect, ids: &[PanelId], rows: Option<&[u8]>, tabbed: bool) -> Placed {
-    let wants_budget = ids.contains(&PanelId::Budget);
-    // A tab with few other panels can afford the strip on a short screen.
-    let few = ids.iter().filter(|id| id.has_cell()).count() <= 3;
-    let min_rows = if tabbed && few {
-        TAB_BUDGET_MIN_ROWS
-    } else {
-        BUDGET_MIN_ROWS
-    };
-    let budget_height = if wants_budget && area.height >= min_rows {
-        budget::HEIGHT
-    } else {
-        0
-    };
-    let [header, tabbar, budget, body, footer] = Layout::vertical([
-        Constraint::Length(HEADER_HEIGHT),
+/// Places the header, the optional tab bar, the panels of a tab and the footer
+/// on `area`. `header` is the header's height, from `header_height`: the
+/// header belongs to the screen, not to a tab, so every tab has the same one.
+/// A short body leaves out the rows that do not fit. A layout with one tab has
+/// no tab bar. `rows` is the size of each row of an arranged tab; `None`, or a
+/// body too short for the rows, gives the automatic grid, which leaves out the
+/// rows that do not fit and reports them in `hidden`.
+pub fn place(
+    area: Rect,
+    header: u16,
+    ids: &[PanelId],
+    rows: Option<&[u8]>,
+    tabbed: bool,
+) -> Placed {
+    let [header, tabbar, body, footer] = Layout::vertical([
+        Constraint::Length(header),
         Constraint::Length(u16::from(tabbed)),
-        Constraint::Length(budget_height),
         Constraint::Min(1),
         Constraint::Length(1),
     ])
@@ -239,7 +211,6 @@ pub fn place(area: Rect, ids: &[PanelId], rows: Option<&[u8]>, tabbed: bool) -> 
     Placed {
         header,
         tabbar,
-        budget,
         panels,
         hidden,
         footer,
@@ -249,12 +220,13 @@ pub fn place(area: Rect, ids: &[PanelId], rows: Option<&[u8]>, tabbed: bool) -> 
 /// The place of one panel of a tab on `area`, `None` when the tab lacks it.
 pub fn panel_rect(
     area: Rect,
+    header: u16,
     ids: &[PanelId],
     rows: Option<&[u8]>,
     tabbed: bool,
     id: PanelId,
 ) -> Option<Rect> {
-    place(area, ids, rows, tabbed)
+    place(area, header, ids, rows, tabbed)
         .panels
         .into_iter()
         .find(|(p, _)| *p == id)
@@ -286,7 +258,13 @@ pub fn render(frame: &mut Frame, app: &App) {
         return;
     }
     let tabbed = app.layout.tabs.len() > 1;
-    let p = place(area, app.tab_ids(), app.tab_rows(), tabbed);
+    let p = place(
+        area,
+        header_height(app, area.width),
+        app.tab_ids(),
+        app.tab_rows(),
+        tabbed,
+    );
     render_header(frame, p.header, app, &pal);
     if tabbed {
         render_tabbar(frame, p.tabbar, app, &pal);
@@ -296,9 +274,6 @@ pub fn render(frame: &mut Frame, app: &App) {
     let dots = burnup::braille_ok(app.icon, pal.mono, app.dots_off);
     match (&app.data, notice::body(app)) {
         (Some(data), None) => {
-            if p.budget.height > 0 {
-                budget::render(frame, p.budget, data, &pal, app.icon, app.budget_detail);
-            }
             for (id, rect) in &p.panels {
                 match id {
                     PanelId::Spend
@@ -319,18 +294,11 @@ pub fn render(frame: &mut Frame, app: &App) {
                     PanelId::Sessions => panels::sessions(frame, *rect, app, data, &pal),
                     PanelId::Hourly => panels::hourly(frame, *rect, data, &pal),
                     PanelId::Burnup => burnup::render(frame, *rect, data, &pal, dots),
-                    PanelId::Budget | PanelId::Projection => {}
+                    PanelId::Projection => {}
                 }
             }
         }
-        (data, Some(n)) => {
-            if let Some(data) = data {
-                if p.budget.height > 0 {
-                    budget::render(frame, p.budget, data, &pal, app.icon, app.budget_detail);
-                }
-            }
-            render_notice(frame, body, &n, &pal);
-        }
+        (_, Some(n)) => render_notice(frame, body, &n, &pal),
         (None, None) => {}
     }
     if let (Some(_), Some(n)) = (&app.data, notice::banner(app)) {
@@ -490,15 +458,7 @@ fn footer(app: &App, pal: &Palette, area_width: u16, hidden: Option<Hidden>) -> 
         .add_modifier(Modifier::BOLD);
     let (status, status_style) = refresh_status(app, pal, area_width);
     // The status keeps its place at the right, so the hints get what is left.
-    let alert = hidden.map(|h| {
-        let noun = if h.count == 1 { "panel" } else { "panels" };
-        format!(
-            "{} {noun} hidden, {} rows show all ",
-            h.count, h.needs_height
-        )
-    });
-    let alert_width = alert.as_ref().map_or(0, |a| a.chars().count());
-    let room = usize::from(area_width).saturating_sub(status.chars().count() + alert_width);
+    let status_width = status.chars().count();
     let theme = format!("theme ({})", app.theme.name());
     // Shown in the order of the key table. When the line is too wide, hints
     // drop in the table's `drop` order, so the ones that matter most stay.
@@ -520,6 +480,23 @@ fn footer(app: &App, pal: &Palette, area_width: u16, hidden: Option<Hidden>) -> 
             .map(|(k, l, _)| k.chars().count() + l.chars().count() + 2)
             .sum::<usize>()
     };
+    // The note has a long and a short form. The short one is used when, with
+    // the long one, a hint the table never drops would not fit.
+    let never_dropped: Vec<_> = hints.iter().filter(|(_, _, d)| *d == 0).cloned().collect();
+    let alert = hidden.map(|h| {
+        let noun = if h.count == 1 { "panel" } else { "panels" };
+        let long = format!(
+            "{} {noun} hidden, {} rows show all ",
+            h.count, h.needs_height
+        );
+        if width(&never_dropped) + status_width + long.chars().count() <= usize::from(area_width) {
+            long
+        } else {
+            format!("{} hidden, {} rows ", h.count, h.needs_height)
+        }
+    });
+    let alert_width = alert.as_ref().map_or(0, |a| a.chars().count());
+    let room = usize::from(area_width).saturating_sub(status_width + alert_width);
     for rank in 1..=u8::MAX {
         if width(&hints) <= room {
             break;
@@ -679,10 +656,15 @@ fn context(c: &Comparison, room: usize) -> (String, String) {
 fn context_line(d: &Data, room: usize) -> (String, String) {
     match &d.comparison {
         Some(c) => context(c, room),
-        None => (
-            range_label(d),
-            "  (no previous period to compare)".to_string(),
-        ),
+        None => {
+            let label = range_label(d);
+            let rest = "  (no previous period to compare)";
+            if label.chars().count() + rest.chars().count() <= room {
+                (label, rest.to_string())
+            } else {
+                (label, String::new())
+            }
+        }
     }
 }
 
@@ -748,18 +730,21 @@ fn metrics(d: &Data) -> [Metric; 3] {
     ]
 }
 
-/// The header body: the context line, then cost, tokens and messages, with the
-/// previous period's value and the change for a period.
-fn header_lines(d: &Data, pal: &Palette, room: usize) -> Vec<Line<'static>> {
+/// The context line of the header body, in the longest form that fits `room`.
+fn context_row(d: &Data, pal: &Palette, room: usize) -> Line<'static> {
     let accent = Style::default()
         .fg(pal.color(pal.hi))
         .add_modifier(Modifier::BOLD);
     let plain = Style::default().fg(pal.color(pal.fg));
     let (now, rest) = context_line(d, room);
-    let mut lines = vec![Line::from(vec![
-        Span::styled(now, accent),
-        Span::styled(rest, plain),
-    ])];
+    Line::from(vec![Span::styled(now, accent), Span::styled(rest, plain)])
+}
+
+/// Cost, tokens and messages, with the previous period's value and the change
+/// for a period.
+fn metric_lines(d: &Data, pal: &Palette) -> Vec<Line<'static>> {
+    let plain = Style::default().fg(pal.color(pal.fg));
+    let mut lines = Vec::new();
     for m in metrics(d) {
         let tint = if m.change > 0.0 {
             pal.warn
@@ -787,6 +772,44 @@ fn header_lines(d: &Data, pal: &Palette, room: usize) -> Vec<Line<'static>> {
     lines
 }
 
+/// Cost, tokens and messages on one row, for a header that stacks. Each reads
+/// `name now vs before change` with the percent of the change, since the
+/// amount follows from the two values. When that is wider than `room`, the
+/// previous value goes too and each reads `name now change`. `None` when even
+/// that does not fit, so the caller keeps the three rows.
+fn folded_metric_line(d: &Data, pal: &Palette, room: usize) -> Option<Line<'static>> {
+    let plain = Style::default().fg(pal.color(pal.fg));
+    [true, false].into_iter().find_map(|with_before| {
+        let mut spans = Vec::new();
+        for (i, m) in metrics(d).into_iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::styled(FOLD_GAP, plain));
+            }
+            let name = if m.name == "messages" { "msgs" } else { m.name };
+            spans.push(Span::styled(format!("{name} "), plain));
+            spans.push(Span::styled(
+                m.now,
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
+            let Some(before) = m.before else { continue };
+            let tint = if m.change > 0.0 {
+                pal.warn
+            } else if m.change < 0.0 {
+                pal.live
+            } else {
+                pal.fg
+            };
+            if with_before {
+                spans.push(Span::styled(format!(" vs {before}"), plain));
+            }
+            let change = Style::default().fg(pal.color(tint));
+            spans.push(Span::styled(format!(" {}", m.percent), change));
+        }
+        let line = Line::from(spans);
+        (line.width() <= room).then_some(line)
+    })
+}
+
 /// The time zone note in the header border. Weeks say which day they start on.
 fn zone_note(app: &App) -> String {
     let zone = match app.range {
@@ -802,6 +825,120 @@ fn zone_note(app: &App) -> String {
         .into_iter()
         .filter(|name| !name.is_empty())
         .fold(zone, |note, name| format!("{note}, {name}"))
+}
+
+/// The gap between the two columns of the header, with a rule in the middle.
+const COLUMN_GAP: usize = 3;
+/// The least width the budget column needs to draw a limit with its bar, the
+/// percent and the verdict. Under it the header stacks its rows.
+const BUDGET_MIN: usize = 44;
+
+/// The gap between the metrics when a stacked header folds them into one row.
+const FOLD_GAP: &str = "  ";
+/// What the header draws inside its border: a first line across the width,
+/// then the comparison and the budget.
+struct HeaderBody {
+    /// The context line, or the message that stands in for the whole header.
+    top: Line<'static>,
+    /// Cost, tokens and messages.
+    left: Vec<Line<'static>>,
+    /// The budget, drawn beside the metrics when `split` is set and under
+    /// them otherwise.
+    right: Vec<Line<'static>>,
+    /// The width of the left column when the two sit side by side.
+    split: Option<usize>,
+    /// Limits and notes the budget lines left out, for the bottom border.
+    more: usize,
+    hidden_notes: usize,
+}
+
+impl HeaderBody {
+    /// The rows inside the border: the context line and then the taller
+    /// column when side by side or both when stacked. Only lines that exist
+    /// count, so no row is kept for data that is not there.
+    fn rows(&self) -> usize {
+        1 + match self.split {
+            Some(_) => self.left.len().max(self.right.len()),
+            None => self.left.len() + self.right.len(),
+        }
+    }
+}
+
+/// The comparison and the budget for a header `width` cells wide inside its
+/// border. The metrics and the budget sit in two columns under the context
+/// line when the budget column can have its least width and stack otherwise,
+/// so a narrow terminal loses no figure.
+fn header_body(app: &App, pal: &Palette, width: usize) -> HeaderBody {
+    let message = |text: String, ink: Style| HeaderBody {
+        top: Line::styled(text, ink),
+        left: Vec::new(),
+        right: Vec::new(),
+        split: None,
+        more: 0,
+        hidden_notes: 0,
+    };
+    let Some(d) = app.data.as_ref() else {
+        return match &app.error {
+            Some(e) => message(e.clone(), Style::default().fg(pal.color(pal.error))),
+            None => message("Reading usage...".to_string(), Style::default()),
+        };
+    };
+    // The metrics column is as wide as its widest row: cost with the previous
+    // value and the change takes 57 cells, a period with no previous one 20.
+    let left = metric_lines(d, pal);
+    let side = left.iter().map(Line::width).max().unwrap_or(0);
+    let split = (width >= side + COLUMN_GAP + BUDGET_MIN).then_some(side);
+    let room = split.map_or(width, |side| width - side - COLUMN_GAP);
+    // A header that stacks folds the comparison into one row and gives the
+    // budget at most `STACKED_ROWS` lines, so the default Charts tab shows
+    // every panel at 80x24 and at the other widths that stack.
+    let left = match split {
+        None => folded_metric_line(d, pal, width).map_or(left, |line| vec![line]),
+        Some(_) => left,
+    };
+    let cap = if split.is_none() {
+        budget::STACKED_ROWS
+    } else {
+        usize::MAX
+    };
+    let b = budget::lines(d, pal, app.icon, room, app.budget_detail, cap);
+    // The `i` hint names only the notes that pressing `i` shows.
+    let hidden_notes = if app.budget_detail || b.hidden_notes == 0 {
+        0
+    } else {
+        let all = budget::lines(d, pal, app.icon, room, true, cap);
+        b.hidden_notes.saturating_sub(all.hidden_notes)
+    };
+    HeaderBody {
+        top: context_row(d, pal, width),
+        left,
+        right: b.lines,
+        split,
+        more: b.more,
+        hidden_notes,
+    }
+}
+
+/// The height of the header on a screen `width` cells wide: two borders and
+/// the rows of its body.
+pub fn header_height(app: &App, width: u16) -> u16 {
+    let pal = app.theme.palette(app.depth);
+    let inner = usize::from(width.saturating_sub(2));
+    let rows = header_body(app, &pal, inner).rows();
+    u16::try_from(rows).unwrap_or(u16::MAX).saturating_add(2)
+}
+
+/// The bottom border note: limits past the two drawn and notes behind `i`.
+fn budget_note(body: &HeaderBody) -> Option<String> {
+    let mut parts = Vec::new();
+    if body.more > 0 {
+        parts.push(format!("+{} more in --json", body.more));
+    }
+    if body.hidden_notes > 0 {
+        let plural = if body.hidden_notes == 1 { "" } else { "s" };
+        parts.push(format!("{} note{plural}, i", body.hidden_notes));
+    }
+    (!parts.is_empty()).then(|| parts.join("  "))
 }
 
 fn render_header(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
@@ -841,16 +978,45 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
         let ink = Style::default().fg(pal.color(pal.warn));
         block = block.title(note(format!("{} unpriced", d.unpriced), ink));
     }
-    let room = usize::from(area.width.saturating_sub(2));
-    let lines = match (&app.data, &app.error) {
-        (Some(d), _) => header_lines(d, pal, room),
-        (None, Some(e)) => vec![Line::styled(
-            e.clone(),
-            Style::default().fg(pal.color(pal.error)),
-        )],
-        (None, None) => vec![Line::raw("Reading usage...")],
-    };
-    frame.render_widget(Paragraph::new(lines).block(block), area);
+    let inner = block.inner(area);
+    let body = header_body(app, pal, usize::from(inner.width));
+    if let Some(text) = budget_note(&body) {
+        let ink = Style::default().fg(pal.color(pal.fg));
+        block = block.title_bottom(note(text, ink));
+    }
+    frame.render_widget(block, area);
+    let HeaderBody {
+        top,
+        left,
+        right,
+        split,
+        ..
+    } = body;
+    let [top_row, rest] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+    frame.render_widget(Paragraph::new(top), top_row);
+    match split {
+        Some(side) => {
+            let [left_area, rule, right_area] = Layout::horizontal([
+                Constraint::Length(side as u16),
+                Constraint::Length(COLUMN_GAP as u16),
+                Constraint::Min(0),
+            ])
+            .areas(rest);
+            frame.render_widget(Paragraph::new(left), left_area);
+            let bar = Line::styled("\u{2502}", edge).centered();
+            for y in rule.top()..rule.bottom() {
+                let cell = Rect::new(rule.x, y, rule.width, 1);
+                frame.render_widget(Paragraph::new(bar.clone()), cell);
+            }
+            frame.render_widget(Paragraph::new(right), right_area);
+        }
+        None => {
+            let mut lines = left;
+            lines.extend(right);
+            frame.render_widget(Paragraph::new(lines), rest);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -862,6 +1028,8 @@ mod tests {
     use ratatui::Terminal;
 
     const NOW: i64 = 1_788_400_000;
+    /// The header height the placement tests use.
+    const HDR: u16 = 6;
 
     fn screen(app: &App, width: u16, height: u16) -> String {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
@@ -946,7 +1114,7 @@ mod tests {
                 yesterday("opus", "alpha", 10.0),
             ],
         );
-        let text = screen(&app, 100, 30);
+        let text = screen(&app, 130, 30);
         for want in [
             "today",
             "yesterday",
@@ -962,6 +1130,37 @@ mod tests {
         }
         // Messages: 2 now against 1 before, tokens 3.0K against 1.5K.
         assert!(text.contains("+100%") && text.contains("+1.5K"), "{text}");
+    }
+
+    #[test]
+    fn the_folded_comparison_drops_the_previous_values_before_it_gives_up() {
+        let app = app_for(
+            Range::Today,
+            &[
+                event("opus", "alpha", 12.5),
+                yesterday("opus", "alpha", 10.0),
+            ],
+        );
+        let d = app.data.as_ref().unwrap();
+        let pal = app.theme.palette(app.depth);
+        let text = |room: usize| {
+            folded_metric_line(d, &pal, room).map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+        };
+
+        let full = text(200).unwrap();
+        let short = text(full.chars().count() - 1).unwrap();
+
+        assert!(full.contains(" vs "), "{full}");
+        assert!(
+            !short.contains(" vs ") && short.contains("+25.0%"),
+            "{short}"
+        );
+        assert_eq!(text(short.chars().count() - 1), None);
     }
 
     #[test]
@@ -1030,7 +1229,7 @@ mod tests {
                 yesterday("claude-haiku-5", "alpha", 0.5),
             ],
         );
-        let text = screen(&app, 100, 30);
+        let text = screen(&app, 100, 40);
         let rows: Vec<&str> = text
             .lines()
             .filter_map(|l| l.split('\u{2502}').nth(1))
@@ -1069,10 +1268,9 @@ mod tests {
     #[test]
     fn the_layout_tiles_the_screen_without_overlap() {
         let area = Rect::new(0, 0, 100, 30);
-        let p = layout(area);
+        let p = layout(area, HDR);
         let rects = [
-            p.header, p.budget, p.spend, p.tokens, p.models, p.projects, p.live, p.sessions,
-            p.footer,
+            p.header, p.spend, p.tokens, p.models, p.projects, p.live, p.sessions, p.footer,
         ];
         let cells: u32 = rects
             .iter()
@@ -1445,21 +1643,21 @@ mod tests {
 
     #[test]
     fn the_classic_placement_matches_the_old_fixed_layout() {
-        for (w, h) in [(80, 24), (100, 30), (120, 36), (160, 50)] {
+        for (w, h) in [(120, 36), (100, 40), (160, 50)] {
             let area = Rect::new(0, 0, w, h);
-            let old = layout(area);
+            let old = layout(area, HDR);
 
             let classic = Layout::classic().tabs[0].panels.clone();
-            let placed = place(area, &classic, None, false);
+            let placed = place(area, HDR, &classic, None, false);
 
-            let rect = |id| panel_rect(area, &classic, None, false, id).unwrap();
+            let rect = |id| panel_rect(area, HDR, &classic, None, false, id).unwrap();
             assert_eq!(rect(PanelId::Spend), old.spend, "{w}x{h}");
             assert_eq!(rect(PanelId::Tokens), old.tokens, "{w}x{h}");
             assert_eq!(rect(PanelId::Models), old.models, "{w}x{h}");
             assert_eq!(rect(PanelId::Breakdown), old.projects, "{w}x{h}");
             assert_eq!(rect(PanelId::Live), old.live, "{w}x{h}");
             assert_eq!(rect(PanelId::Sessions), old.sessions, "{w}x{h}");
-            assert_eq!(placed.budget, old.budget, "{w}x{h}");
+            assert_eq!(placed.header, old.header, "{w}x{h}");
             assert_eq!(placed.footer, old.footer, "{w}x{h}");
         }
     }
@@ -1468,7 +1666,7 @@ mod tests {
     fn a_tab_with_two_panels_stacks_them_and_fills_the_body() {
         let area = Rect::new(0, 0, 100, 30);
 
-        let placed = place(area, &[PanelId::Spend, PanelId::Tokens], None, true);
+        let placed = place(area, HDR, &[PanelId::Spend, PanelId::Tokens], None, true);
 
         let (_, top) = placed.panels[0];
         let (_, bottom) = placed.panels[1];
@@ -1503,13 +1701,13 @@ mod tests {
     }
 
     fn assert_tiles_body(area: Rect, ids: &[PanelId], rows: Option<&[u8]>) -> Placed {
-        let placed = place(area, ids, rows, true);
+        let placed = place(area, HDR, ids, rows, true);
         let body_cells: u32 = placed
             .panels
             .iter()
             .map(|(_, r)| u32::from(r.width) * u32::from(r.height))
             .sum();
-        let body_height = placed.footer.y - placed.budget.bottom();
+        let body_height = placed.footer.y - placed.tabbar.bottom();
         assert_eq!(body_cells, u32::from(body_height) * u32::from(area.width));
         for (i, (_, a)) in placed.panels.iter().enumerate() {
             for (_, b) in &placed.panels[i + 1..] {
@@ -1534,7 +1732,7 @@ mod tests {
         assert_eq!(rect(1).y, rect(0).bottom());
         assert_eq!(rect(1).y, rect(2).y);
         assert_eq!(rect(1).width + rect(2).width, 100);
-        assert_ne!(placed.panels, place(area, &ids, None, true).panels);
+        assert_ne!(placed.panels, place(area, HDR, &ids, None, true).panels);
     }
 
     #[test]
@@ -1542,8 +1740,8 @@ mod tests {
         let area = Rect::new(0, 0, 100, 30);
         let ids = [PanelId::Spend, PanelId::Tokens, PanelId::Models];
 
-        let short = place(area, &ids, Some(&[1, 1]), true);
-        let auto = place(area, &ids, None, true);
+        let short = place(area, HDR, &ids, Some(&[1, 1]), true);
+        let auto = place(area, HDR, &ids, None, true);
 
         assert_eq!(short.panels, auto.panels);
     }
@@ -1555,27 +1753,13 @@ mod tests {
         let ids = [PanelId::Spend, PanelId::Tokens, PanelId::Models];
 
         // Act
-        let rows = place(area, &ids, Some(&[1, 1, 1]), true);
-        let auto = place(area, &ids, None, true);
-        let tall = place(Rect::new(0, 0, 100, 40), &ids, Some(&[1, 1, 1]), true);
+        let rows = place(area, HDR, &ids, Some(&[1, 1, 1]), true);
+        let auto = place(area, HDR, &ids, None, true);
+        let tall = place(Rect::new(0, 0, 100, 40), HDR, &ids, Some(&[1, 1, 1]), true);
 
         // Assert
         assert_eq!(rows.panels, auto.panels);
         assert!(tall.panels.iter().all(|(_, r)| r.width == 100));
-    }
-
-    #[test]
-    fn a_budget_strip_in_a_row_leaves_the_rest_of_the_row_wide() {
-        // Arrange
-        let area = Rect::new(0, 0, 100, 40);
-        let ids = [PanelId::Budget, PanelId::Spend, PanelId::Tokens];
-
-        // Act
-        let placed = assert_tiles_body(area, &ids, Some(&[2, 1]));
-
-        // Assert
-        assert_eq!(placed.panels[0].1.width, 100);
-        assert_eq!(placed.panels[1].1.width, 100);
     }
 
     #[test]
@@ -1714,14 +1898,98 @@ mod tests {
         assert_eq!(app.focus, crate::tui::sort::Panel::Spend);
     }
 
+    /// The rows of the header box, from its top border to its bottom one.
+    fn header_box(app: &App, width: u16, height: u16) -> Vec<String> {
+        let rows = usize::from(header_height(app, width));
+        screen(app, width, height)
+            .lines()
+            .take(rows)
+            .map(str::to_string)
+            .collect()
+    }
+
     #[test]
-    fn the_numbers_tab_shows_the_budget_strip_on_a_24_row_screen() {
+    fn every_tab_draws_the_same_header_with_the_budget_right_above_the_tab_bar() {
+        for (w, h) in [(MIN_WIDTH, MIN_HEIGHT), (100, 30), (150, 44)] {
+            // Arrange
+            let mut app = tabbed_app();
+            let rows = usize::from(header_height(&app, w));
+            let mut seen: Vec<Vec<String>> = Vec::new();
+
+            for tab in 0..app.layout.tabs.len() {
+                // Act
+                app.go_tab(tab as isize);
+                let text = screen(&app, w, h);
+                let lines: Vec<&str> = text.lines().collect();
+                let header = header_box(&app, w, h);
+
+                // Assert
+                let all = header.join("\n");
+                assert!(all.contains("Spend"), "{w}x{h} tab {tab}:\n{text}");
+                assert!(all.contains("cost"), "{w}x{h} tab {tab}:\n{text}");
+                assert!(lines[rows].contains("F1"), "{w}x{h} tab {tab}:\n{text}");
+                seen.push(header);
+            }
+            assert!(seen.iter().all(|s| *s == seen[0]), "{w}x{h}");
+        }
+    }
+
+    #[test]
+    fn no_tab_body_holds_a_budget_panel() {
+        // Arrange
         let mut app = tabbed_app();
-        app.tab = 1;
+        let rows = usize::from(header_height(&app, 150));
 
-        let text = screen(&app, 100, 24);
+        for tab in 0..app.layout.tabs.len() {
+            // Act
+            app.go_tab(tab as isize);
+            let text = screen(&app, 150, 44);
+            let below_bar: String = text.lines().skip(rows + 1).collect::<Vec<_>>().join("\n");
 
-        assert!(text.contains("Budget"), "{text}");
+            // Assert
+            assert!(!below_bar.contains("No limit"), "tab {tab}:\n{text}");
+            assert!(!below_bar.contains("press b"), "tab {tab}:\n{text}");
+            assert!(app.tab_ids().iter().all(|id| id.word() != "budget"));
+        }
+    }
+
+    #[test]
+    fn the_panel_numbers_stay_as_the_keys_map_them_and_the_header_has_none() {
+        // Arrange
+        let mut app = tabbed_app();
+        app.go_tab(1);
+
+        // Act
+        let text = screen(&app, 100, 40);
+
+        // Assert
+        assert!(text.contains("\u{b3}Models"), "{text}");
+        assert!(text.contains("\u{2074}Projects"), "{text}");
+        assert!(
+            !header_box(&app, 100, 40)
+                .join("\n")
+                .contains(|c: char| "\u{b9}\u{b2}\u{b3}\u{2074}\u{2075}\u{2076}".contains(c)),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_saved_layout_with_the_budget_word_draws_like_one_without_it() {
+        // Arrange
+        let mut old = tabbed_app();
+        old.layout = Layout::from_stored(Some(
+            "Numbers=models,breakdown,budget;Sessions=live,sessions",
+        ))
+        .0;
+        let mut new = tabbed_app();
+        new.layout = Layout::parse("Numbers=models,breakdown;Sessions=live,sessions").unwrap();
+
+        // Act
+        let (a, b) = (screen(&old, 100, 30), screen(&new, 100, 30));
+
+        // Assert
+        assert_eq!(a, b);
+        assert!(a.contains("press b to set a monthly budget"), "{a}");
     }
 
     fn press(code: KeyCode) -> KeyEvent {
@@ -1781,9 +2049,9 @@ mod tests {
     }
 
     #[test]
-    fn a_tab_with_only_the_budget_leaves_the_row_keys_inert() {
+    fn a_tab_with_only_a_retired_word_leaves_the_row_keys_inert() {
         let mut app = app_with(&[event("opus", "alpha", 1.0)]);
-        app.layout = Layout::parse("Money=budget;Other=models").unwrap();
+        app.layout = Layout::parse("Money=projection;Other=models").unwrap();
         let before = app.sorts;
 
         let effect = app.key(press(KeyCode::Char('s')));
@@ -1798,7 +2066,7 @@ mod tests {
         for n in 1..=6 {
             let ids: Vec<PanelId> = ALL.iter().copied().take(n).collect();
 
-            let placed = place(area, &ids, None, true);
+            let placed = place(area, HDR, &ids, None, true);
 
             assert_eq!(placed.panels.len(), n, "{n} panels");
             for (i, (_, a)) in placed.panels.iter().enumerate() {
@@ -1871,7 +2139,7 @@ mod tests {
         assert_eq!(
             effect,
             crate::tui::app::Effect::SaveLayout(
-                "Numbers=models,breakdown,budget;Sessions=live,sessions".into()
+                "Numbers=models,breakdown;Sessions=live,sessions".into()
             )
         );
         assert_eq!(app.layout.tabs.len(), 2);
@@ -2157,10 +2425,10 @@ mod tests {
         app.key(press(KeyCode::Char('a')));
 
         // Act
-        for _ in 0..10 {
+        for _ in 0..9 {
             app.key(press(KeyCode::Char('j')));
         }
-        let text = screen(&app, 100, 30);
+        let text = screen(&app, 100, 40);
 
         // Assert
         assert!(text.contains("> breakdown.projects"), "{text}");
@@ -2249,17 +2517,19 @@ mod tests {
         // Arrange
         let area = Rect::new(0, 0, MIN_WIDTH, MIN_HEIGHT);
         let ids = eight_panels();
+        let header = header_height(&tabbed_app(), MIN_WIDTH);
 
         // Act
         let shown: Vec<(usize, usize, Option<Hidden>)> = (1..=8)
             .map(|n| {
-                let placed = place(area, &ids[..n], None, true);
+                let placed = place(area, header, &ids[..n], None, true);
                 (n, placed.panels.len(), placed.hidden)
             })
             .collect();
 
         // Assert
-        let body_rows = usize::from((MIN_HEIGHT - HEADER_HEIGHT - 2) / MIN_ROW_HEIGHT);
+        let fixed = header_height(&tabbed_app(), MIN_WIDTH) + 2;
+        let body_rows = usize::from((MIN_HEIGHT - fixed) / MIN_ROW_HEIGHT);
         assert_eq!(body_rows, 3);
         for (n, drawn, hidden) in shown {
             let expected: usize = auto_rows(n)
@@ -2272,7 +2542,7 @@ mod tests {
             if let Some(h) = hidden {
                 assert_eq!(
                     h.needs_height,
-                    MIN_HEIGHT + MIN_ROW_HEIGHT * auto_rows(n).len() as u16 - 16,
+                    fixed + MIN_ROW_HEIGHT * auto_rows(n).len() as u16,
                     "{n} panels"
                 );
             }
@@ -2283,11 +2553,11 @@ mod tests {
     fn the_screen_height_a_hidden_note_asks_for_shows_every_panel() {
         // Arrange
         let ids = eight_panels();
-        let short = place(Rect::new(0, 0, 100, 24), &ids, None, true);
+        let short = place(Rect::new(0, 0, 100, 24), HDR, &ids, None, true);
 
         // Act
         let needs = short.hidden.unwrap().needs_height;
-        let tall = place(Rect::new(0, 0, 100, needs), &ids, None, true);
+        let tall = place(Rect::new(0, 0, 100, needs), HDR, &ids, None, true);
 
         // Assert
         assert_eq!(tall.hidden, None);
@@ -2302,7 +2572,7 @@ mod tests {
         let rows = [1, 1, 1, 1, 1, 1, 1, 1];
 
         // Act
-        let placed = place(area, &ids, Some(&rows), true);
+        let placed = place(area, HDR, &ids, Some(&rows), true);
 
         // Assert
         assert_eq!(placed.panels.len(), 6);
@@ -2310,40 +2580,45 @@ mod tests {
     }
 
     #[test]
-    fn the_budget_strip_draws_on_top_wherever_it_is_listed_and_beside_eight_panels() {
+    fn the_tab_bar_sits_right_under_the_header_beside_eight_panels() {
         // Arrange
         let area = Rect::new(0, 0, 150, 44);
-        let mut ids = eight_panels();
-        ids.push(PanelId::Budget);
-        let mut first = vec![PanelId::Budget];
-        first.extend(eight_panels());
 
         // Act
-        let last = place(area, &ids, None, true);
-        let top = place(area, &first, None, true);
+        let placed = place(area, HDR, &eight_panels(), None, true);
 
         // Assert
-        assert_eq!(last.budget.height, budget::HEIGHT);
-        assert_eq!(last.budget.y, last.tabbar.bottom());
-        assert_eq!(last.budget.width, area.width);
-        assert_eq!(last.panels, top.panels);
-        assert_eq!(last.panels.len(), 8);
-        assert_eq!(last.hidden, None);
+        assert_eq!(placed.header, Rect::new(0, 0, 150, HDR));
+        assert_eq!(placed.tabbar.y, placed.header.bottom());
+        assert_eq!(placed.panels.len(), 8);
+        assert_eq!(placed.hidden, None);
     }
 
     #[test]
-    fn a_screen_too_short_for_the_strip_leaves_it_out_and_keeps_the_panels() {
+    fn the_header_is_as_tall_on_every_tab_and_on_the_smallest_screen() {
         // Arrange
-        let ids = [PanelId::Budget, PanelId::Models, PanelId::Breakdown];
+        let mut app = tabbed_app();
 
-        // Act
-        let short = place(Rect::new(0, 0, 100, 23), &ids, None, true);
-        let enough = place(Rect::new(0, 0, 100, 24), &ids, None, true);
+        for (w, h) in [(MIN_WIDTH, MIN_HEIGHT), (100, 30), (150, 44)] {
+            let area = Rect::new(0, 0, w, h);
+            let want = header_height(&app, w);
+            for tab in 0..app.layout.tabs.len() {
+                app.go_tab(tab as isize);
 
-        // Assert
-        assert_eq!(short.budget.height, 0);
-        assert_eq!(enough.budget.height, budget::HEIGHT);
-        assert_eq!(short.panels.len(), 2);
+                // Act
+                let t = &app.layout.tabs[tab];
+                let placed = place(
+                    area,
+                    header_height(&app, w),
+                    &t.panels,
+                    t.rows.as_deref(),
+                    true,
+                );
+
+                // Assert
+                assert_eq!(placed.header, Rect::new(0, 0, w, want), "{w}x{h} tab {tab}");
+            }
+        }
     }
 
     #[test]
@@ -2356,13 +2631,12 @@ mod tests {
 
         // Act
         let short = screen(&app, 100, 24);
+        let wide = screen(&app, 150, 24);
         let tall = screen(&app, 100, 44);
 
         // Assert
-        assert!(
-            short.contains("2 panels hidden, 28 rows show all"),
-            "{short}"
-        );
+        assert!(short.contains("2 hidden, 28 rows"), "{short}");
+        assert!(wide.contains("2 panels hidden, 28 rows show all"), "{wide}");
         assert!(!tall.contains("hidden"), "{tall}");
     }
 
@@ -2374,8 +2648,8 @@ mod tests {
         let without = [PanelId::Models, PanelId::Breakdown];
 
         // Act
-        let old = place(area, &with, None, true);
-        let new = place(area, &without, None, true);
+        let old = place(area, HDR, &with, None, true);
+        let new = place(area, HDR, &without, None, true);
 
         // Assert
         assert_eq!(old.panels, new.panels);
@@ -2383,19 +2657,18 @@ mod tests {
     }
 
     #[test]
-    fn the_numbers_tab_stacks_models_over_breakdown_under_the_strip() {
+    fn the_numbers_tab_stacks_models_over_breakdown_under_the_tab_bar() {
         // Arrange
         let area = Rect::new(0, 0, 100, 30);
         let ids = Layout::default().tabs[1].panels.clone();
 
         // Act
-        let placed = place(area, &ids, None, true);
+        let placed = place(area, HDR, &ids, None, true);
 
         // Assert
         let rect = |id| placed.panels.iter().find(|(p, _)| *p == id).unwrap().1;
         let (models, breakdown) = (rect(PanelId::Models), rect(PanelId::Breakdown));
-        assert_eq!(placed.budget.height, budget::HEIGHT);
-        assert_eq!(models.y, placed.budget.bottom());
+        assert_eq!(models.y, placed.tabbar.bottom());
         assert_eq!(breakdown.y, models.bottom());
         assert_eq!((models.width, breakdown.width), (100, 100));
         assert_eq!(placed.panels.len(), 2);

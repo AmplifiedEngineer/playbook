@@ -1,0 +1,7 @@
+╭─┤📺  Agent Budget Dashboard├──┤UTC├─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│last 30 days Aug 5 to Sep 3, 2026  (no previous period to compare)                                                                                  │
+│cost          $20.27 │ Weekly   u █████████████████│██████░░░░░░░░░░░░░░░   61%  $3.05 of $5.00  ▲ hits it in 1d 13h (24h)  resets in 3d (Mon 09-07)│
+│tokens        618.8K │ Weekly     left $1.95    pace +17pt   allow $0.02/h $0.50/d   proj $6.95    resets Mon 09-07 00:00 UTC  manual, local        │
+│messages          26 │ Spend    h this week $3.05 █████░░░░░  last week $6.21 ██████████  -51%  avg $0.04/h $0.99/d                                 │
+│                     │ 5 hour and weekly windows: not on this plan  (i: details)                                                                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

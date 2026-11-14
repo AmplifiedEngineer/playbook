@@ -1,0 +1,7 @@
+╭─┤Agent Budget Dashboard├──┤UTC├──────────────────────────────────────────────╮
+│this month Sep 1 to Sep 3  vs  last month Aug 1 to Aug 3  (same span 2d 1h)   │
+│cost $3.05 vs $0.00 new  tokens 95.2K vs 0 new  msgs 4 vs 0 new               │
+│5 hour   m ######|#--------   50%  ! hits it in 2h 0m  resets in 3h 0m (04:46)│
+│7 day    m #####-|---------   30%  + ok  safe  resets in 4d (Mon 09-07)       │
+│Spend    h this month $3.05 ##########  last month $0.00 ----------  new      │
+╰──────────────────────────────────────────────────────────┤+1 more in --json├─╯
