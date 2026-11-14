@@ -177,15 +177,15 @@ mod tests {
 
     #[test]
     fn an_unnamed_email_account_shows_only_its_domain_name() {
-        assert_eq!(label("igor@getdigital.com.br"), "@getdigital");
+        assert_eq!(label("dev@example.com.br"), "@example");
         assert_eq!(label("a@example.com"), "@example");
-        assert_eq!(label("igor@.com"), "@com");
-        assert_eq!(label("igor@"), "@");
+        assert_eq!(label("dev@.com"), "@com");
+        assert_eq!(label("dev@"), "@");
     }
 
     #[test]
     fn named_plain_and_unknown_accounts_show_unchanged() {
-        assert_eq!(header_label("igor@getdigital.com.br", "Work", &[]), "Work");
+        assert_eq!(header_label("dev@example.com.br", "Work", &[]), "Work");
         assert_eq!(label("home"), "home");
         assert_eq!(label(UNKNOWN_ACCOUNT), UNKNOWN_ACCOUNT);
         assert_eq!(label("@x.com"), "@x.com");
@@ -205,13 +205,14 @@ mod tests {
 
     #[test]
     fn unnamed_emails_on_one_domain_get_their_place() {
-        let choices: Vec<(String, String)> = ["igor@gmail.com", "ana@gmail.com", "bo@work.io"]
-            .map(|k| (k.to_string(), k.to_string()))
-            .to_vec();
+        let choices: Vec<(String, String)> =
+            ["dev@example.com", "ana@example.com", "bo@work.invalid"]
+                .map(|k| (k.to_string(), k.to_string()))
+                .to_vec();
         let shown = |key: &str| header_label(key, key, &choices);
-        assert_eq!(shown("igor@gmail.com"), "@gmail (1)");
-        assert_eq!(shown("ana@gmail.com"), "@gmail (2)");
-        assert_eq!(shown("bo@work.io"), "@work");
+        assert_eq!(shown("dev@example.com"), "@example (1)");
+        assert_eq!(shown("ana@example.com"), "@example (2)");
+        assert_eq!(shown("bo@work.invalid"), "@work");
     }
 
     #[test]

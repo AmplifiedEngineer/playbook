@@ -644,7 +644,7 @@ mod tests {
     fn an_unnamed_email_account_carries_its_full_and_its_masked_header_name() {
         let conn = two_accounts();
         let mut e = event(NOW - 50, "claude-opus-5", "alpha", 1.0);
-        e.account = "igor@getdigital.com.br".to_string();
+        e.account = "dev@example.com.br".to_string();
         db::upsert_usage_event(&conn, &e).unwrap();
         let d = load(
             &conn,
@@ -655,10 +655,10 @@ mod tests {
             NOW,
         )
         .unwrap();
-        assert_eq!(d.accounts.shown, "igor@getdigital.com.br");
-        assert_eq!(d.accounts.masked, "@getdigital");
-        assert_eq!(d.accounts.label(false), "igor@getdigital.com.br");
-        assert_eq!(d.accounts.label(true), "@getdigital");
+        assert_eq!(d.accounts.shown, "dev@example.com.br");
+        assert_eq!(d.accounts.masked, "@example");
+        assert_eq!(d.accounts.label(false), "dev@example.com.br");
+        assert_eq!(d.accounts.label(true), "@example");
     }
 
     /// One event and one telemetry request per machine and account pair. The

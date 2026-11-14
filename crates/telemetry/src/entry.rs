@@ -562,6 +562,30 @@ mod tests {
     }
 
     #[test]
+    fn the_mask_key_cuts_the_account_line_and_the_account_table_of_the_summary() {
+        // Arrange
+        let p = two_account_store("entry-account-mask");
+        let data = crate::config::root(&crate::host::home_dir()).join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let conn = playbook_store::Connection::open(playbook_data::config::db_in(&data)).unwrap();
+        conn.execute_batch(playbook_data::config::SCHEMA_SQL)
+            .unwrap();
+        conn.execute(
+            "INSERT INTO config VALUES ('global','',?1,'true',1)",
+            ["usage.maskAccount"],
+        )
+        .unwrap();
+
+        // Act
+        let text = summary_text(&p, Some("work@x.io")).unwrap();
+
+        // Assert
+        assert!(text.contains("Account: @x\n"), "{text}");
+        assert!(!text.contains("work@x.io"), "{text}");
+        assert!(text.matches("@x").count() >= 2, "{text}");
+    }
+
+    #[test]
     fn one_account_gets_its_own_json_totals_and_names_its_key() {
         // Arrange
         let p = two_account_store("entry-account-json");
