@@ -100,3 +100,108 @@ fn this_pr_review_reads_the_digest_and_drops_findings_fixed_above() {
     );
     assert!(text.contains("`over_line_budget`"), "no per-PR budget");
 }
+
+#[test]
+fn an_over_budget_stack_is_reviewed_one_pr_at_a_time() {
+    // Arrange
+    let text = read("skills/grounding-review/references/stack-review.md");
+    let start = text.find("## 2. Choose the scope").expect("no section 2");
+    let end = text.find("## 2b.").expect("no section 2b");
+    let paragraphs: Vec<&str> = text[start..end].split("\n\n").collect();
+    let holding = |anchor: &str| -> &str {
+        paragraphs
+            .iter()
+            .copied()
+            .find(|p| p.contains(anchor))
+            .unwrap_or_else(|| panic!("no section 2 paragraph holds `{anchor}`"))
+    };
+    let must_have = |paragraph: &str, needles: &[&str]| {
+        for needle in needles {
+            assert!(paragraph.contains(needle), "lacks `{needle}`: {paragraph}");
+        }
+    };
+
+    // Act
+    let over = holding("`over_budget` is true");
+    let far = holding("`far_over_budget` is also true");
+    let the_loop = holding("tear down any worktree from Step 1");
+
+    // Assert
+    must_have(
+        over,
+        &["one PR at a time, bottom first", "This is not a question"],
+    );
+    assert!(!over.contains('?'), "over-budget rule asks a question");
+    assert!(
+        !over
+            .split(|c: char| !c.is_alphabetic())
+            .any(|w| w.eq_ignore_ascii_case("ask")),
+        "over-budget rule asks"
+    );
+    must_have(
+        far,
+        &[
+            "ask once before starting",
+            "far_over_budget_reasons",
+            "pr stack --json",
+            "open_count",
+            "stackMaxPrs",
+            "open_lines",
+            "stackMaxLines",
+            "over twice",
+            "`stackMaxLines` times `open_count`",
+            "at least 2 PRs are open",
+            "continue one PR at a time, this PR only, or stop",
+            "Assumed: this PR only (stack far over budget).",
+        ],
+    );
+    must_have(
+        the_loop,
+        &[
+            "--this-pr",
+            "its own posting step",
+            "no longer open",
+            "the loop overrides the pass's stop",
+            "the original arguments other than the PR number",
+            "skip the rest of the pass",
+        ],
+    );
+    assert!(!text.contains("continue anyway"), "old rule remains");
+}
+
+fn repo_line(rel: &str, marker: &str) -> String {
+    let path = PathBuf::from(env!("PLAYBOOK_REPO_ROOT")).join(rel);
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    text.lines()
+        .find(|l| l.contains(marker))
+        .unwrap_or_else(|| panic!("{rel}: no line with {marker}"))
+        .to_string()
+}
+
+#[test]
+fn the_docs_state_the_two_tier_stack_budget() {
+    // Arrange
+    let guide = repo_line("docs/guides/02-review-and-pr-flow.md", "**Cost guard.**");
+    let lines_row = repo_line("docs/reference/config-keys.md", "| `review.stackMaxLines`");
+    let prs_row = repo_line("docs/reference/config-keys.md", "| `review.stackMaxPrs`");
+
+    // Act
+    let checks = [
+        (&guide, "one PR at a time"),
+        (&guide, "more than twice"),
+        (&guide, "with no question"),
+        (&guide, "at least 2 open PRs that average more lines"),
+        (
+            &lines_row,
+            "at least 2 open PRs that average more than this",
+        ),
+        (&lines_row, "for each open PR"),
+        (&prs_row, "one PR at a time"),
+        (&prs_row, "more than twice"),
+    ];
+
+    // Assert
+    for (line, needle) in checks {
+        assert!(line.contains(needle), "missing {needle:?} in: {line}");
+    }
+}
