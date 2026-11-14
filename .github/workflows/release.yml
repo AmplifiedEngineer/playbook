@@ -22,6 +22,7 @@
 #   publish  build the five targets, attach the assets to a draft release,
 #            write SHA256SUMS, attest, publish the release as the latest,
 #            then download it again and check it.
+#   notes    add a model-written summary above the list in the release body.
 # Then `downstream` opens release/vX.Y.Z in amplifiedengineer/homebrew-tap and
 # amplifiedengineer/marketplace and waits for their own vX.Y.Z releases.
 # Then `nix` moves flake.nix in amplifiedengineer/nix to the release with a
@@ -772,6 +773,51 @@ jobs:
           set -euo pipefail
           gh release edit "$TAG" --draft=false --latest
           echo "Published: $(gh release view "$TAG" --json url --jq .url)" >> "$GITHUB_STEP_SUMMARY"
+
+  # Writes a plain-English summary above the commit list in the release body,
+  # with a model. It never blocks the release: nothing needs it and a failure
+  # keeps the commit list. It skips when the release-notes environment has no
+  # ANTHROPIC_API_KEY secret. Only this job sees the key and reaches the API.
+  notes:
+    name: notes
+    needs: [plan, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    environment: release-notes
+    runs-on: ubuntu-latest
+    timeout-minutes: 30 # the request timeout times its tries
+    continue-on-error: true
+    permissions:
+      contents: write # gh release edit rewrites the release body
+      pull-requests: read # the summary reads PR titles and bodies
+      attestations: read # gh attestation verify reads the attestations
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            tmaproduction.blob.core.windows.net:443
+            tuf-repo.github.com:443
+            tuf-repo-cdn.sigstore.dev:443
+            api.anthropic.com:443
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.tag }}
+          persist-credentials: false
+
+      - name: Write the release summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          SOURCE_REF: refs/heads/${{ github.event.repository.default_branch }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: scripts/release-summary.sh apply "$TAG" "$VERSION"
 
   # Downloads the published release the way users do and checks it.
   verify:

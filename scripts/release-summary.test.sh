@@ -557,4 +557,66 @@ new_case; ok_response "$ANSWER"
 run_apply FAKE_GH_EDIT_RC=1
 want_apply_failure "apply edit" "release edit"
 
+# W. Static check of the `notes` job in release.yml.
+WORKFLOW_DIR="$ROOT/.github/workflows"
+NOTES_HOSTS='api.github.com:443 github.com:443 objects.githubusercontent.com:443 release-assets.githubusercontent.com:443 tmaproduction.blob.core.windows.net:443 tuf-repo.github.com:443 tuf-repo-cdn.sigstore.dev:443 api.anthropic.com:443'
+
+# Prints the lines of one job of a workflow file, the job line included.
+job_block() {
+  awk -v job="  $2:" '
+    /^jobs:/ { injobs = 1; next }
+    injobs && /^  [A-Za-z0-9_-]+:/ { on = ($0 == job) }
+    on { print }
+  ' "$1"
+}
+
+# Prints one line per problem in the `notes` job of the workflow file $1, and
+# in the other workflow files under $2 for the secret.
+notes_job_gaps() {
+  local file="$1" dir="$2" block host f job
+  block="$(job_block "$file" notes)"
+  [ -n "$block" ] || { echo "no notes job"; return; }
+  for want in \
+    'environment: release-notes' \
+    'continue-on-error: true' \
+    'needs: [plan, publish]' \
+    "if: \${{ !cancelled() && needs.publish.result == 'success' }}" \
+    'attestations: read' \
+    'scripts/release-summary.sh apply'; do
+    grep -qF -- "$want" <<<"$block" || echo "notes job lacks: $want"
+  done
+  for host in $NOTES_HOSTS; do
+    grep -qE "^ +$host *$" <<<"$block" || echo "notes job does not allow $host"
+  done
+  grep -qF 'secrets.ANTHROPIC_API_KEY' <<<"$block" || echo "notes job does not read secrets.ANTHROPIC_API_KEY"
+  ! grep -qF 'id-token' <<<"$block" || echo "notes job has id-token"
+  for f in "$dir"/*.yml "$dir"/*.yaml; do
+    [ -f "$f" ] || continue
+    while read -r job; do
+      [ "$job" = notes ] && [ "$f" = "$file" ] && continue
+      ! job_block "$f" "$job" | grep -qF 'secrets.ANTHROPIC_API_KEY' \
+        || echo "$(basename "$f"): job $job reads secrets.ANTHROPIC_API_KEY"
+    done < <(awk '/^jobs:/ { j = 1; next } j && /^  [A-Za-z0-9_-]+:/ { sub(/:$/, "", $1); print $1 }' "$f")
+  done
+}
+
+# W1. A copy of the job without continue-on-error must be caught.
+mkdir "$TMP/wf"
+grep -v 'continue-on-error: true' "$WORKFLOW_DIR/release.yml" > "$TMP/wf/release.yml"
+gaps="$(notes_job_gaps "$TMP/wf/release.yml" "$TMP/wf")"
+grep -qF 'notes job lacks: continue-on-error: true' <<<"$gaps" || fail "workflow check did not catch a missing continue-on-error: $gaps"
+
+# W1b. A second job that reads the secret must be caught.
+mkdir "$TMP/wf2"
+{
+  cat "$WORKFLOW_DIR/release.yml"
+  printf '  leaky:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo "${{ secrets.ANTHROPIC_API_KEY }}"\n'
+} > "$TMP/wf2/release.yml"
+gaps="$(notes_job_gaps "$TMP/wf2/release.yml" "$TMP/wf2")"
+grep -qF 'release.yml: job leaky reads secrets.ANTHROPIC_API_KEY' <<<"$gaps" || fail "workflow check did not catch a second job reading the secret: $gaps"
+
+# W2. The real workflow passes.
+gaps="$(notes_job_gaps "$WORKFLOW_DIR/release.yml" "$WORKFLOW_DIR")"
+[ -z "$gaps" ] || fail "release.yml notes job: $gaps"
+
 echo "release-summary.test.sh: all cases passed"
