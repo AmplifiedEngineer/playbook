@@ -191,7 +191,10 @@ fn the_docs_state_the_two_tier_stack_budget() {
         (&guide, "more than twice"),
         (&guide, "with no question"),
         (&guide, "at least 2 open PRs that average more lines"),
-        (&lines_row, "at least 2 open PRs that average more than this"),
+        (
+            &lines_row,
+            "at least 2 open PRs that average more than this",
+        ),
         (&lines_row, "for each open PR"),
         (&prs_row, "one PR at a time"),
         (&prs_row, "more than twice"),
