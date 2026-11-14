@@ -45,7 +45,7 @@ fn env(tag: &str) -> Env {
     let home = root.join("home");
     let work = root.join("proj");
     let bin = root.join("bin");
-    for d in [&home, &work, &bin] {
+    for d in [&home, &work, &bin, &root.join("tmp")] {
         fs::create_dir_all(d).unwrap();
     }
     make_exec(
@@ -57,6 +57,7 @@ fn env(tag: &str) -> Env {
     let seeded = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .arg("migrate")
         .env("HOME", &home)
+        .env("TMPDIR", root.join("tmp"))
         .output()
         .expect("run playbook migrate");
     assert!(seeded.status.success(), "{seeded:?}");
@@ -119,6 +120,10 @@ impl Env {
             .current_dir(&self.work)
             .env("PWD", &self.work)
             .env("HOME", &self.home)
+            // A launch scans the temp dir for old variants folders. Point it at
+            // an empty dir so a crowded real `$TMPDIR` (a macOS one can hold a
+            // million entries) cannot make every launch take minutes.
+            .env("TMPDIR", self.root.join("tmp"))
             .env("PATH", self.path())
             .env_remove("CLAUDE_CODE_DISABLE_AUTO_MEMORY")
             .env_remove("CLAUDE_CODE_EFFORT_LEVEL")
@@ -902,9 +907,11 @@ fn a_leftover_variants_folder_of_a_dead_session_is_removed_on_launch() {
     let old = tmp.join("playbook-variants-4000000");
     fs::create_dir_all(old.join("agents")).unwrap();
     fs::write(old.join("agents/reviewer-low.md"), "x").unwrap();
-    let out = e.launch_with(&["--"], &["fresh"], &[("TMPDIR", tmp.to_str().unwrap())]);
+    // No TMPDIR override here: the harness default must already be `tmp`, or a
+    // crowded real temp dir would slow every launch in this file.
+    let out = e.launch(&["fresh"]);
     assert!(out.status.success(), "{out:?}");
-    assert!(!old.exists(), "the leftover folder should be gone");
+    assert!(!old.exists(), "the harness TMPDIR should be the empty tmp dir");
 }
 
 #[test]
