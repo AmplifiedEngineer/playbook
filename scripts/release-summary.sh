@@ -34,12 +34,17 @@ API_URL=https://api.anthropic.com/v1/messages
 PROMPT_FILE=scripts/release-summary.prompt.md
 NOTES_SCRIPT=scripts/release-notes.sh
 REPO="${GITHUB_REPOSITORY:-amplifiedengineer/playbook}"
+PLAYBOOK_BIN="${PLAYBOOK_BIN:-playbook}"
+MAX_ATTEMPTS=2
 
 EXIT_FAIL=1
 EXIT_SKIP=9
+EXIT_USAGE=2
 HTTP_OK=200
 STOP_END_TURN=end_turn
 LIST_HEADING="### All changes"
+FIRST_HEADING="### Summary"
+ALLOWED_HEADINGS=("### Summary" "### Breaking changes" "### New features" "### Fixes")
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -112,14 +117,73 @@ call_api() {
 
 # Prints one finding per line for $1 and returns non-zero when it fails.
 check_summary() {
-  if ! grep -q '[^[:space:]]' "$1"; then
+  local file="$1" first heading allowed ok bare url
+  local found=0
+  if ! grep -q '[^[:space:]]' "$file"; then
     echo "the answer is blank"
     return 1
   fi
+
+  first="$(grep -m1 '[^[:space:]]' "$file")"
+  if [ "$first" != "$FIRST_HEADING" ]; then
+    echo "the first line must be '$FIRST_HEADING'"
+    found=1
+  fi
+
+  while IFS= read -r heading; do
+    ok=0
+    for allowed in "${ALLOWED_HEADINGS[@]}"; do
+      [ "$heading" = "$allowed" ] && ok=1
+    done
+    if [ "$ok" -eq 0 ]; then
+      echo "the heading '$heading' is not allowed; use only: ${ALLOWED_HEADINGS[*]}"
+      found=1
+    fi
+  done < <(grep -E '^#{1,6}( |$)' "$file")
+
+  # Inline code spans may hold <, ![ and @, so they are cut out first.
+  bare="$(sed 's/`[^`]*`//g' "$file")"
+  if printf '%s\n' "$bare" | grep -qE '<[A-Za-z/!]'; then
+    echo "raw HTML is not allowed outside code spans"
+    found=1
+  fi
+  if printf '%s\n' "$bare" | grep -qF '!['; then
+    echo "images are not allowed"
+    found=1
+  fi
+  if printf '%s\n' "$bare" | grep -qF '@'; then
+    echo "an @ mention is not allowed outside code spans"
+    found=1
+  fi
+
+  while IFS= read -r url; do
+    case "$(printf '%s' "$url" | tr '[:upper:]' '[:lower:]')" in
+      "https://github.com/$(printf '%s' "$REPO" | tr '[:upper:]' '[:lower:]')/"*) ;;
+      *) echo "the link '$url' does not point into https://github.com/$REPO/"; found=1 ;;
+    esac
+  done < <(grep -oE 'https?://[^][:space:])>"]+' "$file")
+
+  if ! env -u ANTHROPIC_API_KEY "$PLAYBOOK_BIN" prose check --strict "$file"; then
+    found=1
+  fi
+  return "$found"
+}
+
+# Adds the first answer and the findings to $WORK/request.json, so the model
+# writes the whole section again.
+build_retry_request() {
+  local findings="$1" answer
+  answer="$(cat "$WORK/summary.md")"
+  jq --arg answer "$answer" --arg findings "$findings" \
+    '.messages += [{role: "assistant", content: $answer},
+      {role: "user", content: ("The section broke these rules:\n" + $findings
+        + "\nWrite the whole section again and fix every one.")}]' \
+    "$WORK/request.json" > "$WORK/request.next.json"
+  mv "$WORK/request.next.json" "$WORK/request.json"
 }
 
 body() {
-  local notes findings
+  local notes findings attempt
   notes="$(from_caller "${1:?usage: release-summary.sh body <release-notes.json>}")"
   if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
     echo "::notice::release summary skipped: ANTHROPIC_API_KEY is empty." >&2
@@ -129,8 +193,14 @@ body() {
 
   gather_pulls "$notes"
   build_request "$notes"
-  call_api
-  findings="$(check_summary "$WORK/summary.md")" || die "$findings"
+  attempt=1
+  while :; do
+    call_api
+    findings="$(check_summary "$WORK/summary.md")" && break
+    [ "$attempt" -lt "$MAX_ATTEMPTS" ] || die "the summary still breaks the rules after $attempt attempts: $(echo "$findings" | tr '\n' ' ')"
+    build_retry_request "$findings"
+    attempt=$((attempt + 1))
+  done
 
   GITHUB_REPOSITORY="$REPO" bash "$NOTES_SCRIPT" markdown "$notes" > "$WORK/list.md" \
     || die "could not build the commit list."
@@ -145,5 +215,5 @@ body() {
 
 case "${1:-}" in
   body) body "${2:-}" ;;
-  *) echo "usage: release-summary.sh body <release-notes.json>" >&2; exit 2 ;;
+  *) echo "usage: release-summary.sh body <release-notes.json>" >&2; exit "$EXIT_USAGE" ;;
 esac
