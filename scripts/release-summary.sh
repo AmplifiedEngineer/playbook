@@ -54,7 +54,7 @@ HTTP_OK=200
 STOP_END_TURN=end_turn
 LIST_HEADING="### All changes"
 FIRST_HEADING="### Summary"
-ALLOWED_HEADINGS=("### Summary" "### Breaking changes" "### New features" "### Fixes")
+ALLOWED_HEADINGS=("$FIRST_HEADING" "### Breaking changes" "### New features" "### Fixes")
 
 NOTES_ASSET=release-notes.json
 BINARY_ASSET_PREFIX=playbook-
@@ -104,9 +104,10 @@ build_request() {
   local notes="$1"
   {
     echo "<release>"
+    # \u003c is valid JSON for <, so PR text cannot close the tag early.
     jq -n --arg repo "$REPO" --slurpfile notes "$notes" --slurpfile pulls "$WORK/pulls.ndjson" \
       '{repo: $repo, version: $notes[0].version, previous_tag: $notes[0].previous_tag,
-        notes: $notes[0], pulls: $pulls}'
+        notes: $notes[0], pulls: $pulls}' | sed 's/</\\u003c/g'
     printf '</release>'
   } > "$WORK/user.txt"
   jq -n --rawfile system "$PROMPT_FILE" --rawfile content "$WORK/user.txt" \
@@ -138,7 +139,7 @@ call_api() {
 
 # Prints one finding per line for $1 and returns non-zero when it fails.
 check_summary() {
-  local file="$1" first heading allowed ok bare url
+  local file="$1" first heading allowed ok bare url lower prefix
   local found=0
   if ! grep -q '[^[:space:]]' "$file"; then
     echo "the answer is blank"
@@ -177,12 +178,17 @@ check_summary() {
     found=1
   fi
 
+  # Every absolute, protocol-relative or www. target must sit under the repo.
+  prefix="$(printf 'https://github.com/%s/' "$REPO" | tr '[:upper:]' '[:lower:]')"
   while IFS= read -r url; do
-    case "$(printf '%s' "$url" | tr '[:upper:]' '[:lower:]')" in
-      "https://github.com/$(printf '%s' "$REPO" | tr '[:upper:]' '[:lower:]')/"*) ;;
-      *) echo "the link '$url' does not point into https://github.com/$REPO/"; found=1 ;;
+    lower="$(printf '%s' "$url" | tr '[:upper:]' '[:lower:]')"
+    case "$lower" in
+      *"/../"*) ;;
+      "$prefix"*) continue ;;
     esac
-  done < <(grep -oE 'https?://[^][:space:])>"]+' "$file")
+    echo "the link '$url' does not point into https://github.com/$REPO/ or has a '/../' in it"
+    found=1
+  done < <(grep -oEi '(https?:)?//[^][:space:])>"]+|www\.[^][:space:])>"]+' "$file")
 
   if ! env -u ANTHROPIC_API_KEY "$PLAYBOOK_BIN" prose check --strict "$file"; then
     found=1
@@ -270,6 +276,7 @@ apply() {
   done
   chmod +x "$binary"
 
+  # A child process, because die and the skip path exit the whole process.
   PLAYBOOK_BIN="$binary" bash "$(from_caller "$SELF")" body "$dir/$NOTES_ASSET" > "$dir/body.md" || rc=$?
   case "$rc" in
     "$EXIT_OK")

@@ -43,7 +43,7 @@ playbook 0.43.0 shortens the command names and merges the two review commands in
 
 ### Breaking changes
 
-- `/playbook:quick-review` and `/playbook:deep-review` are gone. Use `/playbook:review`. Pass `--quick` or `--deep` to skip the question. ([#1759](https://github.com/amplifiedengineer/playbook/pull/1759))
+- `/playbook:quick-review` and `/playbook:deep-review` are gone. What to do: use `/playbook:review`, and pass `--quick` or `--deep` to skip the question. ([#1759](https://github.com/amplifiedengineer/playbook/pull/1759))
 - `/playbook:commit-and-push` is now `/playbook:commit`. What to do: update saved prompts and scripts that call the old name. ([#1750](https://github.com/amplifiedengineer/playbook/pull/1750))
 
 ### New features
