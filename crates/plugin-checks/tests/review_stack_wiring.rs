@@ -164,3 +164,34 @@ fn an_over_budget_stack_is_reviewed_one_pr_at_a_time() {
     );
     assert!(!text.contains("continue anyway"), "old rule remains");
 }
+
+fn repo_line(rel: &str, marker: &str) -> String {
+    let path = PathBuf::from(env!("PLAYBOOK_REPO_ROOT")).join(rel);
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    text.lines()
+        .find(|l| l.contains(marker))
+        .unwrap_or_else(|| panic!("{rel}: no line with {marker}"))
+        .to_string()
+}
+
+#[test]
+fn the_docs_state_the_two_tier_stack_budget() {
+    // Arrange
+    let guide = repo_line("docs/guides/02-review-and-pr-flow.md", "**Cost guard.**");
+    let lines_row = repo_line("docs/reference/config-keys.md", "| `review.stackMaxLines`");
+    let prs_row = repo_line("docs/reference/config-keys.md", "| `review.stackMaxPrs`");
+
+    // Act
+    let checks = [
+        (&guide, "one PR at a time"),
+        (&guide, "more than twice"),
+        (&lines_row, "for each open PR"),
+        (&prs_row, "one PR at a time"),
+        (&prs_row, "more than twice"),
+    ];
+
+    // Assert
+    for (line, needle) in checks {
+        assert!(line.contains(needle), "missing {needle:?} in: {line}");
+    }
+}
