@@ -45,10 +45,10 @@ pub const HARD_MAX_INPUT_BYTES: u64 = 104_857_600;
 
 /// Every config key playbook resolves, in v1.
 pub const KNOWN_KEYS: &[&str] = &[
-    "autoReview.enabled",
-    "autoReview.type",
-    "autoReview.fix",
-    "autoMerge.enabled",
+    "pr.review.enabled",
+    "pr.review.type",
+    "pr.review.fix",
+    "pr.merge.enabled",
     "commit.signOff",
     "handoff.onClear",
     "pr.draft",
@@ -163,6 +163,79 @@ pub static FIXED_KEYS: LazyLock<Vec<(&'static str, Value)>> = LazyLock::new(|| {
     ]
 });
 
+/// A key that changed its name: `config get`, `set`, `import` and
+/// `apply-proposal` accept `old` and act on `new`, and a stored `old` row
+/// still applies until the `rename-config-keys` migration moves it.
+#[derive(Debug, Clone, Copy)]
+pub struct KeyRename {
+    pub old: &'static str,
+    pub new: &'static str,
+}
+
+/// Every renamed key. A rename adds one row here and renames the key in
+/// [`KNOWN_KEYS`] and its classification list.
+pub const KEY_RENAMES: &[KeyRename] = &[
+    KeyRename {
+        old: "autoReview.enabled",
+        new: "pr.review.enabled",
+    },
+    KeyRename {
+        old: "autoReview.type",
+        new: "pr.review.type",
+    },
+    KeyRename {
+        old: "autoReview.fix",
+        new: "pr.review.fix",
+    },
+    KeyRename {
+        old: "autoMerge.enabled",
+        new: "pr.merge.enabled",
+    },
+];
+
+/// The table unit tests run against, because the real one has no row that
+/// every kind of test can use.
+#[cfg(test)]
+const TEST_KEY_RENAMES: &[KeyRename] = &[KeyRename {
+    old: "legacy.draftPr",
+    new: "pr.draft",
+}];
+
+/// The rename table this build reads.
+pub fn renames() -> &'static [KeyRename] {
+    #[cfg(test)]
+    {
+        TEST_KEY_RENAMES
+    }
+    #[cfg(not(test))]
+    {
+        KEY_RENAMES
+    }
+}
+
+/// The current name of `key`: its new name when it was renamed, else `key`.
+pub fn canonical_key(key: &str) -> &str {
+    renames()
+        .iter()
+        .find(|rename| rename.old == key)
+        .map_or(key, |rename| rename.new)
+}
+
+/// The current name of `given`, or `None` when `given` is an old name and
+/// `present` says its new name is also there, so the new one wins.
+pub fn canonical_unless_shadowed(given: &str, present: impl Fn(&str) -> bool) -> Option<&str> {
+    let key = canonical_key(given);
+    (key == given || !present(key)).then_some(key)
+}
+
+/// The names `key` had before it was renamed.
+pub fn old_names(key: &str) -> impl Iterator<Item = &'static str> + '_ {
+    renames()
+        .iter()
+        .filter(move |rename| rename.new == key)
+        .map(|rename| rename.old)
+}
+
 /// Whether `key` was removed: a stored value is never read, `config set`
 /// refuses it and `config import` skips it.
 pub fn is_retired(key: &str) -> bool {
@@ -218,10 +291,10 @@ pub const SHARED_KEYS: &[&str] = &[
 /// and automation switches, and per-repo rules stay on the machine that set
 /// them. A test requires each known key in exactly one of the two lists.
 pub const LOCAL_ONLY_KEYS: &[&str] = &[
-    "autoReview.enabled",
-    "autoReview.type",
-    "autoReview.fix",
-    "autoMerge.enabled",
+    "pr.review.enabled",
+    "pr.review.type",
+    "pr.review.fix",
+    "pr.merge.enabled",
     "handoff.onClear",
     "pr.rules",
     "pr.ticketPatterns",
@@ -306,10 +379,10 @@ pub fn default_value(key: &str) -> Option<Value> {
         return Some(Value::String(String::new()));
     }
     match key {
-        "autoReview.enabled" => Some(Value::Bool(true)),
-        "autoReview.type" => Some(Value::String("auto".to_string())),
-        "autoReview.fix" => Some(Value::Bool(false)),
-        "autoMerge.enabled" => Some(Value::Bool(false)),
+        "pr.review.enabled" => Some(Value::Bool(true)),
+        "pr.review.type" => Some(Value::String("auto".to_string())),
+        "pr.review.fix" => Some(Value::Bool(false)),
+        "pr.merge.enabled" => Some(Value::Bool(false)),
         "commit.signOff" => Some(Value::Bool(true)),
         "handoff.onClear" => Some(Value::Bool(false)),
         "pr.draft" => Some(Value::Bool(true)),
@@ -368,7 +441,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         return Some(&["auto", "low", "medium", "high", "xhigh", "max"]);
     }
     match key {
-        "autoReview.type" => Some(&["quick", "deep", "auto"]),
+        "pr.review.type" => Some(&["quick", "deep", "auto"]),
         "mode" => Some(&["ask", "auto"]),
         "maxEffortLevel" => Some(&["auto", "low", "medium", "high", "xhigh", "max"]),
         "memory.source" => Some(&["both", "playbook"]),
@@ -414,10 +487,6 @@ pub fn model_override_error(key: &str, value: &str) -> Option<String> {
 /// Keys that predate the shape rule and keep their name until renamed.
 #[cfg(test)]
 const LEGACY_KEY_NAMES: &[&str] = &[
-    "autoReview.enabled",
-    "autoReview.type",
-    "autoReview.fix",
-    "autoMerge.enabled",
     "worktreeCleanup.enabled",
     "maxEffortLevel",
     "auto.agentBudgetUsd",
@@ -522,11 +591,7 @@ mod tests {
 
     #[test]
     fn the_shape_rule_rejects_camel_case_groups_and_long_leaves() {
-        for key in [
-            "reviewStack.maxLines",
-            "autoReview.enabled",
-            "maxEffortLevel",
-        ] {
+        for key in ["reviewStack.maxLines", "maxEffortLevel"] {
             // Arrange
             // Act
             let ok = follows_shape_rule(key);
@@ -818,9 +883,9 @@ mod tests {
     }
 
     #[test]
-    fn default_value_for_auto_review_enabled_is_true() {
+    fn default_value_for_pr_review_enabled_is_true() {
         // Arrange
-        let key = "autoReview.enabled";
+        let key = "pr.review.enabled";
 
         // Act
         let result = default_value(key);
@@ -830,9 +895,9 @@ mod tests {
     }
 
     #[test]
-    fn default_value_for_auto_review_type_is_auto() {
+    fn default_value_for_pr_review_type_is_auto() {
         // Arrange
-        let key = "autoReview.type";
+        let key = "pr.review.type";
 
         // Act
         let result = default_value(key);
@@ -874,9 +939,9 @@ mod tests {
     }
 
     #[test]
-    fn allowed_enum_values_for_auto_review_type_is_quick_deep_or_auto() {
+    fn allowed_enum_values_for_pr_review_type_is_quick_deep_or_auto() {
         // Arrange
-        let key = "autoReview.type";
+        let key = "pr.review.type";
 
         // Act
         let result = allowed_enum_values(key);
@@ -886,9 +951,9 @@ mod tests {
     }
 
     #[test]
-    fn allowed_enum_values_for_auto_review_enabled_is_none() {
+    fn allowed_enum_values_for_pr_review_enabled_is_none() {
         // Arrange
-        let key = "autoReview.enabled";
+        let key = "pr.review.enabled";
 
         // Act
         let result = allowed_enum_values(key);
@@ -927,8 +992,8 @@ mod tests {
     fn default_values_for_the_pr_and_commit_settings() {
         // Arrange
         let cases = [
-            ("autoReview.fix", false),
-            ("autoMerge.enabled", false),
+            ("pr.review.fix", false),
+            ("pr.merge.enabled", false),
             ("commit.signOff", true),
             ("pr.draft", true),
         ];
@@ -946,8 +1011,8 @@ mod tests {
     fn the_pr_and_commit_settings_are_known_keys_with_no_enum_constraint() {
         // Arrange
         let keys = [
-            "autoReview.fix",
-            "autoMerge.enabled",
+            "pr.review.fix",
+            "pr.merge.enabled",
             "commit.signOff",
             "pr.draft",
         ];
@@ -967,5 +1032,85 @@ mod tests {
     fn gc_enabled_is_a_boolean_defaulting_to_true() {
         assert!(KNOWN_KEYS.contains(&"gc.enabled"));
         assert_eq!(default_value("gc.enabled"), Some(Value::Bool(true)));
+    }
+
+    /// Every rename pair of the table the build under test uses.
+    fn pairs() -> Vec<(&'static str, &'static str)> {
+        renames().iter().map(|r| (r.old, r.new)).collect()
+    }
+
+    #[test]
+    fn every_rename_maps_a_retired_name_to_a_known_one() {
+        // Arrange
+        let all: Vec<&KeyRename> = KEY_RENAMES.iter().chain(renames()).collect();
+
+        for row in all {
+            // Act
+            let old_known = KNOWN_KEYS.contains(&row.old);
+            let new_known = KNOWN_KEYS.contains(&row.new);
+            let old_listed = SHARED_KEYS.contains(&row.old) || LOCAL_ONLY_KEYS.contains(&row.old);
+
+            // Assert
+            assert!(!old_known, "{} must not stay a known key", row.old);
+            assert!(!old_listed, "{} must not stay classified", row.old);
+            assert!(!is_retired(row.old), "{} is renamed, not retired", row.old);
+            if KEY_RENAMES.iter().any(|r| r.old == row.old) {
+                assert!(new_known, "{} must be a known key", row.new);
+            }
+        }
+    }
+
+    #[test]
+    fn no_rename_chains_or_repeats_an_old_name() {
+        // Arrange
+        let rows = pairs();
+
+        for (index, (old, new)) in rows.iter().enumerate() {
+            // Act
+            let chained = rows.iter().any(|(other_old, _)| other_old == new);
+            let repeated = rows[index + 1..].iter().any(|(other, _)| other == old);
+
+            // Assert
+            assert!(!chained, "{new} is both a new name and an old name");
+            assert!(!repeated, "{old} appears twice");
+        }
+    }
+
+    #[test]
+    fn canonical_key_maps_each_old_name_to_its_new_name_and_leaves_others() {
+        for (old, new) in pairs() {
+            // Act
+            let from_old = canonical_key(old);
+            let from_new = canonical_key(new);
+
+            // Assert
+            assert_eq!(from_old, new);
+            assert_eq!(from_new, new);
+        }
+        assert_eq!(canonical_key("not.a.renamed.key"), "not.a.renamed.key");
+    }
+
+    #[test]
+    fn old_names_lists_every_old_name_of_a_key() {
+        for (old, new) in pairs() {
+            // Act
+            let names: Vec<&str> = old_names(new).collect();
+
+            // Assert
+            assert!(names.contains(&old), "{new}: {names:?}");
+        }
+        assert_eq!(old_names("mode").count(), 0);
+    }
+
+    #[test]
+    fn a_shared_key_is_judged_by_its_new_name_only() {
+        for (old, new) in pairs() {
+            // Act
+            let old_shared = is_shared(old);
+
+            // Assert
+            assert!(!old_shared, "{old}");
+            assert_eq!(is_shared(new), SHARED_KEYS.contains(&new), "{new}");
+        }
     }
 }
