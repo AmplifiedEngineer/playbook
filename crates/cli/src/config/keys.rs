@@ -550,6 +550,54 @@ pub fn model_override_error(key: &str, value: &str) -> Option<String> {
     ))
 }
 
+/// Keys that predate the shape rule and keep their name until renamed.
+#[cfg(test)]
+const LEGACY_KEY_NAMES: &[&str] = &[
+    "autoReview.enabled",
+    "autoReview.type",
+    "autoReview.fix",
+    "autoMerge.enabled",
+    "pr.bodyMaxChars",
+    "worktreeCleanup.enabled",
+    "worktreeCleanup.staleAfterDays",
+    "worktreeCleanup.conflictGracePeriodDays",
+    "maxEffortLevel",
+    "auto.agentBudgetUsd",
+    "auto.sessionCeilingUsd",
+    "review.stackMaxPrs",
+    "review.stackMaxLines",
+    "usage.telemetryRetentionDays",
+    "usage.telemetryMaxRows",
+    "usage.autoIngestMinutes",
+    "sessions.staleAfterDays",
+    "docs.maxOutputChars",
+    "docs.maxMemoryMb",
+    "code.briefFactsTokens",
+    "systemPrompt.enabled",
+    "update.checkIntervalHours",
+    "watch.maxCatchupHours",
+    "watch.limits.actionsPerDay",
+    "watch.limits.usdPerDay",
+    "gc.handoffGraceDays",
+    "gc.sessionDirIdleDays",
+    "gc.logMaxDays",
+    "gc.logMaxMiB",
+    "gc.gateDbIdleDays",
+    "gc.buildOutputIdleDays",
+    "gc.buildOutputPressureIdleDays",
+    "gc.buildOutputActiveMinutes",
+    "gc.freeSpaceWarnGiB",
+    "gc.freeSpaceWarnPercent",
+];
+
+/// Non-leaf segments that are allowed to be camelCase.
+#[cfg(test)]
+const COMPOUND_GROUPS: &[&str] = &["proseLint", "policyGuard"];
+
+/// The exact size of `KNOWN_KEYS`; each Segment that cuts keys lowers it.
+#[cfg(test)]
+const KEY_CEILING: usize = 99;
+
 #[cfg(test)]
 mod tests {
 
@@ -620,6 +668,71 @@ mod tests {
         }
     }
     use super::*;
+
+    fn follows_shape_rule(key: &str) -> bool {
+        let segments: Vec<&str> = key.split('.').collect();
+        let Some((leaf, groups)) = segments.split_last() else {
+            return false;
+        };
+        let leaf_shape = regex::Regex::new(r"^[a-z]+([A-Z][a-z]+)?$").unwrap();
+        let group_shape = regex::Regex::new(r"^[a-z]+$").unwrap();
+        segments.len() <= 4
+            && leaf_shape.is_match(leaf)
+            && groups
+                .iter()
+                .all(|group| group_shape.is_match(group) || COMPOUND_GROUPS.contains(group))
+    }
+
+    #[test]
+    fn the_shape_rule_rejects_camel_case_groups_and_long_leaves() {
+        for key in [
+            "review.stackMaxLines",
+            "autoReview.enabled",
+            "maxEffortLevel",
+        ] {
+            // Arrange
+            // Act
+            let ok = follows_shape_rule(key);
+            // Assert
+            assert!(!ok, "{key}");
+        }
+    }
+
+    #[test]
+    fn the_shape_rule_accepts_lowercase_groups_and_one_hump_leaves() {
+        for key in ["review.stack.maxLines", "hooks.proseLint.mode", "mode"] {
+            // Arrange
+            // Act
+            let ok = follows_shape_rule(key);
+            // Assert
+            assert!(ok, "{key}");
+        }
+    }
+
+    #[test]
+    fn key_names_follow_the_shape_rule() {
+        // Arrange
+        let mut legacy: Vec<&str> = LEGACY_KEY_NAMES.to_vec();
+        // Act
+        let mut violators: Vec<&str> = KNOWN_KEYS
+            .iter()
+            .copied()
+            .filter(|key| !follows_shape_rule(key))
+            .collect();
+        // Assert
+        violators.sort_unstable();
+        legacy.sort_unstable();
+        assert_eq!(violators, legacy);
+    }
+
+    #[test]
+    fn known_key_count_matches_the_ceiling() {
+        // Arrange
+        // Act
+        let count = KNOWN_KEYS.len();
+        // Assert
+        assert_eq!(count, KEY_CEILING);
+    }
 
     #[test]
     fn the_retired_rm_guard_key_is_no_longer_known() {

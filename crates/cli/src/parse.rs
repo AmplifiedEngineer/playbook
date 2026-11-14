@@ -3,6 +3,7 @@
 
 //! Turns argv into a [`Cli`], or into the text and exit code `main` prints.
 
+use crate::renames::{rewrite, Rename, COMMAND_RENAMES};
 use crate::Cli;
 use clap::error::{ContextKind, ContextValue, ErrorKind};
 use clap::FromArgMatches;
@@ -37,9 +38,15 @@ pub fn command() -> clap::Command {
     cmd.help_template(template)
 }
 
-/// Parses `args` (including the program name).
+/// Parses `args` (including the program name), applying the command renames.
 pub fn parse(args: &[OsString]) -> Result<Cli, ParseExit> {
-    parse_inner(args).map_err(|failure| match failure {
+    parse_with_notice(args).map(|(cli, _)| cli)
+}
+
+/// Like [`parse`], and also returns the deprecation line when `args` named a
+/// renamed command by its old path.
+pub fn parse_with_notice(args: &[OsString]) -> Result<(Cli, Option<String>), ParseExit> {
+    parse_renamed(args, COMMAND_RENAMES).map_err(|failure| match failure {
         Failure::Clap(err) => ParseExit {
             code: err.exit_code(),
             stderr: err.to_string(),
@@ -49,15 +56,21 @@ pub fn parse(args: &[OsString]) -> Result<Cli, ParseExit> {
 }
 
 /// Parses `args`, or prints the failure and exits like `Cli::parse` does.
-pub fn parse_or_exit(args: &[OsString]) -> Cli {
-    match parse_inner(args) {
-        Ok(cli) => cli,
+/// Returns the deprecation line for a renamed command path, if any.
+pub fn parse_or_exit(args: &[OsString]) -> (Cli, Option<String>) {
+    match parse_renamed(args, COMMAND_RENAMES) {
+        Ok(parsed) => parsed,
         Err(Failure::Clap(err)) => err.exit(),
         Err(Failure::Exit(exit)) => {
             eprint!("{}", exit.stderr);
             std::process::exit(exit.code)
         }
     }
+}
+
+fn parse_renamed(args: &[OsString], table: &[Rename]) -> Result<(Cli, Option<String>), Failure> {
+    let (rewritten, notice) = rewrite(args, table);
+    parse_inner(&rewritten).map(|cli| (cli, notice))
 }
 
 fn parse_inner(args: &[OsString]) -> Result<Cli, Failure> {
@@ -316,5 +329,28 @@ mod tests {
             assert_eq!(exit.code, 2, "{args:?}");
             assert_eq!(exit.stderr, clap_text, "{args:?}");
         }
+    }
+
+    #[test]
+    fn parse_rewrites_an_old_path_from_the_table() {
+        // Arrange
+        let table = [Rename {
+            old: "oldtrust",
+            new: "trust",
+            extra: &[],
+        }];
+
+        // Act
+        let (cli, notice) = parse_renamed(&argv(&["playbook", "oldtrust", "/x"]), &table)
+            .ok()
+            .expect("the old path parses");
+
+        // Assert
+        assert!(
+            matches!(cli.command, Command::Trust { .. }),
+            "{:?}",
+            cli.command
+        );
+        assert!(notice.is_some_and(|n| n.contains("oldtrust")));
     }
 }
