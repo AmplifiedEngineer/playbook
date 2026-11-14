@@ -835,12 +835,6 @@ const BUDGET_MIN: usize = 44;
 
 /// The gap between the metrics when a stacked header folds them into one row.
 const FOLD_GAP: &str = "  ";
-/// The rule for a header that stacks under this many cells: cost, tokens and
-/// messages share one row, so the budget keeps every line and the header stays
-/// short enough for the Charts tab to show all its panels at 80x24. Wider
-/// screens are taller too and keep a row for each.
-const FOLD_STACKED_BELOW: usize = 90;
-
 /// What the header draws inside its border: a first line across the width,
 /// then the comparison and the budget.
 struct HeaderBody {
@@ -895,11 +889,14 @@ fn header_body(app: &App, pal: &Palette, width: usize) -> HeaderBody {
     let side = left.iter().map(Line::width).max().unwrap_or(0);
     let split = (width >= side + COLUMN_GAP + BUDGET_MIN).then_some(side);
     let room = split.map_or(width, |side| width - side - COLUMN_GAP);
-    let left = match folded_metric_line(d, pal, width) {
-        Some(line) if split.is_none() && width < FOLD_STACKED_BELOW => vec![line],
-        _ => left,
+    // A header that stacks folds the comparison into one row and gives the
+    // budget at most `STACKED_ROWS` lines, so the default Charts tab shows
+    // every panel at 80x24 and at the other widths that stack.
+    let left = match split {
+        None => folded_metric_line(d, pal, width).map_or(left, |line| vec![line]),
+        Some(_) => left,
     };
-    let cap = if split.is_none() && width < FOLD_STACKED_BELOW {
+    let cap = if split.is_none() {
         budget::STACKED_ROWS
     } else {
         usize::MAX
@@ -1117,7 +1114,7 @@ mod tests {
                 yesterday("opus", "alpha", 10.0),
             ],
         );
-        let text = screen(&app, 100, 30);
+        let text = screen(&app, 130, 30);
         for want in [
             "today",
             "yesterday",
@@ -1133,6 +1130,37 @@ mod tests {
         }
         // Messages: 2 now against 1 before, tokens 3.0K against 1.5K.
         assert!(text.contains("+100%") && text.contains("+1.5K"), "{text}");
+    }
+
+    #[test]
+    fn the_folded_comparison_drops_the_previous_values_before_it_gives_up() {
+        let app = app_for(
+            Range::Today,
+            &[
+                event("opus", "alpha", 12.5),
+                yesterday("opus", "alpha", 10.0),
+            ],
+        );
+        let d = app.data.as_ref().unwrap();
+        let pal = app.theme.palette(app.depth);
+        let text = |room: usize| {
+            folded_metric_line(d, &pal, room).map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+        };
+
+        let full = text(200).unwrap();
+        let short = text(full.chars().count() - 1).unwrap();
+
+        assert!(full.contains(" vs "), "{full}");
+        assert!(
+            !short.contains(" vs ") && short.contains("+25.0%"),
+            "{short}"
+        );
+        assert_eq!(text(short.chars().count() - 1), None);
     }
 
     #[test]

@@ -35,7 +35,7 @@ The terminal view opens on this week compared with last week. Without a terminal
 
 The screen needs at least 80 columns and 24 rows. Below that it says so and draws nothing else. The pictures here use 150 columns and 44 rows, and show sample data.
 
-Every tab has a header with the range, the cost, the tokens and the messages. For today, this week and this month it compares them with the previous period. The header also carries the budget, beside the comparison on a wide screen and under it on a narrow one. Under 92 columns the comparison takes one row, so the default Charts tab shows every panel at 80 by 24. The tab bar sits under the header. `F1` to `F3` pick a tab, and the default layout has three.
+Every tab has a header with the range, the cost, the tokens and the messages. For today, this week and this month it compares them with the previous period. The header also carries the budget, beside the comparison on a wide screen and under it on a narrow one. When it stacks, the comparison takes one row. The tab bar sits under the header. `F1` to `F3` pick a tab, and the default layout has three.
 
 **Charts.** Every chart: spend per day and spend per day by model side by side, tokens per day and the Hourly chart side by side, with a burn-up panel below. The Hourly chart shows the cost of each of the last 24 hours with the total in its title. It has no data in the sample, because the sample sets no limit.
 
@@ -62,7 +62,7 @@ Every tab has a header with the range, the cost, the tokens and the messages. Fo
 
 **Layout editor.** `e` opens a window to add, move and remove tabs and panels. Each change applies and saves at once. The `usage.ui.layout` key holds the result.
 
-Adding a panel takes one action: press `a`, choose the panel and press Enter. The panel lands in the next free place, and the tab arranges itself. A tab holds up to 8 panels, and the editor refuses a ninth with a message. The budget is not a panel: it is part of the header, which every tab shows, so the editor does not offer it. A saved layout that still lists `budget` loads without an error, and the word is skipped.
+Adding a panel takes one action: press `a`, choose the panel and press Enter. The panel lands in the next free place, and the tab arranges itself. A tab holds up to 8 panels, and the editor refuses a ninth with a message. The budget is not a panel: it is part of the header, which every tab shows, so the editor does not offer it. A saved layout that lists `budget` loads and skips the word; a tab left empty is dropped.
 
 A tab with no row layout of its own draws this grid, which the editor edits as it is:
 

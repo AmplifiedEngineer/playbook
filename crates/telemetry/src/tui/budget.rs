@@ -42,7 +42,8 @@ use ratatui::text::{Line, Span};
 /// behind `i`. Only the lines that exist are drawn, so most views are shorter.
 const ROWS: usize = 4;
 /// The most lines under the metrics of a header that stacks on a short screen.
-/// The line left out sits behind `i`, which always draws up to `ROWS`.
+/// With two limits the figures of the first sit behind `i`, which always draws
+/// up to `ROWS`.
 pub const STACKED_ROWS: usize = 3;
 /// The detail view draws a limit row and a figures row for each limit.
 const _: () = assert!(ROWS >= 2 * MAX_LIMITS);
@@ -842,9 +843,13 @@ fn body(
         .map(|l| total(&limit_tail(pal, icon, l, data.now, v, width)))
         .max()
         .unwrap_or(0);
+    // The figures of the first limit and the spend line share what is left of
+    // `cap`; a short cap gives the spend line the row, and `i` shows the
+    // figures of every limit.
+    let first_figures = shown.len() + 2 <= cap;
     for (i, l) in shown.iter().enumerate() {
         lines.push(limit_line(pal, icon, l, data.now, v, width, tail_width));
-        if i == 0 || detail {
+        if detail || (i == 0 && first_figures) {
             lines.push(figures_line(pal, l, data.now, v, width));
         }
     }

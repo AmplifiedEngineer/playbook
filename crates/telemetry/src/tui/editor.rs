@@ -318,7 +318,7 @@ mod tests {
     use super::*;
     use crate::tui::layout::MAX_TAB_PANELS;
 
-    /// The three tabs and eight panels of the layout before the burn-up
+    /// The three tabs and seven panels of the layout before the burn-up
     /// panel, so these tests do not move with the default.
     const THREE_TABS: &str =
         "Charts=spend,tokens;Numbers=models,breakdown,projection;Sessions=live,sessions";

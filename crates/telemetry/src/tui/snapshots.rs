@@ -1974,24 +1974,36 @@ fn the_header_stacks_the_budget_under_the_comparison_on_a_narrow_screen() {
 }
 
 #[test]
-fn the_default_charts_tab_at_80x24_with_a_previous_period_hides_no_panel() {
+fn the_default_charts_tab_with_a_previous_period_hides_no_panel_at_every_stacked_width() {
     use crate::tui::view::{header_height, place};
-    let area = ratatui::layout::Rect::new(0, 0, 80, 24);
     let week = Range::ThisWeek(WeekStart::Monday);
     let none = with_limits(tabbed(0), None, &[], week);
     let one = with_sources(tabbed(0), &over_pace(), week);
     let two = with_sources(tabbed(0), &two_limits(), week);
 
-    for (name, a) in [("no limit", none), ("one limit", one), ("two limits", two)] {
-        assert!(a.data.as_ref().unwrap().comparison.is_some(), "{name}");
-        let placed = place(
-            area,
-            header_height(&a, area.width),
-            a.tab_ids(),
-            a.tab_rows(),
-            a.layout.tabs.len() > 1,
-        );
-        assert_eq!(placed.hidden, None, "{name}:\n{}", draw(&a, 80, 24));
+    // 80 is the least width; the header stacks up to 105.
+    for width in [80u16, 91, 92, 100, 105] {
+        let area = ratatui::layout::Rect::new(0, 0, width, 24);
+        for (name, a) in [
+            ("no limit", &none),
+            ("one limit", &one),
+            ("two limits", &two),
+        ] {
+            assert!(a.data.as_ref().unwrap().comparison.is_some(), "{name}");
+            let placed = place(
+                area,
+                header_height(a, width),
+                a.tab_ids(),
+                a.tab_rows(),
+                a.layout.tabs.len() > 1,
+            );
+            assert_eq!(
+                placed.hidden,
+                None,
+                "{name} at {width}x24:\n{}",
+                draw(a, width, 24)
+            );
+        }
     }
 }
 
@@ -2010,6 +2022,13 @@ fn a_stacked_header_folds_the_comparison_into_one_row_and_keeps_every_figure() {
         1,
         "{text}"
     );
+    // The spend line keeps its row; the figures of the first limit wait behind
+    // i, which shows them.
+    assert!(text.contains("Spend"), "{text}");
+    assert!(!text.contains("left 50%"), "{text}");
+    let mut a = a;
+    a.budget_detail = true;
+    assert!(header_rows(&a, 80, 24).contains("left 50%"));
 }
 
 #[test]
