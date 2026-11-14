@@ -135,12 +135,16 @@ pub fn run_summary(
     super::tui::account::keep(&mut usage, key.as_deref());
     let mut tools = load_tool_events(&conn)?;
     super::tui::account::keep_tools(&mut tools, key.as_deref());
-    let choices: Vec<(String, String)> = super::account_store::accounts(&conn)?
-        .into_iter()
-        .map(|a| (a.key, a.name))
-        .collect();
-    let mask =
-        super::tui::start_mask_account(&super::host::home_dir()).then_some(choices.as_slice());
+    let mask_on = super::tui::start_mask_account(&super::host::home_dir());
+    let choices: Vec<(String, String)> = if mask_on || key.is_some() {
+        super::account_store::accounts(&conn)?
+            .into_iter()
+            .map(|a| (a.key, a.name))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let mask = mask_on.then_some(choices.as_slice());
     let mut text = match range {
         Some(range) => summary::render_range(&usage, &tools, range, now, mask),
         None => summary::render(&usage, &tools, mask),
