@@ -35,7 +35,7 @@ pub(crate) struct Activity {
 
 /// The file in `dir`, or `None` when it is missing, not a plain file, too
 /// large, owned by someone else, or not valid.
-#[allow(dead_code)] // The import that reads the old file is not wired yet.
+#[allow(dead_code)] // WU-5, the import of the old runtime files, wires it.
 pub(crate) fn read(dir: &Path) -> Option<Activity> {
     let path = dir.join(FILE);
     let meta = fs::symlink_metadata(&path).ok()?;

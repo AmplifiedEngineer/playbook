@@ -14,8 +14,9 @@ use playbook_store::{params, schema, Connection};
 use std::path::Path;
 use std::time::Duration;
 
-/// The `agent` of a row a hook creates for a session it has not seen start.
-const AGENT: &str = "claude";
+/// The `agent` of every row a hook writes. It equals the name the usage events
+/// of the Claude Code source carry, so the two tables join on it.
+const AGENT: &str = "claude-code";
 
 /// The `sessions.db` layout this build writes.
 pub(crate) const SCHEMA_VERSION: i64 = 1;
@@ -149,7 +150,8 @@ fn log_reopen(conn: &Connection, id: &str, now: i64) -> playbook_store::Result<u
 }
 
 /// Record a session start, returning the number of rows changed. A resumed
-/// session keeps `started_at`, takes the new place, leaves the ended, crashed
+/// session keeps `started_at`, counts the resume as a fresh event (so a newer
+/// session of the directory does not mark it crashed), takes the new place, leaves the ended, crashed
 /// and closed states (a closed row gets a `reopened` event), and drops its pull
 /// request link when the branch changed, so it never keeps the link of an
 /// earlier directory.
@@ -157,8 +159,8 @@ pub(crate) fn start(conn: &Connection, info: &StartInfo, now: i64) -> Result<usi
     immediate(conn, |conn| {
         log_reopen(conn, &info.id, now)?;
         conn.execute(
-            "INSERT INTO sessions (session_id, cwd, repo, worktree, branch, convention, started_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO sessions (session_id, cwd, repo, worktree, branch, convention, started_at, agent)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(session_id) DO UPDATE SET
                  cwd = excluded.cwd,
                  repo = excluded.repo,
@@ -169,6 +171,7 @@ pub(crate) fn start(conn: &Connection, info: &StartInfo, now: i64) -> Result<usi
                  crashed_at = NULL,
                  closed_at = NULL,
                  closed_reason = NULL,
+                 last_stop_at = MAX(COALESCE(sessions.last_stop_at, 0), excluded.started_at),
                  pr_number = CASE WHEN sessions.branch IS excluded.branch THEN sessions.pr_number END,
                  pr_kind = CASE WHEN sessions.branch IS excluded.branch THEN sessions.pr_kind END,
                  pr_checked_at = CASE WHEN sessions.branch IS excluded.branch THEN sessions.pr_checked_at END,
@@ -182,7 +185,8 @@ pub(crate) fn start(conn: &Connection, info: &StartInfo, now: i64) -> Result<usi
                 info.worktree,
                 info.branch,
                 info.convention,
-                now
+                now,
+                AGENT
             ],
         )
     })
@@ -261,7 +265,7 @@ pub(crate) fn end(conn: &Connection, id: &str, reason: &str, now: i64) -> Result
 
 /// The filter for the rows of `cwd` other than the caller's that are still open and whose
 /// last event is older than `ACTIVE_SECONDS`. `?1` is `cwd`, `?2` the caller's
-/// id and `?3` `now`.
+/// id, `?3` `now` and `?4` `ACTIVE_SECONDS`.
 const CRASHED_CANDIDATES: &str = "WHERE cwd = ?1 AND session_id != ?2
       AND ended_at IS NULL AND crashed_at IS NULL AND closed_at IS NULL
       AND ?3 - MAX(COALESCE(started_at, 0), COALESCE(last_prompt_at, 0),
@@ -543,6 +547,21 @@ mod tests {
             // Assert
             assert_eq!(crashed_at(&conn, "s0"), None, "now = {now}");
         }
+    }
+
+    #[test]
+    fn a_resumed_session_is_not_marked_crashed_by_a_newer_session_of_the_directory() {
+        // Arrange
+        let conn = open_db("sessions-crash-resume");
+        start(&conn, &info("s0", "a", "/proj"), 1000).expect("start");
+        start(&conn, &info("s0", "a", "/proj"), 5000).expect("resume");
+
+        // Act
+        mark_crashed(&conn, "/proj", "other", 5000 + 100).expect("mark");
+
+        // Assert
+        assert_eq!(crashed_at(&conn, "s0"), None);
+        assert_eq!(col(&conn, "s0", "started_at"), Some(1000));
     }
 
     #[test]

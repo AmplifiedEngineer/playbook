@@ -245,12 +245,29 @@ mod tests {
 
     fn git_init(dir: &Path, extra: &[&str]) {
         let status = Command::new("git")
-            .args(["-c", "init.defaultBranch=main", "init", "--quiet"])
+            .args(["init", "-b", "main", "--quiet"])
             .args(extra)
             .arg(dir)
             .status()
             .expect("git");
         assert!(status.success());
+        // Local config only, so a developer's signing or hooks never run.
+        let no_hooks = dir.join(".no-hooks");
+        std::fs::create_dir_all(&no_hooks).unwrap();
+        for (key, value) in [
+            ("commit.gpgsign", "false"),
+            ("user.name", "Test"),
+            ("user.email", "test@example.com"),
+            ("core.hooksPath", no_hooks.to_str().unwrap()),
+        ] {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["config", "--local", key, value])
+                .status()
+                .expect("git");
+            assert!(status.success());
+        }
     }
 
     fn scratch(tag: &str) -> PathBuf {

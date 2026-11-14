@@ -1499,14 +1499,17 @@ fn seeded_session_dir(home: &Path, session_id: &str) -> PathBuf {
     dir
 }
 
-/// One integer column of the row of `id` in the database under `home`.
-fn db_column(home: &Path, id: &str, column: &str) -> Option<i64> {
-    let path = home
-        .join(".config")
+/// The `sessions.db` under `home`.
+fn sessions_db(home: &Path) -> PathBuf {
+    home.join(".config")
         .join("playbook")
         .join("data")
-        .join("sessions.db");
-    let conn = playbook_store::Connection::open(path).expect("open db");
+        .join("sessions.db")
+}
+
+/// One integer column of the row of `id` in the database at `db`, `None` when null.
+fn db_column(db: &Path, id: &str, column: &str) -> Option<i64> {
+    let conn = playbook_store::Connection::open(db).expect("open db");
     conn.query_row(
         &format!("SELECT {column} FROM sessions WHERE session_id = ?1"),
         [id],
@@ -1534,8 +1537,11 @@ fn session_clean_exit_reason_absent_records_a_stop_and_leaves_ended_at_null() {
 
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
-    assert_eq!(db_column(&home, "sid-absent", "ended_at"), None);
-    assert!(db_column(&home, "sid-absent", "last_stop_at").is_some());
+    assert_eq!(
+        db_column(&sessions_db(&home), "sid-absent", "ended_at"),
+        None
+    );
+    assert!(db_column(&sessions_db(&home), "sid-absent", "last_stop_at").is_some());
 }
 
 #[test]
@@ -1557,8 +1563,11 @@ fn session_clean_exit_reason_other_records_a_stop_and_leaves_ended_at_null() {
 
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
-    assert_eq!(db_column(&home, "sid-other", "ended_at"), None);
-    assert!(db_column(&home, "sid-other", "last_stop_at").is_some());
+    assert_eq!(
+        db_column(&sessions_db(&home), "sid-other", "ended_at"),
+        None
+    );
+    assert!(db_column(&sessions_db(&home), "sid-other", "last_stop_at").is_some());
 }
 
 #[test]
@@ -1580,7 +1589,7 @@ fn session_clean_exit_real_reason_sets_ended_at() {
 
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
-    assert!(db_column(&home, "sid-real", "ended_at").is_some());
+    assert!(db_column(&sessions_db(&home), "sid-real", "ended_at").is_some());
     assert!(!session_dir.join("clean-exit").exists());
 }
 
@@ -2577,11 +2586,7 @@ impl Host {
     }
 
     fn db_path(&self) -> PathBuf {
-        self.home
-            .join(".config")
-            .join("playbook")
-            .join("data")
-            .join("sessions.db")
+        sessions_db(&self.home)
     }
 
     fn runtime_dir(&self, id: &str) -> PathBuf {
@@ -2629,13 +2634,7 @@ impl Host {
 
     /// One integer column of the row of `id`, `None` when null.
     fn column(&self, id: &str, column: &str) -> Option<i64> {
-        let conn = playbook_store::Connection::open(self.db_path()).expect("open db");
-        conn.query_row(
-            &format!("SELECT {column} FROM sessions WHERE session_id = ?1"),
-            [id],
-            |r| r.get(0),
-        )
-        .expect("row")
+        db_column(&self.db_path(), id, column)
     }
 
     fn rows(&self, id: &str) -> i64 {
@@ -2713,6 +2712,31 @@ fn a_session_start_writes_one_row_with_its_directory() {
     assert_eq!(count, 1);
     assert_eq!(cwd, host.proj.to_str().unwrap());
     assert!((before..=after).contains(&started_at), "{started_at}");
+}
+
+#[test]
+fn a_session_start_inside_a_repository_writes_its_canonical_root() {
+    // Arrange
+    let host = Host::new("repo-root");
+    run_git(&host.proj, &["init", "-b", "main", "--quiet"]);
+
+    // Act
+    let outcome = host.session_init("s1");
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "{}", outcome.stderr);
+    let conn = playbook_store::Connection::open(host.db_path()).expect("open db");
+    let repo: String = conn
+        .query_row(
+            "SELECT repo FROM sessions WHERE session_id = 's1'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("row");
+    assert_eq!(
+        repo,
+        fs::canonicalize(&host.proj).unwrap().to_str().unwrap()
+    );
 }
 
 #[test]
@@ -2883,24 +2907,36 @@ fn an_unrelated_notification_does_not_create_the_database() {
     assert!(!host.db_path().exists());
 }
 
+const UNRELATED_NOTIFICATION_COLUMNS: [&str; 6] = [
+    "last_prompt_at",
+    "last_stop_at",
+    "waiting_since",
+    "waiting_after_prompt",
+    "ended_at",
+    "crashed_at",
+];
+
 #[test]
 fn an_unrelated_notification_changes_no_column_of_an_existing_row() {
     // Arrange
     let host = Host::new("act-ignored-row");
     host.session_init("s1");
     host.activity("s1", "UserPromptSubmit", "");
-    let columns =
-        "last_prompt_at, last_stop_at, waiting_since, waiting_after_prompt, ended_at, crashed_at";
-    let before = host.column("s1", &format!("COALESCE({columns})"));
-    let waiting_before = host.column("s1", "waiting_after_prompt");
+    let snapshot = |host: &Host| -> Vec<Option<i64>> {
+        UNRELATED_NOTIFICATION_COLUMNS
+            .iter()
+            .map(|column| host.column("s1", column))
+            .collect()
+    };
+    let before = snapshot(&host);
 
     // Act
     host.activity("s1", "Notification", "auth_success");
 
     // Assert
-    assert_eq!(host.column("s1", &format!("COALESCE({columns})")), before);
-    assert_eq!(host.column("s1", "waiting_after_prompt"), waiting_before);
-    assert_eq!(host.column("s1", "waiting_since"), None);
+    for (column, was) in UNRELATED_NOTIFICATION_COLUMNS.iter().zip(before) {
+        assert_eq!(host.column("s1", column), was, "{column}");
+    }
 }
 
 #[test]
@@ -2931,28 +2967,24 @@ fn the_hooks_leave_the_same_runtime_files_on_a_corrupt_database_as_on_a_healthy_
         // Arrange
         let healthy = Host::new(&format!("{hook}-healthy"));
         let corrupt = Host::new(&format!("{hook}-corrupt"));
-        fs::create_dir_all(corrupt.db_path().parent().unwrap()).unwrap();
+        healthy.session_init("s1");
+        corrupt.session_init("s1");
         fs::write(corrupt.db_path(), "not a database").unwrap();
 
         // Act
-        healthy.hook(hook, stdin);
+        let healthy_outcome = healthy.hook(hook, stdin);
         let outcome = corrupt.hook(hook, stdin);
 
         // Assert
-        assert_eq!(outcome.exit_code, 0, "{hook}: {}", outcome.stderr);
         assert_eq!(
-            file_names_or_empty(&corrupt.runtime_dir("s1")),
-            file_names_or_empty(&healthy.runtime_dir("s1")),
-            "{hook}"
+            healthy_outcome.exit_code, 0,
+            "{hook}: {}",
+            healthy_outcome.stderr
         );
-    }
-}
-
-fn file_names_or_empty(dir: &Path) -> Vec<String> {
-    if dir.is_dir() {
-        file_names(dir)
-    } else {
-        Vec::new()
+        assert_eq!(outcome.exit_code, 0, "{hook}: {}", outcome.stderr);
+        let files = file_names(&healthy.runtime_dir("s1"));
+        assert!(!files.is_empty(), "{hook}: session-init wrote no files");
+        assert_eq!(file_names(&corrupt.runtime_dir("s1")), files, "{hook}");
     }
 }
 
@@ -3019,25 +3051,29 @@ const WRITER_PAUSE_MS: u64 = 5;
 #[test]
 #[ignore = "manual latency gate: run with --ignored --nocapture"]
 fn session_activity_p95_is_within_the_target_under_a_busy_writer() {
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
     use std::sync::Arc;
 
     // Arrange
     let host = Host::new("act-p95");
     host.session_init("s1");
     let stop = Arc::new(AtomicBool::new(false));
+    let committed = Arc::new(AtomicUsize::new(0));
     let writer = {
-        let (path, stop) = (host.db_path(), Arc::clone(&stop));
+        let (path, stop, committed) = (host.db_path(), Arc::clone(&stop), Arc::clone(&committed));
         std::thread::spawn(move || {
             let conn = playbook_store::Connection::open(path).expect("writer open");
             conn.busy_timeout(std::time::Duration::from_secs(2))
                 .expect("busy timeout");
             let mut n = 0_i64;
             while !stop.load(Ordering::SeqCst) {
-                let _ = conn.execute(
+                let result = conn.execute(
                     "INSERT OR REPLACE INTO sessions (session_id, started_at) VALUES (?1, ?2)",
                     playbook_store::params![format!("w-{}", n % 50), n],
                 );
+                if result.is_ok() {
+                    committed.fetch_add(1, Ordering::SeqCst);
+                }
                 n += 1;
                 std::thread::sleep(std::time::Duration::from_millis(WRITER_PAUSE_MS));
             }
@@ -3066,5 +3102,9 @@ fn session_activity_p95_is_within_the_target_under_a_busy_writer() {
         ms(at(99)),
         ms(durations[durations.len() - 1])
     );
-    assert!(at(95).as_millis() <= HOOK_WRITE_P95_TARGET_MS);
+    assert!(
+        committed.load(Ordering::SeqCst) > 0,
+        "the writer committed nothing, so the run measured no contention"
+    );
+    assert!(at(95).as_millis() < HOOK_WRITE_P95_TARGET_MS);
 }
