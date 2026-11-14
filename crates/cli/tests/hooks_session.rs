@@ -1499,11 +1499,30 @@ fn seeded_session_dir(home: &Path, session_id: &str) -> PathBuf {
     dir
 }
 
+/// The `sessions.db` under `home`.
+fn sessions_db(home: &Path) -> PathBuf {
+    home.join(".config")
+        .join("playbook")
+        .join("data")
+        .join("sessions.db")
+}
+
+/// One integer column of the row of `id` in the database at `db`, `None` when null.
+fn db_column(db: &Path, id: &str, column: &str) -> Option<i64> {
+    let conn = playbook_store::Connection::open(db).expect("open db");
+    conn.query_row(
+        &format!("SELECT {column} FROM sessions WHERE session_id = ?1"),
+        [id],
+        |r| r.get(0),
+    )
+    .expect("row")
+}
+
 #[test]
-fn session_clean_exit_reason_absent_refreshes_ts_without_marker() {
+fn session_clean_exit_reason_absent_records_a_stop_and_leaves_ended_at_null() {
     // Arrange: a Stop event, which carries no `.reason` at all.
     let home = scratch_dir("reason-absent");
-    let session_dir = seeded_session_dir(&home, "sid-absent");
+    seeded_session_dir(&home, "sid-absent");
     let repo_dir = scratch_dir("reason-absent-repo");
     init_repo_with_origin(&repo_dir, "https://github.com/acme/widget.git");
 
@@ -1518,21 +1537,18 @@ fn session_clean_exit_reason_absent_refreshes_ts_without_marker() {
 
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
-    assert!(
-        session_dir.join("last-clean-ts").is_file(),
-        "last-clean-ts should be refreshed even with no reason"
+    assert_eq!(
+        db_column(&sessions_db(&home), "sid-absent", "ended_at"),
+        None
     );
-    assert!(
-        !session_dir.join("clean-exit").is_file(),
-        "no reason should write no clean-exit marker"
-    );
+    assert!(db_column(&sessions_db(&home), "sid-absent", "last_stop_at").is_some());
 }
 
 #[test]
-fn session_clean_exit_reason_other_refreshes_ts_without_marker() {
+fn session_clean_exit_reason_other_records_a_stop_and_leaves_ended_at_null() {
     // Arrange
     let home = scratch_dir("reason-other");
-    let session_dir = seeded_session_dir(&home, "sid-other");
+    seeded_session_dir(&home, "sid-other");
     let repo_dir = scratch_dir("reason-other-repo");
     init_repo_with_origin(&repo_dir, "https://github.com/acme/widget.git");
 
@@ -1547,18 +1563,15 @@ fn session_clean_exit_reason_other_refreshes_ts_without_marker() {
 
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
-    assert!(
-        session_dir.join("last-clean-ts").is_file(),
-        "last-clean-ts should be refreshed"
+    assert_eq!(
+        db_column(&sessions_db(&home), "sid-other", "ended_at"),
+        None
     );
-    assert!(
-        !session_dir.join("clean-exit").is_file(),
-        "reason 'other' should write no clean-exit marker"
-    );
+    assert!(db_column(&sessions_db(&home), "sid-other", "last_stop_at").is_some());
 }
 
 #[test]
-fn session_clean_exit_real_reason_writes_the_marker() {
+fn session_clean_exit_real_reason_sets_ended_at() {
     // Arrange
     let home = scratch_dir("reason-real");
     let session_dir = seeded_session_dir(&home, "sid-real");
@@ -1576,11 +1589,8 @@ fn session_clean_exit_real_reason_writes_the_marker() {
 
     // Assert
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
-    let marker = fs::read_to_string(session_dir.join("clean-exit")).unwrap();
-    assert_eq!(
-        marker, "logout\n",
-        "marker should hold the reason plus a trailing newline, byte for byte"
-    );
+    assert!(db_column(&sessions_db(&home), "sid-real", "ended_at").is_some());
+    assert!(!session_dir.join("clean-exit").exists());
 }
 
 // ---------------------------------------------------------------------
@@ -2529,4 +2539,572 @@ fn session_init_names_the_setup_command_for_a_pending_settings_change() {
         "{message}"
     );
     assert_eq!(fs::read(&settings).unwrap(), before);
+}
+
+// ---------------------------------------------------------------------------
+// session-init: the sessions.db row
+// ---------------------------------------------------------------------------
+
+/// A last event this far before the call is past `ACTIVE_SECONDS` (900) by a
+/// wide margin, because the hook reads the real clock.
+const STALE_BY_SECS: i64 = 5000;
+/// A last event this recent is far inside `ACTIVE_SECONDS`.
+const RECENT_BY_SECS: i64 = 5;
+
+/// A scratch host: temporary `HOME`, `XDG_CONFIG_HOME`, git config and a fake
+/// `gh` that exits 1, first on `PATH`, so a stray `gh` call fails the lookup
+/// and never reaches the host or the network. Folders are canonicalized
+/// because `current_dir()` returns the resolved path.
+struct Host {
+    home: PathBuf,
+    xdg: PathBuf,
+    git_config: PathBuf,
+    bin: PathBuf,
+    proj: PathBuf,
+}
+
+impl Host {
+    fn new(tag: &str) -> Host {
+        let root = fs::canonicalize(scratch_dir(tag)).expect("canonical root");
+        let bin = root.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let gh = bin.join("gh");
+        fs::write(&gh, "#!/bin/sh\nexit 1\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
+        let proj = root.join("proj");
+        fs::create_dir_all(&proj).unwrap();
+        let git_config = root.join("gitconfig");
+        fs::write(&git_config, "").unwrap();
+        Host {
+            home: root.join("home"),
+            xdg: root.join("xdg"),
+            git_config,
+            bin,
+            proj,
+        }
+    }
+
+    fn db_path(&self) -> PathBuf {
+        sessions_db(&self.home)
+    }
+
+    fn runtime_dir(&self, id: &str) -> PathBuf {
+        self.home
+            .join(".config")
+            .join("playbook")
+            .join("runtime")
+            .join(id)
+    }
+
+    fn session_init(&self, id: &str) -> Outcome {
+        self.hook("session-init", &format!(r#"{{"session_id":"{id}"}}"#))
+    }
+
+    fn hook(&self, name: &str, stdin: &str) -> Outcome {
+        fs::create_dir_all(&self.home).unwrap();
+        let path = format!(
+            "{}:{}",
+            self.bin.display(),
+            env::var("PATH").unwrap_or_default()
+        );
+        run_hook(
+            name,
+            &self.proj,
+            &self.home,
+            stdin,
+            &[
+                ("XDG_CONFIG_HOME", self.xdg.to_str().unwrap()),
+                ("GIT_CONFIG_GLOBAL", self.git_config.to_str().unwrap()),
+                ("GIT_CONFIG_NOSYSTEM", "1"),
+                ("PATH", &path),
+            ],
+        )
+    }
+
+    /// Fire one `session-activity` event for `id`.
+    fn activity(&self, id: &str, event: &str, notification_type: &str) -> Outcome {
+        self.hook(
+            "session-activity",
+            &format!(
+                r#"{{"session_id":"{id}","hook_event_name":"{event}","notification_type":"{notification_type}"}}"#
+            ),
+        )
+    }
+
+    /// One integer column of the row of `id`, `None` when null.
+    fn column(&self, id: &str, column: &str) -> Option<i64> {
+        db_column(&self.db_path(), id, column)
+    }
+
+    fn rows(&self, id: &str) -> i64 {
+        let conn = playbook_store::Connection::open(self.db_path()).expect("open db");
+        conn.query_row(
+            "SELECT COUNT(*) FROM sessions WHERE session_id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .expect("count")
+    }
+
+    /// Run `sql` against the database, for arranging a row state.
+    fn exec(&self, sql: &str) {
+        let conn = playbook_store::Connection::open(self.db_path()).expect("open db");
+        conn.execute_batch(sql).expect("exec");
+    }
+
+    /// Seed a row with the given last event, in `cwd`, through the store's own
+    /// schema (an empty hook run creates it).
+    fn seed(&self, id: &str, cwd: &Path, started_at: i64) {
+        if !self.db_path().exists() {
+            self.session_init("seed-schema");
+            assert!(
+                self.db_path().exists(),
+                "session-init created no sessions.db"
+            );
+        }
+        let conn = playbook_store::Connection::open(self.db_path()).expect("open db");
+        conn.execute(
+            "INSERT INTO sessions (session_id, cwd, started_at) VALUES (?1, ?2, ?3)",
+            playbook_store::params![id, cwd.to_str().unwrap(), started_at],
+        )
+        .expect("seed row");
+    }
+
+    fn crashed_at(&self, id: &str) -> Option<i64> {
+        let conn = playbook_store::Connection::open(self.db_path()).expect("open db");
+        conn.query_row(
+            "SELECT crashed_at FROM sessions WHERE session_id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .expect("row")
+    }
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+}
+
+#[test]
+fn a_session_start_writes_one_row_with_its_directory() {
+    // Arrange
+    let host = Host::new("row");
+
+    // Act
+    let before = unix_now();
+    let outcome = host.session_init("s1");
+    let after = unix_now();
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "{}", outcome.stderr);
+    let conn = playbook_store::Connection::open(host.db_path()).expect("open db");
+    let (count, cwd, started_at): (i64, String, i64) = conn
+        .query_row(
+            "SELECT COUNT(*), MAX(cwd), MAX(started_at) FROM sessions WHERE session_id = 's1'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("row");
+    assert_eq!(count, 1);
+    assert_eq!(cwd, host.proj.to_str().unwrap());
+    assert!((before..=after).contains(&started_at), "{started_at}");
+}
+
+#[test]
+fn a_session_start_inside_a_repository_writes_its_canonical_root() {
+    // Arrange
+    let host = Host::new("repo-root");
+    run_git(&host.proj, &["init", "-b", "main", "--quiet"]);
+
+    // Act
+    let outcome = host.session_init("s1");
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "{}", outcome.stderr);
+    let conn = playbook_store::Connection::open(host.db_path()).expect("open db");
+    let repo: String = conn
+        .query_row(
+            "SELECT repo FROM sessions WHERE session_id = 's1'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("row");
+    assert_eq!(
+        repo,
+        fs::canonicalize(&host.proj).unwrap().to_str().unwrap()
+    );
+}
+
+#[test]
+fn an_open_row_stale_in_the_same_directory_is_marked_crashed() {
+    // Arrange
+    let host = Host::new("crash-stale");
+    host.seed("s0", &host.proj, unix_now() - STALE_BY_SECS);
+
+    // Act
+    host.session_init("s1");
+
+    // Assert
+    assert!(host.crashed_at("s0").is_some());
+}
+
+#[test]
+fn an_open_row_active_in_the_same_directory_is_not_marked_crashed() {
+    // Arrange
+    let host = Host::new("crash-recent");
+    host.seed("s0", &host.proj, unix_now() - RECENT_BY_SECS);
+
+    // Act
+    host.session_init("s1");
+
+    // Assert
+    assert_eq!(host.crashed_at("s0"), None);
+}
+
+/// The files a healthy `session-init` leaves in `runtime/<id>/`.
+const RUNTIME_FILES: [&str; 9] = [
+    "start-ts",
+    "search-count",
+    "tool-count",
+    "edit-count",
+    "edits.jsonl",
+    "seen-reads",
+    "read-state.jsonl",
+    "capture-crossings",
+    "hygiene-level",
+];
+
+fn file_names(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .expect("runtime dir")
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn a_healthy_database_leaves_the_runtime_files_in_place() {
+    // Arrange
+    let host = Host::new("runtime-healthy");
+
+    // Act
+    let outcome = host.session_init("s1");
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "{}", outcome.stderr);
+    let mut want: Vec<String> = RUNTIME_FILES.iter().map(|s| s.to_string()).collect();
+    want.sort();
+    assert_eq!(file_names(&host.runtime_dir("s1")), want);
+}
+
+#[test]
+fn a_corrupt_database_changes_neither_the_exit_code_nor_the_runtime_files() {
+    // Arrange
+    let host = Host::new("runtime-corrupt");
+    fs::create_dir_all(host.db_path().parent().unwrap()).unwrap();
+    fs::write(host.db_path(), "not a database").unwrap();
+
+    // Act
+    let outcome = host.session_init("s1");
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "{}", outcome.stderr);
+    let mut want: Vec<String> = RUNTIME_FILES.iter().map(|s| s.to_string()).collect();
+    want.sort();
+    assert_eq!(file_names(&host.runtime_dir("s1")), want);
+}
+
+const WAITING_NOTICE: &str = "permission_prompt";
+
+#[test]
+fn a_permission_prompt_notice_sets_the_waiting_flag_and_the_next_prompt_clears_it() {
+    // Arrange
+    let host = Host::new("act-chain");
+    host.session_init("s1");
+    host.activity("s1", "UserPromptSubmit", "");
+
+    // Act
+    let notice = host.activity("s1", "Notification", WAITING_NOTICE);
+
+    // Assert
+    assert_eq!(notice.exit_code, 0, "{}", notice.stderr);
+    assert_eq!(host.column("s1", "waiting_after_prompt"), Some(1));
+    assert!(host.column("s1", "waiting_since").is_some());
+
+    // Act
+    host.activity("s1", "UserPromptSubmit", "");
+
+    // Assert
+    assert_eq!(host.column("s1", "waiting_after_prompt"), Some(0));
+}
+
+#[test]
+fn a_notice_after_a_prompt_sets_the_waiting_flag() {
+    // Arrange
+    let host = Host::new("act-notice");
+    host.session_init("s1");
+    host.activity("s1", "UserPromptSubmit", "");
+
+    // Act
+    host.activity("s1", "Notification", WAITING_NOTICE);
+
+    // Assert
+    assert_eq!(host.column("s1", "waiting_after_prompt"), Some(1));
+}
+
+#[test]
+fn a_prompt_clears_the_waiting_flag() {
+    // Arrange
+    let host = Host::new("act-prompt");
+    host.session_init("s1");
+    host.exec("UPDATE sessions SET waiting_after_prompt = 1");
+
+    // Act
+    host.activity("s1", "UserPromptSubmit", "");
+
+    // Assert
+    assert_eq!(host.column("s1", "waiting_after_prompt"), Some(0));
+    assert!(host.column("s1", "last_prompt_at").is_some());
+}
+
+#[test]
+fn a_stop_clears_the_waiting_flag_and_a_later_notice_sets_it_again() {
+    // Arrange
+    let host = Host::new("act-stop");
+    host.session_init("s1");
+    host.exec("UPDATE sessions SET waiting_after_prompt = 1");
+
+    // Act
+    host.activity("s1", "Stop", "");
+
+    // Assert
+    assert_eq!(host.column("s1", "waiting_after_prompt"), Some(0));
+    assert!(host.column("s1", "last_stop_at").is_some());
+
+    // Act
+    host.activity("s1", "Notification", WAITING_NOTICE);
+
+    // Assert
+    assert_eq!(host.column("s1", "waiting_after_prompt"), Some(1));
+}
+
+#[test]
+fn an_unrelated_notification_does_not_create_the_database() {
+    // Arrange
+    let host = Host::new("act-ignored-nodb");
+
+    // Act
+    let outcome = host.activity("s1", "Notification", "auth_success");
+
+    // Assert
+    assert_eq!(outcome.exit_code, 0, "{}", outcome.stderr);
+    assert!(!host.db_path().exists());
+}
+
+const UNRELATED_NOTIFICATION_COLUMNS: [&str; 6] = [
+    "last_prompt_at",
+    "last_stop_at",
+    "waiting_since",
+    "waiting_after_prompt",
+    "ended_at",
+    "crashed_at",
+];
+
+#[test]
+fn an_unrelated_notification_changes_no_column_of_an_existing_row() {
+    // Arrange
+    let host = Host::new("act-ignored-row");
+    host.session_init("s1");
+    host.activity("s1", "UserPromptSubmit", "");
+    let snapshot = |host: &Host| -> Vec<Option<i64>> {
+        UNRELATED_NOTIFICATION_COLUMNS
+            .iter()
+            .map(|column| host.column("s1", column))
+            .collect()
+    };
+    let before = snapshot(&host);
+
+    // Act
+    host.activity("s1", "Notification", "auth_success");
+
+    // Assert
+    for (column, was) in UNRELATED_NOTIFICATION_COLUMNS.iter().zip(before) {
+        assert_eq!(host.column("s1", column), was, "{column}");
+    }
+}
+
+#[test]
+fn an_event_for_a_session_without_a_row_creates_the_row() {
+    // Arrange
+    let host = Host::new("act-norow");
+
+    // Act
+    host.activity("ghost", "UserPromptSubmit", "");
+
+    // Assert
+    assert_eq!(host.rows("ghost"), 1);
+    assert!(host.column("ghost", "last_prompt_at").is_some());
+}
+
+#[test]
+fn the_hooks_leave_the_same_runtime_files_on_a_corrupt_database_as_on_a_healthy_one() {
+    for (hook, stdin) in [
+        (
+            "session-activity",
+            r#"{"session_id":"s1","hook_event_name":"UserPromptSubmit"}"#,
+        ),
+        (
+            "session-clean-exit",
+            r#"{"session_id":"s1","reason":"logout"}"#,
+        ),
+    ] {
+        // Arrange
+        let healthy = Host::new(&format!("{hook}-healthy"));
+        let corrupt = Host::new(&format!("{hook}-corrupt"));
+        healthy.session_init("s1");
+        corrupt.session_init("s1");
+        fs::write(corrupt.db_path(), "not a database").unwrap();
+
+        // Act
+        let healthy_outcome = healthy.hook(hook, stdin);
+        let outcome = corrupt.hook(hook, stdin);
+
+        // Assert
+        assert_eq!(
+            healthy_outcome.exit_code, 0,
+            "{hook}: {}",
+            healthy_outcome.stderr
+        );
+        assert_eq!(outcome.exit_code, 0, "{hook}: {}", outcome.stderr);
+        let files = file_names(&healthy.runtime_dir("s1"));
+        assert!(!files.is_empty(), "{hook}: session-init wrote no files");
+        assert_eq!(file_names(&corrupt.runtime_dir("s1")), files, "{hook}");
+    }
+}
+
+/// Files the old hooks wrote and no hook writes now.
+const RETIRED_FILES: [&str; 3] = ["activity.json", "clean-exit", "last-clean-ts"];
+
+#[test]
+fn no_event_writes_the_retired_runtime_files_or_touches_the_init_files() {
+    let events: [(&str, &str); 6] = [
+        ("session-activity", "UserPromptSubmit"),
+        ("session-activity", "Stop"),
+        ("session-activity", "Notification"),
+        ("session-clean-exit", "Stop"),
+        ("session-clean-exit", "SessionEnd"),
+        ("session-clean-exit", "SessionEndOther"),
+    ];
+    for (i, (hook, event)) in events.iter().enumerate() {
+        // Arrange
+        let host = Host::new(&format!("retired-{i}"));
+        host.session_init("s1");
+        let dir = host.runtime_dir("s1");
+        let init_files: Vec<(String, Vec<u8>)> = file_names(&dir)
+            .into_iter()
+            .map(|n| (n.clone(), fs::read(dir.join(&n)).unwrap()))
+            .collect();
+        let stdin = match *event {
+            "Notification" => format!(
+                r#"{{"session_id":"s1","hook_event_name":"Notification","notification_type":"{WAITING_NOTICE}"}}"#
+            ),
+            "SessionEnd" => {
+                r#"{"session_id":"s1","hook_event_name":"SessionEnd","reason":"logout"}"#
+                    .to_string()
+            }
+            "SessionEndOther" => {
+                r#"{"session_id":"s1","hook_event_name":"SessionEnd","reason":"other"}"#.to_string()
+            }
+            name => format!(r#"{{"session_id":"s1","hook_event_name":"{name}"}}"#),
+        };
+
+        // Act
+        let outcome = host.hook(hook, &stdin);
+
+        // Assert
+        assert_eq!(outcome.exit_code, 0, "{hook} {event}: {}", outcome.stderr);
+        for retired in RETIRED_FILES {
+            assert!(!dir.join(retired).exists(), "{hook} {event}: {retired}");
+        }
+        for (name, bytes) in &init_files {
+            assert_eq!(
+                &fs::read(dir.join(name)).unwrap(),
+                bytes,
+                "{hook} {event}: {name}"
+            );
+        }
+    }
+}
+
+/// The writes a hook makes while a second connection keeps committing.
+const MEASURED_RUNS: usize = 200;
+/// The 95th percentile of one `session-activity` run must stay under this.
+const HOOK_WRITE_P95_TARGET_MS: u128 = 100;
+const WRITER_PAUSE_MS: u64 = 5;
+
+#[test]
+#[ignore = "manual latency gate: run with --ignored --nocapture"]
+fn session_activity_p95_is_within_the_target_under_a_busy_writer() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
+    use std::sync::Arc;
+
+    // Arrange
+    let host = Host::new("act-p95");
+    host.session_init("s1");
+    let stop = Arc::new(AtomicBool::new(false));
+    let committed = Arc::new(AtomicUsize::new(0));
+    let writer = {
+        let (path, stop, committed) = (host.db_path(), Arc::clone(&stop), Arc::clone(&committed));
+        std::thread::spawn(move || {
+            let conn = playbook_store::Connection::open(path).expect("writer open");
+            conn.busy_timeout(std::time::Duration::from_secs(2))
+                .expect("busy timeout");
+            let mut n = 0_i64;
+            while !stop.load(Ordering::SeqCst) {
+                let result = conn.execute(
+                    "INSERT OR REPLACE INTO sessions (session_id, started_at) VALUES (?1, ?2)",
+                    playbook_store::params![format!("w-{}", n % 50), n],
+                );
+                if result.is_ok() {
+                    committed.fetch_add(1, Ordering::SeqCst);
+                }
+                n += 1;
+                std::thread::sleep(std::time::Duration::from_millis(WRITER_PAUSE_MS));
+            }
+        })
+    };
+
+    // Act
+    let mut durations = Vec::with_capacity(MEASURED_RUNS);
+    for _ in 0..MEASURED_RUNS {
+        let t = std::time::Instant::now();
+        let outcome = host.activity("s1", "UserPromptSubmit", "");
+        durations.push(t.elapsed());
+        assert_eq!(outcome.exit_code, 0, "{}", outcome.stderr);
+    }
+    stop.store(true, Ordering::SeqCst);
+    writer.join().expect("writer thread");
+    durations.sort();
+
+    // Assert
+    let at = |p: usize| durations[(durations.len() * p / 100).min(durations.len() - 1)];
+    let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
+    println!(
+        "session-activity ms: median={:.2} p95={:.2} p99={:.2} max={:.2}",
+        ms(durations[durations.len() / 2]),
+        ms(at(95)),
+        ms(at(99)),
+        ms(durations[durations.len() - 1])
+    );
+    assert!(
+        committed.load(Ordering::SeqCst) > 0,
+        "the writer committed nothing, so the run measured no contention"
+    );
+    assert!(at(95).as_millis() < HOOK_WRITE_P95_TARGET_MS);
 }

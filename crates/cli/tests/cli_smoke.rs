@@ -261,9 +261,10 @@ fn walk(dir: &Path, map: &mut BTreeMap<PathBuf, u64>) {
         } else if kind.is_dir() {
             map.insert(p.clone(), 0);
             walk(&p, map);
-        } else if e.file_name() == "config.db" {
+        } else if e.file_name() == "config.db" || e.file_name() == "sessions.db" {
             // The settings database stamps a time on every write, so a second
-            // run that sets the same value changes its bytes. Presence is
+            // run that sets the same value changes its bytes. The session
+            // database stamps the start time on every hook run. Presence is
             // what the check needs.
             map.insert(p, 2);
         } else {
@@ -923,17 +924,25 @@ fn check(c: &Case) -> Vec<String> {
     bad
 }
 
-/// The snapshot without the `-wal` and `-shm` files of `config.db`. Its
-/// contents are compared by presence only (see `walk`), and `doctor check`
-/// opens it from parallel probes, read-write and read-only, so these files
-/// stay or go depending on which connection closes last. The other
+/// The snapshot without the `-wal` and `-shm` files of `config.db` and
+/// `sessions.db`. Their contents are compared by presence only (see `walk`),
+/// and these files stay or go depending on which connection closes last (for
+/// `config.db`, `doctor check` opens it from parallel probes, read-write and
+/// read-only). The other
 /// databases keep their sidecars in the comparison, and the "wrote files"
 /// check still sees all of them, so a read-only command that leaves them
 /// fails.
 fn without_sidecars(mut map: BTreeMap<PathBuf, u64>) -> BTreeMap<PathBuf, u64> {
     map.retain(|p, _| {
         let name = p.file_name().unwrap_or_default();
-        name != "config.db-wal" && name != "config.db-shm"
+        ![
+            "config.db-wal",
+            "config.db-shm",
+            "sessions.db-wal",
+            "sessions.db-shm",
+        ]
+        .iter()
+        .any(|ignored| name == *ignored)
     });
     map
 }

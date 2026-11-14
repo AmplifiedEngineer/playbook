@@ -1,24 +1,22 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Stop / SessionEnd hook (ports the retired shell original): marks a
-//! session as having ended cleanly, so the NEXT session's session-init hook
-//! can detect an orphaned, crashed session (no clean-exit marker) versus a
-//! graceful one.
+//! Stop / SessionEnd hook (ports the retired shell original): records in
+//! `sessions.db` that a turn stopped or that the session ended, so a later
+//! session start can tell an abandoned session from a finished one.
 //!
 //! Wired to both `Stop` (fires after every assistant turn) and `SessionEnd`
-//! (fires once, when the session truly ends) from the same script. `Stop`
-//! refreshes `last-clean-ts` on every turn, so a stale-session check only
-//! fires when a session is genuinely abandoned. Only `SessionEnd` carries a
-//! `.reason`, and only when that reason is present and not `"other"` does
-//! this hook write the `clean-exit` marker and consider queuing the
-//! auto-learn nudge; that presence-and-not-other check is how the two
-//! events are told apart from inside one script.
+//! (fires once, when the session truly ends) from the same script. Only
+//! `SessionEnd` carries a `.reason`, and only when that reason is present and
+//! not `"other"` does this hook record the end and consider queuing the
+//! auto-learn nudge; that presence-and-not-other check is how the two events
+//! are told apart from inside one script.
 
 use crate::common::atomic::with_dir_lock;
 use crate::common::slug::slugify;
 use crate::common::{session_dir, session_id, Payload};
 use crate::hooks::git_toplevel;
+use crate::sessions::store;
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
@@ -35,33 +33,30 @@ pub fn run(payload: &Payload) {
         return;
     }
 
-    refresh_last_clean_ts(&dir);
-
     let reason = payload.field(".reason");
-    if reason.is_empty() || reason == "other" {
+    let ended = !reason.is_empty() && reason != "other";
+    record(&session_id(payload), ended.then_some(reason.as_str()));
+    if !ended {
         return;
     }
 
-    write_clean_exit_marker(&dir, &reason);
     if reason == "clear" {
         crate::handoff::mark_cleared(&session_id(payload));
     }
     queue_auto_learn(payload, &dir);
 }
 
-/// Stamp `last-clean-ts` with the current time. Fires on every `Stop`, not
-/// only at session end, so a crash check downstream only trips when a
-/// session is genuinely abandoned. Matches
-/// the retired shell original.
-fn refresh_last_clean_ts(dir: &str) {
-    let now = crate::common::time::now_epoch_secs();
-    let _ = fs::write(Path::new(dir).join("last-clean-ts"), now.to_string());
-}
-
-/// Write the `clean-exit` marker holding the session-end reason. Matches
-/// the retired shell original.
-fn write_clean_exit_marker(dir: &str, reason: &str) {
-    let _ = fs::write(Path::new(dir).join("clean-exit"), format!("{reason}\n"));
+/// Record the end with `reason`, or a stop when there is none. A database
+/// error is dropped: a hook that blocks a session is worse than a missing label.
+fn record(id: &str, reason: Option<&str>) {
+    let now = crate::common::time::now_secs();
+    let Ok(conn) = store::open() else {
+        return;
+    };
+    let _ = match reason {
+        Some(reason) => store::end(&conn, id, reason, now),
+        None => store::stop(&conn, id, now),
+    };
 }
 
 /// Queue an auto-learn flag for this repo if the session made enough edits.
