@@ -32,13 +32,42 @@ fn run(root: &PathBuf, args: &[&str]) -> Output {
         .expect("spawn playbook")
 }
 
-/// The data folder row shows a disk size that moves between runs.
+/// Rows whose text carries a measured size that moves between two runs: the
+/// data folder and gc rows (file sizes), and the free disk space row (other
+/// processes on the machine change it, which flaked as 85.3 GiB vs 85.2 GiB).
+/// The free disk row has a low-space variant, so the label stops before the value.
+const VOLATILE_LABELS: [&str; 3] = ["data folder", "gc:", "free disk space"];
+
+/// Keeps every row, its level and its label, and masks only what follows the
+/// label. A row that vanishes or changes level still fails the comparison.
 fn stable(out: &[u8]) -> String {
     String::from_utf8_lossy(out)
         .lines()
-        .filter(|l| !l.contains("data folder"))
+        .map(|line| {
+            VOLATILE_LABELS
+                .iter()
+                .find_map(|label| line.find(label).map(|at| (at, label.len())))
+                .map_or_else(
+                    || line.to_string(),
+                    |(at, len)| format!("{}<volatile>", &line[..at + len]),
+                )
+        })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[test]
+fn stable_masks_the_measured_value_and_keeps_the_row() {
+    let a = b"OK   free disk space: 85.3 GiB\nWARN free disk space is low: 1.0 GiB of 9.0 GiB\nOK   other 1";
+    let b = b"OK   free disk space: 85.2 GiB\nWARN free disk space is low: 2.0 GiB of 9.0 GiB\nOK   other 1";
+    assert_eq!(stable(a), stable(b));
+    // A different level, a missing row or a changed stable row still differs.
+    assert_ne!(
+        stable(a),
+        stable(b"WARN free disk space: 85.3 GiB\nOK   other 1")
+    );
+    assert_ne!(stable(a), stable(b"OK   free disk space: 85.3 GiB"));
+    assert_ne!(stable(b"OK   other 1"), stable(b"OK   other 2"));
 }
 
 fn assert_same_as_check(root: &PathBuf) {
