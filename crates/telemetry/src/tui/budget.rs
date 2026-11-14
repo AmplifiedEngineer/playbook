@@ -41,6 +41,9 @@ use ratatui::text::{Line, Span};
 /// which a 24 row screen cannot spare, so the figures of the second limit sit
 /// behind `i`. Only the lines that exist are drawn, so most views are shorter.
 const ROWS: usize = 4;
+/// The most lines under the metrics of a header that stacks on a short screen.
+/// The line left out sits behind `i`, which always draws up to `ROWS`.
+pub const STACKED_ROWS: usize = 3;
 /// The detail view draws a limit row and a figures row for each limit.
 const _: () = assert!(ROWS >= 2 * MAX_LIMITS);
 /// The most limits drawn. The rest are counted in the header's bottom border.
@@ -824,7 +827,9 @@ fn body(
     icon: Icon,
     width: usize,
     detail: bool,
+    cap: usize,
 ) -> (Vec<Line<'static>>, usize) {
+    let cap = if detail { ROWS } else { cap.min(ROWS) };
     let v = &data.limits;
     let all_notes = notes(pal, v, data.now);
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -846,12 +851,12 @@ fn body(
     let mut hidden_notes = all_notes.len();
     if detail {
         for note in &all_notes {
-            if lines.len() < ROWS {
+            if lines.len() < cap {
                 lines.push(Line::styled(fit(&note.full, width), fg(pal, note.ink)));
                 hidden_notes -= 1;
             }
         }
-        if lines.len() < ROWS {
+        if lines.len() < cap {
             lines.push(burn_line(pal, icon, v, width));
         }
     } else {
@@ -860,12 +865,12 @@ fn body(
             hidden_notes = 0;
         }
         lines.push(burn_line(pal, icon, v, width));
-        if hidden_notes > 0 && lines.len() < ROWS {
+        if hidden_notes > 0 && lines.len() < cap {
             lines.push(status_line(pal, &all_notes, width));
             hidden_notes = 0;
         }
     }
-    lines.truncate(ROWS);
+    lines.truncate(cap);
     (lines, hidden_notes)
 }
 
@@ -878,10 +883,17 @@ pub struct Lines {
     pub hidden_notes: usize,
 }
 
-/// The budget lines for a column `width` wide, at most `ROWS`. A line exists
+/// The budget lines for a column `width` wide, at most `cap` and `ROWS`. A line exists
 /// only for data that exists, so the header never keeps rows for the rest.
-pub fn lines(data: &Data, pal: &Palette, icon: Icon, width: usize, detail: bool) -> Lines {
-    let (lines, hidden_notes) = body(data, pal, icon, width, detail);
+pub fn lines(
+    data: &Data,
+    pal: &Palette,
+    icon: Icon,
+    width: usize,
+    detail: bool,
+    cap: usize,
+) -> Lines {
+    let (lines, hidden_notes) = body(data, pal, icon, width, detail, cap);
     Lines {
         lines,
         more: data.limits.limits.len().saturating_sub(MAX_LIMITS),

@@ -35,7 +35,7 @@ The terminal view opens on this week compared with last week. Without a terminal
 
 The screen needs at least 80 columns and 24 rows. Below that it says so and draws nothing else. The pictures here use 150 columns and 44 rows, and show sample data.
 
-Every tab has a header with the range, the cost, the tokens and the messages. For today, this week and this month it compares them with the previous period. The header also carries the budget: each limit with its bar, and the spend against the previous period. On a wide screen the two sit in columns, the cost, tokens and messages on the left and the budget on the right. On a narrow screen, under 106 columns when there is a previous period to compare, the budget rows stack under the comparison. The header draws only the rows it has data for, so a screen with no limit set keeps it short. The tab bar sits under the header. `F1` to `F3` pick a tab, and the default layout has three.
+Every tab has a header with the range, the cost, the tokens and the messages. For today, this week and this month it compares them with the previous period. The header also carries the budget, beside the comparison on a wide screen and under it on a narrow one. Under 92 columns the comparison takes one row, so the default Charts tab shows every panel at 80 by 24. The tab bar sits under the header. `F1` to `F3` pick a tab, and the default layout has three.
 
 **Charts.** Every chart: spend per day and spend per day by model side by side, tokens per day and the Hourly chart side by side, with a burn-up panel below. The Hourly chart shows the cost of each of the last 24 hours with the total in its title. It has no data in the sample, because the sample sets no limit.
 
@@ -79,7 +79,7 @@ A tab with no row layout of its own draws this grid, which the editor edits as i
 
 A tab keeps its own rows only when you set them with `f` (split or join a row) or when the stored value has a `|`. Then adding fills the last row that has room, opens a new row while the tab has fewer than 4, and otherwise fills the first row with room. Old stored layouts load and save as written.
 
-A short screen keeps every row at 5 lines or more. When the rows do not fit, the tab draws the rows that do and hides the panels of the others. The footer then says how many panels are hidden and how many screen rows show all of them, for example `2 panels hidden, 28 rows show all`. The header takes 6 rows on a wide screen while the budget has three lines or fewer, and more when the budget has four or the rows stack, so the number moves a little with the screen. The header is never left out: it is drawn at every size from the 80 by 24 minimum, and the panels give way to it. At 150 by 44 every count from 1 to 8 fits.
+A short screen keeps every row at 5 lines or more. When the rows do not fit, the tab draws the rows that do and hides the panels of the others. The footer then says how many panels are hidden and how many screen rows show all of them, for example `2 panels hidden, 28 rows show all`. The header is never left out, so the panels give way to it. At 150 by 44 every count from 1 to 8 fits.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/pbtop/layout-editor-dark.svg">
@@ -228,7 +228,7 @@ The cost is an estimate at API prices. It is not what a subscription plan bills.
 
 ## Limits
 
-The budget part of the header compares your use with a limit. It has at most four rows, and only the rows that have data are drawn. On a wide screen it fills the right column of the header; on a narrow one it sits under the cost, tokens and messages rows.
+The budget part of the header compares your use with a limit. It has up to four rows, three on a narrow screen, and only the rows with data are drawn. `i` shows all of them. The `N notes, i` border hint shows only when `i` reveals them.
 
 ```
 Monthly  c ████│█████████░░░░░░░░░░░░░░░░░░░   24%  $120 of $500  ▲ hits it in 6d 13h  resets in 27d (Thu 10-01)

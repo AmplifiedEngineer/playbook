@@ -273,7 +273,7 @@ For the period on screen (today, this week or this month, this week for other ra
 
 ### Where it shows
 
-- **Terminal view.** The budget is part of the header, which every tab shows. It sits in a column beside the cost, tokens and messages rows on a wide screen and under them on a narrow one, and draws only the rows it has data for. It is drawn at every size from the 80 by 24 minimum, and a short screen hides tab panels before it touches the header. It lists at most two limits, worst first, and says how many more `--json` has. With no known limit it says how to set one. It ignores the project filter: a limit belongs to the account, not to a repo.
+- **Terminal view.** The budget is part of the header, which every tab shows. It sits in a column beside the cost, tokens and messages rows on a wide screen and under them on a narrow one, and draws only the rows it has data for. Under 90 cells of inner width the comparison folds into one row (`FOLD_STACKED_BELOW`) and the budget keeps three rows (`STACKED_ROWS`), the rest behind `i`. It is drawn at every size from the 80 by 24 minimum, and a short screen hides tab panels before it touches the header. It lists at most two limits, worst first, and says how many more `--json` has. With no known limit it says how to set one. It ignores the project filter: a limit belongs to the account, not to a repo.
 - **`--summary`.** A "Limits and burn rate" section. After the limits it adds:
   - the amount Claude reports as used next to the local estimate, with its age and a stale marker once it is over 6 hours old (or why the two were not compared);
   - one `<period> crossings` line per limit, with the time each of 50, 80 and 100 percent was or will be crossed;

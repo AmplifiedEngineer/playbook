@@ -772,6 +772,44 @@ fn metric_lines(d: &Data, pal: &Palette) -> Vec<Line<'static>> {
     lines
 }
 
+/// Cost, tokens and messages on one row, for a header that stacks. Each reads
+/// `name now vs before change` with the percent of the change, since the
+/// amount follows from the two values. When that is wider than `room`, the
+/// previous value goes too and each reads `name now change`. `None` when even
+/// that does not fit, so the caller keeps the three rows.
+fn folded_metric_line(d: &Data, pal: &Palette, room: usize) -> Option<Line<'static>> {
+    let plain = Style::default().fg(pal.color(pal.fg));
+    [true, false].into_iter().find_map(|with_before| {
+        let mut spans = Vec::new();
+        for (i, m) in metrics(d).into_iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::styled(FOLD_GAP, plain));
+            }
+            let name = if m.name == "messages" { "msgs" } else { m.name };
+            spans.push(Span::styled(format!("{name} "), plain));
+            spans.push(Span::styled(
+                m.now,
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
+            let Some(before) = m.before else { continue };
+            let tint = if m.change > 0.0 {
+                pal.warn
+            } else if m.change < 0.0 {
+                pal.live
+            } else {
+                pal.fg
+            };
+            if with_before {
+                spans.push(Span::styled(format!(" vs {before}"), plain));
+            }
+            let change = Style::default().fg(pal.color(tint));
+            spans.push(Span::styled(format!(" {}", m.percent), change));
+        }
+        let line = Line::from(spans);
+        (line.width() <= room).then_some(line)
+    })
+}
+
 /// The time zone note in the header border. Weeks say which day they start on.
 fn zone_note(app: &App) -> String {
     let zone = match app.range {
@@ -794,6 +832,14 @@ const COLUMN_GAP: usize = 3;
 /// The least width the budget column needs to draw a limit with its bar, the
 /// percent and the verdict. Under it the header stacks its rows.
 const BUDGET_MIN: usize = 44;
+
+/// The gap between the metrics when a stacked header folds them into one row.
+const FOLD_GAP: &str = "  ";
+/// The rule for a header that stacks under this many cells: cost, tokens and
+/// messages share one row, so the budget keeps every line and the header stays
+/// short enough for the Charts tab to show all its panels at 80x24. Wider
+/// screens are taller too and keep a row for each.
+const FOLD_STACKED_BELOW: usize = 90;
 
 /// What the header draws inside its border: a first line across the width,
 /// then the comparison and the budget.
@@ -849,14 +895,30 @@ fn header_body(app: &App, pal: &Palette, width: usize) -> HeaderBody {
     let side = left.iter().map(Line::width).max().unwrap_or(0);
     let split = (width >= side + COLUMN_GAP + BUDGET_MIN).then_some(side);
     let room = split.map_or(width, |side| width - side - COLUMN_GAP);
-    let b = budget::lines(d, pal, app.icon, room, app.budget_detail);
+    let left = match folded_metric_line(d, pal, width) {
+        Some(line) if split.is_none() && width < FOLD_STACKED_BELOW => vec![line],
+        _ => left,
+    };
+    let cap = if split.is_none() && width < FOLD_STACKED_BELOW {
+        budget::STACKED_ROWS
+    } else {
+        usize::MAX
+    };
+    let b = budget::lines(d, pal, app.icon, room, app.budget_detail, cap);
+    // The `i` hint names only the notes that pressing `i` shows.
+    let hidden_notes = if app.budget_detail || b.hidden_notes == 0 {
+        0
+    } else {
+        let all = budget::lines(d, pal, app.icon, room, true, cap);
+        b.hidden_notes.saturating_sub(all.hidden_notes)
+    };
     HeaderBody {
         top: context_row(d, pal, width),
         left,
         right: b.lines,
         split,
         more: b.more,
-        hidden_notes: b.hidden_notes,
+        hidden_notes,
     }
 }
 

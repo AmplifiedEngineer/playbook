@@ -1963,7 +1963,7 @@ fn the_header_stacks_the_budget_under_the_comparison_on_a_narrow_screen() {
     let text = header_rows(&a, 80, 24);
 
     let at = |word: &str| text.lines().position(|l| l.contains(word)).unwrap();
-    assert!(at("messages") < at("5 hour"), "{text}");
+    assert!(at("msgs") < at("5 hour"), "{text}");
     assert!(
         !text
             .lines()
@@ -1971,6 +1971,75 @@ fn the_header_stacks_the_budget_under_the_comparison_on_a_narrow_screen() {
         "{text}"
     );
     check("header_stacked_80x24", &text);
+}
+
+#[test]
+fn the_default_charts_tab_at_80x24_with_a_previous_period_hides_no_panel() {
+    use crate::tui::view::{header_height, place};
+    let area = ratatui::layout::Rect::new(0, 0, 80, 24);
+    let week = Range::ThisWeek(WeekStart::Monday);
+    let none = with_limits(tabbed(0), None, &[], week);
+    let one = with_sources(tabbed(0), &over_pace(), week);
+    let two = with_sources(tabbed(0), &two_limits(), week);
+
+    for (name, a) in [("no limit", none), ("one limit", one), ("two limits", two)] {
+        assert!(a.data.as_ref().unwrap().comparison.is_some(), "{name}");
+        let placed = place(
+            area,
+            header_height(&a, area.width),
+            a.tab_ids(),
+            a.tab_rows(),
+            a.layout.tabs.len() > 1,
+        );
+        assert_eq!(placed.hidden, None, "{name}:\n{}", draw(&a, 80, 24));
+    }
+}
+
+#[test]
+fn a_stacked_header_folds_the_comparison_into_one_row_and_keeps_every_figure() {
+    let a = with_sources(tabbed(0), &two_limits(), Range::ThisWeek(WeekStart::Monday));
+
+    let text = header_rows(&a, 80, 24);
+
+    let row = text.lines().find(|l| l.contains("cost")).unwrap();
+    for word in ["cost", "tokens", "msgs", " vs "] {
+        assert!(row.contains(word), "{word}: {text}");
+    }
+    assert_eq!(
+        text.lines().filter(|l| l.contains("tokens")).count(),
+        1,
+        "{text}"
+    );
+}
+
+#[test]
+fn the_notes_hint_shows_when_pressing_i_reveals_the_note() {
+    let mut a = with_sources(
+        tabbed(0),
+        &enterprise_sources(600),
+        Range::ThisWeek(WeekStart::Monday),
+    );
+
+    let short = header_rows(&a, 80, 24);
+    a.budget_detail = true;
+    let long = header_rows(&a, 80, 24);
+
+    assert!(short.contains("1 note, i"), "{short}");
+    assert!(long.contains("not available"), "{long}");
+    assert!(!long.contains("note, i"), "{long}");
+}
+
+#[test]
+fn the_notes_hint_is_dropped_when_pressing_i_would_not_show_the_notes() {
+    let mut a = numbers_with(&two_limits(), Icon::Off, false);
+    a.data.as_mut().unwrap().limits.windows_note = Some("windows are not on this plan");
+
+    for detail in [false, true] {
+        a.budget_detail = detail;
+        let text = header_rows(&a, 150, 44);
+        assert!(!text.contains("note"), "detail {detail}: {text}");
+        assert!(!text.contains(", i"), "detail {detail}: {text}");
+    }
 }
 
 #[test]
@@ -1999,10 +2068,14 @@ fn the_header_keeps_no_row_for_budget_data_that_does_not_exist() {
     // up to three lines, and only a fourth line adds a row.
     assert_eq!(wide(&none), 2 + 1 + 3);
     assert_eq!(wide(&two), 2 + 1 + 4);
-    // Stacked, only the lines that exist are added: no limit, the note on the
-    // missing windows and the spend.
-    assert_eq!(stacked(&none), 2 + 1 + 3 + 3);
-    assert_eq!(stacked(&two), 2 + 1 + 3 + 4);
+    // Stacked at 80 columns the comparison is one row and the budget has at
+    // most three lines: no limit, the note on the missing windows and the
+    // spend, or the two limits with the figures of the first.
+    assert_eq!(stacked(&none), 2 + 1 + 1 + 3);
+    assert_eq!(
+        stacked(&two),
+        2 + 1 + 1 + crate::tui::budget::STACKED_ROWS as u16
+    );
     // No data yet: the border and one line.
     assert_eq!(
         crate::tui::view::header_height(&App::new(Range::All), 150),
