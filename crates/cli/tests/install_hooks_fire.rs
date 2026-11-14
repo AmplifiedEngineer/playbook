@@ -140,6 +140,28 @@ fn runtime(home: &Path, sid: &str) -> PathBuf {
     home.join(".config/playbook/runtime").join(sid)
 }
 
+/// One integer column of the row of `sid` in the database a hook wrote under
+/// `home`, `None` when there is no database, no row or the column is null.
+fn session_column(home: &Path, sid: &str, column: &str) -> Option<i64> {
+    let db = home.join(".config/playbook/data/sessions.db");
+    let conn = playbook_store::Connection::open(db).ok()?;
+    conn.query_row(
+        &format!("SELECT {column} FROM sessions WHERE session_id = ?1"),
+        [sid],
+        |r| r.get(0),
+    )
+    .ok()
+    .flatten()
+}
+
+fn waiting_flag(home: &Path, sid: &str) -> Option<i64> {
+    session_column(home, sid, "waiting_after_prompt")
+}
+
+fn ended_at_is_set(home: &Path, sid: &str) -> bool {
+    session_column(home, sid, "ended_at").is_some()
+}
+
 fn fires(f: &Fire, name: &str) -> bool {
     match name {
         "session-init" => {
@@ -426,9 +448,7 @@ fn fires(f: &Fire, name: &str) -> bool {
                 &[],
                 &[],
             );
-            let file = fs::read_to_string(runtime(&home, "fire-activity").join("activity.json"));
-            out.is_empty()
-                && file.is_ok_and(|t| t.contains("permission_prompt") && !t.contains("secret"))
+            out.is_empty() && waiting_flag(&home, "fire-activity") == Some(1)
         }
         "session-clean-exit" => {
             let home = scratch(f, "h-exit");
@@ -441,8 +461,7 @@ fn fires(f: &Fire, name: &str) -> bool {
                 &[],
                 &[],
             );
-            fs::read_to_string(runtime(&home, "fire-clean-exit").join("clean-exit"))
-                .is_ok_and(|t| t.trim() == "logout")
+            ended_at_is_set(&home, "fire-clean-exit")
         }
         "memory-capture" => {
             let home = scratch(f, "h-capture");
