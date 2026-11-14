@@ -16,6 +16,14 @@ const DEFAULT_MAX_LINES: u64 = 3000;
 /// Longest branch chain followed in either direction; guards against loops.
 const MAX_CHAIN: usize = 25;
 
+/// A stack over this many times the PR limit, or whose open PRs average more
+/// than the line limit, is a runaway: the review asks before it starts.
+const RUNAWAY_FACTOR: u64 = 2;
+
+/// Fewest open PRs for which "review one at a time" is a real choice; a single
+/// open PR is only ever flagged by its own line budget.
+const MIN_PRS_TO_SPLIT: u64 = 2;
+
 const PR_FIELDS: &str =
     "number,title,state,isDraft,baseRefName,headRefName,headRefOid,additions,deletions,changedFiles,author,mergedAt,url";
 
@@ -157,6 +165,21 @@ impl Stack {
                 limits.max_lines
             ));
         }
+        let mut far = Vec::new();
+        if open_count > RUNAWAY_FACTOR.saturating_mul(limits.max_prs) {
+            far.push(format!(
+                "{open_count} open PRs, more than {RUNAWAY_FACTOR} times the limit of {}",
+                limits.max_prs
+            ));
+        }
+        if open_count >= MIN_PRS_TO_SPLIT
+            && open_lines > limits.max_lines.saturating_mul(open_count)
+        {
+            far.push(format!(
+                "{open_lines} changed lines, more than {} for each of the {open_count} open PRs",
+                limits.max_lines
+            ));
+        }
         let prs: Vec<Value> = self
             .prs
             .iter()
@@ -192,6 +215,8 @@ impl Stack {
             "open_lines": open_lines,
             "over_budget": !over.is_empty(),
             "over_budget_reasons": over,
+            "far_over_budget": !far.is_empty(),
+            "far_over_budget_reasons": far,
             "prs": prs,
             "warnings": self.warnings,
         })
@@ -232,6 +257,11 @@ impl Stack {
         if let Some(reasons) = j["over_budget_reasons"].as_array() {
             for r in reasons {
                 out.push_str(&format!("Over budget: {}\n", r.as_str().unwrap_or("")));
+            }
+        }
+        if let Some(reasons) = j["far_over_budget_reasons"].as_array() {
+            for r in reasons {
+                out.push_str(&format!("Far over budget: {}\n", r.as_str().unwrap_or("")));
             }
         }
         for w in &self.warnings {
@@ -659,6 +689,267 @@ mod tests {
         assert_eq!(j["over_budget"], true);
         let reasons = j["over_budget_reasons"].to_string();
         assert!(reasons.contains("review.stackMaxPrs") && reasons.contains("review.stackMaxLines"));
+    }
+
+    fn stack_of(pairs: &[(State, u64)]) -> Stack {
+        let prs = pairs
+            .iter()
+            .enumerate()
+            .map(|(i, &(state, lines))| StackPr {
+                number: i as u64 + 1,
+                title: format!("pr {}", i + 1),
+                state,
+                draft: false,
+                base: format!("b{i}"),
+                head: format!("b{}", i + 1),
+                head_sha: format!("sha{}", i + 1),
+                additions: lines,
+                deletions: 0,
+                changed_files: 1,
+                author: "a".into(),
+                url: String::new(),
+            })
+            .collect();
+        Stack {
+            source: Source::Api,
+            repo: "o/r".into(),
+            current: 1,
+            prs,
+            warnings: vec![],
+        }
+    }
+
+    fn open_prs(n: usize, lines: u64) -> Vec<(State, u64)> {
+        vec![(State::Open, lines); n]
+    }
+
+    fn with_merged(mut pairs: Vec<(State, u64)>, n: usize, lines: u64) -> Vec<(State, u64)> {
+        pairs.extend(vec![(State::Merged, lines); n]);
+        pairs
+    }
+
+    fn limits(max_prs: u64, max_lines: u64) -> Limits {
+        Limits { max_prs, max_lines }
+    }
+
+    fn strings(v: &Value) -> Vec<String> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r.as_str().unwrap().to_string())
+            .collect()
+    }
+
+    const FAR_COUNT_13: &str = "13 open PRs, more than 2 times the limit of 6";
+
+    #[test]
+    fn budget_tiers_at_their_boundaries() {
+        struct Case {
+            name: &'static str,
+            pairs: Vec<(State, u64)>,
+            limits: Limits,
+            over: &'static [&'static str],
+            far: &'static [&'static str],
+        }
+        let cases = [
+            Case {
+                name: "6 open PRs of 100 lines",
+                pairs: open_prs(6, 100),
+                limits: Limits::default(),
+                over: &[],
+                far: &[],
+            },
+            Case {
+                name: "7 open PRs of 100 lines",
+                pairs: open_prs(7, 100),
+                limits: Limits::default(),
+                over: &["7 open PRs, limit 6 (review.stackMaxPrs)"],
+                far: &[],
+            },
+            Case {
+                name: "1 open PR of 3000 lines",
+                pairs: open_prs(1, 3000),
+                limits: Limits::default(),
+                over: &[],
+                far: &[],
+            },
+            Case {
+                name: "1 open PR of 3001 lines",
+                pairs: open_prs(1, 3001),
+                limits: Limits::default(),
+                over: &["3001 changed lines, limit 3000 (review.stackMaxLines)"],
+                far: &[],
+            },
+            Case {
+                name: "acceptance: 10 open PRs of 1200 lines",
+                pairs: open_prs(10, 1200),
+                limits: Limits::default(),
+                over: &[
+                    "10 open PRs, limit 6 (review.stackMaxPrs)",
+                    "12000 changed lines, limit 3000 (review.stackMaxLines)",
+                ],
+                far: &[],
+            },
+            Case {
+                name: "12 open PRs of 100 lines",
+                pairs: open_prs(12, 100),
+                limits: Limits::default(),
+                over: &["12 open PRs, limit 6 (review.stackMaxPrs)"],
+                far: &[],
+            },
+            Case {
+                name: "13 open PRs of 100 lines",
+                pairs: open_prs(13, 100),
+                limits: Limits::default(),
+                over: &["13 open PRs, limit 6 (review.stackMaxPrs)"],
+                far: &[FAR_COUNT_13],
+            },
+            Case {
+                name: "3 open PRs totaling 9000 lines",
+                pairs: open_prs(3, 3000),
+                limits: Limits::default(),
+                over: &["9000 changed lines, limit 3000 (review.stackMaxLines)"],
+                far: &[],
+            },
+            Case {
+                name: "3 open PRs totaling 9001 lines",
+                pairs: vec![
+                    (State::Open, 3000),
+                    (State::Open, 3000),
+                    (State::Open, 3001),
+                ],
+                limits: Limits::default(),
+                over: &["9001 changed lines, limit 3000 (review.stackMaxLines)"],
+                far: &["9001 changed lines, more than 3000 for each of the 3 open PRs"],
+            },
+            Case {
+                name: "13 open PRs of 4000 lines",
+                pairs: open_prs(13, 4000),
+                limits: Limits::default(),
+                over: &[
+                    "13 open PRs, limit 6 (review.stackMaxPrs)",
+                    "52000 changed lines, limit 3000 (review.stackMaxLines)",
+                ],
+                far: &[
+                    FAR_COUNT_13,
+                    "52000 changed lines, more than 3000 for each of the 13 open PRs",
+                ],
+            },
+            Case {
+                name: "2 open PRs totaling 6000 lines",
+                pairs: open_prs(2, 3000),
+                limits: Limits::default(),
+                over: &["6000 changed lines, limit 3000 (review.stackMaxLines)"],
+                far: &[],
+            },
+            Case {
+                name: "2 open PRs totaling 6001 lines",
+                pairs: vec![(State::Open, 3000), (State::Open, 3001)],
+                limits: Limits::default(),
+                over: &["6001 changed lines, limit 3000 (review.stackMaxLines)"],
+                far: &["6001 changed lines, more than 3000 for each of the 2 open PRs"],
+            },
+            Case {
+                name: "1 open PR of 10000 lines plus 4 merged",
+                pairs: with_merged(open_prs(1, 10000), 4, 100),
+                limits: Limits::default(),
+                over: &["10000 changed lines, limit 3000 (review.stackMaxLines)"],
+                far: &[],
+            },
+            Case {
+                name: "merged PRs are not counted",
+                pairs: with_merged(open_prs(3, 4000), 5, 4000),
+                limits: Limits::default(),
+                over: &["12000 changed lines, limit 3000 (review.stackMaxLines)"],
+                far: &["12000 changed lines, more than 3000 for each of the 3 open PRs"],
+            },
+            Case {
+                name: "per-run override raises the line limit",
+                pairs: open_prs(3, 10000),
+                limits: limits(6, 50000),
+                over: &[],
+                far: &[],
+            },
+            Case {
+                name: "limits at u64::MAX do not overflow",
+                pairs: open_prs(3, 100),
+                limits: limits(u64::MAX, u64::MAX),
+                over: &[],
+                far: &[],
+            },
+            Case {
+                name: "no open PRs",
+                pairs: vec![(State::Merged, 5000); 3],
+                limits: Limits::default(),
+                over: &[],
+                far: &[],
+            },
+        ];
+        for c in cases {
+            // Arrange
+            let stack = stack_of(&c.pairs);
+
+            // Act
+            let j = stack.to_json(c.limits);
+
+            // Assert
+            assert_eq!(strings(&j["over_budget_reasons"]), c.over, "{}", c.name);
+            assert_eq!(j["over_budget"], !c.over.is_empty(), "{}", c.name);
+            assert_eq!(strings(&j["far_over_budget_reasons"]), c.far, "{}", c.name);
+            assert_eq!(j["far_over_budget"], !c.far.is_empty(), "{}", c.name);
+        }
+    }
+
+    #[test]
+    fn a_single_open_pr_over_the_line_limit_flags_the_pr_itself() {
+        // Arrange
+        let stack = stack_of(&with_merged(open_prs(1, 10000), 4, 100));
+
+        // Act
+        let j = stack.to_json(Limits::default());
+
+        // Assert
+        assert_eq!(j["prs"][0]["over_line_budget"], true);
+    }
+
+    #[test]
+    fn text_lists_far_over_reasons_once_after_the_over_reasons() {
+        // Arrange
+        let stack = stack_of(&open_prs(13, 4000));
+
+        // Act
+        let text = stack.to_text(Limits::default());
+
+        // Assert
+        let lines: Vec<&str> = text.lines().collect();
+        let last_over = lines.iter().rposition(|l| l.starts_with("Over budget:"));
+        let far: Vec<usize> = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.starts_with("Far over budget:"))
+            .map(|(i, _)| i)
+            .collect();
+        let expected = [
+            format!("Far over budget: {FAR_COUNT_13}"),
+            "Far over budget: 52000 changed lines, more than 3000 for each of the 13 open PRs"
+                .to_string(),
+        ];
+        let got: Vec<&str> = far.iter().map(|&i| lines[i]).collect();
+        assert_eq!(got, expected);
+        assert!(far[0] > last_over.unwrap(), "{text}");
+    }
+
+    #[test]
+    fn text_of_a_stack_that_is_only_over_has_no_far_over_line() {
+        // Arrange
+        let stack = stack_of(&open_prs(10, 1200));
+
+        // Act
+        let text = stack.to_text(Limits::default());
+
+        // Assert
+        assert!(text.contains("Over budget:"), "{text}");
+        assert!(!text.contains("Far over budget:"), "{text}");
     }
 
     #[test]

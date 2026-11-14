@@ -74,6 +74,24 @@ fn json_for_a_five_stack_lists_every_pr_and_asks() {
 }
 
 #[test]
+fn json_reports_a_stack_far_over_the_pr_limit() {
+    // Arrange
+    let args = "3 --json --max-prs 2";
+
+    // Act
+    let o = run("api-5.json", args);
+
+    // Assert
+    let v: serde_json::Value = serde_json::from_str(&text(&o)).expect("json");
+    assert!(o.status.success());
+    assert_eq!(v["far_over_budget"], true);
+    assert_eq!(
+        v["far_over_budget_reasons"],
+        serde_json::json!(["5 open PRs, more than 2 times the limit of 2"])
+    );
+}
+
+#[test]
 fn a_branch_chain_is_found_without_the_api_field() {
     let o = run("api-none.json", "2 --json");
     let v: serde_json::Value = serde_json::from_str(&text(&o)).expect("json");
