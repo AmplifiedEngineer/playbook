@@ -12,6 +12,7 @@
 //! Follow up: `pr status` (a separate change) defines its own trait
 //! for the same `gh` reads. When both have merged, fold them into one.
 
+use crate::pr::stack::{self, State};
 use crate::pr::wait::latest_checks;
 use serde::Serialize;
 use serde_json::Value;
@@ -24,6 +25,23 @@ pub mod exit {
     pub const CHECKS: i32 = 6;
     pub const WAITING: i32 = 7;
     pub const NOT_QUEUED: i32 = 8;
+}
+
+/// The verdict words of a land call.
+pub mod verdict {
+    pub const MERGED: &str = "MERGED";
+    pub const FAIL: &str = "FAIL";
+    pub const CLOSED: &str = "CLOSED";
+    pub const STILL_WAITING: &str = "STILL_WAITING";
+    pub const NOT_QUEUED: &str = "NOT_QUEUED";
+    /// A stack was enqueued and the call did not wait for it.
+    pub const QUEUED: &str = "QUEUED";
+    pub const DRAFT: &str = "DRAFT";
+    pub const WAITING_ON_BASE: &str = "WAITING_ON_BASE";
+    pub const HEAD_MOVED: &str = "HEAD_MOVED";
+    pub const REVIEW_GATE: &str = "REVIEW_GATE";
+    pub const CHANGES_REQUESTED: &str = "CHANGES_REQUESTED";
+    pub const RESTATE: &str = "RESTATE";
 }
 
 /// The merge methods a repo allows.
@@ -47,6 +65,12 @@ pub trait LandGh {
     fn repo_merge_methods(&self) -> Option<Methods>;
     /// Head branch names of the open PRs.
     fn open_heads(&self) -> Vec<String>;
+    /// The unmerged PR numbers of the stack from its bottom up to `pr`, when
+    /// `pr` sits on another unmerged PR; `None` for a PR that is not stacked.
+    fn stack_prs(&self, pr: &str) -> Option<Vec<u64>>;
+    /// Queues `pr` and the PRs below it with the merge-async endpoint, pinned
+    /// to `head`: the exit code and the combined output.
+    fn enqueue_stack(&self, pr: &str, head: &str) -> (i32, String);
 }
 
 /// Limits of one call.
@@ -59,6 +83,10 @@ pub struct Opts {
     pub settle: Duration,
     /// Test only: end the wait after this many polls instead of a timeout.
     pub max_polls: Option<usize>,
+    /// For a stack: return once it is enqueued instead of waiting for the merges.
+    pub no_wait: bool,
+    /// For a stack: refuse unless the checked head is this commit.
+    pub match_head: Option<String>,
 }
 
 impl Default for Opts {
@@ -68,6 +96,8 @@ impl Default for Opts {
             interval: Duration::from_secs(20),
             settle: Duration::from_secs(120),
             max_polls: None,
+            no_wait: false,
+            match_head: None,
         }
     }
 }
@@ -93,6 +123,12 @@ pub struct Report {
     pub head: String,
     pub checks: ChecksReport,
     pub armed: bool,
+    /// The PRs of a stack, bottom first; empty for a single PR.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub stack: Vec<String>,
+    /// The PR of a stack that stopped the call.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub blocked_by: String,
     pub method: String,
     pub merge_output: String,
     pub state: String,
@@ -103,13 +139,31 @@ pub struct Report {
     pub exit_code: i32,
 }
 
+/// Values `gh` reports that the flow reads.
+const STATE_MERGED: &str = "MERGED";
+const STATE_CLOSED: &str = "CLOSED";
+const STATE_DIRTY: &str = "DIRTY";
+const STATE_BEHIND: &str = "BEHIND";
+const AUTO_MERGE_FIELD: &str = "autoMergeRequest";
+const DISABLE_AUTO_FLAG: &str = "--disable-auto";
+
+/// The merge-async call: the path with the PR number between the two parts,
+/// and the body fields. `merge_queue` makes GitHub queue the stack as one.
+const MERGE_ASYNC_PREFIX: &str = "repos/{owner}/{repo}/pulls/";
+const MERGE_ASYNC_SUFFIX: &str = "/merge-async";
+const MERGE_ACTION_FIELD: &str = "merge_action";
+const MERGE_ACTION_QUEUE: &str = "merge_queue";
+const HEAD_SHA_FIELD: &str = "sha";
+const REVIEW_REQUIRED: &str = "REVIEW_REQUIRED";
+const CHANGES_REQUESTED: &str = "CHANGES_REQUESTED";
+
 /// The exit code of a verdict.
 pub fn exit_code(verdict: &str) -> i32 {
     match verdict {
-        "MERGED" => exit::MERGED,
-        "FAIL" | "CLOSED" => exit::CHECKS,
-        "STILL_WAITING" => exit::WAITING,
-        "NOT_QUEUED" => exit::NOT_QUEUED,
+        verdict::MERGED | verdict::QUEUED => exit::MERGED,
+        verdict::FAIL | verdict::CLOSED => exit::CHECKS,
+        verdict::STILL_WAITING => exit::WAITING,
+        verdict::NOT_QUEUED => exit::NOT_QUEUED,
         _ => exit::REFUSED,
     }
 }
@@ -145,12 +199,12 @@ fn summarize(json: &str) -> (ChecksReport, bool) {
 fn gate(view: &Value) -> Option<&'static str> {
     let review = text(view, "reviewDecision");
     let merge_state = text(view, "mergeStateStatus");
-    if review == "REVIEW_REQUIRED" {
-        Some("REVIEW_GATE")
-    } else if review == "CHANGES_REQUESTED" {
-        Some("CHANGES_REQUESTED")
-    } else if merge_state == "DIRTY" || merge_state == "BEHIND" {
-        Some("RESTATE")
+    if review == REVIEW_REQUIRED {
+        Some(verdict::REVIEW_GATE)
+    } else if review == CHANGES_REQUESTED {
+        Some(verdict::CHANGES_REQUESTED)
+    } else if merge_state == STATE_DIRTY || merge_state == STATE_BEHIND {
+        Some(verdict::RESTATE)
     } else {
         None
     }
@@ -170,6 +224,8 @@ pub fn land(
         head: String::new(),
         checks: ChecksReport::default(),
         armed: false,
+        stack: Vec::new(),
+        blocked_by: String::new(),
         method: String::new(),
         merge_output: String::new(),
         state: String::new(),
@@ -179,65 +235,110 @@ pub fn land(
         next: String::new(),
         exit_code: 0,
     };
-    let verdict = run(gh, pr, opts, now, sleep, &mut r);
+    let mut wait = Wait {
+        opts,
+        now,
+        sleep,
+        polls: 0,
+    };
+    let verdict = run(gh, pr, &mut wait, &mut r);
     r.verdict = verdict.into();
     r.exit_code = exit_code(verdict);
-    r.elapsed_s = now().as_secs();
-    if verdict == "STILL_WAITING" {
+    r.elapsed_s = (wait.now)().as_secs();
+    if verdict == verdict::STILL_WAITING {
         r.next = format!("playbook pr land {pr} --settle 0");
     }
     r
 }
 
-fn run(
+/// The clock, the sleeper and the poll count shared by the waiting steps.
+struct Wait<'a> {
+    opts: &'a Opts,
+    now: &'a mut dyn FnMut() -> Duration,
+    sleep: &'a mut dyn FnMut(Duration),
+    polls: usize,
+}
+
+impl Wait<'_> {
+    fn out_of_time(&mut self) -> bool {
+        match self.opts.max_polls {
+            Some(max) => self.polls >= max,
+            None => (self.now)() >= self.opts.timeout,
+        }
+    }
+
+    fn pause(&mut self) {
+        (self.sleep)(self.opts.interval);
+    }
+}
+
+fn record(r: &mut Report, view: &Value) {
+    r.state = text(view, "state");
+    r.merge_state = text(view, "mergeStateStatus");
+    r.review_decision = text(view, "reviewDecision");
+}
+
+/// The steps in order: gate on the checked head, arm, wait for the merge. A
+/// step that stops the flow returns its verdict as the error.
+fn run(gh: &dyn LandGh, pr: &str, wait: &mut Wait, r: &mut Report) -> &'static str {
+    let head = match gate_on_checks(gh, pr, wait, r, false) {
+        Ok(head) => head,
+        Err(verdict::WAITING_ON_BASE) => {
+            return match gh.stack_prs(pr) {
+                Some(numbers) => land_stack(gh, &numbers, wait, r),
+                None => verdict::WAITING_ON_BASE,
+            };
+        }
+        Err(verdict) => return verdict,
+    };
+    if let Err(verdict) = arm(gh, pr, &head, r) {
+        return verdict;
+    }
+    await_merge(gh, pr, &head, wait, r)
+}
+
+/// Checks the PR can merge and returns the head that was checked: it is open,
+/// not a draft, not stacked on another open PR (unless `in_stack`, where the
+/// base is expected), its required checks pass, the head did not move, and no
+/// review or branch gate holds it.
+fn gate_on_checks(
     gh: &dyn LandGh,
     pr: &str,
-    opts: &Opts,
-    now: &mut dyn FnMut() -> Duration,
-    sleep: &mut dyn FnMut(Duration),
+    wait: &mut Wait,
     r: &mut Report,
-) -> &'static str {
+    in_stack: bool,
+) -> Result<String, &'static str> {
     let Some(view) = gh.pr_view(pr) else {
         r.merge_output = "could not read the PR".into();
-        return "FAIL";
-    };
-    let record = |r: &mut Report, v: &Value| {
-        r.state = text(v, "state");
-        r.merge_state = text(v, "mergeStateStatus");
-        r.review_decision = text(v, "reviewDecision");
+        return Err(verdict::FAIL);
     };
     record(r, &view);
     match r.state.as_str() {
-        "MERGED" => return "MERGED",
-        "CLOSED" => return "CLOSED",
+        STATE_MERGED => return Err(verdict::MERGED),
+        STATE_CLOSED => return Err(verdict::CLOSED),
         _ => {}
     }
     if view.get("isDraft").and_then(Value::as_bool) == Some(true) {
-        return "DRAFT";
+        return Err(verdict::DRAFT);
     }
     let base = text(&view, "baseRefName");
-    if gh.open_heads().contains(&base) {
-        return "WAITING_ON_BASE";
+    if !in_stack && gh.open_heads().contains(&base) {
+        return Err(verdict::WAITING_ON_BASE);
     }
     let head = text(&view, "headRefOid");
     r.head = head.clone();
 
-    let mut polls = 0usize;
-    let out_of_time = |polls: usize, now: &mut dyn FnMut() -> Duration| {
-        opts.max_polls.map_or(now() >= opts.timeout, |m| polls >= m)
-    };
-
-    // Checks. The first read may find none because a fresh push has not
+    // The first read may find no checks because a fresh push has not
     // registered its runs yet: wait once for them, on the first call only.
-    let mut settled = opts.settle.is_zero();
+    let mut settled = wait.opts.settle.is_zero();
     loop {
-        polls += 1;
+        wait.polls += 1;
         let Some(checks) = gh.pr_checks(pr) else {
             // A failed read is not "no checks": try again until the time is up.
-            if out_of_time(polls, now) {
-                return "STILL_WAITING";
+            if wait.out_of_time() {
+                return Err(verdict::STILL_WAITING);
             }
-            sleep(opts.interval);
+            wait.pause();
             continue;
         };
         let (summary, done) = summarize(&checks);
@@ -245,96 +346,233 @@ fn run(
         r.checks = summary;
         if empty && !settled {
             settled = true;
-            sleep(opts.settle);
+            (wait.sleep)(wait.opts.settle);
             continue;
         }
         if done {
             break;
         }
-        if out_of_time(polls, now) {
-            return "STILL_WAITING";
+        if wait.out_of_time() {
+            return Err(verdict::STILL_WAITING);
         }
-        sleep(opts.interval);
+        wait.pause();
     }
     if r.checks.fail > 0 {
-        return "FAIL";
+        return Err(verdict::FAIL);
     }
 
-    // The head must be the one that was checked.
     let Some(view) = gh.pr_view(pr) else {
-        return "STILL_WAITING";
+        return Err(verdict::STILL_WAITING);
     };
     record(r, &view);
     if text(&view, "headRefOid") != head {
-        return "HEAD_MOVED";
+        return Err(verdict::HEAD_MOVED);
     }
-    if let Some(g) = gate(&view) {
-        return g;
+    match gate(&view) {
+        Some(held) => Err(held),
+        None => Ok(head),
     }
+}
 
-    // Arm auto-merge pinned to the head, no method flag.
-    let (code, output) = gh.pr_merge(pr, &["--auto", "--match-head-commit", &head]);
-    let (code, output, method) = if code != 0 && output.to_lowercase().contains("merge method") {
-        match gh.repo_merge_methods() {
-            Some(m) => {
-                let flag = if m.squash {
-                    Some("--squash")
-                } else if m.merge {
-                    Some("--merge")
-                } else if m.rebase {
-                    Some("--rebase")
-                } else {
-                    None
-                };
-                match flag {
-                    Some(flag) => {
-                        let (c, o) =
-                            gh.pr_merge(pr, &["--auto", flag, "--match-head-commit", &head]);
-                        (c, o, flag.trim_start_matches("--").to_string())
-                    }
-                    None => (code, output, String::new()),
-                }
+/// Gates every unmerged PR of the stack bottom up, then queues the top one
+/// (GitHub merges the PRs below it with it) and waits for all of them.
+fn land_stack(gh: &dyn LandGh, numbers: &[u64], wait: &mut Wait, r: &mut Report) -> &'static str {
+    let ids: Vec<String> = numbers.iter().map(u64::to_string).collect();
+    let Some(top) = ids.last() else {
+        return verdict::FAIL;
+    };
+    r.stack = ids.clone();
+    for id in &ids {
+        match gate_on_checks(gh, id, wait, r, true) {
+            Ok(_) => {}
+            // A lower PR that merged since the stack was read needs no gate.
+            Err(verdict::MERGED) if id != top => {}
+            Err(verdict) => {
+                r.blocked_by = id.clone();
+                return verdict;
             }
-            None => (code, output, String::new()),
         }
+    }
+    let head = r.head.clone();
+    if wait
+        .opts
+        .match_head
+        .as_ref()
+        .is_some_and(|pin| *pin != head)
+    {
+        return verdict::HEAD_MOVED;
+    }
+    if let Err(verdict) = disarm_stale_auto_merge(gh, top, r) {
+        return verdict;
+    }
+    if let Err(verdict) = enqueue(gh, top, &head, r) {
+        return verdict;
+    }
+    if wait.opts.no_wait {
+        return verdict::QUEUED;
+    }
+    await_stack(gh, &ids, &head, wait, r)
+}
+
+/// An auto-merge armed earlier makes the queue call fail with a 422, so it
+/// goes first.
+fn disarm_stale_auto_merge(gh: &dyn LandGh, pr: &str, r: &mut Report) -> Result<(), &'static str> {
+    let armed = gh
+        .pr_view(pr)
+        .and_then(|view| view.get(AUTO_MERGE_FIELD).map(|a| !a.is_null()))
+        .unwrap_or(false);
+    if !armed {
+        return Ok(());
+    }
+    let (code, output) = gh.pr_merge(pr, &[DISABLE_AUTO_FLAG]);
+    if code != 0 {
+        r.merge_output = output;
+        return Err(verdict::NOT_QUEUED);
+    }
+    Ok(())
+}
+
+fn enqueue(gh: &dyn LandGh, pr: &str, head: &str, r: &mut Report) -> Result<(), &'static str> {
+    let (code, output) = gh.enqueue_stack(pr, head);
+    r.merge_output = output;
+    if code != 0 {
+        return Err(verdict::NOT_QUEUED);
+    }
+    r.armed = true;
+    r.method = MERGE_ACTION_QUEUE.into();
+    Ok(())
+}
+
+/// Polls until every PR of the stack merges, one closes or the top moves its
+/// head. On a timeout `blocked_by` names the first PR still open.
+fn await_stack(
+    gh: &dyn LandGh,
+    ids: &[String],
+    head: &str,
+    wait: &mut Wait,
+    r: &mut Report,
+) -> &'static str {
+    loop {
+        let mut unmerged = None;
+        for (i, id) in ids.iter().enumerate() {
+            let Some(view) = gh.pr_view(id) else {
+                unmerged.get_or_insert(id);
+                continue;
+            };
+            let is_top = i + 1 == ids.len();
+            if is_top {
+                record(r, &view);
+            }
+            match text(&view, "state").as_str() {
+                STATE_MERGED => continue,
+                STATE_CLOSED => {
+                    r.blocked_by = id.clone();
+                    return verdict::CLOSED;
+                }
+                _ => {}
+            }
+            if is_top && text(&view, "headRefOid") != head {
+                return verdict::HEAD_MOVED;
+            }
+            unmerged.get_or_insert(id);
+        }
+        let Some(id) = unmerged else {
+            return verdict::MERGED;
+        };
+        wait.polls += 1;
+        if wait.out_of_time() {
+            r.blocked_by = id.clone();
+            return verdict::STILL_WAITING;
+        }
+        wait.pause();
+    }
+}
+
+/// The unmerged PRs from the bottom of `stack` up to its current PR, or
+/// `None` when the current PR sits on no other unmerged PR.
+fn unmerged_below(stack: &stack::Stack) -> Option<Vec<u64>> {
+    let at = stack.prs.iter().position(|p| p.number == stack.current)?;
+    let numbers: Vec<u64> = stack.prs[..=at]
+        .iter()
+        .filter(|p| p.state != State::Merged)
+        .map(|p| p.number)
+        .collect();
+    (numbers.len() > 1).then_some(numbers)
+}
+
+/// The merge method flags in the order they are tried.
+fn method_flag(methods: Methods) -> Option<&'static str> {
+    if methods.squash {
+        Some("--squash")
+    } else if methods.merge {
+        Some("--merge")
+    } else if methods.rebase {
+        Some("--rebase")
     } else {
-        (code, output, "auto".to_string())
+        None
+    }
+}
+
+/// Arms auto-merge pinned to `head`, with no method flag first. A repo that
+/// asks for a method gets the first one it allows.
+fn arm(gh: &dyn LandGh, pr: &str, head: &str, r: &mut Report) -> Result<(), &'static str> {
+    let (code, output) = gh.pr_merge(pr, &["--auto", "--match-head-commit", head]);
+    let asks_for_method = code != 0 && output.to_lowercase().contains("merge method");
+    let flag = asks_for_method
+        .then(|| gh.repo_merge_methods().and_then(method_flag))
+        .flatten();
+    let (code, output, method) = match flag {
+        Some(flag) => {
+            let (c, o) = gh.pr_merge(pr, &["--auto", flag, "--match-head-commit", head]);
+            (c, o, flag.trim_start_matches("--").to_string())
+        }
+        None if asks_for_method => (code, output, String::new()),
+        None => (code, output, "auto".to_string()),
     };
     r.merge_output = output;
     if code != 0 {
-        return "NOT_QUEUED";
+        return Err(verdict::NOT_QUEUED);
     }
     r.armed = true;
     r.method = method;
+    Ok(())
+}
 
-    // Wait for the merge.
+/// Polls until the PR merges, closes, moves its head or hits a gate.
+fn await_merge(
+    gh: &dyn LandGh,
+    pr: &str,
+    head: &str,
+    wait: &mut Wait,
+    r: &mut Report,
+) -> &'static str {
     loop {
         let Some(view) = gh.pr_view(pr) else {
             // One failed read while armed is not a failed PR: read again.
-            polls += 1;
-            if out_of_time(polls, now) {
-                return "STILL_WAITING";
+            wait.polls += 1;
+            if wait.out_of_time() {
+                return verdict::STILL_WAITING;
             }
-            sleep(opts.interval);
+            wait.pause();
             continue;
         };
         record(r, &view);
         match r.state.as_str() {
-            "MERGED" => return "MERGED",
-            "CLOSED" => return "CLOSED",
+            STATE_MERGED => return verdict::MERGED,
+            STATE_CLOSED => return verdict::CLOSED,
             _ => {}
         }
         if text(&view, "headRefOid") != head {
-            return "HEAD_MOVED";
+            return verdict::HEAD_MOVED;
         }
-        if let Some(g) = gate(&view) {
-            return g;
+        if let Some(held) = gate(&view) {
+            return held;
         }
-        polls += 1;
-        if out_of_time(polls, now) {
-            return "STILL_WAITING";
+        wait.polls += 1;
+        if wait.out_of_time() {
+            return verdict::STILL_WAITING;
         }
-        sleep(opts.interval);
+        wait.pause();
     }
 }
 
@@ -353,6 +591,18 @@ impl RealGh {
             cmd.current_dir(dir);
         }
         crate::common::proc::run_with_timeout(&mut cmd, CALL_TIMEOUT)
+    }
+
+    /// The exit code and the combined output of a call that acts on the repo.
+    fn gh_status(&self, args: &[&str]) -> (i32, String) {
+        match self.gh(args) {
+            Some(o) => {
+                let mut t = String::from_utf8_lossy(&o.stdout).into_owned();
+                t.push_str(&String::from_utf8_lossy(&o.stderr));
+                (o.status.code().unwrap_or(-1), t.trim().to_string())
+            }
+            None => (-1, "gh did not finish (missing, or timed out)".into()),
+        }
     }
 
     fn stdout(&self, args: &[&str]) -> Option<String> {
@@ -390,14 +640,7 @@ impl LandGh for RealGh {
     fn pr_merge(&self, pr: &str, args: &[&str]) -> (i32, String) {
         let mut all = vec!["pr", "merge", pr];
         all.extend_from_slice(args);
-        match self.gh(&all) {
-            Some(o) => {
-                let mut t = String::from_utf8_lossy(&o.stdout).into_owned();
-                t.push_str(&String::from_utf8_lossy(&o.stderr));
-                (o.status.code().unwrap_or(-1), t.trim().to_string())
-            }
-            None => (-1, "gh did not finish (missing, or timed out)".into()),
-        }
+        self.gh_status(&all)
     }
 
     fn repo_merge_methods(&self) -> Option<Methods> {
@@ -414,6 +657,26 @@ impl LandGh for RealGh {
             merge: b("mergeCommitAllowed"),
             rebase: b("rebaseMergeAllowed"),
         })
+    }
+
+    fn stack_prs(&self, pr: &str) -> Option<Vec<u64>> {
+        let number: u64 = pr.parse().ok()?;
+        let run = |args: &[&str]| -> Result<String, String> {
+            let out = self.gh(args).ok_or("gh did not finish")?;
+            if out.status.success() {
+                Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+            } else {
+                Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+            }
+        };
+        unmerged_below(&stack::detect(&run, Some(number)).ok()?)
+    }
+
+    fn enqueue_stack(&self, pr: &str, head: &str) -> (i32, String) {
+        let path = format!("{MERGE_ASYNC_PREFIX}{pr}{MERGE_ASYNC_SUFFIX}");
+        let action = format!("{MERGE_ACTION_FIELD}={MERGE_ACTION_QUEUE}");
+        let sha = format!("{HEAD_SHA_FIELD}={head}");
+        self.gh_status(&["api", "-X", "PUT", &path, "-f", &action, "-f", &sha])
     }
 
     fn open_heads(&self) -> Vec<String> {
@@ -438,6 +701,23 @@ impl LandGh for RealGh {
             .filter_map(|e| e.get("headRefName")?.as_str().map(String::from))
             .collect()
     }
+}
+
+/// Whether `pr` is stacked on another unmerged PR, read with the real `gh`.
+pub fn is_stacked_real(dir: Option<std::path::PathBuf>, pr: &str) -> bool {
+    RealGh { dir }.stack_prs(pr).is_some()
+}
+
+/// Runs the land flow against the real `gh` and the wall clock.
+pub fn land_real(dir: Option<std::path::PathBuf>, pr: &str, opts: &Opts) -> Report {
+    let start = std::time::Instant::now();
+    land(
+        &RealGh { dir },
+        pr,
+        opts,
+        &mut || start.elapsed(),
+        &mut std::thread::sleep,
+    )
 }
 
 /// The output of a call: `LAND=<verdict>` and then the report as JSON.
@@ -514,6 +794,12 @@ mod tests {
         fn open_heads(&self) -> Vec<String> {
             self.heads.clone()
         }
+        fn stack_prs(&self, _: &str) -> Option<Vec<u64>> {
+            None
+        }
+        fn enqueue_stack(&self, _: &str, _: &str) -> (i32, String) {
+            (0, String::new())
+        }
     }
 
     fn go(fake: &Fake, opts: Opts) -> Report {
@@ -533,8 +819,70 @@ mod tests {
             timeout: Duration::from_secs(60),
             interval: Duration::from_secs(5),
             settle: Duration::ZERO,
-            max_polls: None,
+            ..Opts::default()
         }
+    }
+
+    fn stack_pr(number: u64, state: State) -> stack::StackPr {
+        stack::StackPr {
+            number,
+            title: String::new(),
+            state,
+            draft: false,
+            base: String::new(),
+            head: String::new(),
+            head_sha: String::new(),
+            additions: 0,
+            deletions: 0,
+            changed_files: 0,
+            author: String::new(),
+            url: String::new(),
+        }
+    }
+
+    fn stack_of(current: u64, prs: Vec<stack::StackPr>) -> stack::Stack {
+        stack::Stack {
+            source: stack::Source::Api,
+            repo: "o/r".into(),
+            current,
+            prs,
+            warnings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_stack_to_land_runs_from_the_bottom_unmerged_pr_to_the_named_one() {
+        // Arrange
+        let stack = stack_of(
+            3,
+            vec![
+                stack_pr(1, State::Merged),
+                stack_pr(2, State::Open),
+                stack_pr(3, State::Open),
+                stack_pr(4, State::Open),
+            ],
+        );
+
+        // Act
+        let numbers = unmerged_below(&stack);
+
+        // Assert
+        assert_eq!(numbers, Some(vec![2, 3]));
+    }
+
+    #[test]
+    fn a_pr_with_only_merged_prs_below_is_not_stacked() {
+        // Arrange
+        let stack = stack_of(
+            2,
+            vec![stack_pr(1, State::Merged), stack_pr(2, State::Open)],
+        );
+
+        // Act
+        let numbers = unmerged_below(&stack);
+
+        // Assert
+        assert_eq!(numbers, None);
     }
 
     #[test]
