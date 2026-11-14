@@ -4,6 +4,8 @@
 //! Binary-level tests for `playbook sessions`, run against a scratch `$HOME`.
 //! The fixture history is older than the default window, so it lists nothing.
 
+mod common;
+
 use std::fs;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -34,6 +36,7 @@ fn run(args: &[&str]) -> (bool, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(args)
         .env("HOME", home.canonicalize().unwrap())
+        .env("PATH", common::path_with_failing_gh(&home))
         .output()
         .unwrap();
     let _ = fs::remove_dir_all(&home);

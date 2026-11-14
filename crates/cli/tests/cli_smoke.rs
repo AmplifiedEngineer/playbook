@@ -613,6 +613,7 @@ fn table() -> Vec<Case> {
         case("watch log", &["watch", "log"]).grows(),
         case("sessions sweep", &["sessions", "sweep", "--dry-run"])
             .out("No finished or stale sessions")
+            .gh("exit 1")
             .writes(),
         // network or repo-bound tools, failing fast with a message
         case("eval review-triage", &["eval", "review-triage"]).code(1).err("gh is required"),
@@ -632,7 +633,7 @@ fn table() -> Vec<Case> {
             .code(6)
             .out("LAND=FAIL"),
         // worktrees and memory
-        case("worktree sweep", &["worktree", "sweep"]).writes(),
+        case("worktree sweep", &["worktree", "sweep"]).gh("exit 1").writes(),
         case("worktree remove", &["worktree", "remove", "{ROOT}/none"]).code(1).err("not a registered git worktree"),
         case( "worktree review setup", &["worktree", "review", "setup", "1", "abc123"], ).code(1).err("failed to resolve repo URL").writes(),
         case( "worktree review teardown", &["worktree", "review", "teardown", "{ROOT}/none"], ),
