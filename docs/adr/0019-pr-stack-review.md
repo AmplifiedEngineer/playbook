@@ -53,7 +53,7 @@ The chain walk is capped at 25 PRs and guards against loops. A branch with sever
 
 ### Token budget
 
-The command prints the PR count and the changed-line total before it starts. Two config keys set the point where it asks again: `review.stackMaxPrs` (default 6, counts open PRs) and `review.stackMaxLines` (default 3000, open PRs only). `--json` reports `over_budget` and the reasons. Merged PRs do not count, because they are read in summary form.
+The command prints the PR count and the changed-line total before it starts. Two fixed limits set the size of one review: 6 open PRs and 3000 changed lines (open PRs only). Over them, the command reviews the stack one PR at a time, bottom first, with no question. It asks first only when the stack is far over: more than 12 open PRs, or at least 2 open PRs averaging over 3000 lines. `--json` reports `over_budget`, `far_over_budget` and the reasons. Merged PRs do not count, because they are read in summary form.
 
 ### Failure modes
 
@@ -80,3 +80,7 @@ Per-PR `gh` calls (diffs, summaries) run through `common::par::map`, capped at 4
 - The branch-chain source is best effort. A stack whose bottom PR was merged and whose branch was deleted looks like a smaller stack.
 - Delivery was in four PRs: detection, `--context` and `map`, the command integration with the config keys, then docs.
 - Not proven against a live stack: the whole-stack review flow in the two commands is instructions for the model, covered by the CLI tests for detection, context and mapping but not by an end to end run.
+
+## Note 2026-11-13: new names
+
+The keys `review.stackMaxPrs` and `review.stackMaxLines` are no longer config keys. Their values are fixed at 6 open PRs and 3000 changed lines. A stored value is ignored.

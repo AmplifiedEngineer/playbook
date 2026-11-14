@@ -87,7 +87,8 @@ fn review_asks_the_scope_before_the_depth() {
 fn routing_scores_a_whole_stack_on_the_union_of_the_open_files() {
     let text = read("skills/grounding-review/references/review-routing.md");
     assert!(text.contains("union of the open PRs' files"));
-    assert!(text.contains("review.stackMaxPrs"));
+    assert!(text.contains("over the limit of <max>"));
+    assert!(!text.contains("review.stackMaxPrs"));
 }
 
 #[test]
@@ -145,11 +146,10 @@ fn an_over_budget_stack_is_reviewed_one_pr_at_a_time() {
             "far_over_budget_reasons",
             "pr stack --json",
             "open_count",
-            "stackMaxPrs",
+            "PR limit of 6",
             "open_lines",
-            "stackMaxLines",
             "over twice",
-            "`stackMaxLines` times `open_count`",
+            "3000 times `open_count`",
             "at least 2 PRs are open",
             "continue one PR at a time, this PR only, or stop",
             "Assumed: this PR only (stack far over budget).",
@@ -182,8 +182,10 @@ fn repo_line(rel: &str, marker: &str) -> String {
 fn the_docs_state_the_two_tier_stack_budget() {
     // Arrange
     let guide = repo_line("docs/guides/02-review-and-pr-flow.md", "**Cost guard.**");
-    let lines_row = repo_line("docs/reference/config-keys.md", "| `review.stackMaxLines`");
-    let prs_row = repo_line("docs/reference/config-keys.md", "| `review.stackMaxPrs`");
+    let fixed = repo_line(
+        "docs/reference/config-keys.md",
+        "The thresholds `docs.maxBytes`",
+    );
 
     // Act
     let checks = [
@@ -191,13 +193,9 @@ fn the_docs_state_the_two_tier_stack_budget() {
         (&guide, "more than twice"),
         (&guide, "with no question"),
         (&guide, "at least 2 open PRs that average more lines"),
-        (
-            &lines_row,
-            "at least 2 open PRs that average more than this",
-        ),
-        (&lines_row, "for each open PR"),
-        (&prs_row, "one PR at a time"),
-        (&prs_row, "more than twice"),
+        (&fixed, "one PR at a time"),
+        (&fixed, "above 12 open PRs"),
+        (&fixed, "averaging over 3000 lines"),
     ];
 
     // Assert
