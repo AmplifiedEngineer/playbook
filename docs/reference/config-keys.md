@@ -60,7 +60,7 @@ Some keys may sync between your own machines: `usage.theme`, `usage.maskAccount`
 | `fix.maxFiles` | `3` | whole number, 1 or more | `/playbook:fix` stops and hands off to `/playbook:plan` when more files than this change. |
 | `fix.maxLines` | `500` | whole number, 1 or more | `/playbook:fix` stops the same way when more lines than this change, not counting the new test. |
 | `review.stackMaxPrs` | `6` | whole number, 1 or more | The most open PRs one whole-stack review reads in one context. The command reviews a larger stack one PR at a time, and a stack of more than twice this asks first. |
-| `review.stackMaxLines` | `3000` | whole number, 1 or more | The most changed lines one whole-stack review reads, and the limit for each open PR. A stack whose open PRs average more than this asks first. |
+| `review.stackMaxLines` | `3000` | whole number, 1 or more | The most changed lines one whole-stack review reads, and the limit for each open PR. A whole-stack review of at least 2 open PRs that average more than this asks first. |
 | `review.suggest.deepLines` | `400` | whole number, 1 or more | `playbook review suggest` calls a change with more changed lines of code, tests and plugin files than this a large change and recommends a deep review. |
 | `review.suggest.quickLines` | `60` | whole number, 1 or more | A change that trips no risk rule (a risky path, too many files or packages, or untested code) and has at most this many changed lines of code, tests and plugin files gets a quick review. Docs and lock file lines do not count. Plugin command, skill and agent changes need more than this to count as a risk. |
 | `review.suggest.deepFiles` | `25` | whole number, 1 or more | More changed files than this recommends a deep review. |

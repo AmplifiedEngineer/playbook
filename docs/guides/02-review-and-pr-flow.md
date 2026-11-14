@@ -101,7 +101,7 @@ What a whole-stack review does:
 - **Findings go to the PR that holds the line.** `playbook pr stack map` matches each finding's `file:line` against the diff hunks of the open PRs and creates one pending review per PR. A finding no open PR changes is shown in the report and not posted.
 - **Fixed higher up is dropped.** A finding on code that an open PR above changes or removes is not posted. The report lists it as `fixed above in #<n>`. `playbook pr stack map` does the check and returns it as `fixed_above`.
 - **Safe against change.** If a PR was pushed to, retargeted or closed after the review started, its findings are held back and listed as stale.
-- **Cost guard.** One review reads at most `review.stackMaxPrs` (default 6) open PRs and `review.stackMaxLines` (default 3000) changed lines. The command reviews a larger stack one PR at a time, bottom first, with no question. The command asks first only when the stack is far over: more than twice the PR limit, or more lines than the line limit for each open PR. `playbook pr stack --max-prs` and `--max-lines` raise both for one run. See [Config keys](../reference/config-keys.md).
+- **Cost guard.** One review reads at most `review.stackMaxPrs` (default 6) open PRs and `review.stackMaxLines` (default 3000) changed lines. The command reviews a larger stack one PR at a time, bottom first, with no question. The command asks first only when the stack is far over: more than twice the PR limit, or at least 2 open PRs that average more lines than the line limit. `playbook pr stack --max-prs` and `--max-lines` raise both for one run. See [Config keys](../reference/config-keys.md).
 
 ## How findings are graded
 

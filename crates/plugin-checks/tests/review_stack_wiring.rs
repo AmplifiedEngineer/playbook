@@ -149,8 +149,10 @@ fn an_over_budget_stack_is_reviewed_one_pr_at_a_time() {
             "open_lines",
             "stackMaxLines",
             "over twice",
-            "times",
+            "`stackMaxLines` times `open_count`",
             "at least 2 PRs are open",
+            "continue one PR at a time, this PR only, or stop",
+            "Assumed: this PR only (stack far over budget).",
         ],
     );
     must_have(
@@ -160,6 +162,8 @@ fn an_over_budget_stack_is_reviewed_one_pr_at_a_time() {
             "its own posting step",
             "no longer open",
             "the loop overrides the pass's stop",
+            "the original arguments other than the PR number",
+            "skip the rest of the pass",
         ],
     );
     assert!(!text.contains("continue anyway"), "old rule remains");
@@ -185,6 +189,9 @@ fn the_docs_state_the_two_tier_stack_budget() {
     let checks = [
         (&guide, "one PR at a time"),
         (&guide, "more than twice"),
+        (&guide, "with no question"),
+        (&guide, "at least 2 open PRs that average more lines"),
+        (&lines_row, "at least 2 open PRs that average more than this"),
         (&lines_row, "for each open PR"),
         (&prs_row, "one PR at a time"),
         (&prs_row, "more than twice"),
