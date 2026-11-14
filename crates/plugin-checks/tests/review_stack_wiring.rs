@@ -100,3 +100,67 @@ fn this_pr_review_reads_the_digest_and_drops_findings_fixed_above() {
     );
     assert!(text.contains("`over_line_budget`"), "no per-PR budget");
 }
+
+#[test]
+fn an_over_budget_stack_is_reviewed_one_pr_at_a_time() {
+    // Arrange
+    let text = read("skills/grounding-review/references/stack-review.md");
+    let start = text.find("## 2. Choose the scope").expect("no section 2");
+    let end = text.find("## 2b.").expect("no section 2b");
+    let paragraphs: Vec<&str> = text[start..end].split("\n\n").collect();
+    let holding = |anchor: &str| -> &str {
+        paragraphs
+            .iter()
+            .copied()
+            .find(|p| p.contains(anchor))
+            .unwrap_or_else(|| panic!("no section 2 paragraph holds `{anchor}`"))
+    };
+    let must_have = |paragraph: &str, needles: &[&str]| {
+        for needle in needles {
+            assert!(paragraph.contains(needle), "lacks `{needle}`: {paragraph}");
+        }
+    };
+
+    // Act
+    let over = holding("`over_budget` is true");
+    let far = holding("`far_over_budget` is also true");
+    let the_loop = holding("tear down any worktree from Step 1");
+
+    // Assert
+    must_have(
+        over,
+        &["one PR at a time, bottom first", "This is not a question"],
+    );
+    assert!(!over.contains('?'), "over-budget rule asks a question");
+    assert!(
+        !over
+            .split(|c: char| !c.is_alphabetic())
+            .any(|w| w.eq_ignore_ascii_case("ask")),
+        "over-budget rule asks"
+    );
+    must_have(
+        far,
+        &[
+            "ask once before starting",
+            "far_over_budget_reasons",
+            "pr stack --json",
+            "open_count",
+            "stackMaxPrs",
+            "open_lines",
+            "stackMaxLines",
+            "over twice",
+            "times",
+            "at least 2 PRs are open",
+        ],
+    );
+    must_have(
+        the_loop,
+        &[
+            "--this-pr",
+            "its own posting step",
+            "no longer open",
+            "the loop overrides the pass's stop",
+        ],
+    );
+    assert!(!text.contains("continue anyway"), "old rule remains");
+}
