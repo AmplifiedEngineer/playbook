@@ -5,6 +5,8 @@
 //! branch sits at a commit that is already an ancestor of the default branch,
 //! so it read as "merged" before any work existed.
 
+mod common;
+
 use playbook::worktree::PrState;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -111,6 +113,7 @@ fn sweep(f: &Fixture) -> String {
         .args(["worktree", "sweep"])
         .current_dir(&f.repo)
         .env("HOME", &f.home)
+        .env("PATH", common::path_with_failing_gh(&f.container))
         .output()
         .expect("playbook should spawn");
     assert!(
@@ -284,6 +287,7 @@ fn worktree_remove_takes_its_databases_and_an_id_shared_with_a_live_worktree_kee
         .arg(&wt)
         .current_dir(&f.repo)
         .env("HOME", &f.home)
+        .env("PATH", common::path_with_failing_gh(&f.container))
         .output()
         .expect("playbook should spawn");
 
@@ -346,6 +350,7 @@ fn many_worktrees_are_judged_side_by_side_but_reported_in_list_order() {
             .args(["worktree", "sweep", "--dry-run"])
             .current_dir(&f.repo)
             .env("HOME", &f.home)
+            .env("PATH", common::path_with_failing_gh(&f.container))
             .output()
             .expect("playbook should spawn");
         assert!(out.status.success());
@@ -374,6 +379,7 @@ fn run_playbook(f: &Fixture, cwd: &Path, args: &[&str]) {
         .args(args)
         .current_dir(cwd)
         .env("HOME", &f.home)
+        .env("PATH", common::path_with_failing_gh(&f.container))
         .output()
         .expect("playbook should spawn");
     assert!(

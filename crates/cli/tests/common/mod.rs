@@ -111,3 +111,20 @@ pub(crate) fn strip_ansi(text: &str) -> String {
     }
     out
 }
+
+/// A `PATH` whose first entry holds a `gh` that always exits 1, so a pull
+/// request lookup reads "no information" whatever `gh` the host has. The stub
+/// lives under `root`.
+pub(crate) fn path_with_failing_gh(root: &Path) -> std::ffi::OsString {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = root.join("failing-gh-bin");
+    std::fs::create_dir_all(&dir).unwrap();
+    let gh = dir.join("gh");
+    std::fs::write(&gh, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut paths = vec![dir];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    std::env::join_paths(paths).unwrap()
+}
