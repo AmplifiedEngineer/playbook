@@ -14,6 +14,7 @@
 
 pub(crate) mod activity;
 pub mod links;
+pub(crate) mod state;
 #[allow(dead_code)] // The hooks that write the store are not wired yet.
 pub(crate) mod store;
 mod sweep;
@@ -25,7 +26,6 @@ use crate::usage::UsageEvent;
 use serde_json::{json, Value};
 
 /// Seconds of silence after which a session no longer counts as active.
-#[allow(dead_code)] // Read once the close and crash logic lands.
 pub(crate) const ACTIVE_SECONDS: i64 = 900;
 
 /// Seconds of silence under which a session reads `working`.
@@ -64,8 +64,19 @@ pub fn is_trunk(branch: &str) -> bool {
     matches!(branch, "main" | "master" | "trunk" | "develop" | "")
 }
 
-/// The state of a session. A merged or closed PR means done, whatever the clock says.
-pub fn state_of(last: i64, now: i64, pr: Option<Pr>, cfg: Settings) -> State {
+/// The state of a session: `derive` for a session with a stored row, the
+/// clock rules for one without. A merged or closed PR means done, whatever the
+/// clock says.
+pub(crate) fn state_of(
+    row: Option<&state::Row>,
+    last: i64,
+    now: i64,
+    pr: Option<Pr>,
+    cfg: Settings,
+) -> State {
+    if let Some(row) = row {
+        return state::derive(row, pr, now, cfg);
+    }
     if matches!(
         pr,
         Some(Pr {
@@ -102,7 +113,15 @@ fn advice(state: State, dirty: Option<bool>) -> (bool, String) {
             "stale with uncommitted changes: resume it or commit the work".into(),
         ),
         (State::Stale, false) => (false, "stale: archive or close this session".into()),
-        _ => (false, String::new()),
+        (State::Waiting, _) => (
+            false,
+            "waiting for you: answer it in its terminal".into(),
+        ),
+        (State::Crashed, _) => (
+            true,
+            "the agent exited without a clean end: resume it or close the session".into(),
+        ),
+        (State::Working | State::Idle | State::Closed, _) => (false, String::new()),
     }
 }
 
@@ -128,7 +147,7 @@ pub fn build(
                 return None;
             }
             let (place, pr) = lookup(newest);
-            let state = state_of(newest.timestamp, now, pr, cfg);
+            let state = state_of(None, newest.timestamp, now, pr, cfg);
             let (needs_attention, hint) = advice(state, place.dirty);
             Some(Record {
                 id: newest.session_id.clone(),
@@ -359,10 +378,34 @@ mod tests {
     #[test]
     fn a_session_is_working_idle_or_stale_by_its_last_message() {
         let cfg = Settings::default();
-        assert_eq!(state_of(NOW - 30, NOW, None, cfg), State::Working);
-        assert_eq!(state_of(NOW - 3600, NOW, None, cfg), State::Idle);
-        assert_eq!(state_of(NOW - 3 * DAY, NOW, None, cfg), State::Stale);
-        assert_eq!(state_of(NOW - 3 * DAY + 1, NOW, None, cfg), State::Idle);
+        assert_eq!(state_of(None, NOW - 30, NOW, None, cfg), State::Working);
+        assert_eq!(state_of(None, NOW - 3600, NOW, None, cfg), State::Idle);
+        assert_eq!(state_of(None, NOW - 3 * DAY, NOW, None, cfg), State::Stale);
+        assert_eq!(
+            state_of(None, NOW - 3 * DAY + 1, NOW, None, cfg),
+            State::Idle
+        );
+    }
+
+    #[test]
+    fn a_session_with_a_row_takes_its_state_from_the_row() {
+        let row = state::Row {
+            last_stop_at: Some(NOW - 10),
+            waiting_after_prompt: true,
+            ..state::Row::default()
+        };
+        // The last message argument is old: the row wins.
+        let got = state_of(Some(&row), NOW - 9 * DAY, NOW, None, Settings::default());
+        assert_eq!(got, State::Waiting);
+    }
+
+    #[test]
+    fn a_waiting_or_crashed_session_gets_its_own_hint() {
+        let (attention, hint) = advice(State::Waiting, None);
+        assert!(!attention && hint.contains("waiting"));
+        let (attention, hint) = advice(State::Crashed, None);
+        assert!(attention && hint.contains("without a clean end"));
+        assert_eq!(advice(State::Closed, Some(true)), (false, String::new()));
     }
 
     #[test]
@@ -370,15 +413,15 @@ mod tests {
         let cfg = Settings::default();
         let pr = |kind| Some(Pr { number: 7, kind });
         assert_eq!(
-            state_of(NOW - 10, NOW, pr(PrKind::Merged), cfg),
+            state_of(None, NOW - 10, NOW, pr(PrKind::Merged), cfg),
             State::Done
         );
         assert_eq!(
-            state_of(NOW - 10, NOW, pr(PrKind::Closed), cfg),
+            state_of(None, NOW - 10, NOW, pr(PrKind::Closed), cfg),
             State::Done
         );
         assert_eq!(
-            state_of(NOW - 10, NOW, pr(PrKind::Open), cfg),
+            state_of(None, NOW - 10, NOW, pr(PrKind::Open), cfg),
             State::Working
         );
     }
