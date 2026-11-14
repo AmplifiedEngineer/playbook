@@ -38,19 +38,24 @@ fn run(root: &PathBuf, args: &[&str]) -> Output {
 /// The free disk row has a low-space variant, so the label stops before the value.
 const VOLATILE_LABELS: [&str; 3] = ["data folder", "gc:", "free disk space"];
 
-/// Keeps every row, its level and its label, and masks only what follows the
-/// label. A row that vanishes or changes level still fails the comparison.
+/// A row reads `<LEVEL>  <message>`. Keeps every row, its level and its label,
+/// and masks only what follows a volatile label at the start of the message.
+/// A missing data folder is a state, not a size, so that row stays whole.
 fn stable(out: &[u8]) -> String {
     String::from_utf8_lossy(out)
         .lines()
         .map(|line| {
-            VOLATILE_LABELS
-                .iter()
-                .find_map(|label| line.find(label).map(|at| (at, label.len())))
-                .map_or_else(
-                    || line.to_string(),
-                    |(at, len)| format!("{}<volatile>", &line[..at + len]),
-                )
+            let Some((level, rest)) = line.split_once(char::is_whitespace) else {
+                return line.to_string();
+            };
+            let message = rest.trim_start();
+            if message.ends_with("is empty or missing") {
+                return line.to_string();
+            }
+            match VOLATILE_LABELS.iter().find(|l| message.starts_with(**l)) {
+                Some(label) => format!("{level} {label}<volatile>"),
+                None => line.to_string(),
+            }
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -58,16 +63,39 @@ fn stable(out: &[u8]) -> String {
 
 #[test]
 fn stable_masks_the_measured_value_and_keeps_the_row() {
-    let a = b"OK   free disk space: 85.3 GiB\nWARN free disk space is low: 1.0 GiB of 9.0 GiB\nOK   other 1";
-    let b = b"OK   free disk space: 85.2 GiB\nWARN free disk space is low: 2.0 GiB of 9.0 GiB\nOK   other 1";
+    let a = b"PASS  free disk space: 85.3 GiB\nWARN  free disk space is low: 1.0 GiB of 9.0 GiB\nINFO  other 1";
+    let b = b"PASS  free disk space: 85.2 GiB\nWARN  free disk space is low: 2.0 GiB of 9.0 GiB\nINFO  other 1";
     assert_eq!(stable(a), stable(b));
+    assert_eq!(
+        stable(b"PASS  free disk space: 85.3 GiB"),
+        "PASS free disk space<volatile>"
+    );
+    // The gc and data folder sizes are masked the same way.
+    assert_eq!(
+        stable(b"INFO  gc: 1 KB in 2 items across 4 stores, 0 tombstones kept"),
+        stable(b"INFO  gc: 9 KB in 3 items across 4 stores, 0 tombstones kept")
+    );
+    assert_eq!(
+        stable(b"INFO  data folder /x: 3 files, 4 KB"),
+        stable(b"INFO  data folder /x: 5 files, 9 KB")
+    );
     // A different level, a missing row or a changed stable row still differs.
     assert_ne!(
         stable(a),
-        stable(b"WARN free disk space: 85.3 GiB\nOK   other 1")
+        stable(b"FAIL  free disk space: 85.3 GiB\nWARN  free disk space is low: 1.0 GiB of 9.0 GiB\nINFO  other 1")
     );
-    assert_ne!(stable(a), stable(b"OK   free disk space: 85.3 GiB"));
-    assert_ne!(stable(b"OK   other 1"), stable(b"OK   other 2"));
+    assert_ne!(stable(a), stable(b"PASS  free disk space: 85.3 GiB"));
+    assert_ne!(stable(b"INFO  other 1"), stable(b"INFO  other 2"));
+    // A message that only mentions a label later on is not masked.
+    assert_ne!(
+        stable(b"WARN  fix: check the data folder 1"),
+        stable(b"WARN  fix: check the data folder 2")
+    );
+    // An empty data folder is not the same state as a filled one.
+    assert_ne!(
+        stable(b"INFO  data folder /x is empty or missing"),
+        stable(b"INFO  data folder /x: 3 files, 4 KB")
+    );
 }
 
 fn assert_same_as_check(root: &PathBuf) {
