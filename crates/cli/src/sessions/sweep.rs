@@ -6,12 +6,9 @@
 //! as `playbook worktree remove` (landed, clean, unlocked, not in use). It only
 //! reads. It removes nothing, stops no process and closes no tab or pane.
 
-use super::{link_label, Record, State};
+use super::{link_label, Record, State, ACTIVE_SECONDS};
 use std::fmt::Write as _;
 use std::path::Path;
-
-/// Activity this recent keeps a session out of every lifecycle action.
-const ACTIVE_SECONDS: i64 = 15 * 60;
 
 /// The dry run report for `records`. `judge` gives the verdict line for one
 /// worktree path, from the worktree sweep guards.
@@ -29,7 +26,9 @@ pub(crate) fn report(records: &[Record], now: i64, judge: &dyn Fn(&Path) -> Stri
                 None => "no worktree to remove: close the session".to_string(),
             },
             State::Stale => "stale, not swept: resume it or close it by hand".to_string(),
-            State::Working | State::Idle => continue,
+            State::Working | State::Waiting | State::Idle | State::Crashed | State::Closed => {
+                continue
+            }
         };
         listed += 1;
         let id: String = r.id.chars().take(8).collect();
@@ -127,12 +126,15 @@ mod tests {
     }
 
     #[test]
-    fn working_and_idle_sessions_are_left_out() {
+    fn working_idle_waiting_crashed_and_closed_sessions_are_left_out() {
         let never = |_: &Path| -> String { panic!("not finished") };
         let text = report(
             &[
                 rec("a", State::Working, 10, Some("/w/x")),
                 rec("b", State::Idle, 3600, Some("/w/y")),
+                rec("c", State::Waiting, 10, Some("/w/z")),
+                rec("d", State::Crashed, 3600, Some("/w/a")),
+                rec("e", State::Closed, 3600, Some("/w/b")),
             ],
             NOW,
             &never,
