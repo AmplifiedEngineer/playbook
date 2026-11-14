@@ -96,14 +96,17 @@ A dry run plans, shows the release pull request diff in the run summary, and bui
 
 The sections are Breaking changes, Features, Fixes, Performance and Other changes, in that order. An empty one is left out, and so is the release commit itself. The same notes go into `release-notes.json`, which `SHA256SUMS` lists and the workflow attests.
 
+After `publish`, the `notes` job writes a plain-English summary with a model and puts it above the commit list in the release body: a few headings of prose, then `### All changes` with the list's own headings one level down. The summary must pass checks: only allowed headings, no HTML or mentions, links only into this repository, and `playbook prose check --strict` run with the binary of the release itself, which the release attests. A failed check gets one retry. Without the secret the job skips. The job does not block the release: the list and `release-notes.json` stay the record, and a failed or skipped `notes` leaves the body as it was. A rerun of `notes` rebuilds the body from `release-notes.json` and replaces any hand edit, and the owner can still edit the body by hand. A full rerun after `publish` stops at `draft`, so rerun the `notes` job itself. The model, its settings and the prompt live in `scripts/release-summary.sh` and `scripts/release-summary.prompt.md`.
+
 No check fails a release for a breaking change: the notes list the commits marked breaking first. Releases no longer carry `breaking-changes.json` (ADR 0047). A 0.34 binary, the last that read it, treats the missing asset as a release with no breaking changes.
 
 ## Credentials
 
-The workflow uses two tokens:
+The workflow uses two tokens and one model key:
 
 - `GITHUB_TOKEN`: read, build the draft and publish.
 - igorjs GitHub App token: the release pull request, the tag and the `downstream` pull requests.
+- `ANTHROPIC_API_KEY`: the one secret of the `release-notes` environment, read only by `notes`. Without it the job skips. The environment must have no required reviewers and no wait timer, or `notes` waits for approval after every release. The environment allows deployment only from `main`, so a workflow on another branch cannot read the key.
 
 The app secrets and their guards:
 
