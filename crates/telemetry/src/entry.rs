@@ -582,6 +582,7 @@ mod tests {
         // Assert
         assert!(text.contains("Account: @x\n"), "{text}");
         assert!(!text.contains("work@x.io"), "{text}");
+        assert!(text.matches("@x").count() >= 2, "{text}");
     }
 
     #[test]

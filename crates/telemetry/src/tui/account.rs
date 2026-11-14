@@ -206,12 +206,12 @@ mod tests {
     #[test]
     fn unnamed_emails_on_one_domain_get_their_place() {
         let choices: Vec<(String, String)> =
-            ["dev@example.com", "ana@example.org", "bo@work.invalid"]
+            ["dev@example.com", "ana@example.com", "bo@work.invalid"]
                 .map(|k| (k.to_string(), k.to_string()))
                 .to_vec();
         let shown = |key: &str| header_label(key, key, &choices);
         assert_eq!(shown("dev@example.com"), "@example (1)");
-        assert_eq!(shown("ana@example.org"), "@example (2)");
+        assert_eq!(shown("ana@example.com"), "@example (2)");
         assert_eq!(shown("bo@work.invalid"), "@work");
     }
 
