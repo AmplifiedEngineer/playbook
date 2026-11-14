@@ -22,6 +22,7 @@
 #   publish  build the five targets, attach the assets to a draft release,
 #            write SHA256SUMS, attest, publish the release as the latest,
 #            then download it again and check it.
+#   notes    add a model-written summary above the list in the release body.
 # Then `downstream` opens release/vX.Y.Z in amplifiedengineer/homebrew-tap and
 # amplifiedengineer/marketplace and waits for their own vX.Y.Z releases.
 # Then `nix` moves flake.nix in amplifiedengineer/nix to the release with a
