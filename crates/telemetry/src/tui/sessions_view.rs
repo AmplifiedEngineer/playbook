@@ -90,10 +90,15 @@ fn state_rank(r: &Record) -> u8 {
         return 0;
     }
     match r.state {
-        State::Done => 1,
-        State::Stale => 2,
-        State::Idle => 3,
-        State::Working => 4,
+        // `Crashed` always needs attention, so it leaves through the early
+        // return above; its rank here only completes the match.
+        State::Crashed => 1,
+        State::Done => 2,
+        State::Waiting => 3,
+        State::Stale => 4,
+        State::Idle => 5,
+        State::Working => 6,
+        State::Closed => 7,
     }
 }
 
@@ -189,8 +194,9 @@ fn state_ink(pal: &Palette, r: &Record) -> ratatui::style::Color {
     }
     match r.state {
         State::Working => pal.color(pal.live),
-        State::Idle => pal.color(pal.fg),
-        State::Stale | State::Done => pal.color(pal.warn),
+        State::Idle | State::Closed => pal.color(pal.fg),
+        State::Waiting | State::Stale | State::Done => pal.color(pal.warn),
+        State::Crashed => pal.color(pal.error),
     }
 }
 
@@ -486,6 +492,65 @@ mod tests {
         assert_eq!(view.records()[0].id, "bbbbbbbb22");
         view.selected = 0;
         assert!(screen(&view, 130, 20).contains("! uncommitted changes, nothing is removed"));
+    }
+
+    #[test]
+    fn the_state_order_ranks_the_seven_states() {
+        let mut view = SessionsView::default();
+        let states = [
+            State::Closed,
+            State::Working,
+            State::Idle,
+            State::Stale,
+            State::Waiting,
+            State::Done,
+        ];
+        let records = states
+            .iter()
+            .enumerate()
+            .map(|(i, state)| record(&format!("s{i}"), "playbook", *state, 10, false))
+            .collect();
+        view.refresh(records, NOW);
+        view.order = Order::State;
+        view.sort();
+        let got: Vec<State> = view.records().iter().map(|r| r.state).collect();
+        assert_eq!(
+            got,
+            [
+                State::Done,
+                State::Waiting,
+                State::Stale,
+                State::Idle,
+                State::Working,
+                State::Closed,
+            ]
+        );
+    }
+
+    #[test]
+    fn every_state_draws_its_label_in_the_row() {
+        let rows = [
+            (State::Working, "│working aaaaaaaa playbook         feat/536-x                   536 (cc)               issue #536?        now   182k   $1.50     │"),
+            (State::Waiting, "│waiting aaaaaaaa playbook         feat/536-x                   536 (cc)               issue #536?        now   182k   $1.50     │"),
+            (State::Idle, "│idle    aaaaaaaa playbook         feat/536-x                   536 (cc)               issue #536?        now   182k   $1.50     │"),
+            (State::Stale, "│stale   aaaaaaaa playbook         feat/536-x                   536 (cc)               issue #536?        now   182k   $1.50     │"),
+            (State::Done, "│done    aaaaaaaa playbook         feat/536-x                   536 (cc)               PR #540 merged     now   182k   $1.50     │"),
+            (State::Crashed, "│crashed aaaaaaaa playbook         feat/536-x                   536 (cc)               issue #536?        now   182k   $1.50     │"),
+            (State::Closed, "│closed  aaaaaaaa playbook         feat/536-x                   536 (cc)               issue #536?        now   182k   $1.50     │"),
+        ];
+        for (state, want) in rows {
+            // Arrange
+            let mut view = SessionsView::default();
+            view.refresh(
+                vec![record("aaaaaaaa11", "playbook", state, 30, false)],
+                NOW,
+            );
+            // Act
+            let text = screen(&view, 130, 20);
+            let row = text.lines().find(|l| l.contains("aaaaaaaa")).unwrap_or("");
+            // Assert
+            assert_eq!(row, want, "{state:?}");
+        }
     }
 
     #[test]

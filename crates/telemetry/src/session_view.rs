@@ -50,18 +50,24 @@ pub struct Place {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
     Working,
+    Waiting,
     Idle,
     Stale,
     Done,
+    Crashed,
+    Closed,
 }
 
 impl State {
     pub fn label(self) -> &'static str {
         match self {
             State::Working => "working",
+            State::Waiting => "waiting",
             State::Idle => "idle",
             State::Stale => "stale",
             State::Done => "done",
+            State::Crashed => "crashed",
+            State::Closed => "closed",
         }
     }
 }
@@ -152,6 +158,22 @@ mod tests {
         assert_eq!(tokens(0), "-");
         assert_eq!(tokens(182_000), "182k");
         assert_eq!(tokens(1_250_000), "1.2M");
+    }
+
+    #[test]
+    fn every_state_has_its_label() {
+        let labels = [
+            (State::Working, "working"),
+            (State::Waiting, "waiting"),
+            (State::Idle, "idle"),
+            (State::Stale, "stale"),
+            (State::Done, "done"),
+            (State::Crashed, "crashed"),
+            (State::Closed, "closed"),
+        ];
+        for (state, want) in labels {
+            assert_eq!(state.label(), want);
+        }
     }
 
     fn record() -> Record {
