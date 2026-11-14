@@ -712,6 +712,30 @@ fn worktree_is_dirty(worktree_path: &Path) -> bool {
     }
 }
 
+/// What a report line says after `worktree <path>: `, one text per outcome.
+pub(crate) const REPORT_NOT_LANDED: &str = "not landed, skipping";
+pub(crate) const REPORT_IN_USE: &str = "a process is using it, skipping";
+pub(crate) const REPORT_DIRTY: &str = "has uncommitted changes, skipping";
+pub(crate) const REPORT_LOCK_NO_OWNER: &str = "locked with no readable owner pid, skipping";
+pub(crate) const REPORT_LOCKED_LIVE: &str = "locked by a live process, skipping";
+pub(crate) const REPORT_WOULD_REMOVE: &str = "would remove (dry run)";
+pub(crate) const REPORT_REMOVED: &str = "removed";
+/// The line for a repo whose `worktreeCleanup.enabled` is false.
+pub(crate) const REPORT_CLEANUP_DISABLED: &str =
+    "worktree remove: worktreeCleanup.enabled is false, nothing to do";
+
+/// The tail of a report line for a worktree that was removed.
+fn removed_suffix() -> String {
+    format!(": {REPORT_REMOVED}")
+}
+
+/// The text of a report line for a removal that failed, after the path.
+const REPORT_FAILED_MARKER: &str = ": failed to remove";
+
+/// Says whether a process still has `path` open, kept behind a closure so a
+/// test never runs the host `lsof`.
+type InUse<'a> = &'a dyn Fn(&Path) -> bool;
+
 /// Decides one worktree's fate and, unless `dry_run`, acts on it, returning
 /// a report line: "not landed", "has uncommitted changes", "locked by a live
 /// process", "would remove", or the outcome of the actual removal.
@@ -720,20 +744,21 @@ fn decide_and_report(
     landed: bool,
     lock: &LockState,
     dry_run: bool,
+    in_use: InUse<'_>,
     remove: Remover,
 ) -> String {
     let path = entry.path.display();
     if !landed {
-        return format!("worktree {path}: not landed, skipping");
+        return format!("worktree {path}: {REPORT_NOT_LANDED}");
     }
-    if crate::cc::worktree::is_in_use(&entry.path) {
-        return format!("worktree {path}: a process is using it, skipping");
+    if in_use(&entry.path) {
+        return format!("worktree {path}: {REPORT_IN_USE}");
     }
     if worktree_is_dirty(&entry.path) {
-        return format!("worktree {path}: has uncommitted changes, skipping");
+        return format!("worktree {path}: {REPORT_DIRTY}");
     }
     if lock.is_locked && lock.owner_pid.is_none() {
-        return format!("worktree {path}: locked with no readable owner pid, skipping");
+        return format!("worktree {path}: {REPORT_LOCK_NO_OWNER}");
     }
     let (should_remove, force_twice) = match (lock.is_locked, lock.owner_pid) {
         (false, _) => (true, false),
@@ -741,13 +766,13 @@ fn decide_and_report(
         (true, _) => (false, false),
     };
     if !should_remove {
-        return format!("worktree {path}: locked by a live process, skipping");
+        return format!("worktree {path}: {REPORT_LOCKED_LIVE}");
     }
     if dry_run {
-        return format!("worktree {path}: would remove (dry run)");
+        return format!("worktree {path}: {REPORT_WOULD_REMOVE}");
     }
     match remove(&entry.path, force_twice) {
-        Ok(()) => format!("worktree {path}: removed"),
+        Ok(()) => format!("worktree {path}: {REPORT_REMOVED}"),
         Err(err) => format!("worktree {path}: failed to remove: {err}"),
     }
 }
@@ -772,13 +797,58 @@ pub fn remove(
     target_path: &Path,
     now_epoch: i64,
 ) -> Result<String, String> {
-    let (entry, report) = decide_target(repo_root, home, repo_slug, target_path, now_epoch, false)?;
-    let Some(entry) = entry else {
-        return Ok(report);
+    match remove_with(
+        repo_root,
+        home,
+        repo_slug,
+        target_path,
+        now_epoch,
+        Some(&pr_state::gh_pr_state),
+        &crate::cc::worktree::is_in_use,
+    )? {
+        Removal::Nothing(text) => Ok(text),
+        Removal::Removed(report) => Ok(report),
+    }
+}
+
+/// The outcome of a [`remove_with`] that did not fail.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Removal {
+    /// Nothing was removed: cleanup is turned off, or the path is still there
+    /// after the removal ran. Carries the text to show.
+    Nothing(String),
+    /// The worktree is gone and its data with it; carries the report line.
+    Removed(String),
+}
+
+/// [`remove`] with the pull request lookup and the in-use check passed in, so
+/// a caller or test decides what `gh` and `lsof` would have said.
+pub(crate) fn remove_with(
+    repo_root: &Path,
+    home: &Path,
+    repo_slug: Option<&str>,
+    target_path: &Path,
+    now_epoch: i64,
+    lookup: Option<PrLookup<'_>>,
+    in_use: InUse<'_>,
+) -> Result<Removal, String> {
+    let probes = Probes { lookup, in_use };
+    let target = Target {
+        repo_root,
+        home,
+        repo_slug,
+        path: target_path,
     };
-    if report.ends_with(": removed") {
+    let (entry, report) = decide_target_with(&target, now_epoch, false, &probes)?;
+    let Some(entry) = entry else {
+        return Ok(Removal::Nothing(report));
+    };
+    if report.ends_with(&removed_suffix()) {
+        if entry.path.exists() {
+            return Ok(Removal::Nothing(report));
+        }
         remove_data_of(repo_root, home, repo_slug, &entry.path);
-        Ok(report)
+        Ok(Removal::Removed(report))
     } else {
         Err(report.trim_start_matches("worktree ").to_string())
     }
@@ -794,29 +864,74 @@ pub(crate) fn would_remove(
     target_path: &Path,
     now_epoch: i64,
 ) -> String {
-    match decide_target(repo_root, home, repo_slug, target_path, now_epoch, true) {
-        Ok((_, report)) => report,
-        Err(err) => err,
-    }
+    would_remove_with(
+        repo_root,
+        home,
+        repo_slug,
+        target_path,
+        now_epoch,
+        Some(&pr_state::gh_pr_state),
+        &crate::cc::worktree::is_in_use,
+    )
 }
 
-/// The shared core of [`remove`] and [`would_remove`]: finds the entry, then
-/// decides and, unless `dry_run`, acts. `None` for the entry means cleanup is
-/// turned off and the line says so.
-fn decide_target(
+/// [`would_remove`] with the pull request lookup and the in-use check passed
+/// in.
+pub(crate) fn would_remove_with(
     repo_root: &Path,
     home: &Path,
     repo_slug: Option<&str>,
     target_path: &Path,
     now_epoch: i64,
+    lookup: Option<PrLookup<'_>>,
+    in_use: InUse<'_>,
+) -> String {
+    let probes = Probes { lookup, in_use };
+    let target = Target {
+        repo_root,
+        home,
+        repo_slug,
+        path: target_path,
+    };
+    match decide_target_with(&target, now_epoch, true, &probes) {
+        Ok((_, report)) => report,
+        Err(err) => err,
+    }
+}
+
+/// The worktree a single-target command names, and where to look for it.
+struct Target<'a> {
+    repo_root: &'a Path,
+    home: &'a Path,
+    repo_slug: Option<&'a str>,
+    path: &'a Path,
+}
+
+/// The two outside facts a verdict reads: the pull request state of a branch
+/// and whether a process uses a worktree.
+struct Probes<'a> {
+    lookup: Option<PrLookup<'a>>,
+    in_use: InUse<'a>,
+}
+
+/// The shared core of [`remove`] and [`would_remove`]: finds the entry, then
+/// decides and, unless `dry_run`, acts. `None` for the entry means cleanup is
+/// turned off and the line says so.
+fn decide_target_with(
+    target: &Target<'_>,
+    now_epoch: i64,
     dry_run: bool,
+    probes: &Probes<'_>,
 ) -> Result<(Option<WorktreeEntry>, String), String> {
+    let Target {
+        repo_root,
+        home,
+        repo_slug,
+        path: target_path,
+    } = *target;
     let policy = resolve_policy(home, repo_slug).map_err(|err| err.to_string())?;
     if !policy.enabled {
-        return Ok((
-            None,
-            "worktree remove: worktreeCleanup.enabled is false, nothing to do".to_string(),
-        ));
+        return Ok((None, REPORT_CLEANUP_DISABLED.to_string()));
     }
     let entries = list_worktrees(repo_root)?;
     let target = target_path
@@ -847,12 +962,17 @@ fn decide_target(
     let repo = RepoRef {
         root: repo_root,
         default: default.as_deref(),
-        pr_lookup: None,
+        pr_lookup: probes.lookup,
     };
     let landed = is_landed(&entry, convention, &lock, &policy, &repo, now_epoch, 0);
-    let report = decide_and_report(&entry, landed, &lock, dry_run, &|path, force_twice| {
-        remove_worktree(repo_root, path, force_twice)
-    });
+    let report = decide_and_report(
+        &entry,
+        landed,
+        &lock,
+        dry_run,
+        probes.in_use,
+        &|path, force_twice| remove_worktree(repo_root, path, force_twice),
+    );
     Ok((Some(entry), report))
 }
 
@@ -1009,14 +1129,359 @@ pub fn sweep_removing(
     );
     let mut report = Vec::new();
     for ((entry, _), (lock, landed)) in candidates.iter().zip(judged) {
-        let line = decide_and_report(entry, landed, &lock, dry_run, remove);
-        if !dry_run && (line.ends_with(": removed") || line.contains(": failed to remove")) {
+        let line = decide_and_report(
+            entry,
+            landed,
+            &lock,
+            dry_run,
+            &crate::cc::worktree::is_in_use,
+            remove,
+        );
+        if !dry_run && (line.ends_with(&removed_suffix()) || line.contains(REPORT_FAILED_MARKER)) {
             log_removal(home, now_epoch, &line);
         }
-        if !dry_run && line.ends_with(": removed") {
+        if !dry_run && line.ends_with(&removed_suffix()) {
             remove_data_of(repo_root, home, repo_slug, &entry.path);
         }
         report.push(line);
     }
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// The time of every fixture commit but the feature one, which is dated to
+    /// its worktree's creation. No test reads the clock for a commit age.
+    const FIXTURE_COMMIT_EPOCH: i64 = 1_700_000_000;
+    const BRANCH: &str = "feat/landed-by-squash";
+    const SECS_PER_TEST_DAY: i64 = 86_400;
+    /// Past the one hour grace but inside `staleAfterDays` (30 by default).
+    const TEN_DAYS: i64 = 10 * SECS_PER_TEST_DAY;
+    /// Past `staleAfterDays`.
+    const FORTY_DAYS: i64 = 40 * SECS_PER_TEST_DAY;
+    /// Inside the one hour grace.
+    const TEN_MINUTES: i64 = 600;
+
+    static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn merged(_: &Path, _: &str) -> Option<PrState> {
+        Some(PrState::Merged)
+    }
+    fn open(_: &Path, _: &str) -> Option<PrState> {
+        Some(PrState::Open)
+    }
+    fn idle(_: &Path) -> bool {
+        false
+    }
+    fn busy(_: &Path) -> bool {
+        true
+    }
+
+    fn git_in(dir: &Path, args: &[&str]) {
+        git_at(dir, args, FIXTURE_COMMIT_EPOCH);
+    }
+
+    fn git_at(dir: &Path, args: &[&str], epoch: i64) {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=T", "-c", "user.email=t@t"])
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_DATE", format!("{epoch} +0000"))
+            .env("GIT_COMMITTER_DATE", format!("{epoch} +0000"))
+            .output()
+            .expect("git should spawn");
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// A repository with a bare `origin`, and an agent-tool convention
+    /// worktree on a branch with one commit of its own.
+    struct Fixture {
+        root: PathBuf,
+        repo: PathBuf,
+        home: PathBuf,
+        worktree: PathBuf,
+        /// The branch's last commit time, in Unix seconds.
+        commit_epoch: i64,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let n = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let root = std::env::temp_dir().join(format!(
+                "playbook-decide-target-{}-{n}",
+                crate::testing::run_id()
+            ));
+            std::fs::create_dir_all(&root).expect("create fixture root");
+            let root = root.canonicalize().expect("fixture root resolves");
+            let (bare, repo, home) = (
+                root.join("origin.git"),
+                root.join("repo"),
+                root.join("home"),
+            );
+            for dir in [&bare, &repo, &home] {
+                std::fs::create_dir_all(dir).expect("create fixture dir");
+            }
+            git_in(&bare, &["init", "-q", "--bare", "-b", "main"]);
+            git_in(&repo, &["init", "-q", "-b", "main"]);
+            git_in(
+                &repo,
+                &["remote", "add", "origin", bare.to_str().expect("utf8")],
+            );
+            std::fs::write(repo.join("README.md"), "seed\n").expect("seed file");
+            git_in(&repo, &["add", "."]);
+            git_in(&repo, &["commit", "-q", "-m", "seed"]);
+            git_in(&repo, &["push", "-q", "-u", "origin", "main"]);
+            git_in(&repo, &["remote", "set-head", "origin", "main"]);
+
+            let worktree = repo.join(".claude").join("worktrees").join("agent-landed");
+            std::fs::create_dir_all(worktree.parent().expect("parent")).expect("mkdir");
+            git_in(
+                &repo,
+                &[
+                    "worktree",
+                    "add",
+                    "-q",
+                    "-b",
+                    BRANCH,
+                    worktree.to_str().expect("utf8"),
+                    "main",
+                ],
+            );
+            std::fs::write(worktree.join("feature.txt"), "work\n").expect("feature file");
+            // The grace period reads the folder's creation time, so the
+            // feature commit is dated to that same instant: its age is then
+            // exactly the offset a test adds to `commit_epoch`.
+            let commit_epoch = worktree_created_epoch(&worktree).expect("creation time reads");
+            git_in(&worktree, &["add", "."]);
+            git_at(&worktree, &["commit", "-q", "-m", "feature"], commit_epoch);
+            let worktree = worktree.canonicalize().expect("worktree resolves");
+            Self {
+                root,
+                repo,
+                home,
+                worktree,
+                commit_epoch,
+            }
+        }
+
+        /// Lands the branch the way a squash merge does: the default branch
+        /// gets a different commit, so the branch tip never becomes reachable.
+        fn squash_merge(&self) {
+            std::fs::write(self.repo.join("feature.txt"), "work, squashed\n").expect("squash file");
+            git_in(&self.repo, &["add", "feature.txt"]);
+            git_in(&self.repo, &["commit", "-q", "-m", "squash"]);
+            git_in(&self.repo, &["push", "-q", "origin", "main"]);
+        }
+
+        /// Lands the branch with a fast-forward, so `git branch --merged` sees it.
+        fn fast_forward_merge(&self) {
+            git_in(&self.repo, &["merge", "-q", "--ff-only", BRANCH]);
+            git_in(&self.repo, &["push", "-q", "origin", "main"]);
+        }
+
+        fn dry_run(
+            &self,
+            now_epoch: i64,
+            lookup: Option<PrLookup<'_>>,
+            in_use: InUse<'_>,
+        ) -> String {
+            would_remove_with(
+                &self.repo,
+                &self.home,
+                None,
+                &self.worktree,
+                now_epoch,
+                lookup,
+                in_use,
+            )
+        }
+
+        fn line(&self, text: &str) -> String {
+            format!("worktree {}: {text}", self.worktree.display())
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn decide_target_with_calls_a_squash_merged_branch_landed() {
+        // Arrange
+        let f = Fixture::new();
+        f.squash_merge();
+        let now = f.commit_epoch + TEN_DAYS;
+
+        // Act
+        let line = f.dry_run(now, Some(&merged), &idle);
+
+        // Assert
+        assert_eq!(line, f.line(REPORT_WOULD_REMOVE));
+    }
+
+    #[test]
+    fn an_open_pr_keeps_the_branch_even_past_the_stale_age() {
+        // Arrange
+        let f = Fixture::new();
+        let now = f.commit_epoch + FORTY_DAYS;
+
+        // Act
+        let line = f.dry_run(now, Some(&open), &idle);
+
+        // Assert
+        assert_eq!(line, f.line(REPORT_NOT_LANDED));
+    }
+
+    #[test]
+    fn no_lookup_keeps_a_squash_merged_branch() {
+        // Arrange
+        let f = Fixture::new();
+        f.squash_merge();
+        let now = f.commit_epoch + TEN_DAYS;
+
+        // Act
+        let line = f.dry_run(now, None, &idle);
+
+        // Assert
+        assert_eq!(line, f.line(REPORT_NOT_LANDED));
+    }
+
+    #[test]
+    fn with_no_pr_the_old_local_verdicts_hold() {
+        // Arrange: (merged by git, seconds past the last commit, expected line)
+        let landed = "would remove (dry run)";
+        let kept = "not landed, skipping";
+        let cases = [
+            (true, TEN_DAYS, landed),
+            (true, TEN_MINUTES, kept),
+            (false, TEN_DAYS, kept),
+            (false, TEN_MINUTES, kept),
+            (false, FORTY_DAYS, landed),
+        ];
+        for (is_merged, after_commit, expected) in cases {
+            let f = Fixture::new();
+            if is_merged {
+                f.fast_forward_merge();
+            }
+
+            // Act
+            let line = f.dry_run(f.commit_epoch + after_commit, None, &idle);
+
+            // Assert
+            assert_eq!(
+                line,
+                f.line(expected),
+                "merged={is_merged} after={after_commit}"
+            );
+        }
+    }
+
+    #[test]
+    fn remove_with_a_merged_pr_deletes_a_squash_merged_worktree() {
+        // Arrange
+        let f = Fixture::new();
+        f.squash_merge();
+
+        // Act
+        let result = remove_with(
+            &f.repo,
+            &f.home,
+            None,
+            &f.worktree,
+            f.commit_epoch + TEN_DAYS,
+            Some(&merged),
+            &idle,
+        );
+
+        // Assert
+        assert_eq!(result, Ok(Removal::Removed(f.line(REPORT_REMOVED))));
+        assert!(!f.worktree.exists());
+    }
+
+    #[test]
+    fn remove_with_cleanup_disabled_does_nothing() {
+        // Arrange
+        let f = Fixture::new();
+        crate::config::write::set(
+            crate::config::write::Tier::Global,
+            "worktreeCleanup.enabled",
+            &serde_json::Value::Bool(false),
+            &f.home,
+            None,
+        )
+        .expect("disable cleanup");
+
+        // Act
+        let result = remove_with(
+            &f.repo,
+            &f.home,
+            None,
+            &f.worktree,
+            f.commit_epoch + FORTY_DAYS,
+            Some(&merged),
+            &idle,
+        );
+
+        // Assert
+        assert_eq!(
+            result,
+            Ok(Removal::Nothing(REPORT_CLEANUP_DISABLED.to_string()))
+        );
+        assert!(f.worktree.exists());
+    }
+
+    #[test]
+    fn remove_with_an_unregistered_path_names_it() {
+        // Arrange
+        let f = Fixture::new();
+        let stranger = f.root.join("not-a-worktree");
+
+        // Act
+        let result = remove_with(
+            &f.repo,
+            &f.home,
+            None,
+            &stranger,
+            f.commit_epoch,
+            None,
+            &idle,
+        );
+
+        // Assert
+        assert_eq!(
+            result,
+            Err(format!(
+                "{} is not a registered git worktree",
+                stranger.display()
+            ))
+        );
+    }
+
+    #[test]
+    fn a_worktree_in_use_is_kept_and_an_idle_one_is_not() {
+        // Arrange
+        let f = Fixture::new();
+        f.squash_merge();
+        let now = f.commit_epoch + TEN_DAYS;
+
+        // Act
+        let in_use = f.dry_run(now, Some(&merged), &busy);
+        let idle_line = f.dry_run(now, Some(&merged), &idle);
+
+        // Assert
+        assert_eq!(in_use, f.line(REPORT_IN_USE));
+        assert_eq!(idle_line, f.line(REPORT_WOULD_REMOVE));
+    }
 }

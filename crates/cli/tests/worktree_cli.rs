@@ -7,6 +7,8 @@
 //! CLI-layer subcommands and `tests/worktree_sweep.rs`'s convention for
 //! building convention-specific worktree fixtures.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -133,6 +135,7 @@ fn run_playbook(cwd: &Path, home: &Path, args: &[&str]) -> Output {
         .args(args)
         .current_dir(cwd)
         .env("HOME", home)
+        .env("PATH", common::path_with_failing_gh(home))
         .output()
         .expect("playbook binary should spawn")
 }
