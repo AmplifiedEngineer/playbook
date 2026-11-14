@@ -5,6 +5,14 @@
 # release-summary.sh: a plain-English summary on top of the release notes,
 # written by a model.
 #
+#   release-summary.sh apply <tag> <version>
+#     The release workflow step. Downloads release-notes.json and the linux
+#     binary from the release, checks both attestations, runs "body" with that
+#     binary and puts the result on the release as its notes. A missing key, or
+#     a "body" failure, leaves the notes as they are and exits 0. A failed
+#     download, attestation check or release edit exits 1. It reads GH_TOKEN,
+#     GH_REPO, SOURCE_REF and GITHUB_STEP_SUMMARY, and writes one line there.
+#
 #   release-summary.sh body <release-notes.json>
 #     Prints the full release body: the summary, then "### All changes" and
 #     the commit list from release-notes.sh. Exits 0 with the body on stdout.
@@ -19,6 +27,7 @@
 set -euo pipefail
 
 CALLER="$PWD"
+SELF="$0"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
@@ -40,11 +49,23 @@ MAX_ATTEMPTS=2
 EXIT_FAIL=1
 EXIT_SKIP=9
 EXIT_USAGE=2
+EXIT_OK=0
 HTTP_OK=200
 STOP_END_TURN=end_turn
 LIST_HEADING="### All changes"
 FIRST_HEADING="### Summary"
 ALLOWED_HEADINGS=("### Summary" "### Breaking changes" "### New features" "### Fixes")
+
+NOTES_ASSET=release-notes.json
+BINARY_ASSET_PREFIX=playbook-
+BINARY_ASSET_TARGET=x86_64-unknown-linux-musl
+SIGNER_WORKFLOW=.github/workflows/release.yml
+STEP_DOWNLOAD="download"
+STEP_ATTESTATION="attestation check"
+STEP_EDIT="release edit"
+SUMMARY_WRITTEN="Release summary written."
+SUMMARY_SKIPPED="Release summary skipped: the release-notes environment has no ANTHROPIC_API_KEY secret."
+SUMMARY_FAILED="Release summary failed; the body keeps the commit list."
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -213,7 +234,57 @@ body() {
   cat "$WORK/body.md"
 }
 
+# Appends $1 to the job's step summary when there is one.
+summary_line() {
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    echo "$1" >> "$GITHUB_STEP_SUMMARY"
+  fi
+}
+
+# A failed step of apply: the error on stderr and in the step summary, exit 1.
+step_failed() {
+  local line="::error::release summary: $1 failed, so the release notes are unchanged."
+  echo "$line" >&2
+  summary_line "$line"
+  exit "$EXIT_FAIL"
+}
+
+apply() {
+  local tag version dir binary asset rc=0
+  tag="${1:?usage: release-summary.sh apply <tag> <version>}"
+  version="${2:?usage: release-summary.sh apply <tag> <version>}"
+  if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+    summary_line "$SUMMARY_SKIPPED"
+    exit "$EXIT_OK"
+  fi
+
+  dir="$WORK/release"
+  mkdir -p "$dir"
+  asset="${BINARY_ASSET_PREFIX}${version}-${BINARY_ASSET_TARGET}"
+  binary="$dir/$asset"
+  gh release download "$tag" --dir "$dir" --pattern "$NOTES_ASSET" --pattern "$asset" \
+    || step_failed "$STEP_DOWNLOAD"
+  for file in "$dir/$NOTES_ASSET" "$binary"; do
+    gh attestation verify "$file" --repo "$GH_REPO" --source-ref "$SOURCE_REF" \
+      --signer-workflow "$GH_REPO/$SIGNER_WORKFLOW" > /dev/null || step_failed "$STEP_ATTESTATION"
+  done
+  chmod +x "$binary"
+
+  PLAYBOOK_BIN="$binary" bash "$(from_caller "$SELF")" body "$dir/$NOTES_ASSET" > "$dir/body.md" || rc=$?
+  case "$rc" in
+    "$EXIT_OK")
+      gh release edit "$tag" --notes-file "$dir/body.md" || step_failed "$STEP_EDIT"
+      summary_line "$SUMMARY_WRITTEN" ;;
+    "$EXIT_SKIP")
+      summary_line "$SUMMARY_SKIPPED" ;;
+    *)
+      echo "::warning::release summary: the summary step failed (exit $rc), so the release notes are unchanged." >&2
+      summary_line "$SUMMARY_FAILED" ;;
+  esac
+}
+
 case "${1:-}" in
+  apply) apply "${2:-}" "${3:-}" ;;
   body) body "${2:-}" ;;
-  *) echo "usage: release-summary.sh body <release-notes.json>" >&2; exit "$EXIT_USAGE" ;;
+  *) echo "usage: release-summary.sh apply <tag> <version> | body <release-notes.json>" >&2; exit "$EXIT_USAGE" ;;
 esac

@@ -66,20 +66,50 @@ printf '%s' "${FAKE_CURL_STATUS:-200}"
 exit "$rc"
 FAKE
 
-# The fake gh answers `api repos/<repo>/pulls/<n> --jq <filter>` by running the
-# filter on $FAKE_DIR/pulls/<n>.json, and fails when that file is missing.
+# The fake gh records every call. It answers `api repos/<repo>/pulls/<n> --jq
+# <filter>` by running the filter on $FAKE_DIR/pulls/<n>.json, and fails when
+# that file is missing. `release download` copies the notes fixture and the
+# fake playbook as the binary into --dir; `attestation verify` fails for the
+# file named in FAKE_GH_ATTEST_FAIL; `release edit` keeps a copy of its notes
+# file. FAKE_GH_DOWNLOAD_RC and FAKE_GH_EDIT_RC force a failure.
 cat > "$TMP/fakes/gh" <<'FAKE'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE_DIR/gh-calls"
-if [ "${1:-}" = api ]; then
-  case "${2:-}" in
-    repos/*/pulls/*)
-      f="$FAKE_DIR/pulls/${2##*/}.json"
-      if [ -f "$f" ]; then jq -c "$4" "$f"; exit 0; fi
-      echo "gh: Not Found (HTTP 404)" >&2
-      exit 1 ;;
-  esac
-fi
+case "${1:-} ${2:-}" in
+  "api repos/"*)
+    f="$FAKE_DIR/pulls/${2##*/}.json"
+    if [ -f "$f" ]; then jq -c "$4" "$f"; exit 0; fi
+    echo "gh: Not Found (HTTP 404)" >&2
+    exit 1 ;;
+  "release download")
+    [ "${FAKE_GH_DOWNLOAD_RC:-0}" -eq 0 ] || exit "$FAKE_GH_DOWNLOAD_RC"
+    dir=""; patterns=()
+    shift 3
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --dir) dir="$2"; shift ;;
+        --pattern) patterns+=("$2"); shift ;;
+      esac
+      shift
+    done
+    for p in "${patterns[@]}"; do
+      case "$p" in
+        release-notes.json) cp "$FAKE_DIR/release-notes.json" "$dir/$p" ;;
+        *) cp "$FAKE_DIR/bin/playbook" "$dir/$p" ;;
+      esac
+    done
+    exit 0 ;;
+  "attestation verify")
+    [ "$(basename "$3")" != "${FAKE_GH_ATTEST_FAIL:-}" ] || exit 1
+    exit 0 ;;
+  "release edit")
+    [ "${FAKE_GH_EDIT_RC:-0}" -eq 0 ] || exit "$FAKE_GH_EDIT_RC"
+    while [ $# -gt 0 ]; do
+      if [ "$1" = --notes-file ]; then cp "$2" "$FAKE_DIR/edited-notes"; fi
+      shift
+    done
+    exit 0 ;;
+esac
 exit 1
 FAKE
 # The fake playbook prints a finding and exits 1 when its input file holds the
@@ -405,5 +435,85 @@ if [ -n "$REAL_PLAYBOOK" ]; then
 else
   echo "skip: no real playbook on PATH, the prose check contract is not tested"
 fi
+
+# --- apply ---
+
+TAG=v9.9.9
+VERSION=9.9.9
+SOURCE_REF=refs/heads/main
+BINARY_ASSET="playbook-$VERSION-x86_64-unknown-linux-musl"
+SUMMARY_WRITTEN="Release summary written."
+SUMMARY_SKIPPED="Release summary skipped: the release-notes environment has no ANTHROPIC_API_KEY secret."
+SUMMARY_FAILED="Release summary failed; the body keeps the commit list."
+
+# run_apply [VAR=value...]: runs `apply` with a step summary file and the
+# variables the workflow step sets.
+run_apply() {
+  RC=0
+  env -u ANTHROPIC_API_KEY -u GITHUB_REPOSITORY -u GITHUB_STEP_SUMMARY -u PLAYBOOK_BIN \
+    PATH="$CASE/bin:$PATH" FAKE_DIR="$CASE" FAKE_CURL_RESPONSE="$CASE/response.json" \
+    GITHUB_REPOSITORY="$REPO_NAME" GH_REPO="$REPO_NAME" SOURCE_REF="$SOURCE_REF" \
+    ANTHROPIC_API_KEY="$KEY" GITHUB_STEP_SUMMARY="$CASE/step-summary" \
+    "$@" \
+    bash "$SCRIPT" apply "$TAG" "$VERSION" >"$CASE/stdout" 2>"$CASE/stderr" || RC=$?
+  if grep -qF "$KEY" "$CASE/stdout" "$CASE/stderr" "$CASE/step-summary" 2>/dev/null; then fail "apply: the API key was printed"; fi
+}
+edit_calls() { if [ -f "$CASE/gh-calls" ]; then grep -c '^release edit ' "$CASE/gh-calls" || true; else echo 0; fi; }
+want_apply_failure() {
+  [ "$RC" -eq "$EXIT_FAIL" ] || fail "$1: want exit $EXIT_FAIL, got $RC: $(cat "$CASE/stderr")"
+  grep -q "^::error::release summary: $2 failed" "$CASE/stderr" || fail "$1: no ::error:: naming '$2': $(cat "$CASE/stderr")"
+  grep -q "^::error::release summary: $2 failed" "$CASE/step-summary" || fail "$1: step summary has no '$2' error"
+}
+
+# A1. A good answer: the release is edited once with the body, and the step
+# summary says so. The expected body is what `body` prints for the same inputs.
+new_case; ok_response "$ANSWER"
+run_body
+cp "$CASE/stdout" "$CASE/want-body"
+run_apply
+[ "$RC" -eq 0 ] || fail "apply good: exit $RC: $(cat "$CASE/stderr")"
+[ "$(edit_calls)" -eq 1 ] || fail "apply good: want 1 release edit, got $(edit_calls)"
+grep -qx "release edit $TAG --notes-file .*" "$CASE/gh-calls" || fail "apply good: wrong release edit call: $(cat "$CASE/gh-calls")"
+cmp -s "$CASE/edited-notes" "$CASE/want-body" || fail "apply good: the edited notes differ from the body"
+grep -qxF "$SUMMARY_WRITTEN" "$CASE/step-summary" || fail "apply good: step summary: $(cat "$CASE/step-summary")"
+grep -qF -- "--pattern release-notes.json" "$CASE/gh-calls" || fail "apply good: the notes were not downloaded"
+grep -qF -- "--pattern $BINARY_ASSET" "$CASE/gh-calls" || fail "apply good: the binary was not downloaded"
+for f in release-notes.json "$BINARY_ASSET"; do
+  grep -qE "^attestation verify .*/$f --repo $REPO_NAME --source-ref $SOURCE_REF --signer-workflow $REPO_NAME/.github/workflows/release.yml\$" "$CASE/gh-calls" \
+    || fail "apply good: no attestation check for $f: $(cat "$CASE/gh-calls")"
+done
+
+# A2. No key: no gh call at all, the skip line, exit 0.
+new_case; ok_response "$ANSWER"
+run_apply ANTHROPIC_API_KEY=
+[ "$RC" -eq 0 ] || fail "apply no key: exit $RC"
+[ ! -f "$CASE/gh-calls" ] || fail "apply no key: gh was called"
+grep -qxF "$SUMMARY_SKIPPED" "$CASE/step-summary" || fail "apply no key: step summary: $(cat "$CASE/step-summary")"
+
+# A3. body fails (status 500): exit 0, no release edit, a failure line and a warning.
+new_case; echo '{"type":"error"}' > "$CASE/response.json"
+run_apply FAKE_CURL_STATUS="$HTTP_SERVER_ERROR"
+[ "$RC" -eq 0 ] || fail "apply body fails: exit $RC: $(cat "$CASE/stderr")"
+[ "$(edit_calls)" -eq 0 ] || fail "apply body fails: release edit was called"
+grep -qxF "$SUMMARY_FAILED" "$CASE/step-summary" || fail "apply body fails: step summary: $(cat "$CASE/step-summary")"
+grep -q '^::warning::' "$CASE/stderr" || fail "apply body fails: no ::warning:: on stderr"
+
+# A4. The attestation check fails for the binary: exit 1, no curl, no release edit.
+new_case; ok_response "$ANSWER"
+run_apply FAKE_GH_ATTEST_FAIL="$BINARY_ASSET"
+want_apply_failure "apply attestation" "attestation check"
+[ "$(curl_calls)" -eq 0 ] || fail "apply attestation: curl was called"
+[ "$(edit_calls)" -eq 0 ] || fail "apply attestation: release edit was called"
+
+# A5. The download fails: exit 1 naming the download, nothing else runs.
+new_case; ok_response "$ANSWER"
+run_apply FAKE_GH_DOWNLOAD_RC=1
+want_apply_failure "apply download" "download"
+[ "$(curl_calls)" -eq 0 ] || fail "apply download: curl was called"
+
+# A6. The release edit fails: exit 1 naming the edit.
+new_case; ok_response "$ANSWER"
+run_apply FAKE_GH_EDIT_RC=1
+want_apply_failure "apply edit" "release edit"
 
 echo "release-summary.test.sh: all cases passed"
