@@ -139,6 +139,22 @@ fn get_with_nothing_configured_prints_default_labeled_as_default() {
 }
 
 #[test]
+fn get_session_auto_close_with_an_empty_home_prints_off() {
+    // Arrange
+    let cwd = scratch_dir("get-auto-close");
+    let home = scratch_dir("get-auto-close-home");
+
+    // Act
+    let out = run_playbook(&cwd, &home, &["config", "get", "sessions.autoClose"]);
+
+    // Assert
+    assert!(out.status.success(), "stderr: {}", stderr_of(&out));
+    let stdout = stdout_of(&out);
+    assert!(stdout.contains("off"), "{stdout}");
+    assert!(stdout.contains("(source: default)"), "{stdout}");
+}
+
+#[test]
 fn set_without_flags_writes_repo_tier_and_get_reflects_it() {
     // Arrange: seed the repo tier via a real `set` call before observing it.
     let repo = seeded_repo("set-repo-tier");
@@ -1002,8 +1018,7 @@ fn sync_files_command_writes_both_files_and_fails_clearly_when_blocked() {
     assert!(stderr_of(&blocked).contains("sync config refresh: cannot write"));
 }
 
-const RETIRED_DEAD_KEYS: [(&str, &str); 3] = [
-    ("sessions.autoClose", "off"),
+const RETIRED_DEAD_KEYS: [(&str, &str); 2] = [
     ("launcher.claudeOverride", "false"),
     ("agents.variants", "auto"),
 ];

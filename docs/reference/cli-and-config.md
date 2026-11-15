@@ -48,6 +48,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `usage.budget.weeklyUsd` | `0` | a number, see the config keys page for the range |
 | `usage.ui.layout` | empty | see the config keys page |
 | `usage.ui.state` | empty | see the config keys page |
+| `sessions.autoClose` | `off` | `off`, `propose`, `auto` |
 | `hygiene.enabled` | `true` | `true`, `false` |
 | `docs.convert` | `auto` | `auto`, `off` |
 | `docs.anydocPath` | empty | see the config keys page |

@@ -304,4 +304,26 @@ mod tests {
             assert!(old_row.repo.is_none(), "{}", row.old);
         }
     }
+
+    #[test]
+    fn session_auto_close_accepts_the_three_levels_and_rejects_others() {
+        let rows = keys::AUTONOMY_LEVELS
+            .iter()
+            .map(|level| (*level, true))
+            .chain([("always", false)]);
+        for (level, accepted) in rows {
+            // Arrange
+            let value = serde_json::json!(level);
+
+            // Act
+            let outcome = validate_key_and_value("sessions.autoClose", &value);
+
+            // Assert
+            assert_eq!(outcome.is_ok(), accepted, "{level}: {outcome:?}");
+            if let Err(error) = outcome {
+                let text = error.to_string();
+                assert!(text.contains(&keys::AUTONOMY_LEVELS.join(", ")), "{text}");
+            }
+        }
+    }
 }
