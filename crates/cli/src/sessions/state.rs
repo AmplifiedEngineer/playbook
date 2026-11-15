@@ -21,7 +21,7 @@ pub(crate) struct Row {
 
 impl Row {
     /// The largest of the three timestamps.
-    fn last_event(&self) -> Option<i64> {
+    pub(crate) fn last_event(&self) -> Option<i64> {
         [self.started_at, self.last_prompt_at, self.last_stop_at]
             .into_iter()
             .flatten()

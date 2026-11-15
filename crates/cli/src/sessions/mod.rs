@@ -13,6 +13,11 @@
 //! pull request, each bounded by a timeout, and reads `unknown` on failure.
 
 pub(crate) mod activity;
+#[expect(
+    dead_code,
+    reason = "nothing calls the closer until `sessions sweep --apply` does"
+)]
+pub(crate) mod close;
 pub(crate) mod import;
 pub mod links;
 pub(crate) mod state;
