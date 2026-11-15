@@ -11,7 +11,7 @@ use super::ACTIVE_SECONDS;
 use crate::common::atomic::make_db_file_private;
 use crate::common::sqlite::{retry_busy, OPEN_BUDGET};
 use playbook_store::{params, schema, Connection};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// The `agent` of every row a hook writes. It equals the name the usage events
@@ -118,6 +118,82 @@ pub(crate) fn open_at(path: &Path) -> Result<Connection, String> {
 /// Open the shared database in the data folder.
 pub(crate) fn open() -> Result<Connection, String> {
     open_at(&playbook_data::data_dir().join(DB_NAME))
+}
+
+/// The database file of the user whose home folder is `home`.
+pub(crate) fn db_path_from(home: &Path) -> PathBuf {
+    playbook_data::data_dir_from(home).join(DB_NAME)
+}
+
+/// One session folder of the old runtime files, as the import hands it over.
+/// Times are Unix seconds.
+#[derive(Debug, Default)]
+pub(crate) struct ImportRow {
+    pub id: String,
+    pub started_at: Option<i64>,
+    pub last_prompt_at: Option<i64>,
+    pub last_stop_at: Option<i64>,
+    pub waiting_since: Option<i64>,
+    pub ended_at: Option<i64>,
+    pub end_reason: Option<String>,
+}
+
+/// The `meta` key that marks the import of the old runtime files as done.
+const RUNTIME_IMPORT_KEY: &str = "runtime_import";
+
+/// Whether the import of the old runtime files already ran.
+pub(crate) fn runtime_import_done(conn: &Connection) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM meta WHERE key = ?1",
+        params![RUNTIME_IMPORT_KEY],
+        |r| r.get::<_, i64>(0),
+    )
+    .map(|n| n > 0)
+    .map_err(|e| format!("failed to read {DB_NAME}: {e}"))
+}
+
+/// Write the rows of the import and the `runtime_import` mark in one
+/// transaction, so an interrupted run is repeated whole. A row that exists is
+/// filled only where a column is null, with these exceptions: a minimal row (no
+/// `cwd`, made by a hook) takes the file's `started_at`, `ended_at` and
+/// `end_reason` go only to a row the import inserts, because an existing row
+/// belongs to a session that is live or was resumed, and `waiting_after_prompt`
+/// is set only on insert, because its column is never null and a hook's value
+/// is the truth.
+pub(crate) fn import_rows(conn: &Connection, rows: &[ImportRow], now: i64) -> Result<(), String> {
+    immediate(conn, |conn| {
+        let mut upsert = conn.prepare(
+            "INSERT INTO sessions (session_id, agent, started_at, last_prompt_at, last_stop_at,
+                 waiting_since, waiting_after_prompt, ended_at, end_reason)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6 IS NOT NULL, ?7, ?8)
+             ON CONFLICT(session_id) DO UPDATE SET
+                 started_at = CASE WHEN sessions.cwd IS NULL
+                     THEN COALESCE(excluded.started_at, sessions.started_at)
+                     ELSE COALESCE(sessions.started_at, excluded.started_at) END,
+                 last_prompt_at = COALESCE(sessions.last_prompt_at, excluded.last_prompt_at),
+                 last_stop_at = COALESCE(sessions.last_stop_at, excluded.last_stop_at),
+                 waiting_since = COALESCE(sessions.waiting_since, excluded.waiting_since),
+                 agent = COALESCE(sessions.agent, excluded.agent)",
+        )?;
+        for row in rows {
+            upsert.execute(params![
+                row.id,
+                AGENT,
+                row.started_at,
+                row.last_prompt_at,
+                row.last_stop_at,
+                row.waiting_since,
+                row.ended_at,
+                row.end_reason
+            ])?;
+        }
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+            params![RUNTIME_IMPORT_KEY, now.to_string()],
+        )
+    })
+    .map(|_| ())
+    .map_err(|e| format!("failed to import the old session files into {DB_NAME}: {e}"))
 }
 
 /// Run `f` in a `BEGIN IMMEDIATE` transaction: a deferred one that upgrades

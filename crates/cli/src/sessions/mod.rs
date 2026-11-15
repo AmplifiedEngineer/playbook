@@ -13,9 +13,9 @@
 //! pull request, each bounded by a timeout, and reads `unknown` on failure.
 
 pub(crate) mod activity;
+pub(crate) mod import;
 pub mod links;
 pub(crate) mod state;
-#[allow(dead_code)] // The hooks that write the store are not wired yet.
 pub(crate) mod store;
 mod sweep;
 
