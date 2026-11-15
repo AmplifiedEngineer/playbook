@@ -152,7 +152,7 @@ pub fn run_summary(
     if let Some(key) = &key {
         let shown = super::account_store::display(&choices, key);
         let shown = if mask.is_some() {
-            super::tui::account::header_label(key, &shown, &choices)
+            super::account_store::header_label(key, &shown, &choices)
         } else {
             shown
         };
