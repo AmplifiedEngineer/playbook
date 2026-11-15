@@ -7,6 +7,7 @@
 use super::worktree_create::{git, registered_paths, same_path, BRANCH_PREFIX};
 use crate::cc::worktree::main_worktree;
 use crate::common::Payload;
+use crate::worktree::fully_published;
 use std::path::{Path, PathBuf};
 
 /// Entry point: always exits 0, since a kept worktree is not an error.
@@ -70,51 +71,6 @@ fn remove(payload: &Payload) -> Result<String, String> {
         }
     }
     Ok(format!("removed {}", path.display()))
-}
-
-/// True when every commit of `rev` is reachable from a remote-tracking ref or
-/// the local default branch.
-fn fully_published(dir: &Path, rev: &str, default: &str) -> Result<bool, String> {
-    let local_default = format!("refs/heads/{default}");
-    let has_default = git(dir, &["show-ref", "--verify", "--quiet", &local_default]).is_ok();
-    let mut args = vec!["rev-list", "--count", rev, "--not", "--remotes"];
-    if has_default {
-        args.push(&local_default);
-    }
-    let count = git(dir, &args)?;
-    if count.trim() == "0" {
-        return Ok(true);
-    }
-    Ok(squash_merged(dir, rev, default))
-}
-
-/// True when merging `rev` into the default branch changes nothing while `rev`
-/// does carry a net change, which is how a squash-merged branch looks once its
-/// remote branch is gone. A branch with no net change (a commit and its revert)
-/// is not counted, since its commits would be lost.
-fn squash_merged(dir: &Path, rev: &str, default: &str) -> bool {
-    let targets = [
-        format!("refs/remotes/origin/{default}"),
-        format!("refs/heads/{default}"),
-    ];
-    targets.iter().any(|target| {
-        if git(dir, &["show-ref", "--verify", "--quiet", target]).is_err() {
-            return false;
-        }
-        let Ok(base) = git(dir, &["merge-base", target, rev]) else {
-            return false;
-        };
-        if git(dir, &["diff", "--quiet", base.trim(), rev]).is_ok() {
-            return false;
-        }
-        let Ok(merged) = git(dir, &["merge-tree", "--write-tree", target, rev]) else {
-            return false;
-        };
-        let Ok(tree) = git(dir, &["rev-parse", &format!("{target}^{{tree}}")]) else {
-            return false;
-        };
-        merged.lines().next().map(str::trim) == Some(tree.trim())
-    })
 }
 
 /// The published default branch, else the main worktree's current branch.
