@@ -302,7 +302,15 @@ pub fn load(
         }
     }
     let heads: Vec<&UsageEvent> = newest.into_values().collect();
-    let found = links::gather(&heads, paths, home);
+    let found = links::gather(
+        &heads,
+        paths,
+        home,
+        now,
+        false,
+        &links::pr_of,
+        &store::write_back,
+    );
     let lookup = |e: &UsageEvent| found.get(&e.session_id).cloned().unwrap_or_default();
     let ids: Vec<String> = heads.iter().map(|e| e.session_id.clone()).collect();
     let all = crate::usage::db::load_usage_events_of_sessions(&conn, &ids)?;

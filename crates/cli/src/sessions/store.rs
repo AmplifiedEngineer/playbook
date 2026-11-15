@@ -7,7 +7,7 @@
 //! transaction that upgrades from read to write fails at once with
 //! SQLITE_BUSY in WAL mode, and `busy_timeout` does not retry it.
 
-use super::{state, ACTIVE_SECONDS};
+use super::{state, Pr, PrKind, ACTIVE_SECONDS};
 use crate::common::atomic::make_db_file_private;
 use crate::common::sqlite::{retry_busy, OPEN_BUDGET};
 use playbook_store::{params, schema, Connection, OpenFlags, OptionalExtension};
@@ -78,6 +78,47 @@ CREATE TABLE IF NOT EXISTS lifecycle_actions (
 );
 ";
 
+/// What a pull request lookup adds to a stored row. A `None` field leaves its
+/// column as it is.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct CacheUpdate {
+    pub pr_number: Option<i64>,
+    pub pr_kind: Option<&'static str>,
+    pub pr_head_oid: Option<String>,
+    pub pr_base: Option<String>,
+    pub pr_checked_at: Option<i64>,
+}
+
+/// Stores `update` on the row of `id` in the database at `path`, in one
+/// statement so a failure leaves the row as it was. Does nothing when the file
+/// is absent: the reader never creates the database.
+pub(crate) fn write_back(path: &Path, id: &str, update: &CacheUpdate) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let conn = open_existing(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE,
+        HOOK_BUSY_TIMEOUT_MS,
+    )?;
+    conn.execute(
+        "UPDATE sessions SET pr_number = COALESCE(?2, pr_number), \
+         pr_kind = COALESCE(?3, pr_kind), pr_head_oid = COALESCE(?4, pr_head_oid), \
+         pr_base = COALESCE(?5, pr_base), pr_checked_at = COALESCE(?6, pr_checked_at) \
+         WHERE session_id = ?1",
+        params![
+            id,
+            update.pr_number,
+            update.pr_kind,
+            update.pr_head_oid,
+            update.pr_base,
+            update.pr_checked_at
+        ],
+    )
+    .map_err(|e| db_error("update", e))?;
+    Ok(())
+}
+
 /// What a SessionStart hook knows about the session it starts.
 pub(crate) struct StartInfo {
     pub id: String,
@@ -129,6 +170,78 @@ pub(crate) fn db_path_from(home: &Path) -> PathBuf {
     playbook_data::data_dir_from(home).join(DB_NAME)
 }
 
+fn db_error(action: &str, e: playbook_store::Error) -> String {
+    format!("failed to {action} {DB_NAME}: {e}")
+}
+
+/// Opens the database at `path` without creating it.
+fn open_existing(path: &Path, flags: OpenFlags, timeout_ms: u64) -> Result<Connection, String> {
+    let conn = Connection::open_with_flags(path, flags).map_err(|e| db_error("open", e))?;
+    conn.busy_timeout(Duration::from_millis(timeout_ms))
+        .map_err(|e| db_error("set busy_timeout on", e))?;
+    Ok(conn)
+}
+
+fn open_read_only(path: &Path) -> Result<Connection, String> {
+    open_existing(path, OpenFlags::SQLITE_OPEN_READ_ONLY, READ_BUSY_TIMEOUT_MS)
+}
+
+/// What a stored row remembers of its pull request and the branch it was
+/// looked up for.
+#[derive(Debug, Default)]
+pub(crate) struct CachedPr {
+    pub branch: Option<String>,
+    pub pr: Option<Pr>,
+    pub checked_at: Option<i64>,
+}
+
+/// The cached pull requests of `ids` in the database at `path`. Empty when
+/// the file is absent or unreadable: the cache only saves lookups.
+pub(crate) fn read_pr_cache(
+    path: &Path,
+    ids: &[String],
+) -> std::collections::HashMap<String, CachedPr> {
+    let mut cache = std::collections::HashMap::new();
+    if !path.exists() {
+        return cache;
+    }
+    let Ok(conn) = open_read_only(path) else {
+        return cache;
+    };
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT branch, pr_number, pr_kind, pr_checked_at \
+         FROM sessions WHERE session_id = ?1",
+    ) else {
+        return cache;
+    };
+    for id in ids {
+        let row = stmt
+            .query_row([id], |r| {
+                let number: Option<i64> = r.get(1)?;
+                let kind: Option<String> = r.get(2)?;
+                Ok(CachedPr {
+                    branch: r.get(0)?,
+                    pr: number
+                        .and_then(|n| u64::try_from(n).ok())
+                        .zip(kind.as_deref().and_then(pr_kind_of))
+                        .map(|(number, kind)| Pr { number, kind }),
+                    checked_at: r.get(3)?,
+                })
+            })
+            .optional();
+        if let Ok(Some(row)) = row {
+            cache.insert(id.clone(), row);
+        }
+    }
+    cache
+}
+
+fn pr_kind_of(label: &str) -> Option<PrKind> {
+    [PrKind::Open, PrKind::Merged, PrKind::Closed]
+        .into_iter()
+        .find(|k| k.label() == label)
+}
+
 /// The rows of `ids` in the database at `path`, read through a read only
 /// connection. It never creates the database file; on a valid WAL database
 /// SQLite may still create the `-wal` and `-shm` side files. Empty when the
@@ -140,18 +253,13 @@ pub(crate) fn read_rows(
     if !path.exists() {
         return Ok(Default::default());
     }
-    let failed =
-        |action: &str, e: playbook_store::Error| format!("failed to {action} {DB_NAME}: {e}");
-    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(|e| failed("open", e))?;
-    conn.busy_timeout(Duration::from_millis(READ_BUSY_TIMEOUT_MS))
-        .map_err(|e| failed("set busy_timeout on", e))?;
+    let conn = open_read_only(path)?;
     let mut stmt = conn
         .prepare(
             "SELECT started_at, last_prompt_at, last_stop_at, waiting_after_prompt, \
              ended_at, crashed_at, closed_at FROM sessions WHERE session_id = ?1",
         )
-        .map_err(|e| failed("read", e))?;
+        .map_err(|e| db_error("read", e))?;
     let mut rows = std::collections::HashMap::new();
     for id in ids {
         let row = stmt
@@ -167,7 +275,7 @@ pub(crate) fn read_rows(
                 })
             })
             .optional()
-            .map_err(|e| failed("read", e))?;
+            .map_err(|e| db_error("read", e))?;
         if let Some(row) = row {
             rows.insert(id.clone(), row);
         }
