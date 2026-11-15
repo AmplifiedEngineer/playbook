@@ -47,9 +47,24 @@ fn cwd_of_line(line: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Whether [`place_at`] runs `git status` to fill [`Place::dirty`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Dirty {
+    /// Read it: one more `git` call.
+    Check,
+    /// Leave it `None`, for a caller that never reads it.
+    Skip,
+}
+
 /// The place of a working directory: linked worktree or main checkout, the
 /// playbook convention, and whether it holds uncommitted changes.
 pub fn place_of(cwd: Option<String>, home: &Path) -> Place {
+    place_at(cwd, home, Dirty::Check)
+}
+
+/// [`place_of`], with the `git status` call optional. The session-start hook
+/// stores no dirty flag, so it skips the call.
+pub fn place_at(cwd: Option<String>, home: &Path, dirty: Dirty) -> Place {
     let Some(dir) = cwd else {
         return Place::default();
     };
@@ -61,7 +76,9 @@ pub fn place_of(cwd: Option<String>, home: &Path) -> Place {
             ..Place::default()
         };
     }
-    let dirty = git::raw(&path, &["status", "--porcelain"]).map(|s| !s.trim().is_empty());
+    let is_dirty = (dirty == Dirty::Check)
+        .then(|| git::raw(&path, &["status", "--porcelain"]).map(|s| !s.trim().is_empty()))
+        .flatten();
     let parsed = git::raw(
         &path,
         &[
@@ -85,7 +102,7 @@ pub fn place_of(cwd: Option<String>, home: &Path) -> Place {
         worktree,
         convention,
         gone: false,
-        dirty,
+        dirty: is_dirty,
     }
 }
 
@@ -304,6 +321,26 @@ mod tests {
 
         // Assert
         assert_eq!(repo, None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_dirty_flag_is_read_only_when_asked_for() {
+        // Arrange
+        let root = scratch("dirty");
+        git_init(&root, &[]);
+        std::fs::write(root.join("untracked.txt"), "x").unwrap();
+        let cwd = || Some(root.to_string_lossy().into_owned());
+
+        // Act
+        let checked = place_at(cwd(), Path::new("/h"), Dirty::Check);
+        let skipped = place_at(cwd(), Path::new("/h"), Dirty::Skip);
+
+        // Assert
+        assert_eq!(checked.dirty, Some(true));
+        assert_eq!(skipped.dirty, None);
+        assert_eq!(skipped.cwd, checked.cwd);
+        assert_eq!(skipped.worktree, checked.worktree);
         std::fs::remove_dir_all(root).unwrap();
     }
 
