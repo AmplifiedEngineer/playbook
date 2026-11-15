@@ -13,6 +13,7 @@ use crate::common::git;
 use crate::common::paths::playbook_root_from;
 use crate::common::repo_slug;
 use crate::common::time::parse_iso8601_utc_epoch;
+use crate::hooks::worktree_create::git as hook_git;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -1131,6 +1132,51 @@ pub fn sweep_removing(
     Ok(report)
 }
 
+/// True when every commit of `rev` is reachable from a remote-tracking ref or
+/// the local default branch.
+pub(crate) fn fully_published(dir: &Path, rev: &str, default: &str) -> Result<bool, String> {
+    let local_default = format!("refs/heads/{default}");
+    let has_default = hook_git(dir, &["show-ref", "--verify", "--quiet", &local_default]).is_ok();
+    let mut args = vec!["rev-list", "--count", rev, "--not", "--remotes"];
+    if has_default {
+        args.push(&local_default);
+    }
+    let count = hook_git(dir, &args)?;
+    if count.trim() == "0" {
+        return Ok(true);
+    }
+    Ok(squash_merged(dir, rev, default))
+}
+
+/// True when merging `rev` into the default branch changes nothing while `rev`
+/// does carry a net change, which is how a squash-merged branch looks once its
+/// remote branch is gone. A branch with no net change (a commit and its revert)
+/// is not counted, since its commits would be lost.
+pub(crate) fn squash_merged(dir: &Path, rev: &str, default: &str) -> bool {
+    let targets = [
+        format!("refs/remotes/origin/{default}"),
+        format!("refs/heads/{default}"),
+    ];
+    targets.iter().any(|target| {
+        if hook_git(dir, &["show-ref", "--verify", "--quiet", target]).is_err() {
+            return false;
+        }
+        let Ok(base) = hook_git(dir, &["merge-base", target, rev]) else {
+            return false;
+        };
+        if hook_git(dir, &["diff", "--quiet", base.trim(), rev]).is_ok() {
+            return false;
+        }
+        let Ok(merged) = hook_git(dir, &["merge-tree", "--write-tree", target, rev]) else {
+            return false;
+        };
+        let Ok(tree) = hook_git(dir, &["rev-parse", &format!("{target}^{{tree}}")]) else {
+            return false;
+        };
+        merged.lines().next().map(str::trim) == Some(tree.trim())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1494,5 +1540,182 @@ mod tests {
         assert!(policy.enabled);
         assert_eq!(STALE_AFTER_DAYS, 30);
         assert_eq!(CONFLICT_GRACE_PERIOD_DAYS, 90);
+    }
+
+    const MAIN: &str = "main";
+    const FEATURE: &str = "feat/shared-rule";
+    const FEATURE_FILE: &str = "feature.txt";
+
+    /// A scratch repository that deletes its temp root when dropped.
+    struct RuleRepo {
+        root: PathBuf,
+        repo: PathBuf,
+    }
+
+    impl Drop for RuleRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// A repository on `main` with one seed commit, no hooks and no signing.
+    fn rule_repo(with_origin: bool) -> RuleRepo {
+        let n = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "playbook-branch-rule-{}-{n}",
+            crate::testing::run_id()
+        ));
+        std::fs::create_dir_all(&root).expect("create root");
+        let root = root.canonicalize().expect("root resolves");
+        let (bare, repo) = (root.join("origin.git"), root.join("repo"));
+        for dir in [&bare, &repo] {
+            std::fs::create_dir_all(dir).expect("create dir");
+        }
+        git_in(&bare, &["init", "-q", "--bare", "-b", MAIN]);
+        git_in(&repo, &["init", "-q", "-b", MAIN]);
+        git_in(&repo, &["config", "commit.gpgsign", "false"]);
+        git_in(&repo, &["config", "core.hooksPath", ""]);
+        std::fs::write(repo.join("README.md"), "seed\n").expect("seed");
+        git_in(&repo, &["add", "."]);
+        git_in(&repo, &["commit", "-q", "-m", "seed"]);
+        if with_origin {
+            let url = bare.to_str().expect("utf8");
+            git_in(&repo, &["remote", "add", "origin", url]);
+            git_in(&repo, &["push", "-q", "origin", MAIN]);
+        }
+        RuleRepo { root, repo }
+    }
+
+    /// Commits `FEATURE_FILE` on the current branch of `repo` with `message`.
+    fn commit_feature_file(repo: &Path, message: &str) {
+        std::fs::write(repo.join(FEATURE_FILE), "change\n").expect("write feature file");
+        git_in(repo, &["add", "."]);
+        git_in(repo, &["commit", "-q", "-m", message]);
+    }
+
+    #[test]
+    fn fully_published_is_true_for_a_squash_merged_branch() {
+        // Arrange: the same change under another message, so the commit differs
+        let fixture = rule_repo(true);
+        git_in(&fixture.repo, &["checkout", "-q", "-b", FEATURE]);
+        commit_feature_file(&fixture.repo, "feature");
+        git_in(&fixture.repo, &["checkout", "-q", MAIN]);
+        commit_feature_file(&fixture.repo, "squash");
+        git_in(&fixture.repo, &["push", "-q", "origin", MAIN]);
+
+        // Act
+        let published = fully_published(&fixture.repo, FEATURE, MAIN);
+
+        // Assert
+        assert_eq!(published, Ok(true));
+    }
+
+    #[test]
+    fn fully_published_is_false_for_an_unpushed_unmerged_branch() {
+        // Arrange
+        let fixture = rule_repo(true);
+        git_in(&fixture.repo, &["checkout", "-q", "-b", FEATURE]);
+        commit_feature_file(&fixture.repo, "feature");
+
+        // Act
+        let published = fully_published(&fixture.repo, FEATURE, MAIN);
+
+        // Assert
+        assert_eq!(published, Ok(false));
+    }
+
+    #[test]
+    fn fully_published_is_true_for_a_branch_merged_by_a_merge_commit() {
+        // Arrange
+        let fixture = rule_repo(true);
+        git_in(&fixture.repo, &["checkout", "-q", "-b", FEATURE]);
+        commit_feature_file(&fixture.repo, "feature");
+        git_in(&fixture.repo, &["checkout", "-q", MAIN]);
+        git_in(
+            &fixture.repo,
+            &["merge", "-q", "--no-ff", "-m", "merge", FEATURE],
+        );
+
+        // Act
+        let published = fully_published(&fixture.repo, FEATURE, MAIN);
+
+        // Assert
+        assert_eq!(published, Ok(true));
+    }
+
+    #[test]
+    fn fully_published_with_no_origin_is_true_for_a_rev_reachable_from_main() {
+        // Arrange
+        let fixture = rule_repo(false);
+
+        // Act
+        let published = fully_published(&fixture.repo, MAIN, MAIN);
+
+        // Assert
+        assert_eq!(published, Ok(true));
+    }
+
+    #[test]
+    fn fully_published_with_no_origin_is_false_for_an_unpushed_own_commit() {
+        // Arrange
+        let fixture = rule_repo(false);
+        git_in(&fixture.repo, &["checkout", "-q", "-b", FEATURE]);
+        commit_feature_file(&fixture.repo, "feature");
+
+        // Act
+        let published = fully_published(&fixture.repo, FEATURE, MAIN);
+
+        // Assert
+        assert_eq!(published, Ok(false));
+    }
+
+    #[test]
+    fn fully_published_is_false_for_a_commit_and_its_revert_that_is_not_pushed() {
+        // Arrange
+        let fixture = rule_repo(true);
+        git_in(&fixture.repo, &["checkout", "-q", "-b", FEATURE]);
+        commit_feature_file(&fixture.repo, "feature");
+        git_in(&fixture.repo, &["revert", "--no-edit", "HEAD"]);
+
+        // Act
+        let published = fully_published(&fixture.repo, FEATURE, MAIN);
+
+        // Assert
+        assert_eq!(published, Ok(false));
+    }
+
+    #[test]
+    fn fully_published_with_no_origin_is_true_for_a_branch_squash_merged_into_local_main() {
+        // Arrange
+        let fixture = rule_repo(false);
+        git_in(&fixture.repo, &["checkout", "-q", "-b", FEATURE]);
+        commit_feature_file(&fixture.repo, "feature");
+        git_in(&fixture.repo, &["checkout", "-q", MAIN]);
+        commit_feature_file(&fixture.repo, "squash");
+
+        // Act
+        let published = fully_published(&fixture.repo, FEATURE, MAIN);
+
+        // Assert
+        assert_eq!(published, Ok(true));
+    }
+
+    #[test]
+    fn fully_published_with_no_origin_is_true_for_a_feature_branch_merged_into_local_main() {
+        // Arrange
+        let fixture = rule_repo(false);
+        git_in(&fixture.repo, &["checkout", "-q", "-b", FEATURE]);
+        commit_feature_file(&fixture.repo, "feature");
+        git_in(&fixture.repo, &["checkout", "-q", MAIN]);
+        git_in(
+            &fixture.repo,
+            &["merge", "-q", "--no-ff", "-m", "merge", FEATURE],
+        );
+
+        // Act
+        let published = fully_published(&fixture.repo, FEATURE, MAIN);
+
+        // Assert
+        assert_eq!(published, Ok(true));
     }
 }
