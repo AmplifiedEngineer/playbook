@@ -21,6 +21,10 @@ const BUCKET_CANCEL: &str = "cancel";
 const RUNS_SEGMENT: &str = "/runs/";
 const JOB_SEGMENT: &str = "/job/";
 const STEP_FAILED: &str = "failure";
+/// Reads of the checks `--watch` makes in a row before it reports UNREADABLE.
+/// A single failed read is usually a network blip or a rate limit, so the
+/// watch reads again after one interval; a snapshot makes one read.
+const WATCH_READ_ATTEMPTS: u32 = 3;
 
 /// What the caller asked for.
 #[derive(Debug, Clone, Copy)]
@@ -233,9 +237,28 @@ fn read_jobs(run: u64) -> Option<Value> {
     wait::gh_stdout(&["api", &path]).and_then(|t| serde_json::from_str(&t).ok())
 }
 
+/// Calls `read` up to `attempts` times, sleeping between failures. Returns
+/// the first success, or the last error once every attempt failed.
+fn read_with_retry(
+    attempts: u32,
+    read: &mut dyn FnMut() -> Result<String, String>,
+    sleep: &mut dyn FnMut(),
+) -> Result<String, String> {
+    let mut result = read();
+    for _ in 1..attempts {
+        if result.is_ok() {
+            break;
+        }
+        sleep();
+        result = read();
+    }
+    result
+}
+
 /// Reads the checks of `pr` through `gh`, waiting when `opts.watch` is set.
 pub fn run(pr: &str, opts: &Opts) -> Report {
     let mut unreadable = None;
+    let attempts = if opts.watch { WATCH_READ_ATTEMPTS } else { 1 };
     // Without --watch the read is a snapshot, so a failure is final at once.
     let (verdict, json) = wait::wait_checks(
         if opts.watch {
@@ -244,7 +267,11 @@ pub fn run(pr: &str, opts: &Opts) -> Report {
             Duration::ZERO
         },
         opts.fail_fast || !opts.watch,
-        &mut || match wait::try_read_checks(pr, !opts.required) {
+        &mut || match read_with_retry(
+            attempts,
+            &mut || wait::try_read_checks(pr, !opts.required),
+            &mut || std::thread::sleep(opts.interval),
+        ) {
             Ok(json) => json,
             Err(why) => {
                 unreadable = Some(why);
@@ -334,6 +361,63 @@ mod tests {
         let failed = triage(&[c], &mut |_| panic!("no run to read"));
 
         assert_eq!(failed[0]["run_id"], Value::Null);
+    }
+
+    #[test]
+    fn a_transient_read_failure_is_read_again() {
+        let mut reads = 0;
+        let mut sleeps = 0;
+
+        let got = read_with_retry(
+            WATCH_READ_ATTEMPTS,
+            &mut || {
+                reads += 1;
+                if reads < WATCH_READ_ATTEMPTS {
+                    Err("gh: 502".to_string())
+                } else {
+                    Ok("[]".to_string())
+                }
+            },
+            &mut || sleeps += 1,
+        );
+
+        assert_eq!(got, Ok("[]".to_string()));
+        assert_eq!(reads, WATCH_READ_ATTEMPTS);
+        assert_eq!(sleeps, WATCH_READ_ATTEMPTS - 1);
+    }
+
+    #[test]
+    fn a_read_that_keeps_failing_gives_up_with_the_last_error() {
+        let mut reads = 0;
+
+        let got = read_with_retry(
+            WATCH_READ_ATTEMPTS,
+            &mut || {
+                reads += 1;
+                Err(format!("gh: failure {reads}"))
+            },
+            &mut || {},
+        );
+
+        assert_eq!(got, Err(format!("gh: failure {WATCH_READ_ATTEMPTS}")));
+        assert_eq!(reads, WATCH_READ_ATTEMPTS);
+    }
+
+    #[test]
+    fn a_snapshot_reads_once_and_does_not_sleep() {
+        let mut reads = 0;
+
+        let got = read_with_retry(
+            1,
+            &mut || {
+                reads += 1;
+                Err("gh: down".to_string())
+            },
+            &mut || panic!("a snapshot must not wait"),
+        );
+
+        assert!(got.is_err());
+        assert_eq!(reads, 1);
     }
 
     #[test]
