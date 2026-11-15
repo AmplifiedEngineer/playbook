@@ -326,7 +326,7 @@ pub(crate) mod tests {
 
     #[test]
     fn an_unnamed_email_account_shows_only_its_domain_name() {
-        assert_eq!(label("dev@example.com.br"), "@example");
+        assert_eq!(label("dev@example.com.invalid"), "@example");
         assert_eq!(label("a@example.com"), "@example");
         assert_eq!(label("dev@.com"), "@com");
         assert_eq!(label("dev@"), "@");
@@ -334,7 +334,7 @@ pub(crate) mod tests {
 
     #[test]
     fn named_plain_and_unknown_accounts_show_unchanged() {
-        assert_eq!(header_label("dev@example.com.br", "Work", &[]), "Work");
+        assert_eq!(header_label("dev@example.com.invalid", "Work", &[]), "Work");
         assert_eq!(label("home"), "home");
         assert_eq!(label(UNKNOWN_ACCOUNT), UNKNOWN_ACCOUNT);
         assert_eq!(label("@example.com"), "@example.com");
