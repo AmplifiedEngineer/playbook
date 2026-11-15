@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The exit code of a refused delivery.
 const REFUSED_CODE: i32 = 3;
+/// What a refusal outside a repository says.
+const NOT_A_WORKTREE: &str = "is not a git worktree";
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -72,11 +74,23 @@ fn pr_create_help_lists_its_flags() {
 
 #[test]
 fn pr_create_without_a_title_is_not_a_usage_error() {
-    // Arrange / Act
-    let out = playbook(&["pr", "create", "--body-file", "/tmp/x.md"]);
+    // Arrange
+    let dir = scratch();
+    let body = dir.join("x.md");
+    std::fs::write(&body, "why\n").expect("write body");
+
+    // Act
+    let out = playbook_in(
+        &dir,
+        &["pr", "create", "--body-file", body.to_str().expect("utf8")],
+    );
 
     // Assert
     assert_eq!(out.status.code(), Some(REFUSED_CODE));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains(NOT_A_WORKTREE),
+        "the title is optional, so the refusal is the missing repository"
+    );
 }
 
 #[test]
@@ -85,6 +99,7 @@ fn pr_create_outside_a_repository_is_refused_without_touching_anything() {
     let title = "a".repeat(73);
     let dir = scratch();
     let body = dir.join("x.md");
+    std::fs::write(&body, "why\n").expect("write body");
 
     // Act
     let out = playbook_in(
@@ -101,6 +116,7 @@ fn pr_create_outside_a_repository_is_refused_without_touching_anything() {
 
     // Assert
     assert_eq!(out.status.code(), Some(REFUSED_CODE));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(NOT_A_WORKTREE));
     assert!(
         !dir.join(".git").exists(),
         "nothing may be initialised here"

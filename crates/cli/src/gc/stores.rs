@@ -530,5 +530,6 @@ mod tests {
         assert_eq!(stores[1].limits.idle_days, 90);
         assert_eq!(stores[2].limits.idle_days, 30);
         assert_eq!(stores[3].limits.max_bytes, 5 * 1024 * 1024);
+        assert_eq!(stores[3].action, Action::Rotate);
     }
 }

@@ -8,6 +8,7 @@
 
 use serde_json::Value;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -167,19 +168,42 @@ fn run(row: &Row) -> (Option<i32>, String) {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn playbook");
+    // Drain both pipes on threads so a chatty child never blocks on a full pipe.
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut bytes);
+            }
+            bytes
+        })
+    };
+    let stdout = drain(
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let stderr = drain(
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
     let start = Instant::now();
-    while child.try_wait().expect("poll playbook").is_none() {
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("poll playbook") {
+            break status;
+        }
         if start.elapsed() > TIMEOUT {
             let _ = child.kill();
             panic!("{:?} ran past {TIMEOUT:?}", row.args);
         }
         std::thread::sleep(Duration::from_millis(20));
-    }
-    let out = child.wait_with_output().expect("collect output");
-    (
-        out.status.code(),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-    )
+    };
+    let stdout = stdout.join().expect("drain stdout");
+    drop(stderr.join());
+    (status.code(), String::from_utf8_lossy(&stdout).into_owned())
 }
 
 /// Why a run breaks the envelope contract, or `None` when it holds.

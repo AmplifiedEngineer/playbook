@@ -259,6 +259,6 @@ mod tests {
         std::fs::create_dir_all(&usage).unwrap();
         aged(&usage.join(STAMP), 5 * 60);
 
-        assert!(!spawned(&home));
+        assert!(!due(&usage, INGEST_INTERVAL_MINUTES, SystemTime::now()));
     }
 }

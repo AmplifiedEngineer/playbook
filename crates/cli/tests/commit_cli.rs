@@ -647,6 +647,19 @@ fn run_all_uses_the_given_message() {
 }
 
 #[test]
+fn run_with_only_a_message_commits_what_is_staged_and_leaves_the_rest() {
+    let r = Repo::new("run-msg-only");
+    r.stage("staged.txt", "s\n");
+    put(&r, "loose.txt", "l\n");
+    let o = r.pb(&["commit", "run", "-m", "feat: only the staged file"], "");
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert_eq!(last_subject(&r), "feat: only the staged file");
+    let files = git(&r.work, &["show", "--name-only", "--format=", "HEAD"]);
+    assert_eq!(files, "staged.txt");
+    assert!(git(&r.work, &["status", "--short"]).contains("?? loose.txt"));
+}
+
+#[test]
 fn run_all_with_nothing_to_stage_says_so_and_exits_zero() {
     let r = Repo::new("all-none");
     let o = r.pb(&["commit", "run", "-A"], "");
