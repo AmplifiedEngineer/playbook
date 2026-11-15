@@ -154,9 +154,28 @@ pub fn verify(
         return Err(format!("branch {branch} not found"));
     }
     let remote = format!("origin/{default_branch}");
+    for file in files {
+        reject_unknown_path(dir, &[&remote, branch], file)?;
+    }
     let mut args = vec!["diff", "--name-only", &remote, branch, "--"];
     args.extend(files.iter().map(String::as_str));
     Ok(git(dir, &args)?.lines().map(str::to_string).collect())
+}
+
+/// Fails when no commit of any of `refs` ever touched `file`: a mistyped path
+/// would otherwise differ nowhere and read as landed. History counts, so a
+/// file the Segment deleted still passes.
+fn reject_unknown_path(dir: &Path, refs: &[&str], file: &str) -> Result<(), String> {
+    for tree in refs {
+        let touched = git(dir, &["rev-list", "-1", tree, "--", file])?;
+        if !touched.is_empty() {
+            return Ok(());
+        }
+    }
+    Err(format!(
+        "{file} is in the history of neither {}",
+        refs.join(" nor ")
+    ))
 }
 
 /// Print the verdict of `verify` and return the exit code: 0 on a match, 1 on

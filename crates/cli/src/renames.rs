@@ -111,6 +111,11 @@ pub const LEGACY_NOTICES: &[Rename] = &[
         new: "pr merge",
         extra: &[],
     },
+    Rename {
+        old: "pr land",
+        new: "pr merge",
+        extra: &[],
+    },
 ];
 
 /// The release that removes the old names.

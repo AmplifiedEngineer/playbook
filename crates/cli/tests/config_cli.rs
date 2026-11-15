@@ -991,15 +991,15 @@ fn sync_files_command_writes_both_files_and_fails_clearly_when_blocked() {
     let data = home.join(".config").join("playbook").join("data");
 
     // Act
-    let ok = run_playbook(&cwd, &home, &["config", "sync-files"]);
+    let ok = run_playbook(&cwd, &home, &["sync", "config", "refresh"]);
+    assert!(ok.status.success(), "{}", stderr_of(&ok));
     fs::remove_file(data.join("sync-keys.json")).unwrap();
     fs::create_dir_all(data.join("sync-keys.json")).unwrap();
-    let blocked = run_playbook(&cwd, &home, &["config", "sync-files"]);
+    let blocked = run_playbook(&cwd, &home, &["sync", "config", "refresh"]);
 
     // Assert
-    assert!(ok.status.success(), "{}", stderr_of(&ok));
     assert!(!blocked.status.success());
-    assert!(stderr_of(&blocked).contains("config sync-files: cannot write"));
+    assert!(stderr_of(&blocked).contains("sync config refresh: cannot write"));
 }
 
 const RETIRED_DEAD_KEYS: [(&str, &str); 3] = [

@@ -87,6 +87,28 @@ impl Fixture {
         git(&self.merger, &["push", "-q", "origin", DEFAULT]);
     }
 
+    /// Runs verify and returns the exit code and stderr.
+    fn verify_stderr(&self, files: &[&str]) -> (i32, String) {
+        let mut args = vec!["segment", "verify", "--branch", BRANCH, "--files"];
+        args.extend_from_slice(files);
+        let out = self.playbook(&args);
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    }
+
+    fn playbook(&self, args: &[&str]) -> std::process::Output {
+        Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(args)
+            .current_dir(&self.work)
+            .env("HOME", &self.root)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("playbook runs")
+    }
+
     fn verify(&self, files: &[&str], json: bool) -> (i32, String) {
         let mut args = vec!["segment", "verify", "--branch", BRANCH, "--files"];
         args.extend_from_slice(files);
@@ -188,4 +210,68 @@ fn a_missing_branch_is_an_error() {
     // Assert
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("feat/none"));
+}
+
+#[test]
+fn a_mistyped_path_is_an_error_and_not_a_match() {
+    // Arrange
+    let fx = Fixture::new("typo");
+    let typo = "chnaged.txt";
+
+    // Act
+    let (code, stderr) = fx.verify_stderr(&[typo]);
+
+    // Assert
+    assert_eq!(code, 1);
+    assert!(
+        stderr.contains(&format!("{typo} is in the history of neither")),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn a_file_the_segment_deleted_and_the_remote_merged_still_matches() {
+    // Arrange
+    let fx = Fixture::new("deleted");
+    git(&fx.work, &["rm", "-q", "--", UNTOUCHED]);
+    git(&fx.work, &["commit", "-q", "-m", "drop the file"]);
+    git(&fx.merger, &["rm", "-q", "--", UNTOUCHED]);
+    git(&fx.merger, &["commit", "-q", "-m", "drop the file"]);
+    fx.merge_on_remote();
+
+    // Act
+    let (code, out) = fx.verify(&[UNTOUCHED, CHANGED], false);
+
+    // Assert
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(out, "match=true");
+}
+
+#[test]
+fn a_file_only_the_branch_added_is_known_and_differs() {
+    // Arrange
+    let fx = Fixture::new("added");
+    commit(&fx.work, "added.txt", "new\n");
+
+    // Act
+    let (code, out) = fx.verify(&["added.txt"], false);
+
+    // Assert
+    assert_eq!(code, 1, "{out}");
+    assert_eq!(out, "match=false differing=added.txt");
+}
+
+#[test]
+fn a_directory_of_known_files_is_accepted() {
+    // Arrange
+    let fx = Fixture::new("dir");
+    fs::create_dir_all(fx.work.join("sub")).expect("sub dir");
+    commit(&fx.work, "sub/inner.txt", "x\n");
+
+    // Act
+    let (code, out) = fx.verify(&["sub"], false);
+
+    // Assert
+    assert_eq!(code, 1, "{out}");
+    assert_eq!(out, "match=false differing=sub/inner.txt");
 }

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook config apply-proposal`: shows the config that `pbsync config
+//! `playbook sync config apply`: shows the config that `pbsync config
 //! pull` proposed and, after a yes, stores it in the global tier.
 
 use super::sync_files::{value_text, write_sync_files};
@@ -39,6 +39,9 @@ pub struct Streams<'a> {
     pub err: &'a mut dyn Write,
 }
 
+/// How the command names itself in its messages.
+pub(crate) const COMMAND: &str = "sync config apply";
+
 /// Run the command and return its exit code. Nothing is stored before the
 /// answer is yes, and the proposal file goes only after every key is stored.
 pub fn run(
@@ -55,11 +58,7 @@ pub fn run(
             return Ok(0);
         }
         Err(err) => {
-            writeln!(
-                io.err,
-                "config apply-proposal: cannot read {}: {err}",
-                path.display()
-            )?;
+            writeln!(io.err, "{COMMAND}: cannot read {}: {err}", path.display())?;
             return Ok(1);
         }
     };
@@ -68,7 +67,7 @@ pub fn run(
         Err(err) => {
             writeln!(
                 io.err,
-                "config apply-proposal: {} is not a valid proposal: {err}",
+                "{COMMAND}: {} is not a valid proposal: {err}",
                 path.display()
             )?;
             return Ok(1);
@@ -78,7 +77,7 @@ pub fn run(
     let (changes, rejected) = match classify(&proposal, &root) {
         Ok(split) => split,
         Err(err) => {
-            writeln!(io.err, "config apply-proposal: {err}")?;
+            writeln!(io.err, "{COMMAND}: {err}")?;
             return Ok(1);
         }
     };
@@ -98,27 +97,23 @@ pub fn run(
         )?;
     }
     if !yes && !confirm(io, changes.len())? {
-        writeln!(io.err, "config apply-proposal: nothing was changed")?;
+        writeln!(io.err, "{COMMAND}: nothing was changed")?;
         return Ok(1);
     }
     for change in &changes {
         if let Err(err) = write::set(Tier::Global, &change.key, &change.value, home, None) {
-            writeln!(io.err, "config apply-proposal: {err}")?;
+            writeln!(io.err, "{COMMAND}: {err}")?;
             return Ok(1);
         }
     }
     if let Err(err) = write_sync_files(home) {
         writeln!(
             io.err,
-            "config apply-proposal: warning: sync files not refreshed: {err}"
+            "{COMMAND}: warning: sync files not refreshed: {err}"
         )?;
     }
     std::fs::remove_file(&path)?;
-    writeln!(
-        io.out,
-        "config apply-proposal: applied {} setting(s)",
-        changes.len()
-    )?;
+    writeln!(io.out, "{COMMAND}: applied {} setting(s)", changes.len())?;
     note_shadowed(io.out, &root, repo_slug, &changes)?;
     Ok(0)
 }
@@ -219,7 +214,7 @@ mod tests {
         std::fs::write(path, doc.to_string()).unwrap();
     }
 
-    /// Runs `apply-proposal --yes` and returns its exit code and stdout.
+    /// Runs `sync config apply --yes` and returns its exit code and stdout.
     fn apply(home: &Path) -> (i32, String) {
         let mut input = std::io::Cursor::new(Vec::new());
         let (mut out, mut err) = (Vec::new(), Vec::new());

@@ -76,11 +76,11 @@ fn config_push(args: Vec<String>) -> i32 {
 fn config_refresh() -> i32 {
     match refresh_files() {
         Ok(()) => {
-            println!("config sync-files: key list and values refreshed");
+            println!("sync config refresh: key list and values refreshed");
             0
         }
         Err(err) => {
-            eprintln!("config sync-files: {err}");
+            eprintln!("sync config refresh: {err}");
             EXIT_FAILED
         }
     }
@@ -103,7 +103,7 @@ fn config_apply(yes: bool) -> i32 {
     match crate::config::proposal::run(&home, repo_slug, yes, &mut streams) {
         Ok(code) => code,
         Err(err) => {
-            eprintln!("config apply-proposal: {err}");
+            eprintln!("{}: {err}", crate::config::proposal::COMMAND);
             EXIT_FAILED
         }
     }

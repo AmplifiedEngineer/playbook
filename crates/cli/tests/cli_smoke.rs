@@ -684,7 +684,7 @@ fn table() -> Vec<Case> {
         case("segment unit integrate", &["segment", "unit", "integrate", "WU-1", "--base", "main", "--path", "{ROOT}/wt/wu-1", "--branch", "feat/none", "-m", "feat: x", "--files", "a.rs"]).commit().code(1).err("not the Segment branch"),
         case("segment unit resume", &["segment", "unit", "resume", "WU-1", "--base", "main"]).commit().out("last=none next=red"),
         case("review lenses pick", &["review", "lenses", "pick"]).code(1).err("no default branch"),
-        case("segment verify", &["segment", "verify", "--branch", "main", "--files", "a.rs"]).local_origin().out("match=true"),
+        case("segment verify", &["segment", "verify", "--branch", "main", "--files", "bin/claude"]).git(&["--work-tree", "{ROOT}", "add", ":/bin/claude"]).local_origin().out("match=true"),
         case("plan list", &["plan", "list"]).out("NO_PLANS"),
         case("plan graph check", &["plan", "graph", "check", "{ROOT}/missing.md"]).code(1).err("missing.md"),
         case("plan wave next", &["plan", "wave", "next", "{ROOT}/missing.md"]).code(1).err("missing.md"),
