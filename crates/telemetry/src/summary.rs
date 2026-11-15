@@ -53,7 +53,7 @@ pub type MaskChoices<'a> = Option<&'a [(String, String)]>;
 fn mask_accounts(groups: &mut [Group], choices: &[(String, String)]) {
     for group in groups {
         let name = crate::account_store::display(choices, &group.key);
-        group.key = crate::tui::account::header_label(&group.key, &name, choices);
+        group.key = crate::account_store::header_label(&group.key, &name, choices);
     }
 }
 

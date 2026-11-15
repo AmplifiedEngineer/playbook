@@ -6,6 +6,7 @@
 //! so a second login does not add to the first one's numbers.
 
 use crate::account::UNKNOWN_ACCOUNT;
+use crate::account_store::header_label;
 use crate::{ToolInvocationEvent, UsageEvent};
 use playbook_store::Connection;
 
@@ -112,41 +113,6 @@ pub fn view(conn: &Connection, sel: &AccountSel) -> Result<AccountsView, String>
     })
 }
 
-/// The masked header text for `key`. An unnamed email key shows only `@` and its first
-/// domain label, which keeps the address out of screenshots. When two unnamed
-/// keys cut to the same text, each gets its place among them, so cycling
-/// accounts still changes the header.
-pub(crate) fn header_label(key: &str, name: &str, choices: &[(String, String)]) -> String {
-    let Some(label) = email_cut(key, name) else {
-        return name.to_string();
-    };
-    let clashing: Vec<&str> = choices
-        .iter()
-        .filter(|(k, n)| email_cut(k, n).as_deref() == Some(label.as_str()))
-        .map(|(k, _)| k.as_str())
-        .collect();
-    match clashing.iter().position(|k| *k == key) {
-        Some(at) if clashing.len() > 1 => format!("{label} ({})", at + 1),
-        _ => label,
-    }
-}
-
-/// `None` for a named account or a key with no local part to hide.
-fn email_cut(key: &str, name: &str) -> Option<String> {
-    if name != key {
-        return None;
-    }
-    let (local, domain) = key.split_once('@')?;
-    if local.is_empty() {
-        return None;
-    }
-    let host = domain
-        .split('.')
-        .find(|part| !part.is_empty())
-        .unwrap_or("");
-    Some(format!("@{host}"))
-}
-
 /// Drops the events of other accounts. `None` keeps everything.
 pub fn keep(events: &mut Vec<UsageEvent>, key: Option<&str>) {
     if let Some(key) = key {
@@ -171,26 +137,6 @@ mod tests {
             .to_vec()
     }
 
-    fn label(key: &str) -> String {
-        header_label(key, key, &[(key.to_string(), key.to_string())])
-    }
-
-    #[test]
-    fn an_unnamed_email_account_shows_only_its_domain_name() {
-        assert_eq!(label("dev@example.com.br"), "@example");
-        assert_eq!(label("a@example.com"), "@example");
-        assert_eq!(label("dev@.com"), "@com");
-        assert_eq!(label("dev@"), "@");
-    }
-
-    #[test]
-    fn named_plain_and_unknown_accounts_show_unchanged() {
-        assert_eq!(header_label("dev@example.com.br", "Work", &[]), "Work");
-        assert_eq!(label("home"), "home");
-        assert_eq!(label(UNKNOWN_ACCOUNT), UNKNOWN_ACCOUNT);
-        assert_eq!(label("@x.com"), "@x.com");
-    }
-
     #[test]
     fn the_view_label_is_the_full_email_unless_the_mask_is_on() {
         let view = AccountsView {
@@ -201,18 +147,6 @@ mod tests {
 
         assert_eq!(view.label(false), "dev@example.com");
         assert_eq!(view.label(true), "@example");
-    }
-
-    #[test]
-    fn unnamed_emails_on_one_domain_get_their_place() {
-        let choices: Vec<(String, String)> =
-            ["dev@example.com", "ana@example.com", "bo@work.invalid"]
-                .map(|k| (k.to_string(), k.to_string()))
-                .to_vec();
-        let shown = |key: &str| header_label(key, key, &choices);
-        assert_eq!(shown("dev@example.com"), "@example (1)");
-        assert_eq!(shown("ana@example.com"), "@example (2)");
-        assert_eq!(shown("bo@work.invalid"), "@work");
     }
 
     #[test]
