@@ -14,6 +14,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 const TIMEOUT: Duration = Duration::from_secs(20);
+/// How often the test checks whether the child has exited.
+const POLL: Duration = Duration::from_millis(20);
 
 /// A command line and the envelope `code` its failing fixture must give.
 struct Row {
@@ -146,6 +148,18 @@ fn fake_gh(bin_dir: &Path) {
     fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).expect("chmod fake gh");
 }
 
+/// Reads a child pipe to the end on its own thread, so a chatty child never
+/// blocks on a full pipe while the test polls for its exit.
+fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_end(&mut bytes);
+        }
+        bytes
+    })
+}
+
 fn run(row: &Row) -> (Option<i32>, String) {
     let root = scratch(&row.args.join("-"));
     let (work, home, bin) = (root.join("work"), root.join("home"), root.join("bin"));
@@ -168,28 +182,8 @@ fn run(row: &Row) -> (Option<i32>, String) {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn playbook");
-    // Drain both pipes on threads so a chatty child never blocks on a full pipe.
-    let drain = |pipe: Option<Box<dyn Read + Send>>| {
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            if let Some(mut pipe) = pipe {
-                let _ = pipe.read_to_end(&mut bytes);
-            }
-            bytes
-        })
-    };
-    let stdout = drain(
-        child
-            .stdout
-            .take()
-            .map(|p| Box::new(p) as Box<dyn Read + Send>),
-    );
-    let stderr = drain(
-        child
-            .stderr
-            .take()
-            .map(|p| Box::new(p) as Box<dyn Read + Send>),
-    );
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
     let start = Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait().expect("poll playbook") {
@@ -197,12 +191,13 @@ fn run(row: &Row) -> (Option<i32>, String) {
         }
         if start.elapsed() > TIMEOUT {
             let _ = child.kill();
+            let _ = child.wait();
             panic!("{:?} ran past {TIMEOUT:?}", row.args);
         }
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(POLL);
     };
     let stdout = stdout.join().expect("drain stdout");
-    drop(stderr.join());
+    let _ = stderr.join();
     (status.code(), String::from_utf8_lossy(&stdout).into_owned())
 }
 

@@ -96,7 +96,6 @@ fn pr_create_without_a_title_is_not_a_usage_error() {
 #[test]
 fn pr_create_outside_a_repository_is_refused_without_touching_anything() {
     // Arrange
-    let title = "a".repeat(73);
     let dir = scratch();
     let body = dir.join("x.md");
     std::fs::write(&body, "why\n").expect("write body");
@@ -108,7 +107,7 @@ fn pr_create_outside_a_repository_is_refused_without_touching_anything() {
             "pr",
             "create",
             "--title",
-            &title,
+            "t",
             "--body-file",
             body.to_str().expect("utf8"),
         ],
@@ -167,8 +166,7 @@ fn pr_prepare_with_dir_reads_the_repo_it_points_at_not_the_cwd() {
     fx.commit_lines("b.txt", 2);
     let elsewhere = scratch();
 
-    // Act: gh is absent from the scrubbed PATH-independent path, so use a
-    // PATH with git only; prepare treats a missing gh as "no PR yet".
+    // Act: the fake gh on PATH exits 1, which prepare reads as "no PR yet".
     let out = run_in(
         &elsewhere,
         &elsewhere,
