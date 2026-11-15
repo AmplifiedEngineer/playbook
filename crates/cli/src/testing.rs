@@ -150,10 +150,13 @@ pub fn in_scratch_home(test_path: &str) -> bool {
 }
 
 /// Inserts a `sessions.db` row for `id` under `home`, creating the database,
-/// with the given integer columns set. Panics on failure.
-pub fn seed_session_row(home: &std::path::Path, id: &str, columns: &[(&str, i64)]) {
-    let conn = crate::sessions::store::open_at(&crate::sessions::store::db_path_from(home))
-        .expect("open sessions.db");
+/// with the given integer columns set. The caller unwraps: library code may not.
+pub fn seed_session_row(
+    home: &std::path::Path,
+    id: &str,
+    columns: &[(&str, i64)],
+) -> Result<(), String> {
+    let conn = crate::sessions::store::open_at(&crate::sessions::store::db_path_from(home))?;
     let names: Vec<&str> = columns.iter().map(|(name, _)| *name).collect();
     let marks: Vec<String> = (2..columns.len() + 2).map(|i| format!("?{i}")).collect();
     let sql = format!(
@@ -163,5 +166,7 @@ pub fn seed_session_row(home: &std::path::Path, id: &str, columns: &[(&str, i64)
     );
     let mut args: Vec<&dyn playbook_store::ToSql> = vec![&id];
     args.extend(columns.iter().map(|(_, v)| v as &dyn playbook_store::ToSql));
-    conn.execute(&sql, args.as_slice()).expect("insert row");
+    conn.execute(&sql, args.as_slice())
+        .map(|_| ())
+        .map_err(|e| format!("insert row: {e}"))
 }

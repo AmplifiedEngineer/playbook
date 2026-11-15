@@ -1062,7 +1062,8 @@ mod tests {
                 ("crashed_at", 16),
                 ("closed_at", 17),
             ],
-        );
+        )
+        .unwrap();
         let path = db_path_from(&dir);
 
         // Act
@@ -1090,7 +1091,7 @@ mod tests {
         // Arrange: a rollback journal database, where an exclusive writer
         // blocks readers.
         let dir = scratch_dir("sessions-read-busy");
-        crate::testing::seed_session_row(&dir, "s1", &[("started_at", 11)]);
+        crate::testing::seed_session_row(&dir, "s1", &[("started_at", 11)]).unwrap();
         let path = db_path_from(&dir);
         Connection::open(&path)
             .expect("open")

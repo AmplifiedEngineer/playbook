@@ -156,7 +156,8 @@ fn sessions_lists_a_waiting_session_from_the_database() {
             ("started_at", now() - FAR_AGO_SECS),
             ("waiting_after_prompt", 1),
         ],
-    );
+    )
+    .unwrap();
 
     // Act
     let doc = home.sessions_json();
@@ -177,7 +178,8 @@ fn sessions_lists_a_crashed_session_that_needs_attention() {
             ("started_at", now() - FAR_AGO_SECS),
             ("crashed_at", now() - FAR_AGO_SECS),
         ],
-    );
+    )
+    .unwrap();
 
     // Act
     let doc = home.sessions_json();
@@ -199,7 +201,8 @@ fn sessions_lists_a_closed_session_as_closed() {
             ("started_at", now() - FAR_AGO_SECS),
             ("closed_at", now() - RECENT_SECS),
         ],
-    );
+    )
+    .unwrap();
 
     // Act
     let doc = home.sessions_json();
@@ -243,7 +246,8 @@ fn a_session_with_events_and_no_row_is_listed_beside_one_with_a_row() {
             ("waiting_after_prompt", 1),
             ("started_at", now() - FAR_AGO_SECS),
         ],
-    );
+    )
+    .unwrap();
 
     // Act
     let doc = home.sessions_json();
