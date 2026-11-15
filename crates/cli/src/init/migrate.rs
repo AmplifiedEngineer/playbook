@@ -452,6 +452,13 @@ pub fn registry() -> Vec<Migration> {
             scope: Scope::Owned,
             run: rename_config_keys,
         },
+        Migration {
+            id: "sessions-runtime-files-to-db",
+            since: "next",
+            kind: Kind::Idempotent,
+            scope: Scope::Owned,
+            run: sessions_runtime_files_to_db,
+        },
     ]
 }
 
@@ -1103,6 +1110,35 @@ fn state_files_to_sqlite(ctx: &Ctx) -> Outcome {
     match crate::state::list(&root, "") {
         Ok(_) => Outcome::Quiet,
         Err(err) => Outcome::Failed(StepReport::failed("state", err.to_string())),
+    }
+}
+
+/// Moves the per session runtime files into `sessions.db`. A database error
+/// is `Repeat`, never `Failed`: a failed step stops the later Auto migrations,
+/// and the import is safe to try again on the next run.
+fn sessions_runtime_files_to_db(ctx: &Ctx) -> Outcome {
+    const STEP: &str = "sessions";
+    let runtime = playbook_root_from(&ctx.home).join("runtime");
+    let db_path = crate::sessions::store::db_path_from(&ctx.home);
+    match crate::sessions::import::run(&runtime, &db_path, crate::common::time::now_secs()) {
+        Err(err) => Outcome::Repeat(StepReport::skipped(
+            STEP,
+            format!("{err}; will retry on the next run"),
+        )),
+        Ok(summary) if summary.imported == 0 && summary.skipped.is_empty() => Outcome::Quiet,
+        Ok(summary) => {
+            let mut detail = format!(
+                "imported {} old session folder(s) into sessions.db",
+                summary.imported
+            );
+            if !summary.skipped.is_empty() {
+                detail.push_str(&format!(
+                    "; skipped unreadable folder(s): {}",
+                    summary.skipped.join(", ")
+                ));
+            }
+            Outcome::Repeat(StepReport::wired(STEP, detail))
+        }
     }
 }
 
@@ -1904,6 +1940,56 @@ mod tests {
         assert_eq!(*CALLS.lock().unwrap(), vec!["a", "b"]);
         assert_eq!(first.steps.len(), 2);
         assert!(second.steps.is_empty());
+    }
+
+    fn sessions_import_entry() -> Migration {
+        registry()
+            .into_iter()
+            .find(|m| m.id == "sessions-runtime-files-to-db")
+            .expect("the registry holds the sessions import")
+    }
+
+    #[test]
+    fn migrate_imports_an_old_session_folder_once() {
+        // Arrange
+        let h = home("sessions-import-once");
+        let dir = playbook_root_from(&h).join("runtime").join("s1");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("start-ts"), "500").unwrap();
+        let ms = [sessions_import_entry()];
+
+        // Act
+        let first = run_with(&ms, &ctx(&h));
+        let second = run_with(&ms, &ctx(&h));
+
+        // Assert
+        assert_eq!(first.steps.len(), 1);
+        assert!(first.steps[0].detail.contains("imported 1"));
+        assert!(second.steps.is_empty());
+    }
+
+    #[test]
+    fn a_database_error_repeats_the_import_and_the_later_entry_still_runs() {
+        // Arrange
+        let h = home("sessions-import-corrupt");
+        let dir = playbook_root_from(&h).join("runtime").join("s1");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("start-ts"), "500").unwrap();
+        let db = crate::sessions::store::db_path_from(&h);
+        fs::create_dir_all(db.parent().unwrap()).unwrap();
+        fs::write(&db, "not a database").unwrap();
+        let ms = [sessions_import_entry(), auto("later", runs_quietly)];
+
+        // Act
+        let report = run_with(&ms, &ctx(&h));
+
+        // Assert
+        assert!(!report.failed);
+        assert_eq!(report.steps.len(), 2);
+        let detail = &report.steps[0].detail;
+        assert!(detail.contains("will retry on the next run"), "{detail}");
+        assert!(!detail.contains("imported"), "{detail}");
+        assert_eq!(report.steps[1].name, "quiet");
     }
 
     fn rows(home: &Path) -> Vec<String> {
