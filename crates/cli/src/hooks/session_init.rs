@@ -174,13 +174,14 @@ fn record_session_start(payload: &Payload, home: &str) {
         crate::sessions::links::Dirty::Skip,
     );
     let branch = git_branch();
+    let columns = crate::sessions::links::place_columns(&place, &cwd);
     let info = crate::sessions::store::StartInfo {
         id: id.clone(),
-        cwd: place.cwd,
-        repo: crate::sessions::links::repo_of(&cwd).map(|p| p.to_string_lossy().into_owned()),
-        worktree: place.worktree,
+        cwd: columns.cwd,
+        repo: columns.repo,
+        worktree: columns.worktree,
         branch: (!branch.is_empty() && branch != "HEAD").then_some(branch),
-        convention: (!place.convention.is_empty()).then(|| place.convention.to_string()),
+        convention: columns.convention,
     };
     let now = crate::common::time::now_secs();
     let Ok(conn) = crate::sessions::store::open() else {
