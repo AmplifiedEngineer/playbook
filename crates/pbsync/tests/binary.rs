@@ -6,12 +6,20 @@
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 const SENTINEL: &str = "sentinel-token-77c1";
 
+static NEXT_HOME: AtomicU32 = AtomicU32::new(0);
+
+/// A home folder for one test: emptied first, so neither a folder from an
+/// earlier process with this pid nor a sibling test thread shares it.
 fn home() -> PathBuf {
-    let home =
-        PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("home-{}", std::process::id()));
+    let home = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "home-{}-{}",
+        std::process::id(),
+        NEXT_HOME.fetch_add(1, Ordering::Relaxed)
+    ));
     let _ = std::fs::remove_dir_all(&home);
     std::fs::create_dir_all(&home).unwrap();
     home

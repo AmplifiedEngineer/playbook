@@ -344,6 +344,7 @@ fn a_local_writer_between_pages_commits_without_error() {
     let remote = SqliteFake::new();
     let _a = pushed(SYNC_BATCH_ROWS + 1, MACHINE_A, &remote);
     let path = std::env::temp_dir().join(format!("pbsync-pull-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
     let b = local::open_at(&path);
     let writer = Connection::open(&path).unwrap();
     let settings = PullSettings {

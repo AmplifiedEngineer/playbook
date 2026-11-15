@@ -28,14 +28,38 @@ struct Outcome {
     stderr: String,
 }
 
-fn temp_dir() -> PathBuf {
+/// A data folder owned by one test. It is emptied before use, so a folder a
+/// cached `target/tmp` kept from an earlier process with the same pid never
+/// leaks its `sync.json` in, and it is removed when the test ends.
+struct TestDir(PathBuf);
+
+impl std::ops::Deref for TestDir {
+    type Target = std::path::Path;
+
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn temp_dir() -> TestDir {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "settings-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
+    fresh_dir(dir)
+}
+
+fn fresh_dir(dir: PathBuf) -> TestDir {
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    TestDir(dir)
 }
 
 fn pb(dir: &std::path::Path, args: &[&str], stdin: &str, token: Option<&str>) -> Outcome {
@@ -70,6 +94,24 @@ fn enable_yes(dir: &std::path::Path, accounts: &[&str]) -> Outcome {
         args.extend(["--account", account]);
     }
     pb(dir, &args, "", None)
+}
+
+#[test]
+fn a_folder_left_by_an_earlier_process_is_emptied_and_removed_after_use() {
+    // Arrange: a cached target/tmp kept an enabled folder under this name.
+    let stale = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("settings-stale-cache");
+    std::fs::create_dir_all(&stale).unwrap();
+    std::fs::write(settings_path(&stale), "{\"version\":1,\"enabled\":true}").unwrap();
+    let kept = stale.clone();
+
+    // Act
+    let dir = fresh_dir(stale);
+    let settings = Settings::load(&dir).unwrap();
+    drop(dir);
+
+    // Assert
+    assert_eq!(settings, Settings::default());
+    assert!(!kept.exists());
 }
 
 #[test]
