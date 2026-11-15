@@ -58,3 +58,24 @@ pub(crate) fn isolate(cmd: &mut Command, home: &Path) {
         // No real `claude plugin update` from a test.
         .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1");
 }
+
+/// Call after [`isolate`]: no host git config and a `gh` that always fails
+/// first on `PATH`, so a stray lookup reads as a failed one and never reaches
+/// the host or the network.
+// Only the tests that run the session reader use it.
+#[allow(dead_code)]
+pub(crate) fn go_offline(cmd: &mut Command, home: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = home.join("fake-bin");
+    std::fs::create_dir_all(&bin).expect("fake bin dir");
+    let gh = bin.join("gh");
+    std::fs::write(&gh, "#!/bin/sh\nexit 1\n").expect("fake gh");
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).expect("chmod fake gh");
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .expect("PATH");
+    cmd.env("PATH", path)
+        .env("GIT_CONFIG_GLOBAL", home.join("gitconfig"))
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+}

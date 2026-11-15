@@ -132,12 +132,13 @@ fn advice(state: State, dirty: Option<bool>) -> (bool, String) {
 
 /// One record per session in `events` (all of a session's events, any order),
 /// newest activity first. `lookup` supplies the place and the PR of a session's
-/// newest event. Sessions whose newest event is older than `recent_days` are
-/// left out unless they are not finished.
-pub fn build(
+/// newest event and `rows` the stored rows by session id. Sessions whose newest
+/// event is older than `recent_days` are left out unless they are not finished.
+pub(crate) fn build(
     events: &[UsageEvent],
     now: i64,
     cfg: Settings,
+    rows: &std::collections::HashMap<String, state::Row>,
     lookup: &dyn Fn(&UsageEvent) -> (Place, Option<Pr>),
 ) -> Vec<Record> {
     let mut by_session: std::collections::BTreeMap<&str, Vec<&UsageEvent>> = Default::default();
@@ -152,7 +153,7 @@ pub fn build(
                 return None;
             }
             let (place, pr) = lookup(newest);
-            let state = state_of(None, newest.timestamp, now, pr, cfg);
+            let state = state_of(rows.get(&newest.session_id), newest.timestamp, now, pr, cfg);
             let (needs_attention, hint) = advice(state, place.dirty);
             Some(Record {
                 id: newest.session_id.clone(),
@@ -303,14 +304,14 @@ pub fn load(
     let heads: Vec<&UsageEvent> = newest.into_values().collect();
     let found = links::gather(&heads, paths, home);
     let lookup = |e: &UsageEvent| found.get(&e.session_id).cloned().unwrap_or_default();
-    let all = crate::usage::db::load_usage_events_of_sessions(
-        &conn,
-        &heads
-            .iter()
-            .map(|e| e.session_id.clone())
-            .collect::<Vec<_>>(),
-    )?;
-    Ok((build(&all, now, cfg, &lookup), now))
+    let ids: Vec<String> = heads.iter().map(|e| e.session_id.clone()).collect();
+    let all = crate::usage::db::load_usage_events_of_sessions(&conn, &ids)?;
+    // A broken database costs the overlay, not the list.
+    let rows = store::read_rows(&store::db_path_from(home), &ids).unwrap_or_else(|e| {
+        eprintln!("playbook: {e}; listing sessions without it");
+        Default::default()
+    });
+    Ok((build(&all, now, cfg, &rows, &lookup), now))
 }
 
 /// `playbook sessions`: the text or JSON of [`load`].
@@ -449,7 +450,13 @@ mod tests {
             ev("a", NOW - 1200, "feat/9-x", 0.5),
             ev("a", NOW - 600, "feat/9-x", 0.25),
         ];
-        let records = build(&events, NOW, Settings::default(), &none);
+        let records = build(
+            &events,
+            NOW,
+            Settings::default(),
+            &Default::default(),
+            &none,
+        );
         assert_eq!(records.len(), 1);
         let r = &records[0];
         assert_eq!(r.cost_usd, 0.75);
@@ -467,10 +474,16 @@ mod tests {
             ev("mid", NOW - 3600, "b", 1.0),
             ev("new", NOW - 10, "b", 1.0),
         ];
-        let ids: Vec<String> = build(&events, NOW, Settings::default(), &none)
-            .into_iter()
-            .map(|r| r.id)
-            .collect();
+        let ids: Vec<String> = build(
+            &events,
+            NOW,
+            Settings::default(),
+            &Default::default(),
+            &none,
+        )
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
         assert_eq!(ids, ["new", "mid"]);
     }
 
@@ -491,7 +504,13 @@ mod tests {
                 }),
             )
         };
-        let r = &build(&events, NOW, Settings::default(), &lookup)[0];
+        let r = &build(
+            &events,
+            NOW,
+            Settings::default(),
+            &Default::default(),
+            &lookup,
+        )[0];
         assert_eq!(r.state, State::Done);
         assert!(r.needs_attention);
         assert!(r.hint.contains("nothing is removed"));
@@ -512,7 +531,13 @@ mod tests {
                 }),
             )
         };
-        let r = &build(&events, NOW, Settings::default(), &lookup)[0];
+        let r = &build(
+            &events,
+            NOW,
+            Settings::default(),
+            &Default::default(),
+            &lookup,
+        )[0];
         assert!(!r.needs_attention);
         assert!(r.hint.contains("worktree sweep"));
     }
@@ -535,7 +560,16 @@ mod tests {
                 }),
             )
         };
-        let text = render_text(&build(&events, NOW, Settings::default(), &lookup), NOW);
+        let text = render_text(
+            &build(
+                &events,
+                NOW,
+                Settings::default(),
+                &Default::default(),
+                &lookup,
+            ),
+            NOW,
+        );
         for want in [
             "STATE",
             "done",
@@ -558,7 +592,16 @@ mod tests {
     #[test]
     fn the_json_names_the_guess_and_holds_no_prompt_text() {
         let events = [ev("a", NOW - 600, "fix/issue-3", 0.1)];
-        let doc = render_json(&build(&events, NOW, Settings::default(), &none), NOW);
+        let doc = render_json(
+            &build(
+                &events,
+                NOW,
+                Settings::default(),
+                &Default::default(),
+                &none,
+            ),
+            NOW,
+        );
         let row = &doc["sessions"][0];
         assert_eq!(row["issue_inferred"], 3);
         assert_eq!(row["state"], "idle");

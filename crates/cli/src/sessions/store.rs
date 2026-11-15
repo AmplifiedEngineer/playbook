@@ -7,10 +7,10 @@
 //! transaction that upgrades from read to write fails at once with
 //! SQLITE_BUSY in WAL mode, and `busy_timeout` does not retry it.
 
-use super::ACTIVE_SECONDS;
+use super::{state, ACTIVE_SECONDS};
 use crate::common::atomic::make_db_file_private;
 use crate::common::sqlite::{retry_busy, OPEN_BUDGET};
-use playbook_store::{params, schema, Connection};
+use playbook_store::{params, schema, Connection, OpenFlags, OptionalExtension};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -23,6 +23,10 @@ pub(crate) const SCHEMA_VERSION: i64 = 1;
 
 /// How long a hook waits for the write lock before giving up.
 const HOOK_BUSY_TIMEOUT_MS: u64 = 2000;
+
+/// How long a reader waits for a writer before it gives up and lists without
+/// the database. Short, because the list must stay quick.
+const READ_BUSY_TIMEOUT_MS: u64 = 1000;
 
 /// The name `sessions.db` carries in version errors.
 const DB_NAME: &str = "sessions.db";
@@ -123,6 +127,52 @@ pub(crate) fn open() -> Result<Connection, String> {
 /// The database file of the user whose home folder is `home`.
 pub(crate) fn db_path_from(home: &Path) -> PathBuf {
     playbook_data::data_dir_from(home).join(DB_NAME)
+}
+
+/// The rows of `ids` in the database at `path`, read through a read only
+/// connection. It never creates the database file; on a valid WAL database
+/// SQLite may still create the `-wal` and `-shm` side files. Empty when the
+/// file is absent.
+pub(crate) fn read_rows(
+    path: &Path,
+    ids: &[String],
+) -> Result<std::collections::HashMap<String, state::Row>, String> {
+    if !path.exists() {
+        return Ok(Default::default());
+    }
+    let failed =
+        |action: &str, e: playbook_store::Error| format!("failed to {action} {DB_NAME}: {e}");
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|e| failed("open", e))?;
+    conn.busy_timeout(Duration::from_millis(READ_BUSY_TIMEOUT_MS))
+        .map_err(|e| failed("set busy_timeout on", e))?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT started_at, last_prompt_at, last_stop_at, waiting_after_prompt, \
+             ended_at, crashed_at, closed_at FROM sessions WHERE session_id = ?1",
+        )
+        .map_err(|e| failed("read", e))?;
+    let mut rows = std::collections::HashMap::new();
+    for id in ids {
+        let row = stmt
+            .query_row([id], |r| {
+                Ok(state::Row {
+                    started_at: r.get(0)?,
+                    last_prompt_at: r.get(1)?,
+                    last_stop_at: r.get(2)?,
+                    waiting_after_prompt: r.get::<_, i64>(3)? != 0,
+                    ended_at: r.get(4)?,
+                    crashed_at: r.get(5)?,
+                    closed_at: r.get(6)?,
+                })
+            })
+            .optional()
+            .map_err(|e| failed("read", e))?;
+        if let Some(row) = row {
+            rows.insert(id.clone(), row);
+        }
+    }
+    Ok(rows)
 }
 
 /// One session folder of the old runtime files, as the import hands it over.
@@ -994,6 +1044,76 @@ mod tests {
             started as i64
         );
         assert!(last_seen > first_seen, "writer never overlapped the loop");
+    }
+
+    #[test]
+    fn read_rows_returns_every_column_of_a_row() {
+        // Arrange
+        let dir = scratch_dir("sessions-read-rows");
+        crate::testing::seed_session_row(
+            &dir,
+            "s1",
+            &[
+                ("started_at", 11),
+                ("last_prompt_at", 12),
+                ("last_stop_at", 13),
+                ("waiting_after_prompt", 1),
+                ("ended_at", 15),
+                ("crashed_at", 16),
+                ("closed_at", 17),
+            ],
+        )
+        .unwrap();
+        let path = db_path_from(&dir);
+
+        // Act
+        let rows = read_rows(&path, &["s1".to_string(), "absent".to_string()]).expect("read");
+
+        // Assert
+        let want = state::Row {
+            started_at: Some(11),
+            last_prompt_at: Some(12),
+            last_stop_at: Some(13),
+            waiting_after_prompt: true,
+            ended_at: Some(15),
+            crashed_at: Some(16),
+            closed_at: Some(17),
+        };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows["s1"], want);
+    }
+
+    /// How long the writer in the busy test holds its lock.
+    const WRITER_HOLD: Duration = Duration::from_millis(300);
+
+    #[test]
+    fn read_rows_waits_for_a_writer_that_releases_soon() {
+        // Arrange: a rollback journal database, where an exclusive writer
+        // blocks readers.
+        let dir = scratch_dir("sessions-read-busy");
+        crate::testing::seed_session_row(&dir, "s1", &[("started_at", 11)]).unwrap();
+        let path = db_path_from(&dir);
+        Connection::open(&path)
+            .expect("open")
+            .pragma_update(None, "journal_mode", "DELETE")
+            .expect("journal mode");
+        let (locked_tx, locked_rx) = sync_channel(0);
+        let writer_path = path.clone();
+        let writer = std::thread::spawn(move || {
+            let conn = Connection::open(writer_path).expect("open writer");
+            conn.execute_batch("BEGIN EXCLUSIVE").expect("lock");
+            locked_tx.send(()).expect("signal");
+            std::thread::sleep(WRITER_HOLD);
+            conn.execute_batch("COMMIT").expect("commit");
+        });
+        locked_rx.recv().expect("writer locked");
+
+        // Act
+        let rows = read_rows(&path, &["s1".to_string()]);
+
+        // Assert
+        writer.join().expect("writer thread");
+        assert_eq!(rows.expect("read").len(), 1);
     }
 
     #[test]
