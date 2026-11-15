@@ -502,6 +502,32 @@ pub(crate) fn waiting(conn: &Connection, id: &str, now: i64) -> Result<usize, St
     })
 }
 
+/// Records why the closer left `id` open, and when. Matches only a row whose
+/// `closed_at` is null, so a parallel run cannot block a row another run
+/// closed. Returns whether a row changed.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the closer's audit sink calls it once the sweep is wired"
+    )
+)]
+pub(crate) fn set_blocked(
+    conn: &Connection,
+    id: &str,
+    code: &str,
+    now: i64,
+) -> Result<bool, String> {
+    let changed = conn
+        .execute(
+            "UPDATE sessions SET close_blocked_at = ?2, close_blocked_reason = ?3 \
+             WHERE session_id = ?1 AND closed_at IS NULL",
+            params![id, now, code],
+        )
+        .map_err(|e| db_error("update", e))?;
+    Ok(changed > 0)
+}
+
 /// The session ended with `reason`.
 pub(crate) fn end(conn: &Connection, id: &str, reason: &str, now: i64) -> Result<usize, String> {
     touch(conn, id, now, false, |conn| {
@@ -1261,5 +1287,62 @@ mod tests {
             max.as_secs_f64() * 1000.0
         );
         assert!(at(95).as_millis() <= HOOK_WRITE_P95_TARGET_MS);
+    }
+
+    #[test]
+    fn set_blocked_stores_the_code_on_an_open_row() {
+        // Arrange
+        let conn = seeded("sessions-block-open");
+        start(&conn, &info("s2", "b", "/r"), 900).expect("start");
+
+        // Act
+        let changed = set_blocked(&conn, "s1", "dirty", 2000).expect("block");
+
+        // Assert
+        let reason = |id: &str| -> Option<String> {
+            conn.query_row(
+                "SELECT close_blocked_reason FROM sessions WHERE session_id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .expect("row")
+        };
+        assert_eq!(
+            (changed, col(&conn, "s1", "close_blocked_at"), reason("s1")),
+            (true, Some(2000), Some("dirty".to_string()))
+        );
+        assert_eq!(
+            (col(&conn, "s2", "close_blocked_at"), reason("s2")),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn set_blocked_on_a_closed_row_returns_false_and_changes_nothing() {
+        // Arrange
+        let conn = seeded("sessions-block-closed");
+        start(&conn, &info("s2", "b", "/r"), 900).expect("start");
+        conn.execute(
+            "UPDATE sessions SET closed_at = 5 WHERE session_id = 's1'",
+            [],
+        )
+        .expect("close");
+
+        // Act
+        let changed = set_blocked(&conn, "s1", "dirty", 2000).expect("block");
+
+        // Assert
+        let reason: Option<String> = conn
+            .query_row(
+                "SELECT close_blocked_reason FROM sessions WHERE session_id = 's1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("row");
+        assert_eq!(
+            (changed, col(&conn, "s1", "close_blocked_at"), reason),
+            (false, None, None)
+        );
+        assert_eq!(col(&conn, "s2", "close_blocked_at"), None);
     }
 }

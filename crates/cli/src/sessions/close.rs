@@ -26,6 +26,9 @@ use std::path::Path;
 /// Seconds a blocked session waits before the closer looks at it again.
 pub(crate) const CLOSE_RETRY_SECS: i64 = 86_400;
 
+/// Top level names `git worktree remove --force` may delete without a block.
+const IGNORED_ALLOWLIST: [&str; 5] = ["target", "node_modules", "dist", "build", ".venv"];
+
 /// A session row as the closer reads it.
 #[derive(Debug, Clone)]
 pub(crate) struct Candidate {
@@ -76,6 +79,7 @@ pub(crate) trait Guards {
     fn convention(&self, path: &Path) -> Convention;
     fn in_use(&self, path: &Path) -> bool;
     fn path_exists(&self, path: &Path, site: Site) -> bool;
+    fn ignored_files(&self, path: &Path) -> Result<Vec<String>, String>;
     fn remove(&self, row: &Candidate, path: &Path, now: i64) -> Result<Removal, String>;
 }
 
@@ -86,6 +90,14 @@ pub(crate) trait AuditSink {
     fn set_blocked(&self, id: &str, code: &str, now: i64) -> bool;
     /// Matches only a row whose `closed_at` is null.
     fn set_closed(&self, id: &str, now: i64) -> bool;
+    /// Whether another session that is not stale or closed uses `worktree`.
+    fn has_other_open_row(
+        &self,
+        worktree: &str,
+        target_id: &str,
+        now: i64,
+        session_stale_days: i64,
+    ) -> Result<bool, String>;
 }
 
 /// The sessions to close at `now`: `Done`, quiet for over `ACTIVE_SECONDS`,
@@ -171,6 +183,9 @@ const CODE_CLEANUP_DISABLED: &str = "cleanup_disabled";
 const CODE_NOT_REGISTERED: &str = "not_registered";
 const CODE_UNMANAGED: &str = "unmanaged";
 const CODE_NOT_CLOSABLE: &str = "not_closable";
+const CODE_REMOVE_FAILED: &str = "remove_failed";
+const CODE_IGNORED_FILES: &str = "ignored_files";
+const CODE_SHARED_WORKTREE: &str = "shared_worktree";
 
 /// Why a session stays open: the stable code stored on the row, and the
 /// detail that only the audit row keeps.
@@ -188,11 +203,86 @@ impl Block {
     }
 }
 
+/// Separates file names in an audit or block detail.
+const LIST_SEPARATOR: &str = ", ";
+
+/// Introduces the files the force removal deleted in the worktree audit text.
+const IGNORED_REMOVED_LABEL: &str = "ignored files removed";
+
+/// Whether an ignored file sits under a name of [`IGNORED_ALLOWLIST`].
+fn in_allowlist(name: &str) -> bool {
+    let top = name.split_once('/').map_or(name, |(top, _)| top);
+    IGNORED_ALLOWLIST.contains(&top)
+}
+
+/// The ignored files the force removal would delete. A failed read blocks:
+/// reading it as "none" would let the removal delete files it never listed.
+fn ignored_files_guard(guards: &dyn Guards, path: &Path) -> Result<Vec<String>, Block> {
+    let ignored = guards
+        .ignored_files(path)
+        .map_err(|err| Block::new(CODE_IGNORED_FILES, err))?;
+    let outside: Vec<&str> = ignored
+        .iter()
+        .map(String::as_str)
+        .filter(|name| !in_allowlist(name))
+        .collect();
+    if outside.is_empty() {
+        Ok(ignored)
+    } else {
+        Err(Block::new(CODE_IGNORED_FILES, outside.join(LIST_SEPARATOR)))
+    }
+}
+
+/// The result text of the worktree audit row.
+fn worktree_audit_text(ignored: &[String]) -> String {
+    if ignored.is_empty() {
+        REASON_LANDED.to_string()
+    } else {
+        format!(
+            "{REASON_LANDED}, {IGNORED_REMOVED_LABEL}: {}",
+            ignored.join(LIST_SEPARATOR)
+        )
+    }
+}
+
+/// Closes the row after a confirmed removal; any other outcome blocks unless
+/// the path is gone anyway.
+fn finish_removal(
+    removal: Result<Removal, String>,
+    row: &Candidate,
+    path: &Path,
+    now: i64,
+    guards: &dyn Guards,
+    audit: &dyn AuditSink,
+) -> Result<(), Block> {
+    match removal {
+        Ok(Removal::Removed(_)) => {
+            audit.set_closed(&row.id, now);
+            Ok(())
+        }
+        Ok(Removal::Nothing(text)) | Err(text) => {
+            // A parallel run may have removed it: then the close is done and
+            // a second block row would be noise.
+            if guards.path_exists(path, Site::AfterRemove) {
+                Err(Block::new(CODE_REMOVE_FAILED, text))
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
 /// Closes each planned session. Every session ends closed, blocked with a
 /// stored code, or untouched.
-pub(crate) fn run(plan: &[&Candidate], now: i64, guards: &dyn Guards, audit: &dyn AuditSink) {
+pub(crate) fn run(
+    plan: &[&Candidate],
+    now: i64,
+    session_stale_days: i64,
+    guards: &dyn Guards,
+    audit: &dyn AuditSink,
+) {
     for row in plan {
-        if let Err(block) = close_one(row, now, guards, audit) {
+        if let Err(block) = close_one(row, now, session_stale_days, guards, audit) {
             record_block(row, &block, now, audit);
         }
     }
@@ -203,6 +293,7 @@ pub(crate) fn run(plan: &[&Candidate], now: i64, guards: &dyn Guards, audit: &dy
 fn close_one(
     row: &Candidate,
     now: i64,
+    session_stale_days: i64,
     guards: &dyn Guards,
     audit: &dyn AuditSink,
 ) -> Result<(), Block> {
@@ -210,27 +301,41 @@ fn close_one(
         return Ok(());
     };
     let path = Path::new(worktree);
+    if !guards.path_exists(path, Site::Step1) {
+        return Ok(());
+    }
+    if row.repo.is_none() {
+        return Err(Block::new(CODE_NOT_CLOSABLE, ""));
+    }
+    if matches!(
+        guards.convention(path),
+        Convention::Review | Convention::Unmanaged
+    ) {
+        return Err(Block::new(CODE_UNMANAGED, ""));
+    }
     if let Some(block) = guards.verdict(row, path, now).block() {
         return Err(block);
     }
     if guards.in_use(path) {
         return Err(Block::new(CODE_IN_USE, ""));
     }
+    let ignored = ignored_files_guard(guards, path)?;
+    match audit.has_other_open_row(worktree, &row.id, now, session_stale_days) {
+        Ok(false) => {}
+        Ok(true) => return Err(Block::new(CODE_SHARED_WORKTREE, "")),
+        Err(err) => return Err(Block::new(CODE_SHARED_WORKTREE, err)),
+    }
     let written = audit.write(&Action {
         session_id: row.id.clone(),
         at: now,
         action: ACTION_WORKTREE,
         target: Some(worktree.to_string()),
-        result: REASON_LANDED.to_string(),
+        result: worktree_audit_text(&ignored),
     });
     if written.is_err() {
         return Ok(());
     }
-    // Only a confirmed removal closes the row; anything else stays open.
-    if let Ok(Removal::Removed(_)) = guards.remove(row, path, now) {
-        audit.set_closed(&row.id, now);
-    }
-    Ok(())
+    finish_removal(guards.remove(row, path, now), row, path, now, guards, audit)
 }
 
 /// Stores the block code on the row and, when the code differs from the one
@@ -283,6 +388,13 @@ mod tests {
         blocked: RefCell<Vec<(String, String, i64)>>,
         verdict: Verdict,
         in_use: bool,
+        convention: Convention,
+        exists_step1: bool,
+        exists_after_remove: bool,
+        ignored: Vec<String>,
+        ignored_error: Option<String>,
+        other_open: Result<bool, String>,
+        other_args: RefCell<Option<(String, String, i64, i64)>>,
         removal: Outcome,
         worktree_write_fails: bool,
     }
@@ -296,6 +408,13 @@ mod tests {
                 blocked: RefCell::new(Vec::new()),
                 verdict: Verdict::Landed,
                 in_use: false,
+                convention: Convention::CcLauncher,
+                exists_step1: true,
+                exists_after_remove: true,
+                ignored: Vec::new(),
+                ignored_error: None,
+                other_open: Ok(false),
+                other_args: RefCell::new(None),
                 removal: Outcome::Removed,
                 worktree_write_fails: false,
             }
@@ -314,14 +433,24 @@ mod tests {
             self.verdict.clone()
         }
         fn convention(&self, _: &Path) -> Convention {
-            Convention::CcLauncher
+            self.convention
         }
         fn in_use(&self, _: &Path) -> bool {
             self.note("in_use");
             self.in_use
         }
-        fn path_exists(&self, _: &Path, _: Site) -> bool {
-            true
+        fn path_exists(&self, _: &Path, site: Site) -> bool {
+            match site {
+                Site::Step1 => self.exists_step1,
+                Site::AfterRemove => self.exists_after_remove,
+            }
+        }
+        fn ignored_files(&self, _: &Path) -> Result<Vec<String>, String> {
+            self.note("ignored_files");
+            match &self.ignored_error {
+                Some(err) => Err(err.clone()),
+                None => Ok(self.ignored.clone()),
+            }
         }
         fn remove(&self, _: &Candidate, path: &Path, _: i64) -> Result<Removal, String> {
             self.note("remove");
@@ -354,6 +483,18 @@ mod tests {
             self.note("set_closed");
             self.closed.borrow_mut().push((id.to_string(), now));
             true
+        }
+        fn has_other_open_row(
+            &self,
+            worktree: &str,
+            target_id: &str,
+            now: i64,
+            stale_days: i64,
+        ) -> Result<bool, String> {
+            self.note("has_other_open_row");
+            *self.other_args.borrow_mut() =
+                Some((worktree.to_string(), target_id.to_string(), now, stale_days));
+            self.other_open.clone()
         }
     }
 
@@ -392,18 +533,12 @@ mod tests {
         let row = done("s1");
 
         // Act
-        run(&[&row], NOW, &fake, &fake);
+        run(&[&row], NOW, STALE_DAYS, &fake, &fake);
 
         // Assert
         assert_eq!(
             fake.log(),
-            [
-                "verdict",
-                "in_use",
-                "audit worktree landed",
-                "remove",
-                "set_closed",
-            ]
+            guarded(&["audit worktree landed", "remove", "set_closed"])
         );
         assert_eq!(
             *fake.actions.borrow(),
@@ -418,8 +553,22 @@ mod tests {
         assert_eq!(*fake.closed.borrow(), [("s1".to_string(), NOW)]);
     }
 
+    /// The log entries every closing run writes before its first audit row.
+    const GUARD_LOG: [&str; 4] = ["verdict", "in_use", "ignored_files", "has_other_open_row"];
+
+    /// `GUARD_LOG` followed by `tail`.
+    fn guarded(tail: &[&str]) -> Vec<String> {
+        GUARD_LOG
+            .iter()
+            .chain(tail)
+            .map(|e| e.to_string())
+            .collect()
+    }
+
+    const REMOVE_LOG: [&str; 2] = ["audit worktree landed", "remove"];
+
     #[test]
-    fn a_removal_that_did_not_remove_leaves_the_session_open() {
+    fn a_removal_that_left_the_path_blocks_as_remove_failed() {
         for removal in [Outcome::Nothing, Outcome::Failed] {
             // Arrange
             let fake = Fake {
@@ -429,15 +578,38 @@ mod tests {
             let row = done("s1");
 
             // Act
-            run(&[&row], NOW, &fake, &fake);
+            run(&[&row], NOW, STALE_DAYS, &fake, &fake);
 
             // Assert
+            let log = fake.log();
+            let split = GUARD_LOG.len() + REMOVE_LOG.len();
+            assert_eq!(log[..split], guarded(&REMOVE_LOG));
             assert_eq!(
-                fake.log(),
-                ["verdict", "in_use", "audit worktree landed", "remove"]
+                log[split..],
+                [
+                    format!("audit blocked remove_failed: {WORKTREE}"),
+                    "set_blocked(remove_failed)".to_string()
+                ]
             );
             assert!(fake.closed.borrow().is_empty());
         }
+    }
+
+    #[test]
+    fn a_failed_removal_after_another_run_removed_the_path_does_nothing_more() {
+        // Arrange
+        let fake = Fake {
+            removal: Outcome::Failed,
+            exists_after_remove: false,
+            ..Fake::allowing()
+        };
+        let row = done("s1");
+
+        // Act
+        run(&[&row], NOW, STALE_DAYS, &fake, &fake);
+
+        // Assert
+        assert_eq!(fake.log(), guarded(&REMOVE_LOG));
     }
 
     #[test]
@@ -450,10 +622,10 @@ mod tests {
         let row = done("s1");
 
         // Act
-        run(&[&row], NOW, &fake, &fake);
+        run(&[&row], NOW, STALE_DAYS, &fake, &fake);
 
         // Assert
-        assert_eq!(fake.log(), ["verdict", "in_use", "audit worktree landed"]);
+        assert_eq!(fake.log(), guarded(&["audit worktree landed"]));
         assert!(fake.closed.borrow().is_empty());
     }
 
@@ -571,7 +743,7 @@ mod tests {
             ..Fake::allowing()
         };
         let first = done("s1");
-        run(&[&first], NOW, &fake, &fake);
+        run(&[&first], NOW, STALE_DAYS, &fake, &fake);
         let mut again = done("s1");
         again.close_blocked_at = Some(NOW);
         again.close_blocked_reason = Some(CODE_DIRTY.to_string());
@@ -580,7 +752,7 @@ mod tests {
         let picked = plan(&rows, later, None, STALE_DAYS);
 
         // Act
-        run(&picked, later, &fake, &fake);
+        run(&picked, later, STALE_DAYS, &fake, &fake);
 
         // Assert
         assert_eq!(fake.actions.borrow().len(), 1);
@@ -604,7 +776,7 @@ mod tests {
         row.close_blocked_reason = Some(CODE_NOT_LANDED.to_string());
 
         // Act
-        run(&[&row], NOW, &fake, &fake);
+        run(&[&row], NOW, STALE_DAYS, &fake, &fake);
 
         // Assert
         assert_eq!(
@@ -688,7 +860,7 @@ mod tests {
             let row = done("s1");
 
             // Act
-            run(&[&row], NOW, &fake, &fake);
+            run(&[&row], NOW, STALE_DAYS, &fake, &fake);
 
             // Assert
             assert_eq!(
@@ -712,7 +884,7 @@ mod tests {
         let row = done("s1");
 
         // Act
-        run(&[&row], NOW, &fake, &fake);
+        run(&[&row], NOW, STALE_DAYS, &fake, &fake);
 
         // Assert
         assert_eq!(
@@ -724,5 +896,201 @@ mod tests {
                 "set_blocked(in_use)"
             ]
         );
+    }
+
+    #[test]
+    fn ignored_files_inside_the_allowlist_proceed_to_the_removal() {
+        for entry in IGNORED_ALLOWLIST {
+            // Arrange
+            let fake = Fake {
+                ignored: vec![format!("{entry}/x")],
+                ..Fake::allowing()
+            };
+            let row = done("s1");
+
+            // Act
+            run(&[&row], NOW, STALE_DAYS, &fake, &fake);
+
+            // Assert
+            assert_eq!(fake.log().last().map(String::as_str), Some("set_closed"));
+        }
+    }
+
+    #[test]
+    fn ignored_files_outside_the_allowlist_block_and_name_only_those_files() {
+        let cases = [
+            (vec![".env"], ".env"),
+            (vec!["targets/x"], "targets/x"),
+            (vec!["build.rs"], "build.rs"),
+            (vec!["target/a", ".env"], ".env"),
+        ];
+        for (ignored, detail) in cases {
+            // Arrange
+            let fake = Fake {
+                ignored: ignored.iter().map(|name| name.to_string()).collect(),
+                ..Fake::allowing()
+            };
+            let row = done("s1");
+
+            // Act
+            run(&[&row], NOW, STALE_DAYS, &fake, &fake);
+
+            // Assert
+            let mut expected = guarded(&[])[..GUARD_LOG.len() - 1].to_vec();
+            expected.push(format!("audit blocked ignored_files: {detail}"));
+            expected.push("set_blocked(ignored_files)".to_string());
+            assert_eq!(fake.log(), expected, "{ignored:?}");
+        }
+    }
+
+    #[test]
+    fn a_failed_ignored_files_read_blocks_instead_of_removing() {
+        // Arrange
+        let fake = Fake {
+            ignored_error: Some("git status failed".to_string()),
+            ..Fake::allowing()
+        };
+        let row = done("s1");
+
+        // Act
+        run(&[&row], NOW, STALE_DAYS, &fake, &fake);
+
+        // Assert
+        assert_eq!(
+            fake.log(),
+            [
+                "verdict",
+                "in_use",
+                "ignored_files",
+                "audit blocked ignored_files: git status failed",
+                "set_blocked(ignored_files)"
+            ]
+        );
+    }
+
+    #[test]
+    fn allowed_ignored_files_are_listed_on_the_worktree_audit_row() {
+        // Arrange
+        let fake = Fake {
+            ignored: vec!["target/a".to_string(), "node_modules/b".to_string()],
+            ..Fake::allowing()
+        };
+        let row = done("s1");
+
+        // Act
+        run(&[&row], NOW, STALE_DAYS, &fake, &fake);
+
+        // Assert
+        assert_eq!(
+            fake.actions.borrow()[0].result,
+            "landed, ignored files removed: target/a, node_modules/b"
+        );
+    }
+
+    #[test]
+    fn another_open_row_or_a_failed_read_blocks_as_shared_worktree() {
+        let cases = [
+            (Ok(true), "audit blocked shared_worktree"),
+            (
+                Err("db busy".to_string()),
+                "audit blocked shared_worktree: db busy",
+            ),
+        ];
+        for (other_open, audit_line) in cases {
+            // Arrange
+            let fake = Fake {
+                other_open,
+                ..Fake::allowing()
+            };
+            let row = done("s1");
+
+            // Act
+            run(&[&row], NOW, STALE_DAYS, &fake, &fake);
+
+            // Assert
+            assert_eq!(
+                fake.log(),
+                guarded(&[audit_line, "set_blocked(shared_worktree)"])
+            );
+            let args = fake.other_args.borrow().clone();
+            assert_eq!(
+                args,
+                Some((WORKTREE.to_string(), "s1".to_string(), NOW, STALE_DAYS))
+            );
+        }
+    }
+
+    #[test]
+    fn a_review_or_unmanaged_worktree_is_blocked_before_any_guard_runs() {
+        for convention in [Convention::Review, Convention::Unmanaged] {
+            // Arrange
+            let fake = Fake {
+                convention,
+                ..Fake::allowing()
+            };
+            let row = done("s1");
+
+            // Act
+            run(&[&row], NOW, STALE_DAYS, &fake, &fake);
+
+            // Assert
+            assert_eq!(
+                fake.log(),
+                ["audit blocked unmanaged", "set_blocked(unmanaged)"],
+                "{convention:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_row_with_no_repo_but_an_existing_worktree_is_blocked_as_not_closable() {
+        // Arrange
+        let fake = Fake::allowing();
+        let mut row = done("s1");
+        row.repo = None;
+
+        // Act
+        run(&[&row], NOW, STALE_DAYS, &fake, &fake);
+
+        // Assert
+        assert_eq!(
+            fake.log(),
+            ["audit blocked not_closable", "set_blocked(not_closable)"]
+        );
+    }
+
+    #[test]
+    fn pins_the_temporary_early_return_for_a_worktree_missing_on_disk() {
+        // The no-worktree change replaces this early return, then this test.
+        // Arrange
+        let fake = Fake {
+            exists_step1: false,
+            ..Fake::allowing()
+        };
+        let mut row = done("s1");
+        row.repo = None;
+
+        // Act
+        run(&[&row], NOW, STALE_DAYS, &fake, &fake);
+
+        // Assert
+        assert!(fake.log().is_empty());
+    }
+
+    #[test]
+    fn a_remove_failure_for_one_session_does_not_stop_the_next() {
+        // Arrange
+        let fake = Fake {
+            removal: Outcome::Failed,
+            ..Fake::allowing()
+        };
+        let (first, second) = (done("s1"), done("s2"));
+
+        // Act
+        run(&[&first, &second], NOW, STALE_DAYS, &fake, &fake);
+
+        // Assert
+        let removes = fake.log().iter().filter(|e| *e == "remove").count();
+        assert_eq!(removes, 2);
     }
 }
