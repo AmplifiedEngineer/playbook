@@ -709,6 +709,10 @@ pub(crate) const REPORT_REMOVED: &str = "removed";
 pub(crate) const REPORT_CLEANUP_DISABLED: &str =
     "worktree remove: worktree.cleanup.enabled is false, nothing to do";
 
+/// The tails of the errors for a path the sweep does not manage.
+pub(crate) const ERR_NOT_REGISTERED: &str = "is not a registered git worktree";
+pub(crate) const ERR_NOT_MANAGED: &str = "is not a playbook-managed worktree";
+
 /// The tail of a report line for a worktree that was removed.
 fn removed_suffix() -> String {
     format!(": {REPORT_REMOVED}")
@@ -931,14 +935,11 @@ fn decide_target_with(
                 .unwrap_or_else(|_| entry.path.clone())
                 == target
         })
-        .ok_or_else(|| format!("{} is not a registered git worktree", target_path.display()))?;
+        .ok_or_else(|| format!("{} {ERR_NOT_REGISTERED}", target_path.display()))?;
 
     let convention = classify(&entry.path, home);
     if convention == Convention::Unmanaged {
-        return Err(format!(
-            "{} is not a playbook-managed worktree",
-            target_path.display()
-        ));
+        return Err(format!("{} {ERR_NOT_MANAGED}", target_path.display()));
     }
     let lock = lock_state(&entry);
     let default = needs_default_branch(convention)
