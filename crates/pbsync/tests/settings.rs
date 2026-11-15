@@ -30,7 +30,7 @@ struct Outcome {
 
 /// A data folder owned by one test. It is emptied before use, so a folder a
 /// cached `target/tmp` kept from an earlier process with the same pid never
-/// leaks its `settings.json` in, and it is removed when the test ends.
+/// leaks its `sync.json` in, and it is removed when the test ends.
 struct TestDir(PathBuf);
 
 impl std::ops::Deref for TestDir {

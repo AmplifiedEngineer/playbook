@@ -39,6 +39,12 @@ pub(crate) struct Machine {
     pub(crate) id: String,
 }
 
+impl Drop for Machine {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
 impl Machine {
     pub(crate) fn new(test: &str, id: &str) -> Self {
         let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
