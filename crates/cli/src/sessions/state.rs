@@ -7,7 +7,6 @@
 use super::{Pr, PrKind, Settings, State, DAY, WORKING_SECONDS};
 
 /// The columns of a `sessions` row that decide a state. Times are Unix seconds.
-#[allow(dead_code)] // Filled from store rows once the reader loads them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Row {
     pub started_at: Option<i64>,

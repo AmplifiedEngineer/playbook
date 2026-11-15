@@ -148,3 +148,20 @@ pub fn in_scratch_home(test_path: &str) -> bool {
     );
     false
 }
+
+/// Inserts a `sessions.db` row for `id` under `home`, creating the database,
+/// with the given integer columns set. Panics on failure.
+pub fn seed_session_row(home: &std::path::Path, id: &str, columns: &[(&str, i64)]) {
+    let conn = crate::sessions::store::open_at(&crate::sessions::store::db_path_from(home))
+        .expect("open sessions.db");
+    let names: Vec<&str> = columns.iter().map(|(name, _)| *name).collect();
+    let marks: Vec<String> = (2..columns.len() + 2).map(|i| format!("?{i}")).collect();
+    let sql = format!(
+        "INSERT INTO sessions (session_id, {}) VALUES (?1, {})",
+        names.join(", "),
+        marks.join(", ")
+    );
+    let mut args: Vec<&dyn playbook_store::ToSql> = vec![&id];
+    args.extend(columns.iter().map(|(_, v)| v as &dyn playbook_store::ToSql));
+    conn.execute(&sql, args.as_slice()).expect("insert row");
+}
