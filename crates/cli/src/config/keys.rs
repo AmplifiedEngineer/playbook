@@ -164,7 +164,7 @@ pub static FIXED_KEYS: LazyLock<Vec<(&'static str, Value)>> = LazyLock::new(|| {
 });
 
 /// A key that changed its name: `config get`, `set`, `import` and
-/// `apply-proposal` accept `old` and act on `new`, and a stored `old` row
+/// `sync config apply` accept `old` and act on `new`, and a stored `old` row
 /// still applies until the `rename-config-keys` migration moves it.
 #[derive(Debug, Clone, Copy)]
 pub struct KeyRename {

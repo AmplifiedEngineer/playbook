@@ -189,3 +189,22 @@ fn a_missing_branch_is_an_error() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("feat/none"));
 }
+
+#[test]
+fn a_mistyped_path_is_an_error_and_not_a_match() {
+    // Arrange
+    let fx = Fixture::new("typo");
+    let typo = "chnaged.txt";
+
+    // Act
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["segment", "verify", "--branch", BRANCH, "--files", typo])
+        .current_dir(&fx.work)
+        .env("HOME", &fx.root)
+        .output()
+        .expect("playbook runs");
+
+    // Assert
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(typo));
+}

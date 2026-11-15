@@ -121,8 +121,8 @@ fn run_context_is_an_alias_row_for_mode_status_json() {
 }
 
 #[test]
-fn the_wait_commands_print_a_deprecation_line_naming_pr_merge() {
-    for old in ["pr ci-wait", "pr land-wait"] {
+fn the_superseded_pr_commands_print_a_deprecation_line_naming_pr_merge() {
+    for old in ["pr ci-wait", "pr land-wait", "pr land"] {
         // Arrange
         let mut words = vec!["playbook"];
         words.extend(old.split(' '));
@@ -135,7 +135,8 @@ fn the_wait_commands_print_a_deprecation_line_naming_pr_merge() {
         // Assert
         assert_eq!(
             line,
-            Some(playbook::renames::deprecation_line(old, "pr merge"))
+            Some(playbook::renames::deprecation_line(old, "pr merge")),
+            "{old}"
         );
     }
 }

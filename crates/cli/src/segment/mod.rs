@@ -154,9 +154,24 @@ pub fn verify(
         return Err(format!("branch {branch} not found"));
     }
     let remote = format!("origin/{default_branch}");
+    for file in files {
+        reject_unknown_path(dir, &[&remote, branch], file)?;
+    }
     let mut args = vec!["diff", "--name-only", &remote, branch, "--"];
     args.extend(files.iter().map(String::as_str));
     Ok(git(dir, &args)?.lines().map(str::to_string).collect())
+}
+
+/// Fails when `file` is in none of `refs`: a mistyped path would otherwise
+/// differ nowhere and read as landed.
+fn reject_unknown_path(dir: &Path, refs: &[&str], file: &str) -> Result<(), String> {
+    for tree in refs {
+        let listed = git(dir, &["ls-tree", "-r", "--name-only", tree, "--", file])?;
+        if !listed.is_empty() {
+            return Ok(());
+        }
+    }
+    Err(format!("{file} is in neither {}", refs.join(" nor ")))
 }
 
 /// Print the verdict of `verify` and return the exit code: 0 on a match, 1 on
