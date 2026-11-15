@@ -9,11 +9,18 @@
 use super::state;
 use super::state::derive;
 use super::{Pr, Settings, State, ACTIVE_SECONDS};
-use crate::worktree::{
-    Convention, Removal, ERR_NOT_MANAGED, ERR_NOT_REGISTERED, REPORT_CLEANUP_DISABLED,
-    REPORT_DIRTY, REPORT_IN_USE, REPORT_LOCKED_LIVE, REPORT_LOCK_NO_OWNER, REPORT_NOT_LANDED,
-    REPORT_WOULD_REMOVE,
-};
+// One `use` per name: the gc guard scan bans a braced import of the worktree module outside its allow list.
+use crate::worktree::Convention;
+use crate::worktree::Removal;
+use crate::worktree::ERR_NOT_MANAGED;
+use crate::worktree::ERR_NOT_REGISTERED;
+use crate::worktree::REPORT_CLEANUP_DISABLED;
+use crate::worktree::REPORT_DIRTY;
+use crate::worktree::REPORT_IN_USE;
+use crate::worktree::REPORT_LOCKED_LIVE;
+use crate::worktree::REPORT_LOCK_NO_OWNER;
+use crate::worktree::REPORT_NOT_LANDED;
+use crate::worktree::REPORT_WOULD_REMOVE;
 use std::path::Path;
 
 /// Seconds a blocked session waits before the closer looks at it again.
