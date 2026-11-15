@@ -575,6 +575,7 @@ fn table() -> Vec<Case> {
         // watch mode: nothing is enabled and no token is set on a fresh home
         case("watch", &["watch"]).out("watch is off"),
         case("watch once", &["watch", "once"]).out("watch is off"),
+        case("watch once", &["watch", "once", "--dry-run"]).code(1).err("GITHUB_TOKEN"),
         case("watch approve", &["watch", "approve", "1"]).code(1).err("GITHUB_TOKEN"),
         case("watch reject", &["watch", "reject", "1"]).code(1).err("not waiting").grows(),
         case("watch status", &["watch", "status"]).out("enabled: false").grows(),

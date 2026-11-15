@@ -481,4 +481,67 @@ mod tests {
         // Assert
         assert_eq!((state.as_str(), failed, running, total), ("pass", 0, 0, 3));
     }
+
+    // pending_logins / completed_reviews --------------------------------------
+
+    #[test]
+    fn pending_logins_prefers_a_login_then_a_team_name_then_the_team_literal() {
+        // Arrange
+        let json = serde_json::json!({"reviewRequests": [
+            {"login": "dave", "name": "ignored"},
+            {"name": "core-team"},
+            {}
+        ]});
+
+        // Act
+        let logins = pending_logins(&json);
+
+        // Assert
+        assert_eq!(logins, ["dave", "core-team", "team"]);
+    }
+
+    #[test]
+    fn pending_logins_is_empty_without_a_review_requests_array() {
+        assert!(pending_logins(&serde_json::json!({})).is_empty());
+        assert!(pending_logins(&serde_json::json!({"reviewRequests": null})).is_empty());
+    }
+
+    #[test]
+    fn completed_reviews_renders_each_state_with_its_prefix_and_time() {
+        // Arrange
+        let json = serde_json::json!({"latestReviews": [
+            {"author": {"login": "bob"}, "state": "APPROVED", "submittedAt": "t1"},
+            {"author": {"login": "carol"}, "state": "CHANGES_REQUESTED", "submittedAt": "t2"},
+            {"author": {"login": "erin"}, "state": "DISMISSED", "submittedAt": "t3"}
+        ]});
+
+        // Act
+        let reviews = completed_reviews(&json, &[]);
+
+        // Assert
+        assert_eq!(reviews, ["g:bob:t1", "r:carol:t2", "d:erin:t3"]);
+    }
+
+    #[test]
+    fn completed_reviews_skips_comments_the_bot_and_a_pending_reviewer() {
+        // Arrange
+        let json = serde_json::json!({"latestReviews": [
+            {"author": {"login": "bob"}, "state": "COMMENTED", "submittedAt": "t1"},
+            {"author": {"login": "coderabbitai"}, "state": "APPROVED", "submittedAt": "t2"},
+            {"author": {"login": "dave"}, "state": "APPROVED", "submittedAt": "t3"},
+            {"author": {"login": "carol"}, "state": "APPROVED", "submittedAt": "t4"}
+        ]});
+        let pending = vec!["dave".to_string()];
+
+        // Act
+        let reviews = completed_reviews(&json, &pending);
+
+        // Assert
+        assert_eq!(reviews, ["g:carol:t4"]);
+    }
+
+    #[test]
+    fn completed_reviews_is_empty_without_a_latest_reviews_array() {
+        assert!(completed_reviews(&serde_json::json!({}), &[]).is_empty());
+    }
 }

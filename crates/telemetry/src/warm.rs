@@ -217,8 +217,14 @@ mod tests {
         assert!(!usage.join(STAMP).exists());
     }
 
-    /// Runs `maybe_spawn` with a fake program and reports whether it started.
-    fn spawned(home: &Path) -> bool {
+    /// How long a spawn that should happen may take on a slow machine.
+    const SPAWN_WAIT: Duration = Duration::from_secs(5);
+    /// How long to watch for a spawn that should not happen.
+    const NO_SPAWN_WAIT: Duration = Duration::from_millis(300);
+
+    /// Runs `maybe_spawn` with a fake program and reports whether it started
+    /// within `wait`.
+    fn spawned(home: &Path, wait: Duration) -> bool {
         let paths = Paths::from_home(home);
         let marker = home.join("ran");
         let script = home.join("fake");
@@ -233,7 +239,7 @@ mod tests {
             std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         maybe_spawn(&paths, &script);
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + wait;
         while std::time::Instant::now() < deadline {
             if marker.exists() {
                 return true;
@@ -248,7 +254,7 @@ mod tests {
         let home = dir("warm-off");
         config(&home, r#"{"usage":{"autoIngest":false}}"#);
 
-        assert!(spawned(&home));
+        assert!(spawned(&home, SPAWN_WAIT));
     }
 
     #[test]
@@ -259,6 +265,6 @@ mod tests {
         std::fs::create_dir_all(&usage).unwrap();
         aged(&usage.join(STAMP), 5 * 60);
 
-        assert!(!spawned(&home));
+        assert!(!spawned(&home, NO_SPAWN_WAIT));
     }
 }
