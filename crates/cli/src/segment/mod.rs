@@ -162,16 +162,20 @@ pub fn verify(
     Ok(git(dir, &args)?.lines().map(str::to_string).collect())
 }
 
-/// Fails when `file` is in none of `refs`: a mistyped path would otherwise
-/// differ nowhere and read as landed.
+/// Fails when no commit of any of `refs` ever touched `file`: a mistyped path
+/// would otherwise differ nowhere and read as landed. History counts, so a
+/// file the Segment deleted still passes.
 fn reject_unknown_path(dir: &Path, refs: &[&str], file: &str) -> Result<(), String> {
     for tree in refs {
-        let listed = git(dir, &["ls-tree", "-r", "--name-only", tree, "--", file])?;
-        if !listed.is_empty() {
+        let touched = git(dir, &["rev-list", "-1", tree, "--", file])?;
+        if !touched.is_empty() {
             return Ok(());
         }
     }
-    Err(format!("{file} is in neither {}", refs.join(" nor ")))
+    Err(format!(
+        "{file} is in the history of neither {}",
+        refs.join(" nor ")
+    ))
 }
 
 /// Print the verdict of `verify` and return the exit code: 0 on a match, 1 on
