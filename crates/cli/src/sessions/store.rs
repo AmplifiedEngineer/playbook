@@ -78,8 +78,8 @@ CREATE TABLE IF NOT EXISTS lifecycle_actions (
 );
 ";
 
-/// What a pull request lookup adds to a stored row. A `None` field leaves its
-/// column as it is.
+/// What a lookup adds to a stored row: the pull request and, for a row a hook
+/// never filled, its place. A `None` field leaves its column as it is.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct CacheUpdate {
     pub pr_number: Option<i64>,
@@ -87,6 +87,10 @@ pub(crate) struct CacheUpdate {
     pub pr_head_oid: Option<String>,
     pub pr_base: Option<String>,
     pub pr_checked_at: Option<i64>,
+    pub cwd: Option<String>,
+    pub repo: Option<String>,
+    pub worktree: Option<String>,
+    pub convention: Option<String>,
 }
 
 /// Stores `update` on the row of `id` in the database at `path`, in one
@@ -104,7 +108,11 @@ pub(crate) fn write_back(path: &Path, id: &str, update: &CacheUpdate) -> Result<
     conn.execute(
         "UPDATE sessions SET pr_number = COALESCE(?2, pr_number), \
          pr_kind = COALESCE(?3, pr_kind), pr_head_oid = COALESCE(?4, pr_head_oid), \
-         pr_base = COALESCE(?5, pr_base), pr_checked_at = COALESCE(?6, pr_checked_at) \
+         pr_base = COALESCE(?5, pr_base), pr_checked_at = COALESCE(?6, pr_checked_at), \
+         repo = CASE WHEN cwd IS NULL THEN COALESCE(?8, repo) ELSE repo END, \
+         worktree = CASE WHEN cwd IS NULL THEN COALESCE(?9, worktree) ELSE worktree END, \
+         convention = CASE WHEN cwd IS NULL THEN COALESCE(?10, convention) ELSE convention END, \
+         cwd = CASE WHEN cwd IS NULL THEN COALESCE(?7, cwd) ELSE cwd END \
          WHERE session_id = ?1",
         params![
             id,
@@ -112,7 +120,11 @@ pub(crate) fn write_back(path: &Path, id: &str, update: &CacheUpdate) -> Result<
             update.pr_kind,
             update.pr_head_oid,
             update.pr_base,
-            update.pr_checked_at
+            update.pr_checked_at,
+            update.cwd,
+            update.repo,
+            update.worktree,
+            update.convention
         ],
     )
     .map_err(|e| db_error("update", e))?;
@@ -193,6 +205,8 @@ pub(crate) struct CachedPr {
     pub branch: Option<String>,
     pub pr: Option<Pr>,
     pub checked_at: Option<i64>,
+    /// Whether a hook already stored the place, so the lookup need not.
+    pub has_cwd: bool,
 }
 
 /// The cached pull requests of `ids` in the database at `path`. Empty when
@@ -209,7 +223,7 @@ pub(crate) fn read_pr_cache(
         return cache;
     };
     let Ok(mut stmt) = conn.prepare(
-        "SELECT branch, pr_number, pr_kind, pr_checked_at \
+        "SELECT branch, pr_number, pr_kind, pr_checked_at, cwd IS NOT NULL \
          FROM sessions WHERE session_id = ?1",
     ) else {
         return cache;
@@ -226,6 +240,7 @@ pub(crate) fn read_pr_cache(
                         .zip(kind.as_deref().and_then(pr_kind_of))
                         .map(|(number, kind)| Pr { number, kind }),
                     checked_at: r.get(3)?,
+                    has_cwd: r.get(4)?,
                 })
             })
             .optional();

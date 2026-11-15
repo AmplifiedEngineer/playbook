@@ -4,10 +4,10 @@
 //! The slow, fallible lookups behind a session record: the working directory
 //! a transcript recorded, what git says about that directory, and the pull
 //! request of the branch. Every call is bounded by a timeout and every failure
-//! reads as "unknown". The only write is the pull request cache: `gather`
-//! stores a lookup's outcome in an existing `sessions.db` through the injected
-//! write-back, and falls back to the cached pull request when a lookup finds
-//! none.
+//! reads as "unknown". The only write is the cache: `gather` stores a lookup's
+//! outcome in an existing `sessions.db` through the injected write-back, fills
+//! the place columns of a row the hook never filled, and falls back to the
+//! cached pull request when a lookup finds none.
 
 use super::{is_trunk, store, Place, Pr, PrKind};
 use crate::common::git;
@@ -193,6 +193,42 @@ pub fn parse_pr_list(json: &str) -> Option<PrFound> {
     })
 }
 
+/// The four place columns a `sessions.db` row stores, as a hook and the
+/// backfill both write them.
+pub struct PlaceColumns {
+    pub cwd: Option<String>,
+    pub repo: Option<String>,
+    pub worktree: Option<String>,
+    pub convention: Option<String>,
+}
+
+/// The place columns of `place`, which was read from the live directory `cwd`.
+pub fn place_columns(place: &Place, cwd: &Path) -> PlaceColumns {
+    PlaceColumns {
+        cwd: place.cwd.clone(),
+        repo: repo_of(cwd).map(|p| p.to_string_lossy().into_owned()),
+        worktree: place.worktree.clone(),
+        convention: (!place.convention.is_empty()).then(|| place.convention.to_string()),
+    }
+}
+
+/// The place columns of a row that has none, from the live directory its
+/// events show. Empty when there is none, so nothing unproven is stored. They
+/// share one `UPDATE` with the PR columns, so a failure stores neither.
+fn place_update(place: &Place, live_cwd: Option<&str>) -> store::CacheUpdate {
+    let Some(cwd) = live_cwd else {
+        return store::CacheUpdate::default();
+    };
+    let columns = place_columns(place, Path::new(cwd));
+    store::CacheUpdate {
+        cwd: columns.cwd,
+        repo: columns.repo,
+        worktree: columns.worktree,
+        convention: columns.convention,
+        ..store::CacheUpdate::default()
+    }
+}
+
 /// Looks up the place and the PR of every distinct session in `newest`, one
 /// scoped thread each so slow `gh` calls overlap. Keyed by session id.
 pub(crate) fn gather(
@@ -218,18 +254,15 @@ pub(crate) fn gather(
                     let row = cache.get(&e.session_id);
                     // A session that changed branch must not show the old branch's PR.
                     let cached = row.filter(|c| c.branch.as_deref() == Some(e.branch.as_str()));
-                    let dir = match (&place.cwd, place.gone) {
-                        (Some(dir), false) if !is_trunk(&e.branch) => Some(dir),
-                        _ => None,
-                    };
-                    let Some(dir) = dir else {
-                        return (e.session_id.clone(), (place, None));
-                    };
+                    let live_cwd = place.cwd.as_deref().filter(|_| !place.gone);
+                    let dir = live_cwd.filter(|_| !is_trunk(&e.branch));
                     let is_fresh = cached
                         .and_then(|c| c.checked_at)
                         .is_some_and(|at| !force && now - at < PR_REFRESH_SECS);
-                    let looked_up = (!is_fresh).then(|| pr_of(Path::new(dir), &e.branch));
-                    let cached_pr = cached.and_then(|c| c.pr);
+                    let looked_up = dir
+                        .filter(|_| !is_fresh)
+                        .map(|dir| pr_of(Path::new(dir), &e.branch));
+                    let cached_pr = cached.and_then(|c| c.pr).filter(|_| dir.is_some());
                     let pr = match &looked_up {
                         // No PR found keeps the cached one: `gh` also fails offline.
                         Some(found) => found
@@ -241,7 +274,10 @@ pub(crate) fn gather(
                             .or(cached_pr),
                         None => cached_pr,
                     };
-                    let mut update = store::CacheUpdate::default();
+                    let mut update = row
+                        .filter(|r| !r.has_cwd)
+                        .map(|_| place_update(&place, live_cwd))
+                        .unwrap_or_default();
                     if let Some(found) = &looked_up {
                         update.pr_checked_at = Some(now);
                         if let Some(f) = found {
@@ -346,6 +382,46 @@ mod tests {
                 ],
             )
             .unwrap();
+        }
+
+        /// Points the transcript at a linked worktree under the agent tool
+        /// convention of a fresh repository.
+        fn use_linked_worktree(&mut self) {
+            let repo = self.home.join("repo");
+            let linked = repo.join(".claude").join("worktrees").join("agent-1");
+            git_init(&repo, &[]);
+            for args in [
+                vec!["commit", "-q", "--allow-empty", "-m", "i"],
+                vec![
+                    "worktree",
+                    "add",
+                    "-q",
+                    "-b",
+                    BRANCH,
+                    linked.to_str().unwrap(),
+                ],
+            ] {
+                let ok = Command::new("git")
+                    .current_dir(&repo)
+                    .args(args)
+                    .status()
+                    .unwrap();
+                assert!(ok.success());
+            }
+            let projects = self.home.join(".claude").join("projects").join("-p");
+            std::fs::write(
+                projects.join(format!("{SESSION}.jsonl")),
+                format!("{{\"cwd\":\"{}\"}}\n", linked.display()),
+            )
+            .unwrap();
+            self.work = linked;
+        }
+
+        /// A row that a hook never filled: no place columns.
+        fn seed_without_place(&self, checked_at: Option<i64>, kind: Option<&str>) {
+            self.seed(checked_at, kind);
+            let conn = store::open_at(&self.db()).unwrap();
+            conn.execute("UPDATE sessions SET cwd = NULL", []).unwrap();
         }
 
         fn column(&self, name: &str) -> Option<String> {
@@ -570,6 +646,188 @@ mod tests {
         // Assert
         assert_eq!(fixture.column("pr_kind"), None);
         assert_eq!(fixture.column("pr_checked_at"), Some(NOW.to_string()));
+    }
+
+    #[test]
+    fn a_merged_lookup_also_stores_the_place_of_a_row_without_a_cwd() {
+        // Arrange
+        let mut fixture = Fixture::new("backfill");
+        fixture.use_linked_worktree();
+        fixture.seed_without_place(None, None);
+        let calls = AtomicUsize::new(0);
+        let lookup = counting(&calls, Some(merged()));
+
+        // Act
+        fixture.gather(NOW, false, &lookup, &store::write_back);
+
+        // Assert
+        let worktree = fixture.work.canonicalize().unwrap();
+        let repo = fixture.home.join("repo").canonicalize().unwrap();
+        assert_eq!(
+            fixture.column("cwd"),
+            fixture.work.to_str().map(String::from)
+        );
+        assert_eq!(fixture.column("repo"), repo.to_str().map(String::from));
+        assert_eq!(
+            fixture.column("worktree"),
+            worktree.to_str().map(String::from)
+        );
+        assert_eq!(fixture.column("convention").as_deref(), Some("agent"));
+        assert_eq!(fixture.column("pr_kind").as_deref(), Some("merged"));
+    }
+
+    #[test]
+    fn the_null_cwd_backfill_follows_the_place_and_not_the_lookup() {
+        // Arrange
+        struct Case {
+            tag: &'static str,
+            has_place: bool,
+            dir_gone: bool,
+            found: Option<PrFound>,
+            checked_at: Option<i64>,
+            kind: Option<&'static str>,
+            stores_place: bool,
+            pr_kind: Option<&'static str>,
+            checked_after: Option<i64>,
+            lookups: usize,
+        }
+        let cases = [
+            Case {
+                tag: "no_place_merged",
+                has_place: false,
+                dir_gone: false,
+                found: Some(merged()),
+                checked_at: None,
+                kind: None,
+                stores_place: false,
+                pr_kind: None,
+                checked_after: None,
+                lookups: 0,
+            },
+            Case {
+                tag: "gone_place",
+                has_place: true,
+                dir_gone: true,
+                found: Some(merged()),
+                checked_at: None,
+                kind: None,
+                stores_place: false,
+                pr_kind: None,
+                checked_after: None,
+                lookups: 0,
+            },
+            Case {
+                tag: "place_none",
+                has_place: true,
+                dir_gone: false,
+                found: None,
+                checked_at: None,
+                kind: None,
+                stores_place: true,
+                pr_kind: None,
+                checked_after: Some(NOW),
+                lookups: 1,
+            },
+            Case {
+                tag: "place_in_window",
+                has_place: true,
+                dir_gone: false,
+                found: Some(merged()),
+                checked_at: Some(NOW - 10),
+                kind: Some("open"),
+                stores_place: true,
+                pr_kind: Some("open"),
+                checked_after: Some(NOW - 10),
+                lookups: 0,
+            },
+        ];
+        for case in cases {
+            let mut fixture = Fixture::new(case.tag);
+            fixture.use_linked_worktree();
+            fixture.seed_without_place(case.checked_at, case.kind);
+            if !case.has_place {
+                std::fs::remove_dir_all(fixture.home.join(".claude")).unwrap();
+            }
+            if case.dir_gone {
+                std::fs::remove_dir_all(&fixture.work).unwrap();
+            }
+            let calls = AtomicUsize::new(0);
+            let lookup = counting(&calls, case.found.clone());
+
+            // Act
+            fixture.gather(NOW, false, &lookup, &store::write_back);
+
+            // Assert
+            let tag = case.tag;
+            assert_eq!(calls.load(Ordering::SeqCst), case.lookups, "{tag}");
+            assert_eq!(fixture.column("cwd").is_some(), case.stores_place, "{tag}");
+            assert_eq!(fixture.column("pr_kind").as_deref(), case.pr_kind, "{tag}");
+            assert_eq!(
+                fixture.column("pr_checked_at"),
+                case.checked_after.map(|t| t.to_string()),
+                "{tag}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_place_and_the_pr_are_written_by_one_statement() {
+        // Arrange
+        let mut fixture = Fixture::new("one-statement");
+        fixture.use_linked_worktree();
+        fixture.seed_without_place(None, None);
+        let conn = store::open_at(&fixture.db()).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER refuse_cwd BEFORE UPDATE OF cwd ON sessions \
+             WHEN NEW.cwd IS NOT NULL BEGIN SELECT RAISE(ABORT, 'no cwd'); END;",
+        )
+        .unwrap();
+        let calls = AtomicUsize::new(0);
+        let lookup = counting(&calls, Some(merged()));
+
+        // Act
+        fixture.gather(NOW, false, &lookup, &store::write_back);
+
+        // Assert
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        for column in ["pr_kind", "pr_checked_at", "cwd", "worktree"] {
+            assert_eq!(fixture.column(column), None, "{column}");
+        }
+    }
+
+    #[test]
+    fn a_place_a_hook_wrote_during_the_lookup_is_never_overwritten() {
+        // Arrange
+        const HOOK_CWD: &str = "/hook/cwd";
+        const HOOK_REPO: &str = "/hook/repo";
+        const HOOK_WORKTREE: &str = "/hook/worktree";
+        const HOOK_CONVENTION: &str = "hook";
+        let mut fixture = Fixture::new("hook-race");
+        fixture.use_linked_worktree();
+        fixture.seed_without_place(None, None);
+        let db = fixture.db();
+        let lookup = move |_: &Path, _: &str| {
+            let conn = store::open_at(&db).unwrap();
+            conn.execute(
+                "UPDATE sessions SET cwd = ?1, repo = ?2, worktree = ?3, convention = ?4",
+                playbook_store::params![HOOK_CWD, HOOK_REPO, HOOK_WORKTREE, HOOK_CONVENTION],
+            )
+            .unwrap();
+            Some(merged())
+        };
+
+        // Act
+        fixture.gather(NOW, false, &lookup, &store::write_back);
+
+        // Assert
+        assert_eq!(fixture.column("cwd").as_deref(), Some(HOOK_CWD));
+        assert_eq!(fixture.column("repo").as_deref(), Some(HOOK_REPO));
+        assert_eq!(fixture.column("worktree").as_deref(), Some(HOOK_WORKTREE));
+        assert_eq!(
+            fixture.column("convention").as_deref(),
+            Some(HOOK_CONVENTION)
+        );
+        assert_eq!(fixture.column("pr_kind").as_deref(), Some("merged"));
     }
 
     #[test]
