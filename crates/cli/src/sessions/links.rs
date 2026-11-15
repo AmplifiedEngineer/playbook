@@ -4,9 +4,12 @@
 //! The slow, fallible lookups behind a session record: the working directory
 //! a transcript recorded, what git says about that directory, and the pull
 //! request of the branch. Every call is bounded by a timeout and every failure
-//! reads as "unknown". Nothing here writes or changes anything.
+//! reads as "unknown". The only write is the pull request cache: `gather`
+//! stores a lookup's outcome in an existing `sessions.db` through the injected
+//! write-back, and falls back to the cached pull request when a lookup finds
+//! none.
 
-use super::{is_trunk, Place, Pr, PrKind};
+use super::{is_trunk, store, Place, Pr, PrKind};
 use crate::common::git;
 use crate::common::proc::run_with_timeout;
 use crate::usage::run::Paths;
@@ -20,6 +23,24 @@ use std::time::Duration;
 /// Lines of a transcript read while looking for its working directory.
 const HEAD_LINES: usize = 200;
 const GH_TIMEOUT: Duration = Duration::from_secs(8);
+/// Seconds a looked-up pull request stays trusted before `gh` is asked again.
+pub(crate) const PR_REFRESH_SECS: i64 = 300;
+
+/// A pull request as `gh` reports it, with the commit and base the closer
+/// compares against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrFound {
+    pub number: u64,
+    pub kind: PrKind,
+    pub head_oid: Option<String>,
+    pub base: Option<String>,
+}
+
+/// The pull request lookup of `gather`, injected so tests need no `gh`.
+pub(crate) type PrLookup<'a> = &'a (dyn Fn(&Path, &str) -> Option<PrFound> + Sync);
+/// Stores a lookup's outcome for a session; a failure is the caller's to ignore.
+pub(crate) type WriteBack<'a> =
+    &'a (dyn Fn(&Path, &str, &store::CacheUpdate) -> Result<(), String> + Sync);
 
 /// The `cwd` of the first transcript line that has one, for the Claude Code
 /// transcript of `session_id` under `projects`. The prompt text on those lines
@@ -139,19 +160,23 @@ fn convention_label(c: crate::worktree::Convention) -> &'static str {
 
 /// The newest pull request of `branch`, read with `gh` from `dir`. `None` when
 /// `gh` is missing, offline or finds none.
-pub fn pr_of(dir: &Path, branch: &str) -> Option<Pr> {
+pub fn pr_of(dir: &Path, branch: &str) -> Option<PrFound> {
     let mut command = Command::new("gh");
     command
         .current_dir(dir)
         .args([
             "pr", "list", "--head", branch, "--state", "all", "--limit", "1",
         ])
-        .args(["--json", "number,state"]);
+        .args(["--json", "number,state,headRefOid,baseRefName"]);
     let out = run_with_timeout(&mut command, GH_TIMEOUT).filter(|o| o.status.success())?;
     parse_pr_list(&String::from_utf8_lossy(&out.stdout))
 }
 
-pub fn parse_pr_list(json: &str) -> Option<Pr> {
+fn text_field(value: &serde_json::Value, key: &str) -> Option<String> {
+    value.get(key)?.as_str().map(str::to_string)
+}
+
+pub fn parse_pr_list(json: &str) -> Option<PrFound> {
     let value: serde_json::Value = serde_json::from_str(json).ok()?;
     let first = value.as_array()?.first()?;
     let kind = match first.get("state")?.as_str()? {
@@ -160,19 +185,29 @@ pub fn parse_pr_list(json: &str) -> Option<Pr> {
         "CLOSED" => PrKind::Closed,
         _ => return None,
     };
-    Some(Pr {
+    Some(PrFound {
         number: first.get("number")?.as_u64()?,
         kind,
+        head_oid: text_field(first, "headRefOid"),
+        base: text_field(first, "baseRefName"),
     })
 }
 
 /// Looks up the place and the PR of every distinct session in `newest`, one
 /// scoped thread each so slow `gh` calls overlap. Keyed by session id.
-pub fn gather(
+pub(crate) fn gather(
     newest: &[&UsageEvent],
     paths: &Paths,
     home: &Path,
+    now: i64,
+    force: bool,
+    pr_of: PrLookup,
+    write_back: WriteBack,
 ) -> HashMap<String, (Place, Option<Pr>)> {
+    let ids: Vec<String> = newest.iter().map(|e| e.session_id.clone()).collect();
+    let db = store::db_path_from(home);
+    let cache = store::read_pr_cache(&db, &ids);
+    let (db, cache) = (&db, &cache);
     std::thread::scope(|scope| {
         let handles: Vec<_> = newest
             .iter()
@@ -180,12 +215,46 @@ pub fn gather(
                 scope.spawn(move || {
                     let cwd = transcript_cwd(&paths.claude_projects, &e.session_id);
                     let place = place_of(cwd, home, Dirty::Check);
-                    let pr = match (&place.cwd, place.gone) {
-                        (Some(dir), false) if !is_trunk(&e.branch) => {
-                            pr_of(Path::new(dir), &e.branch)
-                        }
+                    let row = cache.get(&e.session_id);
+                    // A session that changed branch must not show the old branch's PR.
+                    let cached = row.filter(|c| c.branch.as_deref() == Some(e.branch.as_str()));
+                    let dir = match (&place.cwd, place.gone) {
+                        (Some(dir), false) if !is_trunk(&e.branch) => Some(dir),
                         _ => None,
                     };
+                    let Some(dir) = dir else {
+                        return (e.session_id.clone(), (place, None));
+                    };
+                    let is_fresh = cached
+                        .and_then(|c| c.checked_at)
+                        .is_some_and(|at| !force && now - at < PR_REFRESH_SECS);
+                    let looked_up = (!is_fresh).then(|| pr_of(Path::new(dir), &e.branch));
+                    let cached_pr = cached.and_then(|c| c.pr);
+                    let pr = match &looked_up {
+                        // No PR found keeps the cached one: `gh` also fails offline.
+                        Some(found) => found
+                            .as_ref()
+                            .map(|f| Pr {
+                                number: f.number,
+                                kind: f.kind,
+                            })
+                            .or(cached_pr),
+                        None => cached_pr,
+                    };
+                    let mut update = store::CacheUpdate::default();
+                    if let Some(found) = &looked_up {
+                        update.pr_checked_at = Some(now);
+                        if let Some(f) = found {
+                            update.pr_number = i64::try_from(f.number).ok();
+                            update.pr_kind = Some(f.kind.label());
+                            update.pr_head_oid = f.head_oid.clone();
+                            update.pr_base = f.base.clone();
+                        }
+                    }
+                    if row.is_some() && update != store::CacheUpdate::default() {
+                        // A failed write only costs the next read a lookup.
+                        let _ = write_back(db, &e.session_id, &update);
+                    }
                     (e.session_id.clone(), (place, pr))
                 })
             })
@@ -198,10 +267,320 @@ pub fn gather(
 mod tests {
     use super::*;
 
+    use crate::common::test_support::scratch_dir;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const OLD_AGE_SECS: i64 = PR_REFRESH_SECS;
+
+    fn merged() -> PrFound {
+        PrFound {
+            number: PR_NUMBER,
+            kind: PrKind::Merged,
+            head_oid: Some("abc".into()),
+            base: Some("main".into()),
+        }
+    }
+
+    const NOW: i64 = 1_788_400_000;
+    const SESSION: &str = "s1";
+    const BRANCH: &str = "feat/x";
+    const PR_NUMBER: u64 = 7;
+    const SEEDED_OID: &str = "seeded-oid";
+    const SEEDED_BASE: &str = "seeded-base";
+    const OTHER_BRANCH: &str = "feat/old";
+
+    fn no_write(_: &Path, _: &str, _: &store::CacheUpdate) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// A scratch home with a transcript whose cwd is an existing folder and,
+    /// once seeded, a `sessions.db` row for [`SESSION`].
+    struct Fixture {
+        home: PathBuf,
+        work: PathBuf,
+        branch: &'static str,
+    }
+
+    impl Fixture {
+        fn new(tag: &str) -> Self {
+            let home = scratch_dir(tag);
+            let work = home.join("work");
+            let projects = home.join(".claude").join("projects").join("-p");
+            std::fs::create_dir_all(&work).unwrap();
+            std::fs::create_dir_all(&projects).unwrap();
+            std::fs::write(
+                projects.join(format!("{SESSION}.jsonl")),
+                format!("{{\"cwd\":\"{}\"}}\n", work.display()),
+            )
+            .unwrap();
+            Fixture {
+                home,
+                work,
+                branch: BRANCH,
+            }
+        }
+
+        fn db(&self) -> PathBuf {
+            store::db_path_from(&self.home)
+        }
+
+        fn seed(&self, checked_at: Option<i64>, kind: Option<&str>) {
+            self.seed_on(BRANCH, checked_at, kind);
+        }
+
+        fn seed_on(&self, branch: &str, checked_at: Option<i64>, kind: Option<&str>) {
+            let conn = store::open_at(&self.db()).unwrap();
+            let number = kind.map(|_| PR_NUMBER as i64);
+            conn.execute(
+                "INSERT INTO sessions (session_id, cwd, branch, pr_number, pr_kind, \
+                 pr_head_oid, pr_base, pr_checked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                playbook_store::params![
+                    SESSION,
+                    self.work.to_str(),
+                    branch,
+                    number,
+                    kind,
+                    SEEDED_OID,
+                    SEEDED_BASE,
+                    checked_at
+                ],
+            )
+            .unwrap();
+        }
+
+        fn column(&self, name: &str) -> Option<String> {
+            let conn = store::open_at(&self.db()).unwrap();
+            conn.query_row(
+                &format!("SELECT CAST({name} AS TEXT) FROM sessions WHERE session_id = ?1"),
+                [SESSION],
+                |r| r.get(0),
+            )
+            .unwrap()
+        }
+
+        fn gather(
+            &self,
+            now: i64,
+            force: bool,
+            lookup: PrLookup,
+            write: WriteBack,
+        ) -> (Place, Option<Pr>) {
+            let event = UsageEvent {
+                session_id: SESSION.into(),
+                branch: self.branch.into(),
+                ..UsageEvent::default()
+            };
+            let paths = Paths::from_home(&self.home);
+            let mut found = gather(&[&event], &paths, &self.home, now, force, lookup, write);
+            found.remove(SESSION).expect("the session is gathered")
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.home);
+        }
+    }
+
+    #[test]
+    fn a_fresh_cached_pr_does_not_call_the_lookup() {
+        // Arrange
+        let fixture = Fixture::new("fresh");
+        fixture.seed(Some(NOW - (PR_REFRESH_SECS - 1)), Some("open"));
+        let lookup = |_: &Path, _: &str| -> Option<PrFound> { panic!("the lookup must not run") };
+
+        // Act
+        let (_, pr) = fixture.gather(NOW, false, &lookup, &no_write);
+
+        // Assert
+        assert_eq!(
+            pr,
+            Some(Pr {
+                number: PR_NUMBER,
+                kind: PrKind::Open
+            })
+        );
+    }
+
+    #[test]
+    fn the_lookup_runs_and_is_written_back_when_the_cache_is_old_or_empty() {
+        // Arrange
+        let cases = [("old", Some(NOW - OLD_AGE_SECS)), ("never_checked", None)];
+        for (tag, checked_at) in cases {
+            let fixture = Fixture::new(tag);
+            fixture.seed(checked_at, Some("open"));
+            let calls = AtomicUsize::new(0);
+            let lookup = |_: &Path, _: &str| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Some(merged())
+            };
+
+            // Act
+            let (_, pr) = fixture.gather(NOW, false, &lookup, &store::write_back);
+
+            // Assert
+            assert_eq!(calls.load(Ordering::SeqCst), 1, "{tag}");
+            assert_eq!(pr.map(|p| p.kind), Some(PrKind::Merged), "{tag}");
+            assert_eq!(
+                fixture.column("pr_checked_at"),
+                Some(NOW.to_string()),
+                "{tag}"
+            );
+        }
+    }
+
+    fn counting<'a>(
+        calls: &'a AtomicUsize,
+        found: Option<PrFound>,
+    ) -> impl Fn(&Path, &str) -> Option<PrFound> + Sync + 'a {
+        move |_, _| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            found.clone()
+        }
+    }
+
+    #[test]
+    fn without_a_database_the_lookup_runs_and_no_file_is_created() {
+        // Arrange
+        let fixture = Fixture::new("no-db");
+        let calls = AtomicUsize::new(0);
+        let lookup = counting(&calls, Some(merged()));
+
+        // Act
+        let (_, pr) = fixture.gather(NOW, false, &lookup, &store::write_back);
+
+        // Assert
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(pr.map(|p| p.kind), Some(PrKind::Merged));
+        assert!(!fixture.db().exists());
+    }
+
+    #[test]
+    fn a_trunk_branch_or_a_missing_or_gone_place_skips_the_lookup_and_shows_no_pr() {
+        // Arrange
+        let cases = [
+            ("trunk", "main", None),
+            ("no_place", BRANCH, Some(".claude")),
+            ("gone_place", BRANCH, Some("work")),
+        ];
+        for (tag, branch, remove) in cases {
+            let mut fixture = Fixture::new(tag);
+            fixture.branch = branch;
+            fixture.seed_on(branch, Some(NOW - 10), Some("open"));
+            if let Some(name) = remove {
+                std::fs::remove_dir_all(fixture.home.join(name)).unwrap();
+            }
+            let calls = AtomicUsize::new(0);
+            let lookup = counting(&calls, Some(merged()));
+
+            // Act
+            let (_, pr) = fixture.gather(NOW, false, &lookup, &store::write_back);
+
+            // Assert
+            assert_eq!(calls.load(Ordering::SeqCst), 0, "{tag}");
+            assert_eq!(pr, None, "{tag}");
+        }
+    }
+
+    #[test]
+    fn a_forced_lookup_replaces_a_fresh_cached_pr() {
+        // Arrange
+        let fixture = Fixture::new("force");
+        fixture.seed(Some(NOW - 10), Some("open"));
+        let calls = AtomicUsize::new(0);
+        let lookup = counting(&calls, Some(merged()));
+
+        // Act
+        let (_, pr) = fixture.gather(NOW, true, &lookup, &store::write_back);
+
+        // Assert
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(pr.map(|p| p.kind), Some(PrKind::Merged));
+        assert_eq!(fixture.column("pr_kind").as_deref(), Some("merged"));
+        assert_eq!(fixture.column("pr_head_oid").as_deref(), Some("abc"));
+        assert_eq!(fixture.column("pr_base").as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn a_forced_lookup_that_finds_nothing_keeps_the_cached_pr() {
+        // Arrange
+        let fixture = Fixture::new("force-none");
+        fixture.seed(Some(NOW - 10), Some("open"));
+        let calls = AtomicUsize::new(0);
+        let lookup = counting(&calls, None);
+
+        // Act
+        let (_, pr) = fixture.gather(NOW, true, &lookup, &store::write_back);
+
+        // Assert
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(pr.map(|p| p.kind), Some(PrKind::Open));
+        assert_eq!(fixture.column("pr_kind").as_deref(), Some("open"));
+        assert_eq!(fixture.column("pr_head_oid").as_deref(), Some(SEEDED_OID));
+        assert_eq!(fixture.column("pr_base").as_deref(), Some(SEEDED_BASE));
+    }
+
+    #[test]
+    fn a_pr_cached_on_another_branch_is_never_shown() {
+        // Arrange
+        let cases = [("fresh", NOW - 10), ("old", NOW - OLD_AGE_SECS)];
+        for (tag, checked_at) in cases {
+            let fixture = Fixture::new(tag);
+            fixture.seed_on(OTHER_BRANCH, Some(checked_at), Some("open"));
+            let calls = AtomicUsize::new(0);
+            let lookup = counting(&calls, None);
+
+            // Act
+            let (_, pr) = fixture.gather(NOW, false, &lookup, &store::write_back);
+
+            // Assert
+            assert_eq!(calls.load(Ordering::SeqCst), 1, "{tag}");
+            assert_eq!(pr, None, "{tag}");
+        }
+    }
+
+    #[test]
+    fn a_failed_write_back_still_returns_the_looked_up_pr() {
+        // Arrange
+        let fixture = Fixture::new("write-fails");
+        fixture.seed(None, None);
+        let calls = AtomicUsize::new(0);
+        let lookup = counting(&calls, Some(merged()));
+        let failing = |_: &Path, _: &str, _: &store::CacheUpdate| Err("disk full".to_string());
+
+        // Act
+        let (_, pr) = fixture.gather(NOW, false, &lookup, &failing);
+
+        // Assert
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(pr.map(|p| p.kind), Some(PrKind::Merged));
+    }
+
+    #[test]
+    fn a_branch_with_no_pr_is_marked_checked_and_keeps_its_columns() {
+        // Arrange
+        let fixture = Fixture::new("no-pr");
+        fixture.seed(None, None);
+        let calls = AtomicUsize::new(0);
+        let lookup = counting(&calls, None);
+
+        // Act
+        fixture.gather(NOW, false, &lookup, &store::write_back);
+
+        // Assert
+        assert_eq!(fixture.column("pr_kind"), None);
+        assert_eq!(fixture.column("pr_checked_at"), Some(NOW.to_string()));
+    }
+
     #[test]
     fn a_pr_list_reads_the_newest_state() {
-        let pr = parse_pr_list(r#"[{"number":540,"state":"MERGED"}]"#).unwrap();
+        let json = r#"[{"number":540,"state":"MERGED","headRefOid":"abc","baseRefName":"main"}]"#;
+        let pr = parse_pr_list(json).unwrap();
         assert_eq!((pr.number, pr.kind), (540, PrKind::Merged));
+        assert_eq!(
+            (pr.head_oid.as_deref(), pr.base.as_deref()),
+            (Some("abc"), Some("main"))
+        );
         assert_eq!(parse_pr_list("[]"), None);
         assert_eq!(parse_pr_list("not json"), None);
         assert_eq!(parse_pr_list(r#"[{"number":1,"state":"DRAFT"}]"#), None);
