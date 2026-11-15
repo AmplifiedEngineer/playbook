@@ -19,6 +19,7 @@ const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 const EXIT_FAILED: i32 = 1;
 const EXIT_USAGE: i32 = 2;
 /// A process killed by a signal exits with 128 plus its number in a shell.
+#[cfg(unix)]
 const SIGNAL_EXIT_BASE: i32 = 128;
 const NOT_FOUND: &str = "pbsync helper not found; run playbook update";
 
