@@ -268,10 +268,10 @@ gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews --input "$REVIEW_JSON" --jq
 - **Q2:** "Submit verb? approve / comment / request-changes / skip." When `SELF_REVIEW` is true, offer only `comment` and `skip`, because GitHub rejects approve and request-changes on your own PR. On `skip`, leave it PENDING. Otherwise:
 - **Q3:** "Add a comment for the review?" (optional free text, blank to skip). Leave `BODY` empty on a blank answer, except: on `approve` with a blank answer, default `BODY` to `LGTM`.
 
-Submit (intent pr-review-submit: `"$PR_NUMBER" "$REVIEW_ID" --event <approve|comment|request-changes> --json`, `--body "$BODY"` when set), or without the tool run:
+Submit (intent pr-review-submit: `"$PR_NUMBER" "$REVIEW_ID" --event <approve|comment|request-changes> --json`, `--body "$BODY"` when set), else run:
 
 ```bash
-gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews/$REVIEW_ID/events -f event=<APPROVE|COMMENT|REQUEST_CHANGES> ${BODY:+-f body="$BODY"}
+gh api -X POST /repos/$REPO/pulls/$PR_NUMBER/reviews/$REVIEW_ID/events -f event=<APPROVE|COMMENT|REQUEST_CHANGES> ${BODY:+-f} ${BODY:+"body=$BODY"}
 ```
 
 Never invent URLs; use the returned `html_url`.
