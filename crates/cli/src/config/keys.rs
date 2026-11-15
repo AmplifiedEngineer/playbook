@@ -79,6 +79,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "usage.budget.weeklyUsd",
     "usage.ui.layout",
     "usage.ui.state",
+    "sessions.autoClose",
     "hygiene.enabled",
     "docs.convert",
     "docs.anydocPath",
@@ -106,7 +107,6 @@ pub const KNOWN_KEYS: &[&str] = &[
 /// built-in constant is listed in [`FIXED_KEYS`] instead.
 pub const RETIRED_KEYS: &[&str] = &[
     "hooks.rmGuard.allowedRoots",
-    "sessions.autoClose",
     "launcher.claudeOverride",
     "agents.variants",
 ];
@@ -350,6 +350,7 @@ pub const LOCAL_ONLY_KEYS: &[&str] = &[
     "security.defaults",
     "usage.telemetry",
     "usage.ui.state",
+    "sessions.autoClose",
     "hygiene.enabled",
     "docs.convert",
     "docs.anydocPath",
@@ -451,6 +452,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "usage.telemetry" => Some(Value::String("auto".to_string())),
         "usage.budget.monthlyUsd" | "usage.budget.weeklyUsd" => Some(Value::Number(0.into())),
         "usage.ui.layout" | "usage.ui.state" => Some(Value::String(String::new())),
+        "sessions.autoClose" => Some(Value::String("off".to_string())),
         "hygiene.enabled" => Some(Value::Bool(true)),
         "docs.convert" => Some(Value::String("auto".to_string())),
         "docs.anydocPath" => Some(Value::String(String::new())),
@@ -474,6 +476,10 @@ pub fn default_value(key: &str) -> Option<Value> {
     }
 }
 
+/// The levels shared by `sessions.autoClose` and `watch.autonomy`, from doing
+/// nothing to acting without asking.
+pub const AUTONOMY_LEVELS: &[&str] = &["off", "propose", "auto"];
+
 /// The fixed set of string values `key` accepts, or `None` if `key` has no
 /// enum constraint (including an unknown key).
 pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
@@ -492,10 +498,11 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "usage.timeZone" => Some(&["local", "utc"]),
         "usage.telemetry" => Some(&["auto", "off"]),
         "docs.convert" => Some(&["auto", "off"]),
+        "sessions.autoClose" => Some(AUTONOMY_LEVELS),
         "hooks.proseLint.mode" => Some(&["warn", "block", "off"]),
         "upgrade.mode" => Some(&["notify", "auto", "off"]),
         "upgrade.plugin" => Some(&["auto", "ask", "off"]),
-        "watch.autonomy" => Some(&["off", "propose", "auto"]),
+        "watch.autonomy" => Some(AUTONOMY_LEVELS),
         "pr.rules" => Some(&["default", "warn", "off"]),
         _ => None,
     }
@@ -528,9 +535,10 @@ pub fn model_override_error(key: &str, value: &str) -> Option<String> {
 #[cfg(test)]
 const COMPOUND_GROUPS: &[&str] = &["proseLint", "policyGuard", "systemPrompt"];
 
-/// The exact size of `KNOWN_KEYS`; each Segment that cuts keys lowers it.
+/// The exact count of `KNOWN_KEYS`: adding or bringing back a key raises it,
+/// cutting keys lowers it.
 #[cfg(test)]
-const KEY_CEILING: usize = 54;
+const KEY_CEILING: usize = 55;
 
 #[cfg(test)]
 mod tests {
@@ -1150,5 +1158,18 @@ mod tests {
             assert!(!old_shared, "{old}");
             assert_eq!(is_shared(new), SHARED_KEYS.contains(&new), "{new}");
         }
+    }
+
+    #[test]
+    fn session_auto_close_accepts_auto_and_defaults_to_off() {
+        // Arrange
+        let key = "sessions.autoClose";
+        // Act
+        let allowed = allowed_enum_values(key);
+        // Assert
+        assert!(KNOWN_KEYS.contains(&key));
+        assert!(!is_retired(key));
+        assert_eq!(default_value(key), Some(Value::String("off".to_string())));
+        assert_eq!(allowed, Some(AUTONOMY_LEVELS));
     }
 }
