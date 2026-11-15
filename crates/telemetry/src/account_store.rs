@@ -337,7 +337,7 @@ pub(crate) mod tests {
         assert_eq!(header_label("dev@example.com.br", "Work", &[]), "Work");
         assert_eq!(label("home"), "home");
         assert_eq!(label(UNKNOWN_ACCOUNT), UNKNOWN_ACCOUNT);
-        assert_eq!(label("@x.com"), "@x.com");
+        assert_eq!(label("@example.com"), "@example.com");
     }
 
     #[test]
