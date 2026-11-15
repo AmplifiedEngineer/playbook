@@ -8,7 +8,7 @@ use crate::json::envelope;
 use crate::pr::merge::code;
 use crate::pr::wait::{self, verdict as ci};
 use serde_json::{json, Value};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// A check that has not finished when the call returns without `--watch`.
 const PENDING: &str = "PENDING";
@@ -23,7 +23,9 @@ const JOB_SEGMENT: &str = "/job/";
 const STEP_FAILED: &str = "failure";
 /// Reads of the checks `--watch` makes in a row before it reports UNREADABLE.
 /// A single failed read is usually a network blip or a rate limit, so the
-/// watch reads again after one interval; a snapshot makes one read.
+/// watch reads again after one interval. A snapshot, the first read of a watch
+/// (a bad PR number or login will not clear) and a read after `--timeout`
+/// make one read.
 const WATCH_READ_ATTEMPTS: u32 = 3;
 
 /// What the caller asked for.
@@ -255,10 +257,20 @@ fn read_with_retry(
     result
 }
 
+/// How many reads one poll may make.
+fn read_attempts(watch: bool, seen_ok: bool, expired: bool) -> u32 {
+    if watch && seen_ok && !expired {
+        WATCH_READ_ATTEMPTS
+    } else {
+        1
+    }
+}
+
 /// Reads the checks of `pr` through `gh`, waiting when `opts.watch` is set.
 pub fn run(pr: &str, opts: &Opts) -> Report {
     let mut unreadable = None;
-    let attempts = if opts.watch { WATCH_READ_ATTEMPTS } else { 1 };
+    let start = Instant::now();
+    let mut seen_ok = false;
     // Without --watch the read is a snapshot, so a failure is final at once.
     let (verdict, json) = wait::wait_checks(
         if opts.watch {
@@ -268,11 +280,14 @@ pub fn run(pr: &str, opts: &Opts) -> Report {
         },
         opts.fail_fast || !opts.watch,
         &mut || match read_with_retry(
-            attempts,
+            read_attempts(opts.watch, seen_ok, start.elapsed() >= opts.timeout),
             &mut || wait::try_read_checks(pr, !opts.required),
             &mut || std::thread::sleep(opts.interval),
         ) {
-            Ok(json) => json,
+            Ok(json) => {
+                seen_ok = true;
+                json
+            }
             Err(why) => {
                 unreadable = Some(why);
                 "[]".to_string()
@@ -418,6 +433,14 @@ mod tests {
 
         assert!(got.is_err());
         assert_eq!(reads, 1);
+    }
+
+    #[test]
+    fn only_a_live_watch_that_has_read_before_reads_again() {
+        assert_eq!(read_attempts(true, true, false), WATCH_READ_ATTEMPTS);
+        assert_eq!(read_attempts(false, true, false), 1);
+        assert_eq!(read_attempts(true, false, false), 1);
+        assert_eq!(read_attempts(true, true, true), 1);
     }
 
     #[test]
