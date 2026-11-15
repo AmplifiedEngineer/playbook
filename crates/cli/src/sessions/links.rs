@@ -47,9 +47,19 @@ fn cwd_of_line(line: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Whether [`place_of`] runs `git status` to fill [`Place::dirty`].
+#[derive(Debug, Clone, Copy)]
+pub enum Dirty {
+    /// Read it: one more `git` call.
+    Check,
+    /// Leave it `None`, for a caller that never reads it.
+    Skip,
+}
+
 /// The place of a working directory: linked worktree or main checkout, the
-/// playbook convention, and whether it holds uncommitted changes.
-pub fn place_of(cwd: Option<String>, home: &Path) -> Place {
+/// playbook convention, and whether it holds uncommitted changes. The
+/// session-start hook stores no dirty flag, so it passes [`Dirty::Skip`].
+pub fn place_of(cwd: Option<String>, home: &Path, dirty: Dirty) -> Place {
     let Some(dir) = cwd else {
         return Place::default();
     };
@@ -61,7 +71,10 @@ pub fn place_of(cwd: Option<String>, home: &Path) -> Place {
             ..Place::default()
         };
     }
-    let dirty = git::raw(&path, &["status", "--porcelain"]).map(|s| !s.trim().is_empty());
+    let is_dirty = match dirty {
+        Dirty::Check => git::raw(&path, &["status", "--porcelain"]).map(|s| !s.trim().is_empty()),
+        Dirty::Skip => None,
+    };
     let parsed = git::raw(
         &path,
         &[
@@ -85,7 +98,7 @@ pub fn place_of(cwd: Option<String>, home: &Path) -> Place {
         worktree,
         convention,
         gone: false,
-        dirty,
+        dirty: is_dirty,
     }
 }
 
@@ -166,7 +179,7 @@ pub fn gather(
             .map(|e| {
                 scope.spawn(move || {
                     let cwd = transcript_cwd(&paths.claude_projects, &e.session_id);
-                    let place = place_of(cwd, home);
+                    let place = place_of(cwd, home, Dirty::Check);
                     let pr = match (&place.cwd, place.gone) {
                         (Some(dir), false) if !is_trunk(&e.branch) => {
                             pr_of(Path::new(dir), &e.branch)
@@ -308,8 +321,32 @@ mod tests {
     }
 
     #[test]
+    fn the_dirty_flag_is_read_only_when_asked_for() {
+        // Arrange
+        let root = scratch("dirty");
+        git_init(&root, &[]);
+        std::fs::write(root.join("untracked.txt"), "x").unwrap();
+        let cwd = || Some(root.to_string_lossy().into_owned());
+
+        // Act
+        let checked = place_of(cwd(), Path::new("/h"), Dirty::Check);
+        let skipped = place_of(cwd(), Path::new("/h"), Dirty::Skip);
+
+        // Assert
+        assert_eq!(checked.dirty, Some(true));
+        assert_eq!(skipped.dirty, None);
+        assert_eq!(skipped.cwd, checked.cwd);
+        assert_eq!(skipped.worktree, checked.worktree);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn a_directory_that_is_gone_reads_as_gone_and_never_as_clean() {
-        let place = place_of(Some("/definitely/not/here".into()), Path::new("/h"));
+        let place = place_of(
+            Some("/definitely/not/here".into()),
+            Path::new("/h"),
+            Dirty::Check,
+        );
         assert!(place.gone);
         assert_eq!(place.dirty, None);
     }

@@ -168,8 +168,11 @@ fn record_session_start(payload: &Payload, home: &str) {
     if id.is_empty() {
         return;
     }
-    let place =
-        crate::sessions::links::place_of(Some(cwd.to_string_lossy().into_owned()), Path::new(home));
+    let place = crate::sessions::links::place_of(
+        Some(cwd.to_string_lossy().into_owned()),
+        Path::new(home),
+        crate::sessions::links::Dirty::Skip,
+    );
     let branch = git_branch();
     let info = crate::sessions::store::StartInfo {
         id: id.clone(),
