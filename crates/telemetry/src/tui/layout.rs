@@ -222,26 +222,44 @@ impl Default for Layout {
             panels: panels.to_vec(),
             rows: None,
         };
-        // Cost per day and cost per model side by side, tokens and the
-        // hourly cost side by side, the burn-up across the full width.
+        // Cost per day and the burn-up, tokens and total cost, cost per model
+        // and the hourly cost, two panels in each row.
         let charts = Tab {
-            rows: Some(vec![2, 2, 1]),
+            rows: Some(vec![2, 2, 2]),
             ..tab(
                 "Charts",
                 &[
+                    PanelId::SpendDaily,
+                    PanelId::Burnup,
+                    PanelId::Tokens,
                     PanelId::SpendTotal,
                     PanelId::SpendModel,
-                    PanelId::Tokens,
                     PanelId::Hourly,
-                    PanelId::Burnup,
+                ],
+            )
+        };
+        // The skills view alone in the first row, then two views in each row.
+        let breakdown = Tab {
+            rows: Some(vec![1, 2, 2]),
+            ..tab(
+                "Breakdown",
+                &[
+                    PanelId::BreakdownSkills,
+                    PanelId::BreakdownAgents,
+                    PanelId::BreakdownTools,
+                    PanelId::BreakdownHealth,
+                    PanelId::BreakdownProjects,
                 ],
             )
         };
         Layout {
             tabs: vec![
                 charts,
-                tab("Numbers", &[PanelId::Models, PanelId::Breakdown]),
-                tab("Sessions", &[PanelId::Live, PanelId::Sessions]),
+                tab(
+                    "Numbers",
+                    &[PanelId::Models, PanelId::Live, PanelId::Sessions],
+                ),
+                breakdown,
             ],
         }
     }
@@ -528,12 +546,23 @@ mod tests {
     }
 
     #[test]
-    fn the_default_layout_has_the_charts_numbers_and_sessions_tabs() {
+    fn the_default_layout_has_the_charts_numbers_and_breakdown_tabs() {
         let layout = Layout::default();
 
         let names: Vec<&str> = layout.tabs.iter().map(|t| t.name.as_str()).collect();
 
-        assert_eq!(names, ["Charts", "Numbers", "Sessions"]);
+        assert_eq!(names, ["Charts", "Numbers", "Breakdown"]);
+    }
+
+    const OWNER_DEFAULT: &str = "Charts=spend.daily,burnup|tokens,spend.total|spend.model,hourly;Numbers=models,live,sessions;Breakdown=breakdown.skills|breakdown.agents,breakdown.tools|breakdown.health,breakdown.projects";
+
+    #[test]
+    fn the_default_layout_text_is_the_built_in_arrangement_and_round_trips() {
+        let layout = Layout::default();
+
+        assert_eq!(layout.to_text(), OWNER_DEFAULT);
+        assert_eq!(Layout::parse(OWNER_DEFAULT).unwrap(), layout);
+        assert_eq!(Layout::parse(&layout.to_text()).unwrap(), layout);
     }
 
     #[test]
@@ -685,7 +714,7 @@ mod tests {
     }
 
     #[test]
-    fn the_default_charts_tab_splits_spend_and_arranges_the_rows() {
+    fn the_default_charts_tab_arranges_two_panels_per_row() {
         // Arrange
         let layout = Layout::default();
 
@@ -694,19 +723,20 @@ mod tests {
         let text = layout.to_text();
 
         // Assert
-        assert_eq!(charts.rows, Some(vec![2, 2, 1]));
+        assert_eq!(charts.rows, Some(vec![2, 2, 2]));
         assert_eq!(
             charts.panels,
             [
+                PanelId::SpendDaily,
+                PanelId::Burnup,
+                PanelId::Tokens,
                 PanelId::SpendTotal,
                 PanelId::SpendModel,
-                PanelId::Tokens,
-                PanelId::Hourly,
-                PanelId::Burnup
+                PanelId::Hourly
             ]
         );
         assert!(
-            text.starts_with("Charts=spend.total,spend.model|tokens,hourly|burnup;"),
+            text.starts_with("Charts=spend.daily,burnup|tokens,spend.total|spend.model,hourly;"),
             "{text}"
         );
         assert_eq!(Layout::parse(&text).unwrap(), layout);
@@ -785,14 +815,17 @@ mod tests {
     }
 
     #[test]
-    fn the_default_numbers_tab_is_models_and_breakdown() {
+    fn the_default_numbers_tab_is_models_live_and_sessions() {
         let layout = Layout::default();
 
         let numbers = &layout.tabs[1];
 
-        assert_eq!(numbers.panels, [PanelId::Models, PanelId::Breakdown]);
+        assert_eq!(
+            numbers.panels,
+            [PanelId::Models, PanelId::Live, PanelId::Sessions]
+        );
         assert_eq!(numbers.rows, None);
-        assert!(layout.to_text().contains("Numbers=models,breakdown;"));
+        assert!(layout.to_text().contains("Numbers=models,live,sessions;"));
     }
 
     #[test]

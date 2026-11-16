@@ -1826,13 +1826,13 @@ Example: `playbook upgrade --check`
 
 Show token and cost usage across your sessions
 
-With no subcommand, opens the terminal view, which opens on this week compared with last week. When stdout is not a terminal, or with `--summary`, prints a text summary of estimated cost instead. `--json` prints the same numbers as JSON for scripts. Times and days use your local time zone, shown in the output; `--utc` switches to UTC, or set `usage.timeZone` or `PLAYBOOK_TELEMETRY_TZ` to `local` or `utc`. Ranges: today, week, last-week, month, last-month, 30d, 60d, 90d, all. Weeks start on Monday unless `usage.weekStart` says otherwise. For today, week and month, `--json` adds a comparison with the previous period over the same elapsed span, and `--summary` prints it. The cost per agent and skill, tool latency and health views come from Claude Code's OpenTelemetry export when it is available, see `playbook usage collect`.
+With no subcommand, opens the terminal view, which opens on this month compared with last month. When stdout is not a terminal, or with `--summary`, prints a text summary of estimated cost instead. `--json` prints the same numbers as JSON for scripts. Times and days use your local time zone, shown in the output; `--utc` switches to UTC, or set `usage.timeZone` or `PLAYBOOK_TELEMETRY_TZ` to `local` or `utc`. Ranges: today, week, last-week, month, last-month, 30d, 60d, 90d, all. Weeks start on Monday unless `usage.weekStart` says otherwise. For today, week and month, `--json` adds a comparison with the previous period over the same elapsed span, and `--summary` prints it. The cost per agent and skill, tool latency and health views come from Claude Code's OpenTelemetry export when it is available, see `playbook usage collect`.
 
 Example: `playbook usage --range today`
 
 - `--json`: Print the totals, groupings and live view as JSON
 - `--summary`: Print the text summary and exit (every recorded session unless `--range` is given)
-- `--range <RANGE>`: Date range, counted in days of the chosen time zone. One of today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
+- `--range <RANGE>`: Date range, counted in days of the chosen time zone. One of today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default month for the terminal view, 30d for `--json`, all for `--summary`
 - `--account <KEY_OR_NAME>`: Show only one account, by key or name. Scopes `--summary` and `--json`, and the terminal view opens on it
 - `--utc`: Show times and group days in UTC. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`
 - `--local`: Show times and group days in your local time zone. This is the default. Overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`

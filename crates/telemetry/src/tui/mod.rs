@@ -86,8 +86,8 @@ fn save_mask_account(home: &Path, mask: bool) -> Option<String> {
         .map(|e| format!("Account mask not saved: {e}"))
 }
 
-/// The range to open on: the `--range` flag, else the stored one, else this
-/// week.
+/// The range to open on: the `--range` flag, else the stored one, else the
+/// current month.
 fn start_range(
     flag: Option<Range>,
     saved: &ui_state::UiState,
@@ -99,7 +99,7 @@ fn start_range(
             .as_deref()
             .and_then(|r| Range::parse_with(Some(r), week))
     })
-    .unwrap_or(Range::ThisWeek(week))
+    .unwrap_or(Range::CurrentMonth)
 }
 
 /// The state to store. A range that only came from `--range` is not stored
@@ -522,13 +522,13 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_or_invalid_stored_range_opens_on_this_week() {
-        let week = Range::ThisWeek(WeekStart::Monday);
+    fn a_missing_or_invalid_stored_range_opens_on_the_current_month() {
+        let month = Range::CurrentMonth;
 
-        assert_eq!(start_range(None, &saved(None), WeekStart::Monday), week);
+        assert_eq!(start_range(None, &saved(None), WeekStart::Monday), month);
         assert_eq!(
             start_range(None, &saved(Some("nonsense")), WeekStart::Monday),
-            week
+            month
         );
     }
 

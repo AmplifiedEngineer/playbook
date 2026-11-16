@@ -5,26 +5,26 @@
 │messages          26 │                                                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  F1 Charts ╭┤ Layout: tabs and panels ├─────────────────────────────────────────────────╮
-╭─┤¹Spend p│  Charts  Numbers  Sessions                                                 │──────────╮
-│Thu 2026-0│                                                                            │7.6K tok  │
-│ $8┤┄┄┄┄┄┄│ Add after burnup   enter add   esc back   j/k choose                       │┄┄┄┄┄┄┄┄┄┄│
-│ $4┤┄┄┄┄┄┄│ > spend              cost per day as a chart or a daily table              │┄┄┄┄┄┄┄┄┄┄│
-│ $0┤▁▄▁  ▂│   models             cost and tokens per model                             │ ▂▂  ▅  ▃ │
-│    5 7  9│   breakdown          projects, agents, skills, tools or health (v switches)│ 29 31  3 │
-╰┤peak $6.0│   live               sessions with a message in the last 15 minutes        │ haiku-5├─╯
-╭─┤²Tokens │   sessions           every session of the period, grouped by day           │────┤UTC├─╮
-│total 618.│   spend.daily        cost per day as a table, always this view             │          │
-│Thu 2026-0│   breakdown.projects cost per project, always this view                    │          │
-│ 50K┤┄┄┄┄┄│   breakdown.agents   cost per agent, always this view                      │┄┄┄┄┄┄┄┄┄┄│
-│ 25K┤▂▂▂┄┄│ spend.total: total cost per day as a chart, always this view               │┄┄┄┄┄┄┄┄█┄│
-│   0┤███  │                                                                            │        █ │
-│     5   8│ Left/Right tab   h/l j/k move cursor   H/J/K/L move panel   f width        │0  22 0 1 │
-╰──────────│ a add   d remove   u undo   < > move tab   n new   x delete   r rename     │ haiku-5├─╯
-╭─┤Burn-up├│ R reset   esc or q close   changes are saved as you make them              │iod, UTC├─╮
-│no burn-up╰────────────────────────────────────────────────────────────────────────────╯          │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─┤¹Daily c│  Charts  Numbers  Breakdown                                                │iod, UTC├─╮
+│date▼     │                                                                            │          │
+│Thu 09-03 │ Add after hourly   enter add   esc back   j/k choose                       │          │
+│Wed 09-02 │ > spend              cost per day as a chart or a daily table              │          │
+│Tue 09-01 │   models             cost and tokens per model                             │          │
+│Mon 08-31 │   breakdown          projects, agents, skills, tools or health (v switches)│          │
+╰──────────│   live               sessions with a message in the last 15 minutes        │──────────╯
+╭─┤²Tokens │   sessions           every session of the period, grouped by day           │──────────╮
+│total 618.│   breakdown.projects cost per project, always this view                    │ $0.68/day│
+│Thu 2026-0│   breakdown.agents   cost per agent, always this view                      │7.6K tok  │
+│ 50K┤┄┄┄┄┄│   breakdown.skills   cost per skill, always this view                      │┄┄┄┄┄┄┄┄┄┄│
+│ 25K┤▂▂▂┄┄│ spend.daily: cost per day as a table, always this view                     │┄┄┄┄┄┄┄┄┄┄│
+│   0┤███  │                                                                            │ ▂▂  ▅  ▃ │
+│     5   8│ Left/Right tab   h/l j/k move cursor   H/J/K/L move panel   f width        │ 29 31  3 │
+╰──────────│ a add   d remove   u undo   < > move tab   n new   x delete   r rename     │■■■ high├─╯
+╭─┤¹Spend p│ R reset   esc or q close   changes are saved as you make them              │────┤UTC├─╮
+│Thu 2026-0╰────────────────────────────────────────────────────────────────────────────╯          │
+│ $8┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄││ $1.6┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│
+│ $4┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▇┄┄┄┄┄┄┄┄┄┄┄┄┄┄││ $0.8┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄█┄│
+│ $0┤▁▄▁  ▂ ▁▁ ▁  ▁▅ ▁▃  ▁ ▂▁▁    █▁ ▄  ▂▂  ▅  ▃ ││   $0┤                                        █ │
+│    5 7  9  11 13 15 17 19 21 23 25 27 29 31  3 ││      2  4   6  8   10 12  14 16  18 20  22 0 1 │
+╰┤peak $6.01├────┤■ opus-5 ■ sonnet-5 ■ haiku-5├─╯╰┤peak $1.25├────┤■ opus-5 ■ sonnet-5 ■ haiku-5├─╯
  Tab tab w week m month r range v view / filter ? help q quit        updated 01:46:40 UTC, every 5s

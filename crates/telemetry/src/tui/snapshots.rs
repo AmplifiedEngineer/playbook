@@ -1065,7 +1065,7 @@ fn tabbed(tab: usize) -> App {
 }
 
 #[test]
-fn the_charts_tab_splits_spend_above_full_width_tokens_at_100x30() {
+fn the_charts_tab_arranges_two_panels_per_row_at_100x30() {
     let a = with_limits(
         tabbed(0),
         None,
@@ -1173,13 +1173,13 @@ fn a_pinned_breakdown_slot_without_the_focus_does_not_scroll_with_its_sibling() 
 }
 
 #[test]
-fn the_numbers_tab_shows_the_tables_under_the_header_at_100x30() {
+fn the_numbers_tab_shows_models_live_and_sessions_at_100x30() {
     check("tab_numbers_100x30", &draw(&tabbed(1), 100, 30));
 }
 
 #[test]
-fn the_sessions_tab_stacks_live_and_sessions_at_80x24() {
-    check("tab_sessions_80x24", &draw(&tabbed(2), 80, 24));
+fn the_breakdown_tab_shows_its_views_at_80x24() {
+    check("tab_breakdown_80x24", &draw(&tabbed(2), 80, 24));
 }
 
 #[test]

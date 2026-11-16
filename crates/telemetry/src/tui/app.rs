@@ -755,7 +755,7 @@ impl App {
             self.note = Some(format!("Reset failed: {why}"));
             return Effect::None;
         }
-        let range = Range::ThisWeek(self.week_start);
+        let range = Range::CurrentMonth;
         let query_changed = self.range != range || !self.filter.is_empty();
         self.editor = None;
         self.range = range;

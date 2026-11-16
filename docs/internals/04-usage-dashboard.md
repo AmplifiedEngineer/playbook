@@ -9,7 +9,7 @@
 | `playbook usage` | Opens the terminal view. When stdout is not a terminal, prints the text summary instead. |
 | `playbook usage --summary` | Reads anything new, prints the text summary and exits. With `--range` it covers only that range and names the dates. For `today`, `week` and `month` it ends with the [period comparison](#period-comparison). |
 | `playbook usage --json` | Prints the totals, the groups and the live view as JSON, for scripts. For `today`, `week` and `month` it adds a `comparison` object. |
-| `playbook usage --range <name>` | Sets the range for the terminal view, `--json` and `--summary` (see [Ranges](#ranges)). Default: `week` for the terminal view, `30d` for `--json`, all time for `--summary`. |
+| `playbook usage --range <name>` | Sets the range for the terminal view, `--json` and `--summary` (see [Ranges](#ranges)). Default: `month` for the terminal view, `30d` for `--json`, all time for `--summary`. |
 | `playbook usage collect` | Runs the local OpenTelemetry receiver in the foreground. `cc` or the `session-init` hook starts it when needed. See [The telemetry receiver](#the-telemetry-receiver). |
 | `playbook usage status [--json]` | Shows whether the receiver runs, the telemetry row counts and the retention limits. Starts nothing. |
 | `playbook usage prune [--dry-run]` | Deletes telemetry rows past the retention limits. See [Checking and running the collector](#checking-and-running-the-collector). |
@@ -84,7 +84,7 @@ Every range is a set of whole days in the chosen time zone, shown in the header 
 | `30d`, `60d`, `90d` | The last N days, including today. |
 | `all` | Everything stored. |
 
-The terminal view opens on `week`, compared with last week, and `r` steps between `today` and `week`. `today`, `week` and `month` (month to date) are periods, shown against the previous one. `last-week`, `last-month`, `30d`, `60d`, `90d` and `all` do not conflict with the comparison and stay. They show their own totals with no comparison: `W`, `M` and `a` jump to them and `--range` opens on any of them.
+The terminal view opens on `month`, compared with last month, and `r` steps between `today` and `week`. `today`, `week` and `month` (month to date) are periods, shown against the previous one. `last-week`, `last-month`, `30d`, `60d`, `90d` and `all` do not conflict with the comparison and stay. They show their own totals with no comparison: `W`, `M` and `a` jump to them and `--range` opens on any of them.
 
 Weeks start on Monday. Set `usage.weekStart` to `sunday` or `saturday` to change it (`playbook config set usage.weekStart sunday`). The terminal view, `--json`, `--summary` and the web `range=` parameter all read the key, so they agree. The key is in camel case like the other config keys.
 

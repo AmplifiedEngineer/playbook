@@ -737,8 +737,8 @@ pub enum Command {
     },
     /// Show token and cost usage across your sessions
     ///
-    /// With no subcommand, opens the terminal view, which opens on this week
-    /// compared with last week. When stdout is not a terminal, or with
+    /// With no subcommand, opens the terminal view, which opens on this month
+    /// compared with last month. When stdout is not a terminal, or with
     /// `--summary`, prints a text summary of estimated cost instead. `--json`
     /// prints the same numbers as JSON for scripts. Times and days use your
     /// local time zone, shown in the output; `--utc` switches to UTC, or set
@@ -760,7 +760,7 @@ pub enum Command {
         /// Print the text summary and exit (every recorded session unless `--range` is given)
         #[arg(long, conflicts_with_all = ["json"])]
         summary: bool,
-        /// Date range, counted in days of the chosen time zone. One of today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
+        /// Date range, counted in days of the chosen time zone. One of today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default month for the terminal view, 30d for `--json`, all for `--summary`
         #[arg(long, value_name = "RANGE")]
         range: Option<String>,
         /// Show only one account, by key or name. Scopes `--summary` and `--json`, and the terminal view opens on it

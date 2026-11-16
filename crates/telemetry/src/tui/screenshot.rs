@@ -160,7 +160,7 @@ fn numbers(app: &mut App) {
     tabs(app, 1);
 }
 
-fn sessions(app: &mut App) {
+fn breakdown(app: &mut App) {
     tabs(app, 2);
 }
 
@@ -182,18 +182,18 @@ fn budget(app: &mut App) {
 const VIEWS: &[View] = &[
     View {
         stem: "charts",
-        label: "pbtop Charts tab: spend per day, spend per day by model, tokens per day, spend per hour and a burn-up panel",
+        label: "pbtop Charts tab: spend per day, burn-up, tokens per day, total spend, spend per day by model and spend per hour",
         setup: charts,
     },
     View {
         stem: "numbers",
-        label: "pbtop Numbers tab: models and projects, with the budget in the header",
+        label: "pbtop Numbers tab: models, live sessions and sessions per day, with the budget in the header",
         setup: numbers,
     },
     View {
-        stem: "sessions",
-        label: "pbtop Sessions tab: live sessions and sessions per day",
-        setup: sessions,
+        stem: "breakdown",
+        label: "pbtop Breakdown tab: skills, agents, tools, health and projects",
+        setup: breakdown,
     },
     View {
         stem: "help",
