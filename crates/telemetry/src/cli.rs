@@ -9,8 +9,8 @@ use clap::Parser;
 
 /// Show token and cost usage across your Claude Code sessions
 ///
-/// With no subcommand, opens the terminal view, which opens on this week
-/// compared with last week. When stdout is not a terminal, or with
+/// With no subcommand, opens the terminal view, which opens on this month
+/// compared with last month. When stdout is not a terminal, or with
 /// `--summary`, prints a text summary of estimated cost instead. `--json`
 /// prints the same numbers as JSON for scripts. Times and days use your local
 /// time zone, shown in the output; `--utc` switches to UTC, or set `usage.timeZone`

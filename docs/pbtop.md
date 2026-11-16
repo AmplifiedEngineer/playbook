@@ -4,7 +4,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/pbtop/charts-dark.svg">
-  <img src="images/pbtop/charts-light.svg" alt="pbtop Charts tab: spend per day, spend per day by model, tokens per day, spend per hour and a burn-up panel, sample data">
+  <img src="images/pbtop/charts-light.svg" alt="pbtop Charts tab: spend per day, burn-up, tokens per day, total spend, spend per day by model and spend per hour, sample data">
 </picture>
 
 ## When to use it
@@ -22,7 +22,7 @@ playbook usage
 
 Both run the same code. `playbook usage` comes with Playbook. `pbtop` is the same dashboard as its own program: the Homebrew formula of `playbook` links it, and the [install guide](guides/00-install.md#optional-pbtop-alone) shows how to install it alone.
 
-The terminal view opens on this week compared with last week. Without a terminal, or with `--summary`, it prints a text summary instead.
+The terminal view opens on this month compared with last month. Without a terminal, or with `--summary`, it prints a text summary instead.
 
 | Flag | What it does |
 |---|---|
@@ -37,20 +37,20 @@ The screen needs at least 80 columns and 24 rows. Below that it says so and draw
 
 Every tab has a header with the range, the cost, the tokens and the messages. For today, this week and this month it compares them with the previous period. The header also carries the budget, beside the comparison on a wide screen and under it on a narrow one. When it stacks, the comparison takes one row. The tab bar sits under the header. `F1` to `F3` pick a tab, and the default layout has three.
 
-**Charts.** Every chart: spend per day and spend per day by model side by side, tokens per day and the Hourly chart side by side, with a burn-up panel below. The Hourly chart shows the cost of each of the last 24 hours with the total in its title. It has no data in the sample, because the sample sets no limit.
+**Charts.** Every chart, two to a row: spend per day and the burn-up, tokens per day and total spend, spend per day by model and the Hourly chart. The Hourly chart shows the cost of each of the last 24 hours with the total in its title. It has no data in the sample, because the sample sets no limit.
 
-**Numbers.** The models table and the projects table. Each limit in the header also says when it reaches the limit at the current pace, so a separate Projection panel is gone.
+**Numbers.** The models table, the live sessions and the sessions per day. Each limit in the header also says when it reaches the limit at the current pace, so a separate Projection panel is gone.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/pbtop/numbers-dark.svg">
-  <img src="images/pbtop/numbers-light.svg" alt="pbtop Numbers tab: models and projects under the header, sample data">
+  <img src="images/pbtop/numbers-light.svg" alt="pbtop Numbers tab: models, live sessions and sessions per day under the header, sample data">
 </picture>
 
-**Sessions tab.** Live sessions, which have a message in the last 15 minutes, and every session of the range grouped by day.
+**Breakdown.** The skills view on its own in the first row, then agents and tools, then health and projects. Live sessions have a message in the last 15 minutes. The Sessions panel groups every session of the range by day.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="images/pbtop/sessions-dark.svg">
-  <img src="images/pbtop/sessions-light.svg" alt="pbtop Sessions tab: live sessions and sessions per day, sample data">
+  <source media="(prefers-color-scheme: dark)" srcset="images/pbtop/breakdown-dark.svg">
+  <img src="images/pbtop/breakdown-light.svg" alt="pbtop Breakdown tab: skills, agents, tools, health and projects, sample data">
 </picture>
 
 **Help.** `?` opens a window that lists every key. It scrolls when the screen is short.

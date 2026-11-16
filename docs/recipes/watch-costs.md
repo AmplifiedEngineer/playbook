@@ -29,7 +29,7 @@ See tokens and cost for your sessions, in a terminal dashboard or as one text su
 
 ## What you see
 
-The page runs step 2 on a fresh machine, so it prints `No usage in this month`. With sessions recorded, it prints the message count and the estimated cost, then one table per grouping, such as by day or by model. The dashboard has a Charts, a Numbers and a Sessions tab. Press `?` for its keys.
+The page runs step 2 on a fresh machine, so it prints `No usage in this month`. With sessions recorded, it prints the message count and the estimated cost, then one table per grouping, such as by day or by model. The dashboard has a Charts, a Numbers and a Breakdown tab. Press `?` for its keys.
 
 ## Next
 

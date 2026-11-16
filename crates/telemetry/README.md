@@ -16,7 +16,7 @@ It is part of the [playbook](https://github.com/amplifiedengineer/playbook) tool
 - Cost and tokens per day, model, repo, branch and session, with a week over week comparison.
 - Cache read and write tokens, split into the five minute and one hour tiers.
 - Tool, skill and agent breakdowns and latency, when Claude Code telemetry is on (see the receiver below).
-- Tabs (Charts, Numbers, Sessions by default) with the panels you choose. Press `e` to edit the layout, `Tab` and `F1` to `F12` to switch tabs. The header, with the budget in it, stays on every tab.
+- Tabs (Charts, Numbers, Breakdown by default) with the panels you choose. Press `e` to edit the layout, `Tab` and `F1` to `F12` to switch tabs. The header, with the budget in it, stays on every tab.
 - The budget, in the header, with the rate limits and, beside each limit, when it is reached at the current pace, and an Hourly chart of the cost of the last 24 hours. The limits come from the playbook statusline (Pro and Max windows), from the usage numbers Claude Code caches in its config file (the 5 hour and weekly windows, or the monthly spend limit on Enterprise, shown with its age), or from a budget you set.
 - Your last tab, range, views, sorts and filter, restored on the next start.
 - Codex session history, read the same way.
@@ -55,7 +55,7 @@ cargo build --release
 ## Use
 
 ```sh
-pbtop                 # terminal view, this week against last week
+pbtop                 # terminal view, this month against last month
 pbtop --summary       # text summary and exit
 pbtop --json          # the same numbers as JSON
 pbtop --range 30d     # today, week, last-week, month, last-month, 30d, 60d, 90d, all
@@ -100,7 +100,7 @@ Settings are playbook's own, from the global tier of its config store (`~/.confi
 | `usage.telemetry` | `auto` | `auto`, `off` |
 | `usage.budget.monthlyUsd` | `0` | number |
 | `usage.budget.weeklyUsd` | `0` | number |
-| `usage.ui.layout` | empty | text like `Charts=spend.total,spend.model\|tokens,hourly\|burnup;Numbers=models,breakdown;Sessions=live,sessions`; press `e` in pbtop to edit, changes save at once |
+| `usage.ui.layout` | empty | text like `Charts=spend.daily,burnup\|tokens,spend.total\|spend.model,hourly;Numbers=models,live,sessions;Breakdown=breakdown.skills\|breakdown.agents,breakdown.tools\|breakdown.health,breakdown.projects`; press `e` in pbtop to edit, changes save at once |
 | `usage.ui.state` | empty | text written by pbtop: the screen setup it restores |
 
 ## Telemetry receiver

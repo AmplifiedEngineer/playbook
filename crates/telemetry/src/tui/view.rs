@@ -1801,7 +1801,7 @@ mod tests {
         let text = screen(&app, 140, 30);
 
         assert!(text.contains("F1 Charts"), "{text}");
-        assert!(text.contains("F3 Sessions"), "{text}");
+        assert!(text.contains("F3 Breakdown"), "{text}");
         assert!(text.contains("Tab tab"), "{text}");
     }
 
@@ -1885,7 +1885,7 @@ mod tests {
 
         app.key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE));
 
-        assert_eq!(app.focus, crate::tui::sort::Panel::Live);
+        assert_eq!(app.focus, crate::tui::sort::Panel::Projects);
     }
 
     #[test]
@@ -1964,7 +1964,7 @@ mod tests {
 
         // Assert
         assert!(text.contains("\u{b3}Models"), "{text}");
-        assert!(text.contains("\u{2074}Projects"), "{text}");
+        assert!(text.contains("\u{2075}Live sessions"), "{text}");
         assert!(
             !header_box(&app, 100, 40)
                 .join("\n")
@@ -1978,11 +1978,11 @@ mod tests {
         // Arrange
         let mut old = tabbed_app();
         old.layout = Layout::from_stored(Some(
-            "Numbers=models,breakdown,budget;Sessions=live,sessions",
+            "Numbers=models,live,budget;Breakdown=breakdown.skills",
         ))
         .0;
         let mut new = tabbed_app();
-        new.layout = Layout::parse("Numbers=models,breakdown;Sessions=live,sessions").unwrap();
+        new.layout = Layout::parse("Numbers=models,live;Breakdown=breakdown.skills").unwrap();
 
         // Act
         let (a, b) = (screen(&old, 100, 30), screen(&new, 100, 30));
@@ -2031,7 +2031,7 @@ mod tests {
     fn the_bracket_key_wraps_inside_the_panels_of_a_tab() {
         let mut app = tabbed_app();
         app.go_tab(1);
-        app.focus = crate::tui::sort::Panel::Projects;
+        app.focus = crate::tui::sort::Panel::Sessions;
 
         app.key(press(KeyCode::Char(']')));
 
@@ -2045,7 +2045,7 @@ mod tests {
 
         app.key(press(KeyCode::Char(']')));
 
-        assert_eq!(app.focus_slot(), Some(PanelId::SpendModel));
+        assert_eq!(app.focus_slot(), Some(PanelId::Tokens));
     }
 
     #[test]
@@ -2139,7 +2139,8 @@ mod tests {
         assert_eq!(
             effect,
             crate::tui::app::Effect::SaveLayout(
-                "Numbers=models,breakdown;Sessions=live,sessions".into()
+                "Numbers=models,live,sessions;Breakdown=breakdown.skills|breakdown.agents,breakdown.tools|breakdown.health,breakdown.projects"
+                    .into()
             )
         );
         assert_eq!(app.layout.tabs.len(), 2);
@@ -2276,7 +2277,7 @@ mod tests {
         assert_eq!(effect, crate::tui::app::Effect::Requery);
         assert_eq!(app.layout, Layout::default());
         assert_eq!(app.tab, 0);
-        assert_eq!(app.range, Range::ThisWeek(app.week_start));
+        assert_eq!(app.range, Range::CurrentMonth);
         assert!(app.filter.is_empty());
         assert_eq!(app.spend_view, crate::tui::app::SpendView::default());
         assert_eq!(app.projects_view, crate::tui::app::ProjectsView::default());
@@ -2312,10 +2313,7 @@ mod tests {
 
     #[test]
     fn a_reset_asks_for_a_requery_when_only_the_filter_or_only_the_range_changed() {
-        for (range, filter) in [
-            (Range::ThisWeek(crate::query::WeekStart::Monday), "alpha"),
-            (Range::All, ""),
-        ] {
+        for (range, filter) in [(Range::CurrentMonth, "alpha"), (Range::All, "")] {
             // Arrange
             let mut app = tabbed_app();
             app.week_start = crate::query::WeekStart::Monday;
@@ -2338,7 +2336,7 @@ mod tests {
     fn a_reset_needs_no_requery_when_the_query_is_already_the_default() {
         // Arrange
         let mut app = tabbed_app();
-        app.range = Range::ThisWeek(app.week_start);
+        app.range = Range::CurrentMonth;
         app.go_tab(2);
         app.key(press(KeyCode::Char('e')));
 
@@ -2657,7 +2655,7 @@ mod tests {
     }
 
     #[test]
-    fn the_numbers_tab_stacks_models_over_breakdown_under_the_tab_bar() {
+    fn the_numbers_tab_puts_models_and_live_side_by_side_over_sessions_under_the_tab_bar() {
         // Arrange
         let area = Rect::new(0, 0, 100, 30);
         let ids = Layout::default().tabs[1].panels.clone();
@@ -2667,11 +2665,17 @@ mod tests {
 
         // Assert
         let rect = |id| placed.panels.iter().find(|(p, _)| *p == id).unwrap().1;
-        let (models, breakdown) = (rect(PanelId::Models), rect(PanelId::Breakdown));
+        let (models, live, sessions) = (
+            rect(PanelId::Models),
+            rect(PanelId::Live),
+            rect(PanelId::Sessions),
+        );
         assert_eq!(models.y, placed.tabbar.bottom());
-        assert_eq!(breakdown.y, models.bottom());
-        assert_eq!((models.width, breakdown.width), (100, 100));
-        assert_eq!(placed.panels.len(), 2);
+        assert_eq!(live.y, models.y);
+        assert_eq!(live.x, models.right());
+        assert_eq!(sessions.y, models.bottom());
+        assert_eq!(sessions.width, 100);
+        assert_eq!(placed.panels.len(), 3);
     }
 
     #[test]

@@ -84,7 +84,7 @@ Every range is a set of whole days in the chosen time zone, shown in the header 
 | `30d`, `60d`, `90d` | The last N days, including today. |
 | `all` | Everything stored. |
 
-The terminal view opens on `week`, compared with last week, and `r` steps between `today` and `week`. `today`, `week` and `month` (month to date) are periods, shown against the previous one. `last-week`, `last-month`, `30d`, `60d`, `90d` and `all` do not conflict with the comparison and stay. They show their own totals with no comparison: `W`, `M` and `a` jump to them and `--range` opens on any of them.
+The terminal view opens on `month`, compared with last month, and `r` steps between `today` and `week`. `today`, `week` and `month` (month to date) are periods, shown against the previous one. `last-week`, `last-month`, `30d`, `60d`, `90d` and `all` do not conflict with the comparison and stay. They show their own totals with no comparison: `W`, `M` and `a` jump to them and `--range` opens on any of them.
 
 Weeks start on Monday. Set `usage.weekStart` to `sunday` or `saturday` to change it (`playbook config set usage.weekStart sunday`). The terminal view, `--json`, `--summary` and the web `range=` parameter all read the key, so they agree. The key is in camel case like the other config keys.
 

@@ -5,26 +5,26 @@
 │messages          26 │                                                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  F1 Charts ╭┤ Layout: tabs and panels ├─────────────────────────────────────────────────╮
-╭─┤¹Spend p│  Charts  Numbers  Sessions                                                 │──────────╮
+╭─┤¹Daily c│  Charts  Numbers  Breakdown                                                │iod, UTC├─╮
+│date▼     │                                                                            │          │
+│Thu 09-03 │ [> spend.daily                      ][  burnup                           ] │          │
+│Wed 09-02 │ [  tokens                           ][  spend.total                      ] │          │
+│Tue 09-01 │ [  spend.model                      ][  hourly                           ] │          │
+│Mon 08-31 │                                                                            │          │
+╰──────────│                                                                            │──────────╯
+╭─┤²Tokens │                                                                            │──────────╮
+│total 618.│                                                                            │ $0.68/day│
 │Thu 2026-0│                                                                            │7.6K tok  │
-│ $8┤┄┄┄┄┄┄│ [> spend.total                      ][  spend.model                      ] │┄┄┄┄┄┄┄┄┄┄│
-│ $4┤┄┄┄┄┄┄│ [  tokens                           ][  hourly                           ] │┄┄┄┄┄┄┄┄┄┄│
-│ $0┤▁▄▁  ▂│ [  burnup                                                                ] │ ▂▂  ▅  ▃ │
-│    5 7  9│                                                                            │ 29 31  3 │
-╰┤peak $6.0│                                                                            │ haiku-5├─╯
-╭─┤²Tokens │                                                                            │────┤UTC├─╮
-│total 618.│                                                                            │          │
-│Thu 2026-0│                                                                            │          │
 │ 50K┤┄┄┄┄┄│                                                                            │┄┄┄┄┄┄┄┄┄┄│
-│ 25K┤▂▂▂┄┄│ spend.total: total cost per day as a chart, always this view               │┄┄┄┄┄┄┄┄█┄│
-│   0┤███  │                                                                            │        █ │
-│     5   8│ Left/Right tab   h/l j/k move cursor   H/J/K/L move panel   f width        │0  22 0 1 │
-╰──────────│ a add   d remove   u undo   < > move tab   n new   x delete   r rename     │ haiku-5├─╯
-╭─┤Burn-up├│ R reset   esc or q close   changes are saved as you make them              │iod, UTC├─╮
-│no burn-up╰────────────────────────────────────────────────────────────────────────────╯          │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+│ 25K┤▂▂▂┄┄│ spend.daily: cost per day as a table, always this view                     │┄┄┄┄┄┄┄┄┄┄│
+│   0┤███  │                                                                            │ ▂▂  ▅  ▃ │
+│     5   8│ Left/Right tab   h/l j/k move cursor   H/J/K/L move panel   f width        │ 29 31  3 │
+╰──────────│ a add   d remove   u undo   < > move tab   n new   x delete   r rename     │■■■ high├─╯
+╭─┤¹Spend p│ R reset   esc or q close   changes are saved as you make them              │────┤UTC├─╮
+│Thu 2026-0╰────────────────────────────────────────────────────────────────────────────╯          │
+│ $8┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄││ $1.6┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│
+│ $4┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▇┄┄┄┄┄┄┄┄┄┄┄┄┄┄││ $0.8┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄█┄│
+│ $0┤▁▄▁  ▂ ▁▁ ▁  ▁▅ ▁▃  ▁ ▂▁▁    █▁ ▄  ▂▂  ▅  ▃ ││   $0┤                                        █ │
+│    5 7  9  11 13 15 17 19 21 23 25 27 29 31  3 ││      2  4   6  8   10 12  14 16  18 20  22 0 1 │
+╰┤peak $6.01├────┤■ opus-5 ■ sonnet-5 ■ haiku-5├─╯╰┤peak $1.25├────┤■ opus-5 ■ sonnet-5 ■ haiku-5├─╯
  Tab tab w week m month r range v view / filter ? help q quit        updated 01:46:40 UTC, every 5s
