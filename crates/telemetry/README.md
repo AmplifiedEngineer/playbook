@@ -13,7 +13,7 @@ It is part of the [playbook](https://github.com/amplifiedengineer/playbook) tool
 
 ## What it shows
 
-- Cost and tokens per day, model, repo, branch and session, with a week over week comparison.
+- Cost and tokens per day, model, repo, branch and session, with a comparison against the previous day, week or month.
 - Cache read and write tokens, split into the five minute and one hour tiers.
 - Tool, skill and agent breakdowns and latency, when Claude Code telemetry is on (see the receiver below).
 - Tabs (Charts, Numbers, Breakdown by default) with the panels you choose. Press `e` to edit the layout, `Tab` and `F1` to `F12` to switch tabs. The header, with the budget in it, stays on every tab.

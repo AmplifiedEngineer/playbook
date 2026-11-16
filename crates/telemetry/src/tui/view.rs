@@ -2316,7 +2316,6 @@ mod tests {
         for (range, filter) in [(Range::CurrentMonth, "alpha"), (Range::All, "")] {
             // Arrange
             let mut app = tabbed_app();
-            app.week_start = crate::query::WeekStart::Monday;
             app.range = range;
             app.filter = filter.into();
 
