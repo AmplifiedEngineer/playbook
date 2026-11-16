@@ -22,7 +22,7 @@ playbook usage
 
 Both run the same code. `playbook usage` comes with Playbook. `pbtop` is the same dashboard as its own program: the Homebrew formula of `playbook` links it, and the [install guide](guides/00-install.md#optional-pbtop-alone) shows how to install it alone.
 
-The terminal view opens on this month compared with last month, unless you pass `--range` or a range was saved from the last run. Without a terminal, or with `--summary`, it prints a text summary instead.
+The terminal view opens on this month compared with last month, unless `--range` or a saved range says otherwise. Without a terminal, or with `--summary`, it prints a text summary instead.
 
 | Flag | What it does |
 |---|---|
@@ -37,16 +37,16 @@ The screen needs at least 80 columns and 24 rows. Below that it says so and draw
 
 Every tab has a header with the range, the cost, the tokens and the messages. For today, this week and this month it compares them with the previous period. The header also carries the budget, beside the comparison on a wide screen and under it on a narrow one. When it stacks, the comparison takes one row. The tab bar sits under the header. `F1` to `F3` pick a tab, and the default layout has three.
 
-**Charts.** Every chart, two to a row: spend per day and the burn-up, tokens per day and total spend, spend per day by model and the Hourly chart. The Hourly chart shows the cost of each of the last 24 hours with the total in its title. It has no data in the sample, because the sample sets no limit.
+**Charts.** Every chart, two to a row. The Hourly chart shows the cost of each of the last 24 hours with the total in its title. It has no data in the sample, because the sample sets no limit.
 
-**Numbers.** The models table, the live sessions and the sessions per day. Live sessions have a message in the last 15 minutes. The Sessions panel groups every session of the range by day. Each limit in the header also says when it reaches the limit at the current pace, so a separate Projection panel is gone.
+**Numbers.** The models table, the live sessions and the sessions per day. Live sessions have a message in the last 15 minutes. Each limit in the header also says when it reaches the limit at the current pace, so a separate Projection panel is gone.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/pbtop/numbers-dark.svg">
   <img src="images/pbtop/numbers-light.svg" alt="pbtop Numbers tab: models, live sessions and sessions per day under the header, sample data">
 </picture>
 
-**Breakdown.** The skills view on its own in the first row, then agents and tools, then health and projects.
+**Breakdown.** Skills first, then agents and tools, then health and projects.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/pbtop/breakdown-dark.svg">
