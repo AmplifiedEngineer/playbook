@@ -51,8 +51,9 @@ fn root(home: &Path) -> PathBuf {
     playbook::common::paths::playbook_root_from(home)
 }
 
-/// The stored rows, read under the old names the migration still works on:
-/// the key rename waits for the next release, so export leaves them out.
+/// The stored rows under the old names the migration works on. The key
+/// rename may or may not have run yet (it waits for a release), so each key
+/// is read under its new name first and its old name after.
 fn stored(home: &Path) -> Value {
     let root = root(home);
     let mut global = serde_json::Map::new();
@@ -60,10 +61,16 @@ fn stored(home: &Path) -> Value {
     let mut org = serde_json::Map::new();
     for key in READ_KEYS {
         let found = store::lookup(&root, key, Some(SLUG)).unwrap();
+        let renamed = store::lookup(
+            &root,
+            playbook::config::keys::canonical_key(key),
+            Some(SLUG),
+        )
+        .unwrap();
         for (map, value) in [
-            (&mut global, found.global),
-            (&mut repo, found.repo),
-            (&mut org, found.org),
+            (&mut global, renamed.global.or(found.global)),
+            (&mut repo, renamed.repo.or(found.repo)),
+            (&mut org, renamed.org.or(found.org)),
         ] {
             if let Some(value) = value {
                 map.insert(key.to_string(), value);
@@ -126,7 +133,7 @@ fn migrate_moves_the_old_default_once_and_keeps_every_other_value() {
     assert_moved(&home);
 
     // Act: the user picks 5 on purpose after the move, then migrate runs again
-    seed(&home, &[(Tier::Global, "auto.budgetUsd", json!(5))]);
+    seed(&home, &[(Tier::Global, "auto.budget.mainUsd", json!(5))]);
     let second = playbook(&home, &["migrate", "--json"]);
 
     // Assert: the migration ran once, so the choice stays

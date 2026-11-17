@@ -2,6 +2,90 @@
 
 Release notes for playbook: the binary and the plugin in `plugins/playbook`. From 0.34.0 they ship together as one `vX.Y.Z` release with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). Each release has a section named `## playbook <version>`, newest first, which the release pull request adds from the notes that `scripts/release-notes.sh` builds. The sections from 0.33.0 down are plugin releases from before the two lines joined. The binary skips 0.27 to 0.33: it goes from 0.26 to 0.34.0.
 
+## playbook 0.44.0
+
+### Breaking changes
+
+- **cli**: this drops playbook json and its 17 subcommands. Nothing but tests called them. ([#1809](https://github.com/AmplifiedEngineer/playbook/pull/1809))
+- **cli**: this drops five doctor fact helper subcommands, hooks explain-rm and the usage ingest stub. No plugin, hook or script called them. ([#1810](https://github.com/AmplifiedEngineer/playbook/pull/1810))
+- **config**: sessions.autoClose, launcher.claudeOverride and agents.variants move to the retired list. config set refuses them, config import skips them, and a stored value no longer shows up. ([#1812](https://github.com/AmplifiedEngineer/playbook/pull/1812))
+- **config**: the gc.\* threshold keys are gone. config set refuses them and playbook ignores a stored value. ([#1813](https://github.com/AmplifiedEngineer/playbook/pull/1813))
+- **config**: docs.maxBytes, docs.timeoutSeconds, docs.maxOutputChars, docs.maxMemoryMb, docs.displayChars, sessions.staleAfterDays, sessions.recentDays, hygiene.thresholdTokens, worktreeCleanup.staleAfterDays, worktreeCleanup.conflictGracePeriodDays, update.checkIntervalHours and auto.warnPct are gone. config set refuses them and playbook ignores a stored value. ([#1814](https://github.com/AmplifiedEngineer/playbook/pull/1814))
+- **config**: usage.refreshSeconds, usage.telemetryRetentionDays, usage.telemetryMaxRows, usage.autoIngestMinutes and usage.autoIngest are gone. config set refuses them and playbook ignores a stored value. ([#1815](https://github.com/AmplifiedEngineer/playbook/pull/1815))
+- **config**: nine config keys are gone, including code.briefFactsTokens. config set refuses them and playbook ignores a stored value. Use plan brief --facts-tokens N to add the Callers block. ([#1816](https://github.com/AmplifiedEngineer/playbook/pull/1816))
+- **config**: the five per-rule pr.rules keys are gone. config set refuses them, playbook ignores a stored value, and no rule can be set to block on its own. ([#1817](https://github.com/AmplifiedEngineer/playbook/pull/1817))
+- **cli**: pr create now prints the deliver report and commits staged changes first. ([#1822](https://github.com/AmplifiedEngineer/playbook/pull/1822))
+- **cli**: pr merge now waits for the merge by default. Pass --no-wait for the old arm-and-return behavior. ([#1823](https://github.com/AmplifiedEngineer/playbook/pull/1823))
+- **cli**: pr review triage now answers from the diff rules when they are sure; pass --model for the old model-only answer. ([#1826](https://github.com/AmplifiedEngineer/playbook/pull/1826))
+- **handoff**: merge the handoff commands into /playbook:handoff ([#1840](https://github.com/AmplifiedEngineer/playbook/pull/1840))
+
+### Features
+
+- **statusline**: project usage windows and read cache state ([#1791](https://github.com/AmplifiedEngineer/playbook/pull/1791))
+- **pbtop**: add an option to mask the account email ([#1796](https://github.com/AmplifiedEngineer/playbook/pull/1796))
+- **pbtop**: show the budget in the header on every tab ([#1793](https://github.com/AmplifiedEngineer/playbook/pull/1793))
+- **worktree**: use the PR lookup in decide\_target ([#1800](https://github.com/AmplifiedEngineer/playbook/pull/1800))
+- **sessions**: derive session state in one pure function ([#1804](https://github.com/AmplifiedEngineer/playbook/pull/1804))
+- **pr**: report when a stack is far over the review budget ([#1805](https://github.com/AmplifiedEngineer/playbook/pull/1805))
+- **review**: review an over-budget stack one PR at a time ([#1807](https://github.com/AmplifiedEngineer/playbook/pull/1807))
+- **sessions**: write session state to sessions.db from the hooks ([#1832](https://github.com/AmplifiedEngineer/playbook/pull/1832))
+- **config**: add the config key rename table and migration ([#1818](https://github.com/AmplifiedEngineer/playbook/pull/1818))
+- **config**: rename effort ceiling and auto budget keys to nested names ([#1819](https://github.com/AmplifiedEngineer/playbook/pull/1819))
+- **config**: rename worktree, watch and upgrade keys to nested names ([#1820](https://github.com/AmplifiedEngineer/playbook/pull/1820))
+- **cli**: fold commit all into commit run -A, keeping it hidden ([#1821](https://github.com/AmplifiedEngineer/playbook/pull/1821))
+- **cli**: add pr checks with --watch and failure triage ([#1824](https://github.com/AmplifiedEngineer/playbook/pull/1824))
+- **cli**: nest the review triage commands, keeping the old names ([#1825](https://github.com/AmplifiedEngineer/playbook/pull/1825))
+- **cli**: fold run-context into mode status ([#1827](https://github.com/AmplifiedEngineer/playbook/pull/1827))
+- **cli**: add playbook sync as the entry point for usage sync ([#1828](https://github.com/AmplifiedEngineer/playbook/pull/1828))
+- **cli**: nest memory import-claude, cc bust-cache, doctor migrations ([#1830](https://github.com/AmplifiedEngineer/playbook/pull/1830))
+- **cli**: nest sanitize and watch service commands, fold watch dry-run ([#1831](https://github.com/AmplifiedEngineer/playbook/pull/1831))
+- **cli**: fold plans into plan list, keeping plans ([#1833](https://github.com/AmplifiedEngineer/playbook/pull/1833))
+- **cli**: add pr review post and submit ([#1834](https://github.com/AmplifiedEngineer/playbook/pull/1834))
+- **cli**: add segment unit start, integrate and resume ([#1835](https://github.com/AmplifiedEngineer/playbook/pull/1835))
+- **cli**: add plan graph check and plan wave next ([#1836](https://github.com/AmplifiedEngineer/playbook/pull/1836))
+- **cli**: add plan ledger show and set ([#1837](https://github.com/AmplifiedEngineer/playbook/pull/1837))
+- **cli**: add review lenses pick, checks --list and segment verify ([#1838](https://github.com/AmplifiedEngineer/playbook/pull/1838))
+- **sessions**: import the old session runtime files into sessions.db ([#1848](https://github.com/AmplifiedEngineer/playbook/pull/1848))
+- **sessions**: overlay the stored rows on the sessions list ([#1850](https://github.com/AmplifiedEngineer/playbook/pull/1850))
+- **sessions**: cache the pull request in sessions.db ([#1851](https://github.com/AmplifiedEngineer/playbook/pull/1851))
+- **sessions**: fill the place of a session row on first read ([#1852](https://github.com/AmplifiedEngineer/playbook/pull/1852))
+- **config**: bring back sessions.autoClose with an auto level ([#1854](https://github.com/AmplifiedEngineer/playbook/pull/1854))
+- **sessions**: add the session closer planner and runner ([#1855](https://github.com/AmplifiedEngineer/playbook/pull/1855))
+- **sessions**: add closer guards for ignored and shared files ([#1856](https://github.com/AmplifiedEngineer/playbook/pull/1856))
+- **telemetry**: make the owner's pbtop layout and month range default ([#1857](https://github.com/AmplifiedEngineer/playbook/pull/1857))
+
+### Fixes
+
+- **pbtop**: give every bar the same width and align bars with the axis ([#1792](https://github.com/AmplifiedEngineer/playbook/pull/1792))
+- **hooks**: stop the context size scan at a compaction ([#1790](https://github.com/AmplifiedEngineer/playbook/pull/1790))
+- **hooks**: stop reading past a compaction and cover its tests ([#1794](https://github.com/AmplifiedEngineer/playbook/pull/1794))
+- **pbtop**: show an unnamed email account as its domain name only ([#1795](https://github.com/AmplifiedEngineer/playbook/pull/1795))
+- **pbtop**: mask the account in --summary when usage.maskAccount is on ([#1798](https://github.com/AmplifiedEngineer/playbook/pull/1798))
+- **pr**: retry a failed read in pr checks --watch ([#1841](https://github.com/AmplifiedEngineer/playbook/pull/1841))
+- **cli**: name sync commands in messages, reject mistyped verify paths ([#1846](https://github.com/AmplifiedEngineer/playbook/pull/1846))
+- **cli**: build SIGNAL\_EXIT\_BASE only on unix ([#1849](https://github.com/AmplifiedEngineer/playbook/pull/1849))
+- **state**: skip numbered migrated copies as legacy sources ([#1859](https://github.com/AmplifiedEngineer/playbook/pull/1859))
+- **telemetry**: drop the v hint from an empty pinned breakdown panel ([#1858](https://github.com/AmplifiedEngineer/playbook/pull/1858))
+
+### Performance
+
+- **sessions**: skip git status in the session-start hook ([#1845](https://github.com/AmplifiedEngineer/playbook/pull/1845))
+
+### Other changes
+
+- test(cli): mask volatile values in the doctor default test ([#1797](https://github.com/AmplifiedEngineer/playbook/pull/1797))
+- test(cli): isolate TMPDIR in cc\_launch tests ([#1799](https://github.com/AmplifiedEngineer/playbook/pull/1799))
+- test(pbtop): use example emails and cover the masked summary ([#1801](https://github.com/AmplifiedEngineer/playbook/pull/1801))
+- test(cli): guard command names against new hyphens and deep paths ([#1808](https://github.com/AmplifiedEngineer/playbook/pull/1808))
+- refactor(cli): delete json helper modules nothing calls ([#1811](https://github.com/AmplifiedEngineer/playbook/pull/1811))
+- docs(sync): tell users to run playbook sync ([#1829](https://github.com/AmplifiedEngineer/playbook/pull/1829))
+- docs(config): give every key a reason and document the env vars ([#1839](https://github.com/AmplifiedEngineer/playbook/pull/1839))
+- test(pbsync): isolate the settings tests' data folders ([#1842](https://github.com/AmplifiedEngineer/playbook/pull/1842))
+- test(cli): restore lost direct tests and tighten weak ones ([#1843](https://github.com/AmplifiedEngineer/playbook/pull/1843))
+- refactor(telemetry): move the account label out of the TUI ([#1844](https://github.com/AmplifiedEngineer/playbook/pull/1844))
+- docs(review): fix the zsh submit fallback, drop a stale allow rule ([#1847](https://github.com/AmplifiedEngineer/playbook/pull/1847))
+- refactor(worktree): share the branch publication rule ([#1853](https://github.com/AmplifiedEngineer/playbook/pull/1853))
+
 ## playbook 0.43.0
 
 ### Breaking changes
