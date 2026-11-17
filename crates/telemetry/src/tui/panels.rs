@@ -828,6 +828,16 @@ fn telemetry_off(app: &App) -> String {
     crate::telemetry_status::empty_panel_lines(app.telemetry).join("\n")
 }
 
+/// The empty-state hint that names the `v` key. A pinned panel shows one view
+/// and `v` does nothing there, so it gets no hint.
+fn switch_hint(slot: PanelId) -> &'static str {
+    if slot.projects_view().is_some() {
+        ""
+    } else {
+        " v switches the view."
+    }
+}
+
 fn telemetry_split(
     frame: &mut Frame,
     area: Rect,
@@ -854,7 +864,7 @@ fn telemetry_split(
         return empty(frame, area, pal, block, &telemetry_off(app));
     }
     if view.is_empty() {
-        let text = format!("No {label} activity in this range. v switches the view.");
+        let text = format!("No {label} activity in this range.{}", switch_hint(slot));
         return empty(frame, area, pal, block, &text);
     }
     let covered = view.coverage(data.totals.cost_usd) * 100.0;
@@ -978,7 +988,7 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette, s
             area,
             pal,
             block,
-            "No tool calls in this range. v switches the view.",
+            &format!("No tool calls in this range.{}", switch_hint(slot)),
         );
     }
     block = block.title(tools_note(pal, data));
@@ -1388,5 +1398,57 @@ mod tests {
         assert_eq!(age(7 * 60), "7m");
         assert_eq!(age(2 * 3600 + 5), "2h");
         assert_eq!(age(-3), "0s");
+    }
+
+    type DrawFn = fn(&mut Frame, Rect, &App, &Data, &Palette, PanelId);
+
+    fn empty_breakdown(slot: PanelId, draw: DrawFn) -> String {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = App::new(crate::query::Range::All);
+        let mut data = Data::build(
+            &[],
+            Default::default(),
+            1_788_400_000,
+            crate::query::Range::All,
+            "",
+        );
+        data.telemetry_rows = true;
+        app.data = Some(data.clone());
+        let pal = super::super::theme::Theme::Mono.palette(Default::default());
+        let mut terminal = Terminal::new(TestBackend::new(80, 6)).unwrap();
+        terminal
+            .draw(|f| draw(f, f.area(), &app, &data, &pal, slot))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        (0..6)
+            .map(|y| (0..80).map(|x| buf[(x, y)].symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn a_pinned_breakdown_panel_does_not_hint_at_the_v_key_when_empty() {
+        let cases: [(PanelId, DrawFn); 4] = [
+            (PanelId::BreakdownAgents, agents),
+            (PanelId::BreakdownSkills, skills),
+            (PanelId::BreakdownTools, tools),
+            (PanelId::BreakdownHealth, health),
+        ];
+        for (slot, draw) in cases {
+            let text = empty_breakdown(slot, draw);
+            if slot != PanelId::BreakdownHealth {
+                assert!(text.contains("in this range"), "{slot:?}: {text}");
+            }
+            assert!(!text.contains("switches"), "{slot:?}: {text}");
+        }
+    }
+
+    #[test]
+    fn the_unpinned_agents_and_tools_views_keep_the_v_hint_when_empty() {
+        for draw in [agents, tools] {
+            let text = empty_breakdown(PanelId::Breakdown, draw);
+            assert!(text.contains("v switches the view."), "{text}");
+        }
     }
 }
