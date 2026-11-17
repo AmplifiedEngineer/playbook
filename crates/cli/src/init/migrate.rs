@@ -2007,7 +2007,11 @@ mod tests {
     /// release fills it in, so whether it is recorded depends on that.
     fn rows_without_the_index_cleanup(home: &Path) -> Vec<String> {
         let mut rows = rows(home);
-        rows.retain(|r| !r.contains(CODE_INDEX_FILES_MIGRATION));
+        // Both run once a release fills in their `since`, and neither is
+        // what these tests are about.
+        rows.retain(|r| {
+            !r.contains(CODE_INDEX_FILES_MIGRATION) && !r.contains(RENAME_CONFIG_KEYS_MIGRATION)
+        });
         rows
     }
 
@@ -3555,19 +3559,15 @@ mod tests {
     }
 
     #[test]
-    fn fixed_config_keys_is_a_manual_migration_that_waits_for_the_next_release() {
+    fn fixed_config_keys_is_a_manual_migration() {
         // Arrange
         let entry = registry()
             .into_iter()
             .find(|m| m.id == FIXED_CONFIG_KEYS_MIGRATION)
             .expect("registered");
 
-        // Act
-        let since = entry.since();
-
-        // Assert
+        // Assert: its `since` is `next` on main and a version after a release
         assert!(matches!(entry.kind, Kind::Manual));
-        assert_eq!(since, Since::Next);
     }
 
     /// The two stored names of a rename, as booleans (the test table's
@@ -3637,20 +3637,16 @@ mod tests {
     }
 
     #[test]
-    fn rename_config_keys_is_an_unattended_migration_that_waits_for_the_next_release() {
+    fn rename_config_keys_is_an_unattended_migration() {
         // Arrange
         let entry = registry()
             .into_iter()
             .find(|m| m.id == RENAME_CONFIG_KEYS_MIGRATION)
             .expect("registered");
 
-        // Act
-        let since = entry.since();
-
-        // Assert
+        // Assert: its `since` is `next` on main and a version after a release
         assert!(matches!(entry.kind, Kind::Auto));
         assert!(matches!(entry.scope, Scope::Owned));
-        assert_eq!(since, Since::Next);
     }
 
     #[test]
