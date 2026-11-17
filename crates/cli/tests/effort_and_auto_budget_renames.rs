@@ -75,6 +75,18 @@ fn seed_old(home: &Path, tier: Tier, key: &str, value: Value) {
     store::put(&root(home), tier, Some(SLUG), key, &value).unwrap();
 }
 
+/// Every stored value of a renamed key under its old and new name, sorted:
+/// moving a row between the names (a release's rename migration) keeps it.
+fn values_under_either_name(home: &Path, old: &str, new: &str) -> Vec<String> {
+    let mut all: Vec<String> = [old, new]
+        .into_iter()
+        .flat_map(|key| store::stored_values(&root(home), key).unwrap())
+        .map(|value| value.to_string())
+        .collect();
+    all.sort();
+    all
+}
+
 #[test]
 fn a_stored_old_row_reads_under_the_new_name_and_migrate_leaves_it_alone() {
     for (old, new, global, repo) in [
@@ -82,12 +94,12 @@ fn a_stored_old_row_reads_under_the_new_name_and_migrate_leaves_it_alone() {
         (AGENT_OLD, AGENT_NEW, json!(6), json!(8)),
         (CEILING_OLD, CEILING_NEW, json!(900), json!(950)),
     ] {
-        // Arrange: the rename migration waits for the next release, so a
-        // binary built before then reads the old row through its fallback
+        // Arrange: the rename migration may not have run (it waits for a
+        // release), so the old row must read through its fallback either way
         let home = scratch("old-row");
         seed_old(&home, Tier::Global, old, global.clone());
         seed_old(&home, Tier::Repo, old, repo.clone());
-        let before = store::stored_values(&root(&home), old).unwrap();
+        let before = values_under_either_name(&home, old, new);
 
         // Act
         let first = playbook(&home, &["migrate"]);
@@ -101,9 +113,9 @@ fn a_stored_old_row_reads_under_the_new_name_and_migrate_leaves_it_alone() {
         assert_eq!(global_read, global, "{old}");
         assert_eq!(repo_read, repo, "{old}");
         assert_eq!(
-            store::stored_values(&root(&home), old).unwrap(),
+            values_under_either_name(&home, old, new),
             before,
-            "{old}: migrate changed the rows"
+            "{old}: migrate changed the values"
         );
     }
 }
