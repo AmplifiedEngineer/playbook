@@ -1429,21 +1429,26 @@ mod tests {
 
     #[test]
     fn a_pinned_breakdown_panel_does_not_hint_at_the_v_key_when_empty() {
-        let cases: [(PanelId, DrawFn); 3] = [
+        let cases: [(PanelId, DrawFn); 4] = [
             (PanelId::BreakdownAgents, agents),
             (PanelId::BreakdownSkills, skills),
             (PanelId::BreakdownTools, tools),
+            (PanelId::BreakdownHealth, health),
         ];
         for (slot, draw) in cases {
             let text = empty_breakdown(slot, draw);
-            assert!(text.contains("in this range."), "{slot:?}: {text}");
+            if slot != PanelId::BreakdownHealth {
+                assert!(text.contains("in this range"), "{slot:?}: {text}");
+            }
             assert!(!text.contains("switches"), "{slot:?}: {text}");
         }
     }
 
     #[test]
-    fn the_unpinned_breakdown_switcher_keeps_the_v_hint_when_empty() {
-        let text = empty_breakdown(PanelId::Breakdown, agents);
-        assert!(text.contains("v switches the view."), "{text}");
+    fn the_unpinned_agents_and_tools_views_keep_the_v_hint_when_empty() {
+        for draw in [agents, tools] {
+            let text = empty_breakdown(PanelId::Breakdown, draw);
+            assert!(text.contains("v switches the view."), "{text}");
+        }
     }
 }
