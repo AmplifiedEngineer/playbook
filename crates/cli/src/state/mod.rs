@@ -388,6 +388,7 @@ mod tests {
         let r = root("state-marker-again");
         let done = r.join("worktree-sweep-marker-_tmp_repo.migrated");
         fs::write(&done, "1700000000").unwrap();
+        assert_eq!(pending_legacy(&r), 0);
         assert_eq!(get(&r, "worktree-sweep/_tmp_repo.migrated").unwrap(), None);
         assert!(done.is_file(), "the imported marker was renamed again");
         assert!(!r
@@ -408,6 +409,23 @@ mod tests {
         assert!(!r
             .join("worktree-sweep-marker-_tmp_repo.migrated.1.migrated")
             .exists());
+    }
+
+    #[test]
+    fn only_a_migrated_suffix_marks_a_name_as_done() {
+        for done in ["a.migrated", "a.migrated.1", "a.migrated.15"] {
+            assert!(is_migrated_name(done), "{done}");
+        }
+        for live in [
+            "a",
+            "a.5",
+            "a.migrated.",
+            "a.migrated.1.2",
+            "a.migrated.bak",
+            "migrated",
+        ] {
+            assert!(!is_migrated_name(live), "{live}");
+        }
     }
 
     #[test]
