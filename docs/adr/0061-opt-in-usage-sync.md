@@ -1,9 +1,9 @@
 # ADR-0061: Sync Usage Between One User's Computers Only When the User Turns It On
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Amended 2026-11-13:** users now run the sync commands as `playbook sync ...`, and `pbsync` stays as the helper and a short alias. Commands below are as they were when this record was written.
 - **Date created:** 2026-11-07
-- **Date modified:** 2026-11-07
+- **Date modified:** 2026-11-17
 - **Relates to:** [ADR 0025](0025-self-improving-playbook.md) (it rejected remote learning across users; this ADR covers one user's own machines and does not change that), [ADR 0020](0020-usage-terminal-ui.md) (the usage UI that reads these rows)
 
 ## Context
@@ -102,5 +102,3 @@ The owner answered the earlier open questions.
 2. **Engine: keep `rusqlite`.** The `libsql` swap is rejected. `playbook-store` stays on `rusqlite`. Sync is a separate `pbsync` binary that talks to Turso over HTTP with `ureq`.
 3. **Privacy: sync a salted repo-name hash.** The hash is 128 bits of hex from a truncated SHA-256, with a per-user salt in the remote `shared_meta`. Sync still sends no branch or working directory, no raw email, and no `session_id` or `agent`.
 4. **Work account: it syncs too.** The explicit per-account allowlist `sync.accounts` stays in config and starts empty. The owner adds accounts. Enabling sync stays a visible opt-in with a consent prompt, because company policy still applies.
-
-The Status stays Proposed until the owner accepts this record.
