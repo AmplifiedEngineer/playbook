@@ -166,18 +166,27 @@ fn legacy_files(root: &Path) -> Vec<PathBuf> {
                 p.is_file()
                     && p.file_name()
                         .and_then(|n| n.to_str())
-                        // A marker already imported carries `.migrated`.
-                        // Importing it again would rename it once more on
-                        // every run and store a key with the suffix.
-                        .is_some_and(|n| {
-                            n.starts_with(LEGACY_SWEEP_PREFIX) && !n.ends_with(".migrated")
-                        })
+                        // A marker already imported carries `.migrated` (or
+                        // `.migrated.N`). Importing it again would rename it
+                        // once more on every run and store a key with the
+                        // suffix.
+                        .is_some_and(|n| n.starts_with(LEGACY_SWEEP_PREFIX) && !is_migrated_name(n))
             })
             .collect();
         markers.sort();
         out.extend(markers);
     }
     out
+}
+
+/// Whether a file name already went through a migration: it ends in
+/// `.migrated` or in a numbered `.migrated.N` copy.
+fn is_migrated_name(name: &str) -> bool {
+    let base = match name.rsplit_once('.') {
+        Some((head, n)) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => head,
+        _ => name,
+    };
+    base.ends_with(".migrated")
 }
 
 fn file_epoch(path: &Path, body: &str) -> i64 {
@@ -379,11 +388,44 @@ mod tests {
         let r = root("state-marker-again");
         let done = r.join("worktree-sweep-marker-_tmp_repo.migrated");
         fs::write(&done, "1700000000").unwrap();
+        assert_eq!(pending_legacy(&r), 0);
         assert_eq!(get(&r, "worktree-sweep/_tmp_repo.migrated").unwrap(), None);
         assert!(done.is_file(), "the imported marker was renamed again");
         assert!(!r
             .join("worktree-sweep-marker-_tmp_repo.migrated.migrated")
             .exists());
+    }
+
+    #[test]
+    fn a_numbered_migrated_copy_is_never_a_legacy_source() {
+        let r = root("state-marker-numbered");
+        let kept = r.join("worktree-sweep-marker-_tmp_repo.migrated.1");
+        fs::write(&kept, "1700000000").unwrap();
+        assert_eq!(pending_legacy(&r), 0);
+        assert!(get(&r, "worktree-sweep/_tmp_repo.migrated.1")
+            .unwrap()
+            .is_none());
+        assert!(kept.is_file(), "the numbered copy was renamed");
+        assert!(!r
+            .join("worktree-sweep-marker-_tmp_repo.migrated.1.migrated")
+            .exists());
+    }
+
+    #[test]
+    fn only_a_migrated_suffix_marks_a_name_as_done() {
+        for done in ["a.migrated", "a.migrated.1", "a.migrated.15"] {
+            assert!(is_migrated_name(done), "{done}");
+        }
+        for live in [
+            "a",
+            "a.5",
+            "a.migrated.",
+            "a.migrated.1.2",
+            "a.migrated.bak",
+            "migrated",
+        ] {
+            assert!(!is_migrated_name(live), "{live}");
+        }
     }
 
     #[test]
