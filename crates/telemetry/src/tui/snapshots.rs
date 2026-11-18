@@ -1590,7 +1590,7 @@ fn the_dot_chart_draws_braille_and_keeps_the_point_glyphs_whole() {
 }
 
 #[test]
-fn the_used_area_is_denser_in_the_danger_zone_than_below_it() {
+fn the_used_area_is_solid_below_the_danger_zone_too() {
     // Arrange
     let pal = Theme::Standard.palette(ColorDepth::True);
     let (b, limits) = burn_case("exceeded");
@@ -1612,7 +1612,11 @@ fn the_used_area_is_denser_in_the_danger_zone_than_below_it() {
     let (calm, alarm) = (dots_in(pal.usage_ink(0.0)), dots_in(pal.usage_ink(100.0)));
 
     // Assert
-    assert!(!calm.is_empty() && calm.iter().all(|n| *n <= 4), "{calm:?}");
+    let full = |cells: &[u32]| cells.iter().filter(|n| **n == 8).count();
+    assert!(
+        full(&calm) > calm.len() / 2,
+        "calm area is not solid: {calm:?}"
+    );
     assert!(alarm.contains(&8), "no full alarm cell: {alarm:?}");
 }
 

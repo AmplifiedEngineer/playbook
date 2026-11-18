@@ -6,7 +6,8 @@
 //! resolution of whole-cell glyphs. Every set dot carries a role, and a cell
 //! takes the role that ranks highest among its dots.
 
-const DOT_COLS: usize = 2;
+/// Dot columns in one cell.
+pub const DOT_COLS: usize = 2;
 const DOT_ROWS: usize = 4;
 const BRAILLE_BASE: u32 = 0x2800;
 
@@ -25,6 +26,34 @@ pub struct DotGrid<R> {
     width: usize,
     height: usize,
     cells: Vec<(u8, Option<R>)>,
+}
+
+/// The dots on the straight line between two dots, ends included, each one
+/// touching the next.
+pub fn line_dots(from: (usize, usize), to: (usize, usize)) -> Vec<(usize, usize)> {
+    let ((mut x, mut y), (x1, y1)) = (
+        (from.0 as isize, from.1 as isize),
+        (to.0 as isize, to.1 as isize),
+    );
+    let (dx, dy) = ((x1 - x).abs(), -(y1 - y).abs());
+    let (sx, sy) = ((x1 - x).signum(), (y1 - y).signum());
+    let mut err = dx + dy;
+    let mut dots = Vec::new();
+    loop {
+        dots.push((x as usize, y as usize));
+        if (x, y) == (x1, y1) {
+            return dots;
+        }
+        let doubled = 2 * err;
+        if doubled >= dy {
+            err += dy;
+            x += sx;
+        }
+        if doubled <= dx {
+            err += dx;
+            y += sy;
+        }
+    }
 }
 
 impl<R: Copy + Ord> DotGrid<R> {
@@ -67,25 +96,9 @@ impl<R: Copy + Ord> DotGrid<R> {
         ) else {
             return;
         };
-        let clip = |(x, y): (usize, usize)| (x.min(last_x) as isize, y.min(last_y) as isize);
-        let ((mut x, mut y), (x1, y1)) = (clip(from), clip(to));
-        let (dx, dy) = ((x1 - x).abs(), -(y1 - y).abs());
-        let (sx, sy) = ((x1 - x).signum(), (y1 - y).signum());
-        let mut err = dx + dy;
-        loop {
-            self.set(x as usize, y as usize, role);
-            if (x, y) == (x1, y1) {
-                return;
-            }
-            let doubled = 2 * err;
-            if doubled >= dy {
-                err += dy;
-                x += sx;
-            }
-            if doubled <= dx {
-                err += dx;
-                y += sy;
-            }
+        let clip = |(x, y): (usize, usize)| (x.min(last_x), y.min(last_y));
+        for (x, y) in line_dots(clip(from), clip(to)) {
+            self.set(x, y, role);
         }
     }
 
