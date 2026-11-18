@@ -82,3 +82,8 @@ reason = "zip Shrink decoder panic needs the legacy-zip feature and extract(); p
 id = "GHSA-8hxf-qr8p-62x4"
 ignoreUntil = 2026-12-31
 reason = "zip AES HMAC bypass needs the aes-crypto feature; pbdoc enables only deflate and reads no encrypted entries"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0543"
+ignoreUntil = 2026-12-31
+reason = "chrono is unmaintained, which is a notice and not a vulnerability; cargo audit already allows it as a warning"
