@@ -2,46 +2,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Token counts to dollars. Transcripts carry no cost field, so cost comes
-//! from this hand-maintained per-model table, taken from
-//! <https://platform.claude.com/docs/en/about-claude/pricing> on 2026-10-08.
-//! It can drift from published pricing. A model not in the table is never
-//! guessed: it is reported as unpriced by the callers.
+//! from the price table (`price_table`), a snapshot of LiteLLM's public price
+//! list that a newer download can replace. A model the table lacks falls back
+//! to `RETIRED`, the few models that list has dropped, and then to nothing: it
+//! is never guessed, and callers report it as unpriced.
+
+use crate::price_table::{Entry, PriceTable, Rates};
+use std::sync::OnceLock;
 
 /// (normalized model name, input USD per MTok, output USD per MTok, cache read
-/// as a fraction of the input price).
-const PRICES: [(&str, f64, f64, f64); 21] = [
-    ("fable-5-1", 10.0, 50.0, 0.025),
-    ("mythos-5-1", 10.0, 50.0, 0.025),
-    ("fable-5", 10.0, 50.0, 0.1),
-    ("mythos-5", 10.0, 50.0, 0.1),
-    ("opus-5-5", 4.0, 20.0, 0.05),
-    ("opus-5", 5.0, 25.0, 0.1),
-    ("opus-4-8", 5.0, 25.0, 0.1),
-    ("opus-4-7", 5.0, 25.0, 0.1),
-    ("opus-4-6", 5.0, 25.0, 0.1),
-    ("opus-4-5", 5.0, 25.0, 0.1),
+/// as a fraction of the input price). Models that LiteLLM no longer lists but
+/// old transcripts still name, priced as published when they were retired.
+const RETIRED: [(&str, f64, f64, f64); 5] = [
     ("opus-4-1", 15.0, 75.0, 0.1),
     ("opus-4", 15.0, 75.0, 0.1),
-    ("sonnet-5-5", 2.0, 10.0, 0.05),
-    ("sonnet-5", 2.0, 10.0, 0.1),
-    ("sonnet-4-6", 3.0, 15.0, 0.1),
-    ("sonnet-4-5", 3.0, 15.0, 0.1),
     ("sonnet-4", 3.0, 15.0, 0.1),
-    ("haiku-5-5", 0.1, 0.5, 0.1),
-    ("haiku-4-5", 1.0, 5.0, 0.1),
     ("3-5-haiku", 0.8, 4.0, 0.1),
     ("haiku-3-5", 0.8, 4.0, 0.1),
 ];
 
-/// Haiku 5.5 charges more for a prompt over 100,000 tokens: input and output
-/// prices are 5x the base ones (0.50 and 2.50 per MTok against 0.10 and 0.50).
-const HAIKU_5_5_LONG_PROMPT_TOKENS: u64 = 100_000;
-const HAIKU_5_5_LONG_PROMPT_FACTOR: f64 = 5.0;
-
-const CACHE_WRITE_5M_MULTIPLIER: f64 = 1.25;
-const CACHE_WRITE_1H_MULTIPLIER: f64 = 2.0;
-const TOKENS_PER_UNIT: f64 = 1_000_000.0;
 const DATE_SUFFIX_LEN: usize = 8;
+
+static TABLE: OnceLock<PriceTable> = OnceLock::new();
+
+fn table() -> &'static PriceTable {
+    TABLE.get_or_init(PriceTable::embedded)
+}
 
 /// One message's token counts, with cache writes split by cache lifetime.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -97,23 +83,15 @@ pub fn same_model(a: &str, b: &str) -> bool {
     key(a) == key(b)
 }
 
-/// Dollar cost of one message, or `None` when the model is not in the table.
+/// Dollar cost of one message, or `None` when no price is known for the model.
 pub fn cost_usd(model: &str, tokens: &Tokens) -> Option<f64> {
+    if let Some(usd) = table().cost_usd(model, tokens) {
+        return Some(usd);
+    }
     let name = normalize(model);
-    let (_, input, output, read_fraction) = PRICES.iter().find(|(n, _, _, _)| *n == name)?;
-    let prompt = tokens.input + tokens.cache_write_5m + tokens.cache_write_1h + tokens.cache_read;
-    let factor = if name == "haiku-5-5" && prompt > HAIKU_5_5_LONG_PROMPT_TOKENS {
-        HAIKU_5_5_LONG_PROMPT_FACTOR
-    } else {
-        1.0
-    };
-    let (input, output) = (input * factor, output * factor);
-    let total = tokens.input as f64 * input
-        + tokens.output as f64 * output
-        + tokens.cache_write_5m as f64 * input * CACHE_WRITE_5M_MULTIPLIER
-        + tokens.cache_write_1h as f64 * input * CACHE_WRITE_1H_MULTIPLIER
-        + tokens.cache_read as f64 * input * read_fraction;
-    Some(total / TOKENS_PER_UNIT)
+    let (_, input, output, read_fraction) = RETIRED.iter().find(|(n, _, _, _)| *n == name)?;
+    let rates = Rates::from_per_million(*input, *output, *read_fraction);
+    Some(Entry::flat(rates).cost(tokens))
 }
 
 #[cfg(test)]
@@ -245,6 +223,20 @@ mod tests {
         };
         assert!(close(per_million("claude-opus-4-8[1m]", tokens), 5.0));
         assert!(close(per_million("CLAUDE-SONNET-5", tokens), 2.0));
+    }
+
+    #[test]
+    fn models_launched_after_the_hand_table_are_priced_from_the_snapshot() {
+        // Under every long prompt threshold, so the base rates apply.
+        let tokens = Tokens {
+            input: 100_000,
+            output: 100_000,
+            ..Tokens::default()
+        };
+
+        assert!(close(per_million("claude-fable-5-2", tokens), 0.8 + 4.0));
+        assert!(close(per_million("gpt-6-luna", tokens), 0.01 + 0.05));
+        assert!(close(per_million("gpt-6.1-sol", tokens), 0.2 + 1.0));
     }
 
     #[test]

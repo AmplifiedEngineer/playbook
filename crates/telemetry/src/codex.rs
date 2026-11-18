@@ -246,8 +246,8 @@ mod tests {
             ),
             (800, 200, 50)
         );
-        assert!(first.unpriced, "OpenAI models are not in the price table");
-        assert_eq!(first.cost_usd, 0.0);
+        assert!(!first.unpriced, "OpenAI models are in the price table");
+        assert!(first.cost_usd > 0.0);
 
         let second = &events.usage[1];
         assert_eq!(
