@@ -220,7 +220,7 @@ cost = (input x in + output x out
       + cache read x in x read share) / 1,000,000
 ```
 
-Here `in` and `out` are the model's dollars per million input and output tokens, and `read share` is its cache read price as a share of `in`. One model, Haiku 5.5, charges five times the base price when the prompt passes 100,000 tokens.
+Here `in` and `out` are the model's dollars per million input and output tokens, and `read share` is its cache read price as a share of `in`. Some models, such as Haiku 5.5, charge more when the prompt is long, and the table has that too.
 
 The cost is an estimate at API prices. It is not what a subscription plan bills. pbtop does not guess the price of a model that is not in the table: its messages count as $0, and `--summary` and `--json` name how many and which models.
 
@@ -281,6 +281,7 @@ Live means a session whose last message is no older than 15 minutes.
 | `usage.weekStart` | `monday` | The first day of the week. |
 | `usage.timeZone` | `local` | `local` or `utc`. |
 | `usage.telemetry` | `auto` | `off` stops Playbook from pointing sessions at the receiver. |
+| `usage.priceRefresh` | `auto` | `off` stops the daily price download. |
 | `usage.budget.monthlyUsd` | `0` | A manual monthly budget. `0` means none. |
 | `usage.budget.weeklyUsd` | `0` | The same for the week. |
 | `usage.ui.layout` | empty | The tabs and panels, up to 8 panels per tab. Empty means the three default tabs. |

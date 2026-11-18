@@ -8,6 +8,7 @@
 //! is never guessed, and callers report it as unpriced.
 
 use crate::price_table::{Entry, PriceTable, Rates};
+use std::path::Path;
 use std::sync::OnceLock;
 
 /// (normalized model name, input USD per MTok, output USD per MTok, cache read
@@ -24,6 +25,14 @@ const RETIRED: [(&str, f64, f64, f64); 5] = [
 const DATE_SUFFIX_LEN: usize = 8;
 
 static TABLE: OnceLock<PriceTable> = OnceLock::new();
+
+/// Chooses the table the rest of the run prices with: the cached download
+/// when it is newer than the built-in snapshot, else the snapshot. Call it
+/// once at start; a later call, or a price lookup before it, leaves the
+/// first choice in place.
+pub fn install(cache: &Path) {
+    let _ = TABLE.set(PriceTable::load(cache));
+}
 
 fn table() -> &'static PriceTable {
     TABLE.get_or_init(PriceTable::embedded)

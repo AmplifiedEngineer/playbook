@@ -24,6 +24,8 @@ pub struct Paths {
     pub claude_json: PathBuf,
     pub codex_sessions: PathBuf,
     pub db: PathBuf,
+    /// The refreshed price list, which may not exist yet.
+    pub price_cache: PathBuf,
 }
 
 impl Paths {
@@ -33,6 +35,7 @@ impl Paths {
             claude_json: home.join(".claude.json"),
             codex_sessions: home.join(".codex").join("sessions"),
             db: super::host::state_dir_from(home).join("usage.db"),
+            price_cache: super::data::cache_dir(home).join(super::data::PRICE_CACHE_FILE),
         }
     }
 

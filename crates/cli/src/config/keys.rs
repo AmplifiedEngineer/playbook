@@ -75,6 +75,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "usage.weekStart",
     "usage.timeZone",
     "usage.telemetry",
+    "usage.priceRefresh",
     "usage.budget.monthlyUsd",
     "usage.budget.weeklyUsd",
     "usage.ui.layout",
@@ -297,6 +298,7 @@ pub const USER_KEYS: &[&str] = &[
     "watch.limits.dailyActions",
     "watch.limits.dailyUsd",
     "usage.telemetry",
+    "usage.priceRefresh",
 ];
 
 /// Whether `key` is a per-user setting. `config set` writes it to the global
@@ -349,6 +351,7 @@ pub const LOCAL_ONLY_KEYS: &[&str] = &[
     "fix.maxLines",
     "security.defaults",
     "usage.telemetry",
+    "usage.priceRefresh",
     "usage.ui.state",
     "sessions.autoClose",
     "hygiene.enabled",
@@ -449,7 +452,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "usage.maskAccount" => Some(Value::Bool(false)),
         "usage.weekStart" => Some(Value::String("monday".to_string())),
         "usage.timeZone" => Some(Value::String("local".to_string())),
-        "usage.telemetry" => Some(Value::String("auto".to_string())),
+        "usage.telemetry" | "usage.priceRefresh" => Some(Value::String("auto".to_string())),
         "usage.budget.monthlyUsd" | "usage.budget.weeklyUsd" => Some(Value::Number(0.into())),
         "usage.ui.layout" | "usage.ui.state" => Some(Value::String(String::new())),
         "sessions.autoClose" => Some(Value::String("off".to_string())),
@@ -496,7 +499,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "usage.theme" => Some(&["default", "spectrum", "dark", "light", "mono"]),
         "usage.weekStart" => Some(&["monday", "sunday", "saturday"]),
         "usage.timeZone" => Some(&["local", "utc"]),
-        "usage.telemetry" => Some(&["auto", "off"]),
+        "usage.telemetry" | "usage.priceRefresh" => Some(&["auto", "off"]),
         "docs.convert" => Some(&["auto", "off"]),
         "sessions.autoClose" => Some(AUTONOMY_LEVELS),
         "hooks.proseLint.mode" => Some(&["warn", "block", "off"]),
@@ -538,7 +541,7 @@ const COMPOUND_GROUPS: &[&str] = &["proseLint", "policyGuard", "systemPrompt"];
 /// The exact count of `KNOWN_KEYS`: adding or bringing back a key raises it,
 /// cutting keys lowers it.
 #[cfg(test)]
-const KEY_CEILING: usize = 55;
+const KEY_CEILING: usize = 56;
 
 #[cfg(test)]
 mod tests {

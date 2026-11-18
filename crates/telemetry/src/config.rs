@@ -25,6 +25,7 @@ pub const KEYS: &[&str] = &[
     "usage.weekStart",
     "usage.timeZone",
     "usage.telemetry",
+    "usage.priceRefresh",
     "usage.budget.monthlyUsd",
     "usage.budget.weeklyUsd",
     "usage.ui.layout",
@@ -38,7 +39,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "usage.maskAccount" => Value::from(false),
         "usage.weekStart" => Value::from("monday"),
         "usage.timeZone" => Value::from("local"),
-        "usage.telemetry" => Value::from("auto"),
+        "usage.telemetry" | "usage.priceRefresh" => Value::from("auto"),
         "usage.budget.monthlyUsd" | "usage.budget.weeklyUsd" => Value::from(0),
         "usage.ui.layout" | "usage.ui.state" => Value::from(""),
         _ => return None,
@@ -51,7 +52,7 @@ pub fn allowed_values(key: &str) -> Option<&'static [&'static str]> {
         "usage.theme" => Some(&["default", "spectrum", "dark", "light", "mono"]),
         "usage.weekStart" => Some(&["monday", "sunday", "saturday"]),
         "usage.timeZone" => Some(&["local", "utc"]),
-        "usage.telemetry" => Some(&["auto", "off"]),
+        "usage.telemetry" | "usage.priceRefresh" => Some(&["auto", "off"]),
         _ => None,
     }
 }

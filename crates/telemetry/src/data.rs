@@ -21,6 +21,14 @@ pub fn usage_db(home: &Path) -> PathBuf {
     data_dir(home).join(USAGE_DB_FILE)
 }
 
+/// The folder for files that can be fetched again, next to the data folder.
+pub fn cache_dir(home: &Path) -> PathBuf {
+    crate::config::root(home).join("cache")
+}
+
+/// The refreshed copy of the price list inside the cache folder.
+pub const PRICE_CACHE_FILE: &str = "litellm-prices.json";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -33,5 +41,6 @@ mod tests {
             usage_db(home),
             Path::new("/h/.config/playbook/data/usage.db")
         );
+        assert_eq!(cache_dir(home), Path::new("/h/.config/playbook/cache"));
     }
 }

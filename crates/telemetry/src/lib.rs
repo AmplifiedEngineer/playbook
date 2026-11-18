@@ -38,6 +38,7 @@ pub mod monthly_use;
 pub mod otlp;
 pub mod period;
 pub mod plan;
+pub mod price_refresh;
 pub mod price_table;
 pub mod pricing;
 pub mod query;

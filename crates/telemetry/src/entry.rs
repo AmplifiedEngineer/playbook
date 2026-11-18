@@ -142,6 +142,7 @@ pub fn run(
         );
     }
     super::db::open_db(&paths.db).map(drop)?;
+    super::pricing::install(&paths.price_cache);
     match sub {
         // Answered above, before the data file is created.
         Some(UsageCommand::Doctor { .. } | UsageCommand::Stop) => Ok(String::new()),
