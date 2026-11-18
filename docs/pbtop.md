@@ -222,7 +222,7 @@ cost = (input x in + output x out
 
 Here `in` and `out` are the model's dollars per million input and output tokens, and `read share` is its cache read price as a share of `in`. The table also has the higher price some models charge for a long prompt.
 
-An estimate is at API prices, not what a plan bills. For a model the table lacks, pbtop learns a rate from three telemetry requests. Without them the model shows as unpriced, and `--summary` and `--json` name it.
+An estimate is at API prices, not what a plan bills. For a model the table lacks, pbtop learns a rate from three telemetry requests. Without them the model shows as unpriced in the header border, `--summary` and `--json`. The header marks estimates: `~$451 (estimated)`, or `~$451 (12% estimated)` when telemetry covers the rest.
 
 ## Limits
 
@@ -304,7 +304,7 @@ Usage sync is an opt-in preview. It copies usage rows between your own machines 
 
 - The numbers look low or stale. Run `playbook usage status` to see whether the receiver runs and how many telemetry rows exist.
 - A limit looks wrong. Run `playbook usage doctor`. Its output has no email, name or token, so you can share it.
-- The screen is blank or says it is too small. Make the window at least 80 columns by 24 rows.
+- The screen is blank or too small. Use at least 80 columns by 24 rows.
 - A model shows no price. The table lacks it. `--summary` names it.
 
 ## Next

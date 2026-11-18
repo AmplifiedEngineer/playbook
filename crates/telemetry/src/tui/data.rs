@@ -284,6 +284,8 @@ pub struct Data {
     pub sessions: Vec<SessionDay>,
     /// Messages in the range whose model has no price (counted as $0).
     pub unpriced: usize,
+    /// The models behind `unpriced`, sorted.
+    pub unpriced_models: Vec<String>,
     /// Every day from the start of the range to today, idle days at zero.
     pub series: Vec<DayPoint>,
     /// The last `HOURS` hours of the zone's clock, the current hour last, idle
@@ -467,6 +469,7 @@ impl Data {
             repos: group_usage(&inside, Dimension::Repo),
             sessions: query::session_days(&inside),
             unpriced: unpriced_models(&inside).0,
+            unpriced_models: unpriced_models(&inside).1,
             series,
             hours: hour_series(window, now, filter, zone),
             live,

@@ -1,9 +1,9 @@
 ╭─┤Agent Budget Dashboard├──┤UTC├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │this month Sep 1 to Sep 3 until 01:46  vs  last month Aug 1 to Aug 3 until 01:46  (same span 2d 1h)                                                           │
-│cost           $3.05   vs      $0.00      +$3.05      new │ Monthly  u |-----------    8%  $3.05 of $40.00  ! hits it in 25d 3h  resets in 27d (Thu 10-01)    │
-│tokens         95.2K   vs          0      +95.2K      new │ Monthly    left $36.95   pace +1pt    allow $0.06/h $1.32/d   proj $44.12   manual, local         │
-│messages           4   vs          0          +4      new │ Weekly   u #####|#-----   61%  $3.05 of $5.00  ! hits it in 1d 13h (24h)  resets in 3d (Mon 09-07)│
-│                                                          │ Spend    h this month $3.05 ##########  last month $0.00 ----------  new  avg $0.06/h $1.47/d     │
+│cost          ~$3.05   vs      $0.00      +$3.05      new (estimated) │ Monthly  u |-----------    8%  $3.05 of $40.00  ! hits it in 25d 3h  resets in 27d    │
+│tokens         95.2K   vs          0      +95.2K      new             │ Monthly    left $36.95   pace +1pt    allow $0.06/h $1.32/d   manual, local           │
+│messages           4   vs          0          +4      new             │ Weekly   u #####|#-----   61%  $3.05 of $5.00  ! hits it in 1d 13h (24h)  resets in 3d│
+│                                                                      │ Spend    h this month $3.05 ##########  last month $0.00 ----------  new              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─┤¹Spend per day, USD├─┤v view: total├────────────────────────────────────────╮╭─┤²Tokens per day├────────────────────────────────────────────────────────────╮
 │total $3.05  peak $1.80 on 09-01  avg $1.02/day                               ││total 95.2K  peak 47.6K on 09-01  avg 31.7K/day                               │

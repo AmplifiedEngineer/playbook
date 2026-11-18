@@ -660,6 +660,8 @@ struct Metric {
     percent: String,
     /// The change itself, whose sign picks the color.
     change: f64,
+    /// Said after the value when it is partly an estimate.
+    note: Option<String>,
 }
 
 impl Metric {
@@ -671,14 +673,26 @@ impl Metric {
             amount: String::new(),
             percent: String::new(),
             change: 0.0,
+            note: None,
         }
     }
 }
 
+/// The cost with a leading `~` and the estimate note when part of it is one.
+fn cost_text(d: &Data, usd: f64) -> (String, Option<String>) {
+    match d.totals.estimate_label() {
+        Some(label) => (format!("~{}", money(usd)), Some(format!(" ({label})"))),
+        None => (money(usd), None),
+    }
+}
+
 fn metrics(d: &Data) -> [Metric; 3] {
+    let (now_cost, cost_note) = cost_text(d, d.totals.cost_usd);
     let Some(c) = &d.comparison else {
+        let mut cost = Metric::alone("cost", now_cost);
+        cost.note = cost_note;
         return [
-            Metric::alone("cost", money(d.totals.cost_usd)),
+            cost,
             Metric::alone("tokens", compact(d.totals.tokens())),
             Metric::alone("messages", d.totals.messages.to_string()),
         ];
@@ -687,11 +701,12 @@ fn metrics(d: &Data) -> [Metric; 3] {
     [
         Metric {
             name: "cost",
-            now: money(c.current.cost_usd),
+            now: cost_text(d, c.current.cost_usd).0,
             before: Some(money(c.previous.cost_usd)),
             amount: signed_money(cost.amount),
             percent: signed_percent(cost.percent, c.current.cost_usd > 0.0),
             change: cost.amount,
+            note: cost_note,
         },
         Metric {
             name: "tokens",
@@ -700,6 +715,7 @@ fn metrics(d: &Data) -> [Metric; 3] {
             amount: signed_compact(tokens.amount),
             percent: signed_percent(tokens.percent, c.current.tokens() > 0),
             change: tokens.amount,
+            note: None,
         },
         Metric {
             name: "messages",
@@ -708,6 +724,7 @@ fn metrics(d: &Data) -> [Metric; 3] {
             amount: signed_count(messages.amount),
             percent: signed_percent(messages.percent, c.current.messages > 0),
             change: messages.amount,
+            note: None,
         },
     ]
 }
@@ -749,6 +766,9 @@ fn metric_lines(d: &Data, pal: &Palette) -> Vec<Line<'static>> {
                 Style::default().fg(pal.color(tint)),
             ));
         }
+        if let Some(note) = &m.note {
+            spans.push(Span::styled(note.clone(), plain));
+        }
         lines.push(Line::from(spans));
     }
     lines
@@ -773,6 +793,9 @@ fn folded_metric_line(d: &Data, pal: &Palette, room: usize) -> Option<Line<'stat
                 m.now,
                 Style::default().add_modifier(Modifier::BOLD),
             ));
+            if let Some(note) = &m.note {
+                spans.push(Span::styled(note.clone(), plain));
+            }
             let Some(before) = m.before else { continue };
             let tint = if m.change > 0.0 {
                 pal.warn
@@ -790,6 +813,25 @@ fn folded_metric_line(d: &Data, pal: &Palette, room: usize) -> Option<Line<'stat
         let line = Line::from(spans);
         (line.width() <= room).then_some(line)
     })
+}
+
+/// The models named in the unpriced note before it says how many more.
+const NAMED_UNPRICED: usize = 2;
+
+/// `unpriced: a, b +1`, or the message count when no model is known.
+fn unpriced_note(d: &Data) -> String {
+    if d.unpriced_models.is_empty() {
+        return format!("{} unpriced", d.unpriced);
+    }
+    let named = d.unpriced_models.iter().take(NAMED_UNPRICED);
+    let mut text = format!(
+        "unpriced: {}",
+        named.cloned().collect::<Vec<_>>().join(", ")
+    );
+    if d.unpriced_models.len() > NAMED_UNPRICED {
+        text.push_str(&format!(" +{}", d.unpriced_models.len() - NAMED_UNPRICED));
+    }
+    text
 }
 
 /// The time zone note in the header border. Weeks say which day they start on.
@@ -958,7 +1000,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
     }
     if let Some(d) = app.data.as_ref().filter(|d| d.unpriced > 0) {
         let ink = Style::default().fg(pal.color(pal.warn));
-        block = block.title(note(format!("{} unpriced", d.unpriced), ink));
+        block = block.title(note(unpriced_note(d), ink));
     }
     let inner = block.inner(area);
     let body = header_body(app, pal, usize::from(inner.width));
@@ -1573,12 +1615,28 @@ mod tests {
     }
 
     #[test]
-    fn the_unpriced_count_shows_in_the_header_border() {
+    fn the_unpriced_models_show_in_the_header_border() {
         let mut e = event("mystery", "alpha", 0.0);
         e.unpriced = true;
         let app = app_with(&[e]);
-        assert!(screen(&app, 80, 24).contains("1 unpriced"));
-        assert!(screen(&app, 120, 30).contains("1 unpriced"));
+        assert!(screen(&app, 80, 24).contains("unpriced: mystery"));
+        assert!(screen(&app, 120, 30).contains("unpriced: mystery"));
+    }
+
+    #[test]
+    fn the_cost_is_marked_unless_it_is_all_from_telemetry() {
+        use crate::CostSource;
+        let mut exact = event("m", "alpha", 3.0);
+        exact.cost_source = CostSource::Telemetry;
+        let guess = event("m", "alpha", 1.0);
+
+        let mixed = screen(&app_with(&[exact.clone(), guess.clone()]), 120, 30);
+        let all_guess = screen(&app_with(&[guess]), 120, 30);
+        let all_exact = screen(&app_with(&[exact]), 120, 30);
+
+        assert!(mixed.contains("~$4.00 (25% estimated)"), "{mixed}");
+        assert!(all_guess.contains("~$1.00 (estimated)"), "{all_guess}");
+        assert!(all_exact.contains("$3.00") && !all_exact.contains("% estimated"));
     }
 
     #[test]

@@ -1,8 +1,8 @@
 ╭─┤Agent Budget Dashboard├──┤UTC, weeks start Mon├─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │this week Aug 31 to Sep 3 until 01:46  vs  last week Aug 24 to Aug 27 until 01:46  (same span 3d 1h)                                                          │
-│cost           $3.05   vs      $6.21      -$3.16   -50.9% │ No limit   ------------------------------------------------------  press b to set a monthly budget│
-│tokens         95.2K   vs      71.4K      +23.8K   +33.3% │ Spend    h this week $0.00 ----------  last week $0.00 ----------  new  avg n/a                   │
-│messages           4   vs          3          +1   +33.3% │                                                                                                   │
+│cost          ~$3.05   vs      $6.21      -$3.16   -50.9% (estimated) │ No limit   ------------------------------------------  press b to set a monthly budget│
+│tokens         95.2K   vs      71.4K      +23.8K   +33.3%             │ Spend    h this week $0.00 ----------  last week $0.00 ----------  new  avg n/a       │
+│messages           4   vs          3          +1   +33.3%             │                                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─┤¹Spend per day, USD├─┤v view: total├────────────────────────────────────────╮╭─┤²Tokens per day├────────────────────────────────────────────────────────────╮
 │total $3.05  peak $1.80 on 09-01  avg $0.76/day                               ││total 95.2K  peak 47.6K on 09-01  avg 23.8K/day                               │
