@@ -211,10 +211,11 @@ mod tests {
     }
 
     #[test]
-    fn a_short_plot_keeps_only_zero_and_the_top() {
+    fn a_plot_under_four_rows_keeps_only_zero_and_the_top() {
         assert_eq!(Axis::of(100.0, 1).ticks(), vec![0.0, 100.0]);
         assert_eq!(Axis::of(100.0, 3).ticks(), vec![0.0, 100.0]);
         assert_eq!(Axis::of(2.2, 3).ticks(), vec![0.0, 2.5]);
+        assert_eq!(Axis::of(100.0, 4).ticks(), vec![0.0, 50.0, 100.0]);
         assert_eq!(Axis::of(100.0, 5).ticks(), vec![0.0, 50.0, 100.0]);
     }
 

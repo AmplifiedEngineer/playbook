@@ -12,7 +12,7 @@
 //! uses it, so the cursor lands on the bar it points at.
 
 use super::data::{DayPoint, Slots};
-use super::fmt::{axis_money, axis_tokens, compact, fit, money, WEEKDAYS};
+use super::fmt::{axis_money_for_step, axis_tokens, compact, fit, money, WEEKDAYS};
 use super::scale::{Axis, ROW_EIGHTHS};
 use super::theme::{Fill, Ink, Palette, SERIES};
 use crate::aggregate::date_key;
@@ -55,9 +55,10 @@ impl Metric {
         }
     }
 
-    fn axis_label(self, v: f64) -> String {
+    /// A label for a grid line of an axis whose lines are `step` apart.
+    fn axis_label(self, v: f64, step: f64) -> String {
         match self {
-            Metric::Cost => axis_money(v),
+            Metric::Cost => axis_money_for_step(v, step),
             Metric::Tokens => axis_tokens(v),
         }
     }
@@ -354,7 +355,7 @@ impl Plot {
             let width = axis
                 .ticks()
                 .iter()
-                .map(|t| metric.axis_label(*t).chars().count() as u16)
+                .map(|t| metric.axis_label(*t, axis.step).chars().count() as u16)
                 .max()
                 .unwrap_or(2);
             let settled = width == label_width;
@@ -808,7 +809,11 @@ pub fn render(buf: &mut Buffer, plot: &Plot, series: &[DayPoint], view: &View, p
                 peak == Some(i),
             );
             let x = geo.x_of(i);
-            buf.set_stringn(x, y, label, usize::from(geo.cells[i].1), style);
+            // The last bar has no gap after it, so its label stops at the
+            // plot edge.
+            let room =
+                usize::from(geo.cells[i].1).min(usize::from(geo.plot.right().saturating_sub(x)));
+            buf.set_stringn(x, y, label, room, style);
         }
     }
     if let (Some(y), 1) = (geo.dates_y, geo.per) {
@@ -883,7 +888,10 @@ fn draw_axis(buf: &mut Buffer, plot: &Plot, pal: &Palette) {
         buf[(axis_x, p.y + row)]
             .set_char('\u{2524}')
             .set_style(dim(pal));
-        let label = fit(&plot.metric.axis_label(value), usize::from(geo.gutter - 2));
+        let label = fit(
+            &plot.metric.axis_label(value, plot.axis.step),
+            usize::from(geo.gutter - 2),
+        );
         let width = label.chars().count() as u16;
         buf.set_string(axis_x - width, p.y + row, label, dim(pal));
     }
@@ -974,11 +982,11 @@ fn draw_stacked(buf: &mut Buffer, plot: &Plot, slots: &Slots, pal: &Palette) {
         let runs = runs(bar, slots, levels);
         let start_of = |k: usize| if k == 0 { 0 } else { runs[k - 1].1 };
         for r in 0..p.height {
-            let lo = usize::from(r) * 8;
+            let lo = usize::from(r) * ROW_EIGHTHS;
             if lo >= levels {
                 break;
             }
-            let hi = (lo + 8).min(levels);
+            let hi = (lo + ROW_EIGHTHS).min(levels);
             // How much of this cell each run fills.
             let overlap = |k: usize| hi.min(runs[k].1).saturating_sub(lo.max(start_of(k)));
             let inside: Vec<usize> = (0..runs.len()).filter(|k| overlap(*k) > 0).collect();
@@ -989,7 +997,7 @@ fn draw_stacked(buf: &mut Buffer, plot: &Plot, slots: &Slots, pal: &Palette) {
                 .unwrap_or(0);
             let eighths = hi - lo;
             let (glyph, style) = match (pal.mono, inside.as_slice()) {
-                (true, _) if eighths == 8 => {
+                (true, _) if eighths == ROW_EIGHTHS => {
                     (PATTERNS[runs[main].0 % PATTERNS.len()], Style::default())
                 }
                 (true, _) => (EIGHTHS[eighths - 1], Style::default()),
@@ -1180,6 +1188,46 @@ mod tests {
     }
 
     #[test]
+    fn no_weekday_or_day_label_passes_the_right_edge_of_the_plot() {
+        for panel_width in 30..=140 {
+            for days in 1..=31 {
+                let panel = Rect::new(0, 0, panel_width, 14);
+                let (plot, buf) = draw(panel, &series(&vec![1.0; days]), None);
+                let right = plot.geo.plot.right();
+                for y in [plot.geo.weekdays_y, plot.geo.dates_y]
+                    .into_iter()
+                    .flatten()
+                {
+                    for x in right..panel_width {
+                        assert_eq!(
+                            buf[(x, y)].symbol(),
+                            " ",
+                            "{panel_width} wide, {days} days, row {y}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn small_dollar_peaks_get_distinct_axis_labels() {
+        for peak in [0.0004, 0.002, 0.0035, 0.01, 0.37] {
+            let plot = Plot::new(Rect::new(0, 0, 60, 18), &series(&[peak]), Metric::Cost);
+            let labels: Vec<String> = plot
+                .axis
+                .ticks()
+                .iter()
+                .map(|t| plot.metric.axis_label(*t, plot.axis.step))
+                .collect();
+            let mut unique = labels.clone();
+            unique.dedup();
+            assert_eq!(unique, labels, "peak {peak}");
+            assert!(labels.len() >= 3, "peak {peak}: {labels:?}");
+        }
+    }
+
+    #[test]
     fn the_pair_that_wastes_the_fewest_columns_wins_and_wider_bars_win_ties() {
         // Seven bars in 32 columns: 3 and 1 leave 5. 2 and 3 would leave none,
         // but a gap wider than a bar is not tried, and 4 and 1 (34) does not fit.
@@ -1215,8 +1263,8 @@ mod tests {
                 let series = series(&[value, 400.0]);
                 let (plot, buf) = draw(panel, &series, None);
                 let p = plot.geo.plot;
-                if p.height < 5 && value < 400.0 {
-                    continue; // a plot under five rows carries no middle line
+                if p.height < 4 && value < 400.0 {
+                    continue; // a plot under four rows carries no middle line
                 }
                 let label_row = (p.y..p.y + p.height)
                     .find(|y| row(&buf, *y).contains(label))
@@ -1311,7 +1359,11 @@ mod tests {
         let mut rows = Vec::new();
         for value in &ticks {
             let y = p.y + plot.axis.row_of(*value, p.height);
-            assert_eq!(label(y).trim(), plot.metric.axis_label(*value), "{value}");
+            assert_eq!(
+                label(y).trim(),
+                plot.metric.axis_label(*value, plot.axis.step),
+                "{value}"
+            );
             // The axis line has a tick at each label.
             assert_eq!(buf[(p.x - 1, y)].symbol(), "\u{2524}");
             rows.push(y);

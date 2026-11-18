@@ -110,33 +110,48 @@ pub fn signed_percent(percent: Option<f64>, grew: bool) -> String {
     }
 }
 
-/// A number with at most three decimals and no trailing zeros: `2.5`, `0.05`.
-fn trimmed(n: f64) -> String {
-    let text = format!("{n:.3}");
+/// The decimals an axis label keeps unless a small step needs more.
+const AXIS_DECIMALS: usize = 3;
+
+/// A number with at most `decimals` decimals and no trailing zeros: `2.5`,
+/// `0.05`.
+fn trimmed(n: f64, decimals: usize) -> String {
+    let text = format!("{n:.decimals$}");
     text.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 /// An axis label in dollars: `$0`, `$0.25`, `$12.5`, `$250`, `$2.5K`.
 pub fn axis_money(usd: f64) -> String {
-    format!("${}", axis_number(usd))
+    format!("${}", axis_number(usd, AXIS_DECIMALS))
+}
+
+/// An axis label in dollars on an axis whose lines are `step` apart, with
+/// enough decimals that no two lines read the same.
+pub fn axis_money_for_step(usd: f64, step: f64) -> String {
+    let needed = if step.is_finite() && step > 0.0 {
+        (-step.log10().floor()).max(0.0) as usize
+    } else {
+        0
+    };
+    format!("${}", axis_number(usd, needed.max(AXIS_DECIMALS)))
 }
 
 /// An axis label in tokens: `0`, `250`, `500K`, `2.5M`.
 pub fn axis_tokens(n: f64) -> String {
-    axis_number(n)
+    axis_number(n, AXIS_DECIMALS)
 }
 
-fn axis_number(n: f64) -> String {
+fn axis_number(n: f64, decimals: usize) -> String {
     const UNITS: [(f64, &str); 3] = [(1e9, "B"), (1e6, "M"), (1e3, "K")];
     for (size, suffix) in UNITS {
         if n >= size * 0.9995 {
-            return format!("{}{suffix}", trimmed(n / size));
+            return format!("{}{suffix}", trimmed(n / size, decimals));
         }
     }
     if n >= 100.0 {
         format!("{n:.0}")
     } else {
-        trimmed(n)
+        trimmed(n, decimals)
     }
 }
 
