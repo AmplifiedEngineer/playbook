@@ -7,15 +7,12 @@
 
 use crate::limits::LimitPeriod;
 use crate::limits_source::{Snapshot, Sources, Window};
+use crate::query::month_first_day;
 use crate::UsageEvent;
 
 const DAY: i64 = 86_400;
 const HOUR: i64 = 3_600;
 const MINUTE: i64 = 60;
-/// Days of history before today: all of last month and the days of this one.
-const HISTORY_DAYS: i64 = 50;
-/// Days before today that belong to this month, so older days are last month's.
-const THIS_MONTH_DAYS: i64 = 20;
 /// Last month runs at this share of this month's level.
 const PREVIOUS_MONTH_LEVEL: f64 = 0.8;
 /// 1970-01-01 was a Thursday, three days after Monday.
@@ -23,7 +20,8 @@ const EPOCH_WEEKDAY_SHIFT: i64 = 3;
 const WEEK_DAYS: i64 = 7;
 /// Spend in dollars of a whole day, Monday first.
 const WEEKDAY_SPEND: [f64; 7] = [26.0, 34.0, 38.0, 31.0, 22.0, 6.0, 4.0];
-/// A day-to-day factor so no two days match, picked by day number.
+/// A week-to-week factor so the same weekday differs from week to week,
+/// picked by week number.
 const DAY_WOBBLE: [f64; 7] = [0.85, 1.1, 0.95, 1.2, 0.9, 1.05, 1.0];
 /// The hours of work and how much of the day's spend each one gets.
 const WORK_HOURS: [(i64, f64); 9] = [
@@ -82,17 +80,22 @@ fn event(ts: i64, session: String, model: &str, repo: &str, cost: f64) -> UsageE
 /// it. The days count back from the UTC start of the day of `now`.
 pub(super) fn events(now: i64) -> Vec<UsageEvent> {
     let today = now - now % DAY;
+    let this_month_first = month_first_day(today / DAY);
+    let last_month_first = month_first_day(this_month_first - 1);
+    let this_month_days = today / DAY - this_month_first;
+    let history_days = today / DAY - last_month_first;
     let mut events = Vec::new();
-    for age in 1..=HISTORY_DAYS {
+    for age in 1..=history_days {
         let start = today - age * DAY;
         let day = start / DAY;
         let weekday = (day + EPOCH_WEEKDAY_SHIFT).rem_euclid(WEEK_DAYS) as usize;
-        let level = if age > THIS_MONTH_DAYS {
+        let level = if age > this_month_days {
             PREVIOUS_MONTH_LEVEL
         } else {
             1.0
         };
-        let spend = WEEKDAY_SPEND[weekday] * DAY_WOBBLE[day.rem_euclid(WEEK_DAYS) as usize] * level;
+        let week = (day + EPOCH_WEEKDAY_SHIFT).div_euclid(WEEK_DAYS) as usize;
+        let spend = WEEKDAY_SPEND[weekday] * DAY_WOBBLE[week % DAY_WOBBLE.len()] * level;
         for (slot, (hour, share)) in WORK_HOURS.iter().enumerate() {
             let repo = PROJECTS[(day as usize + slot) % PROJECTS.len()];
             let session = format!("s-{day}-{}", slot / HOURS_PER_SESSION);
