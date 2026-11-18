@@ -13,7 +13,7 @@
 
 use super::budget;
 use super::data::Data;
-use super::dots::DotGrid;
+use super::dots::{line_dots, DotGrid};
 use super::fmt::{axis_money, fit};
 use super::icon::Icon;
 use super::theme::{Ink, Palette};
@@ -37,6 +37,8 @@ const HEADROOM: f64 = 1.05;
 /// The thresholds drawn, in percent of the limit.
 const NEAR: f64 = 80.0;
 const PERCENT: f64 = 100.0;
+/// The projection keeps one dot in this many along its path.
+const PROJECTION_STEP: usize = 2;
 /// The glyph in the legend for the used area drawn as dots.
 const DOT_ACTUAL: char = '\u{28ff}';
 
@@ -335,50 +337,22 @@ impl Dot {
     }
 }
 
-/// The dot row of the projection in each dot column from `now` on, so the
-/// dotted line starts at the last used value.
-fn projection_edge(b: &Burnup, fine: &Plot) -> Vec<Option<usize>> {
-    (0..fine.width)
-        .map(|x| {
-            let at = fine.time(b, x);
-            b.projected_at(at)
-                .filter(|_| at >= b.now)
-                .map(|v| fine.row(v))
-        })
-        .collect()
+/// The dots of the projection, one connected path from the last used value at
+/// `now` to the period end, or none when there is no projection. Each dot
+/// touches the next, so a steep stretch has no gap.
+fn projection_path(b: &Burnup, fine: &Plot) -> Vec<(usize, usize)> {
+    let Some(end) = b.projected_end else {
+        return Vec::new();
+    };
+    let Some(start) = (0..fine.width).rev().find(|x| fine.time(b, *x) <= b.now) else {
+        return Vec::new();
+    };
+    line_dots((start, fine.row(b.total)), (fine.width - 1, fine.row(end)))
 }
 
-/// The dots of a continuous line through one row per column. Two columns
-/// that differ in height meet halfway, so a rise reads as one stroke and not
-/// as two separate dots. A column with `None` breaks the line.
-fn connect(edge: &[Option<usize>]) -> Vec<(usize, usize)> {
-    // The rows each column covers, as `(low, high)`.
-    let mut span: Vec<Option<(usize, usize)>> = edge.iter().map(|r| r.map(|y| (y, y))).collect();
-    for x in 1..edge.len() {
-        let (Some(from), Some(to)) = (edge[x - 1], edge[x]) else {
-            continue;
-        };
-        // The left column runs to the middle, the right one from just past it.
-        let mid = (from + to) / 2;
-        let next = if to > from {
-            mid + 1
-        } else {
-            mid.saturating_sub(1)
-        };
-        let widen = |s: &mut Option<(usize, usize)>, row: usize| {
-            if let Some((lo, hi)) = s {
-                *lo = (*lo).min(row);
-                *hi = (*hi).max(row);
-            }
-        };
-        widen(&mut span[x - 1], mid);
-        widen(&mut span[x], if to == from { to } else { next });
-    }
-    span.into_iter()
-        .enumerate()
-        .filter_map(|(x, s)| s.map(|(lo, hi)| (lo..=hi).map(move |y| (x, y))))
-        .flatten()
-        .collect()
+/// Every second dot of `path`, so the projection reads as dotted.
+fn dotted(path: &[(usize, usize)]) -> impl Iterator<Item = (usize, usize)> + '_ {
+    path.iter().copied().step_by(PROJECTION_STEP)
 }
 
 /// Fills each dot column up to `now` solid from the bottom to its value, each
@@ -399,9 +373,9 @@ fn fill_used(b: &Burnup, fine: &Plot, grid: &mut DotGrid<Dot>) {
 }
 
 /// The plot as spans of Braille cells, top row first. The used area is a solid
-/// fill, grown from the bottom of each dot column to its value. The reference
-/// lines and the projection are dots too, but only in cells the fill leaves
-/// free, so they never cut it. Markers and the other point glyphs stay
+/// fill, grown from the bottom of each dot column to its value. The dotted
+/// projection takes the cells the fill leaves free, and the reference lines
+/// the cells neither touches, so nothing cuts the fill or the projection. Markers and the other point glyphs stay
 /// whole-cell glyphs over the dots.
 fn dot_rows(b: &Burnup, pal: &Palette, plot: &Plot) -> Vec<Vec<Span<'static>>> {
     let fine = Plot {
@@ -411,6 +385,10 @@ fn dot_rows(b: &Burnup, pal: &Palette, plot: &Plot) -> Vec<Vec<Span<'static>>> {
     };
     let mut fill = DotGrid::new(plot.width, plot.height);
     fill_used(b, &fine, &mut fill);
+    let mut projection = DotGrid::new(plot.width, plot.height);
+    for (x, y) in dotted(&projection_path(b, &fine)) {
+        projection.set(x, y, Dot::Projection);
+    }
     let mut dots = DotGrid::new(plot.width, plot.height);
     let mut glyphs = vec![vec![Role::Empty; plot.width]; plot.height];
     for (y, row) in cells(b, &fine).into_iter().enumerate() {
@@ -426,16 +404,14 @@ fn dot_rows(b: &Burnup, pal: &Palette, plot: &Plot) -> Vec<Vec<Span<'static>>> {
             }
         }
     }
-    for (x, y) in connect(&projection_edge(b, &fine)) {
-        if x % 3 != 2 {
-            dots.set(x, y, Dot::Projection);
-        }
-    }
     (0..plot.height)
         .map(|row| {
             (0..plot.width)
                 .map(|col| {
-                    let drawn = fill.cell(col, row).or_else(|| dots.cell(col, row));
+                    let drawn = fill
+                        .cell(col, row)
+                        .or_else(|| projection.cell(col, row))
+                        .or_else(|| dots.cell(col, row));
                     match (glyphs[row][col], drawn) {
                         (Role::Empty, Some((ch, dot))) => {
                             Span::styled(ch.to_string(), style(pal, dot.ink(pal)))
@@ -643,57 +619,6 @@ mod tests {
         }
     }
 
-    /// Whether each column's dots touch those of the next column.
-    fn unbroken(dots: &[(usize, usize)]) -> bool {
-        let range = |x: usize| {
-            let ys: Vec<usize> = dots.iter().filter(|d| d.0 == x).map(|d| d.1).collect();
-            ys.iter().min().copied().zip(ys.iter().max().copied())
-        };
-        let last = dots.iter().map(|d| d.0).max().unwrap_or(0);
-        (0..last).all(|x| match (range(x), range(x + 1)) {
-            (Some((lo, hi)), Some((lo2, hi2))) => lo2 <= hi + 1 && lo <= hi2 + 1,
-            _ => false,
-        })
-    }
-
-    #[test]
-    fn no_samples_draw_no_line() {
-        assert!(connect(&[]).is_empty());
-        assert!(connect(&[None, None]).is_empty());
-    }
-
-    #[test]
-    fn one_sample_draws_one_dot() {
-        assert_eq!(connect(&[Some(3)]), vec![(0, 3)]);
-    }
-
-    #[test]
-    fn two_samples_far_apart_in_height_join_without_a_gap() {
-        // Arrange
-        let edge = [Some(2), Some(14)];
-
-        // Act
-        let dots = connect(&edge);
-
-        // Assert
-        assert!(dots.contains(&(0, 2)) && dots.contains(&(1, 14)));
-        assert!(unbroken(&dots));
-        assert_eq!(dots.len(), 13);
-    }
-
-    #[test]
-    fn a_fall_joins_as_well_as_a_rise() {
-        let dots = connect(&[Some(14), Some(2)]);
-        assert!(unbroken(&dots));
-        assert_eq!(dots.len(), 13);
-    }
-
-    #[test]
-    fn a_missing_column_breaks_the_line() {
-        let dots = connect(&[Some(1), None, Some(9)]);
-        assert_eq!(dots, vec![(0, 1), (2, 9)]);
-    }
-
     /// Whether dot `(x, y)` is set in `grid`.
     fn lit(grid: &DotGrid<Dot>, x: usize, y: usize) -> bool {
         let Some((ch, _)) = grid.cell(x / 2, y / 4) else {
@@ -790,22 +715,85 @@ mod tests {
         }
     }
 
+    fn projecting(total: f64, end: f64) -> Burnup {
+        let mut b = line(vec![(0, 0.0), (400, total)], 400);
+        b.total = total;
+        b.projected_end = Some(end);
+        b
+    }
+
     #[test]
-    fn the_projection_is_dotted_and_starts_at_the_last_used_value() {
+    fn the_projection_is_one_connected_path_from_the_last_used_value_to_the_end() {
+        for end in [45.0, 100.0, 400.0] {
+            // Arrange
+            let b = projecting(40.0, end);
+            let f = fine(&b);
+
+            // Act
+            let path = projection_path(&b, &f);
+
+            // Assert
+            assert_eq!(path.first().map(|d| d.1), Some(f.row(40.0)), "end {end}");
+            assert_eq!(path.last(), Some(&(f.width - 1, f.row(end))), "end {end}");
+            assert!(
+                path.windows(2)
+                    .all(|w| w[0].0.abs_diff(w[1].0) <= 1 && w[0].1.abs_diff(w[1].1) <= 1),
+                "gap in {path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_projection_is_dotted_and_there_is_none_without_a_projected_end() {
+        let b = projecting(40.0, 100.0);
+        let path = projection_path(&b, &fine(&b));
+        assert_eq!(dotted(&path).count(), path.len().div_ceil(PROJECTION_STEP));
+        let mut none = projecting(40.0, 100.0);
+        none.projected_end = None;
+        assert!(projection_path(&none, &fine(&none)).is_empty());
+    }
+
+    #[test]
+    fn no_reference_dot_shares_a_cell_with_a_projection_dot() {
         // Arrange
-        let mut b = line(vec![(0, 0.0), (400, 40.0)], 400);
-        b.total = 40.0;
-        b.projected_end = Some(100.0);
-        let f = fine(&b);
+        let pal = Theme::Standard.palette(ColorDepth::True);
+        let b = projecting(47.0, 170.0);
+        let plot = Plot::new(&b, 40, 14);
+        let f = Plot {
+            width: plot.width * 2,
+            height: plot.height * 4,
+            top: plot.top,
+        };
+        let mut fill = DotGrid::new(plot.width, plot.height);
+        fill_used(&b, &f, &mut fill);
+        let projected: std::collections::HashSet<(usize, usize)> = dotted(&projection_path(&b, &f))
+            .map(|(x, y)| (x / 2, y / 4))
+            .filter(|(col, row)| fill.cell(*col, *row).is_none())
+            .collect();
+        assert!(projected.len() > 10);
 
         // Act
-        let projected = projection_edge(&b, &f);
+        let rows = dot_rows(&b, &pal, &plot);
 
         // Assert
-        let first = projected.iter().position(Option::is_some).unwrap();
-        assert!(f.time(&b, first) >= b.now);
-        // The first column lies a fraction past `now`, so one dot row of rise at most.
-        assert!(projected[first].unwrap().abs_diff(f.row(40.0)) <= 1);
-        assert!(projected[f.width - 1].is_some());
+        let reference = [pal.error, pal.inactive].map(|ink| pal.color(ink));
+        for (row, spans) in rows.iter().enumerate() {
+            for (col, span) in spans.iter().enumerate() {
+                // A whole-cell marker replaces the dots under it.
+                let dotted_cell = span
+                    .content
+                    .chars()
+                    .all(|c| ('\u{2800}'..='\u{28ff}').contains(&c));
+                if dotted_cell && projected.contains(&(col, row)) {
+                    assert_eq!(
+                        span.style.fg,
+                        Some(pal.color(Dot::Projection.ink(&pal))),
+                        "cell ({col}, {row}) {:?}",
+                        span.content
+                    );
+                    assert!(!reference.contains(&span.style.fg.unwrap()));
+                }
+            }
+        }
     }
 }
