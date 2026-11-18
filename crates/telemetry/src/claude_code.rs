@@ -369,6 +369,7 @@ fn usage_event(line: &Value, timestamp: i64, repos: &mut RepoResolver) -> Option
         event_id,
         timestamp,
         session_id: str_field(line, "sessionId").to_string(),
+        request_id: str_field(line, "requestId").to_string(),
         model: str_field(message, "model").to_string(),
         effort: str_field(line, "effort").to_string(),
         repo: repos.resolve(str_field(line, "cwd")),

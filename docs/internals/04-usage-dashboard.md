@@ -493,7 +493,7 @@ If the collector is not running when a session starts, Claude Code may drop what
 
 ## Choosing a source per session
 
-After each ingest, `usage::reconcile` compares every session that has telemetry rows with its transcript totals and records one verdict in `session_reconcile`. Transcripts stay the authority, and every total (`--json`, `--summary`, the terminal view) still sums the transcript rows priced by playbook, so nothing is counted twice.
+After each ingest, `usage::reconcile` compares every session that has telemetry rows with its transcript totals and records one verdict in `session_reconcile`. The verdict compares telemetry with the transcript rows priced by the table alone. Totals do not depend on it: they come from the cost merge below.
 
 | Verdict | When | Source |
 |---|---|---|
@@ -503,6 +503,16 @@ After each ingest, `usage::reconcile` compares every session that has telemetry 
 | No telemetry rows | Nothing is recorded. | Reads from transcripts, so old history needs no backfill. |
 
 The pass is idempotent. A failure leaves transcripts as the source.
+
+### Cost merge
+
+`cost_merge.rs` runs inside every event loader, so the terminal view, `--summary`, `--json`, the limits and the burn rate sum the same per request figures. A transcript line of Claude Code carries a `requestId`, stored in `usage_events.request_id` (schema version 6, added by `ALTER TABLE` on open). The telemetry row calls it `request_id`, and (session id, request id) joins them exactly.
+
+- A request with a telemetry `cost_usd` above 0 takes that cost. Claude Code computed it. A zero is ignored, since it may only mean Claude Code did not know the model.
+- A request only telemetry saw becomes an event with the id `telemetry:<session>:<request>`. It takes the account, repo and branch of its session, or the `unknown` account. Requests are added only after a one time backfill (`backfill::run_request_ids_once`) has filled the request id of rows stored earlier, because an old row without one would count twice. The marker is the `usage_watermarks` row `backfill:request-id-v1`. A row the backfill could not fill (its transcript was deleted, say) keeps an empty request id, so a request with no exact match is also compared with the empty-id rows of its session. The same model and token counts mean it is that row: it is not added, and it takes the telemetry cost when exactly one row fits.
+- A request telemetry missed keeps the table estimate. When the table has no price for its model but telemetry priced at least 3 requests of it, the cost is the model's learned rate: telemetry cost over weighted tokens, with output at 5 times input, a cache write at 1.25 times and a cache read at a tenth. A model with neither stays unpriced and costs 0.
+
+Each event has a `CostSource`: `Telemetry` is exact, `Table` and `Learned` are estimates.
 
 ## Cost per agent
 

@@ -25,7 +25,7 @@ impl Home {
         fs::create_dir_all(&project).unwrap();
         let line = |session: &str, id: &str, ts: &str, input: u64, output: u64| {
             format!(
-                "{{\"type\":\"assistant\",\"uuid\":\"{id}\",\"sessionId\":\"{session}\",\"timestamp\":\"{ts}\",\"cwd\":\"/w/proj-one\",\"gitBranch\":\"main\",\"message\":{{\"id\":\"msg_{id}\",\"model\":\"claude-sonnet-5\",\"content\":[],\"usage\":{{\"input_tokens\":{input},\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":{output}}}}}}}\n"
+                "{{\"type\":\"assistant\",\"uuid\":\"{id}\",\"sessionId\":\"{session}\",\"requestId\":\"req_{id}\",\"timestamp\":\"{ts}\",\"cwd\":\"/w/proj-one\",\"gitBranch\":\"main\",\"message\":{{\"id\":\"msg_{id}\",\"model\":\"claude-sonnet-5\",\"content\":[],\"usage\":{{\"input_tokens\":{input},\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":{output}}}}}}}\n"
             )
         };
         let sessions = [
@@ -117,7 +117,7 @@ fn source(conn: &Connection, session: &str) -> Option<String> {
 }
 
 #[test]
-fn telemetry_never_changes_a_total_and_each_session_reads_from_one_source() {
+fn telemetry_adds_only_requests_transcripts_missed_and_each_session_reads_from_one_source() {
     let home = Home::new();
 
     // Transcripts only: the fallback. This also creates the store.
@@ -137,7 +137,7 @@ fn telemetry_never_changes_a_total_and_each_session_reads_from_one_source() {
     );
     // Session B: the receiver missed the second message (partial).
     add_request(&conn, "sess-b", "req_b1", (3000, 700), cost("sess-b", "b1"));
-    // Session D: telemetry with no transcript at all. It must add nothing.
+    // Session D: telemetry with no transcript at all. Its request is added.
     add_request(&conn, "sess-d", "req_d1", (9000, 9000), 99.0);
     // A redelivered batch is stored once.
     add_request(&conn, "sess-a", "req_a1", (1000, 500), cost("sess-a", "a1"));
@@ -147,7 +147,25 @@ fn telemetry_never_changes_a_total_and_each_session_reads_from_one_source() {
     assert_eq!(rows, 4);
 
     let after = home.totals();
-    assert_eq!(after, before, "telemetry rows must not move any total");
+    let (b, a) = (&before, &after);
+    for key in [
+        "cache_creation_tokens",
+        "cache_read_tokens",
+        "unpriced_messages",
+    ] {
+        assert_eq!(a[key], b[key], "{key}");
+    }
+    assert_eq!(a["messages"], 6, "only the telemetry only request is added");
+    assert_eq!(
+        a["input_tokens"],
+        b["input_tokens"].as_u64().unwrap() + 9000
+    );
+    assert_eq!(
+        a["output_tokens"],
+        b["output_tokens"].as_u64().unwrap() + 9000
+    );
+    let cost = |v: &Value| v["cost_usd"].as_f64().unwrap();
+    assert!((cost(a) - cost(b) - 99.0).abs() < 1e-9, "{a} vs {b}");
 
     let conn = home.db();
     assert_eq!(state(&conn, "sess-a").as_deref(), Some("complete"));

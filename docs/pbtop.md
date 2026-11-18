@@ -212,7 +212,7 @@ The first line shows the id and the name. The second sets a name, and an empty n
 
 ## Cost math
 
-Transcripts carry no cost, so pbtop estimates each message from a price table. The table is a copy of the [LiteLLM price list](https://github.com/BerriAI/litellm) that ships with pbtop, so a new Claude or OpenAI model is priced without a code change. For one message:
+pbtop uses the cost Claude Code reports through telemetry, matched by request id, and adds requests only telemetry saw. Transcripts carry no cost, so it estimates every other message from a copy of the [LiteLLM price list](https://github.com/BerriAI/litellm) that ships with pbtop. For an estimated message:
 
 ```text
 cost = (input x in + output x out
@@ -220,9 +220,9 @@ cost = (input x in + output x out
       + cache read x in x read share) / 1,000,000
 ```
 
-Here `in` and `out` are the model's dollars per million input and output tokens, and `read share` is its cache read price as a share of `in`. Some models, such as Haiku 5.5, charge more when the prompt is long, and the table has that too.
+Here `in` and `out` are the model's dollars per million input and output tokens, and `read share` is its cache read price as a share of `in`. The table also has the higher price some models charge for a long prompt.
 
-The cost is an estimate at API prices. It is not what a subscription plan bills. pbtop does not guess the price of a model that is not in the table: its messages count as $0, and `--summary` and `--json` name how many and which models.
+An estimate is at API prices, not what a plan bills. For a model the table lacks, pbtop learns a rate from three telemetry requests. Without them the model shows as unpriced, and `--summary` and `--json` name it.
 
 ## Limits
 
@@ -305,7 +305,7 @@ Usage sync is an opt-in preview. It copies usage rows between your own machines 
 - The numbers look low or stale. Run `playbook usage status` to see whether the receiver runs and how many telemetry rows exist.
 - A limit looks wrong. Run `playbook usage doctor`. Its output has no email, name or token, so you can share it.
 - The screen is blank or says it is too small. Make the window at least 80 columns by 24 rows.
-- A model shows no price. It is not in the price table. `--summary` names it.
+- A model shows no price. The table lacks it. `--summary` names it.
 
 ## Next
 

@@ -89,6 +89,7 @@ pub fn ingest_into(
 ) -> Result<IngestStats, String> {
     let source = ClaudeCodeSource::new(paths.claude_projects.clone());
     backfill::run_once(&source, conn)?;
+    backfill::run_request_ids_once(&source, conn)?;
     if let Some(dir) = paths.db.parent() {
         super::session_account::import(conn, dir)?;
         super::session_account::repair_joined_keys(conn)?;

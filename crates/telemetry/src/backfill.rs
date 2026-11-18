@@ -12,6 +12,7 @@ use super::UsageSource;
 use playbook_store::{Connection, Transaction, TransactionBehavior};
 
 const MARKER: &str = "backfill:repo-and-cache-tier-v1";
+const REQUEST_ID_MARKER: &str = crate::cost_merge::REQUEST_ID_BACKFILL_MARKER;
 
 /// Runs the repair once per database. Safe to call on every ingest: it is a
 /// single cheap read after the first run, and two racing callers apply it once.
@@ -43,6 +44,34 @@ pub fn run_once(source: &dyn UsageSource, conn: &Connection) -> Result<usize, St
         )?;
     }
     db::raise_watermark(&tx, MARKER, 1)?;
+    tx.commit()
+        .map_err(|e| format!("failed to commit backfill transaction: {e}"))?;
+    Ok(changed)
+}
+
+/// Fills `request_id` on rows stored before the column existed, from the same
+/// transcripts, then marks the store complete so telemetry only requests can be
+/// added without counting an old row twice. A row whose transcript is gone
+/// keeps none, which only means its cost stays an estimate.
+pub fn run_request_ids_once(source: &dyn UsageSource, conn: &Connection) -> Result<usize, String> {
+    if db::get_watermark(conn, REQUEST_ID_MARKER)? > 0 {
+        return Ok(0);
+    }
+    if db::count_usage_events(conn)? == 0 {
+        db::raise_watermark(conn, REQUEST_ID_MARKER, 1)?;
+        return Ok(0);
+    }
+    let events = source.events_since(0)?;
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
+        .map_err(|e| format!("failed to begin backfill transaction: {e}"))?;
+    if db::get_watermark(&tx, REQUEST_ID_MARKER)? > 0 {
+        return Ok(0);
+    }
+    let mut changed = 0;
+    for event in events.usage.iter().filter(|e| !e.request_id.is_empty()) {
+        changed += db::set_request_id(&tx, &event.event_id, &event.request_id)?;
+    }
+    db::raise_watermark(&tx, REQUEST_ID_MARKER, 1)?;
     tx.commit()
         .map_err(|e| format!("failed to commit backfill transaction: {e}"))?;
     Ok(changed)
@@ -118,6 +147,33 @@ mod tests {
             (orphan.repo.as_str(), orphan.cache_creation_1h_tokens),
             ("old-name", 0)
         );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn request_ids_are_filled_once_and_the_store_is_then_marked_complete() {
+        let dir = scratch_dir("usage-backfill-request");
+        let conn = db::open_db(&dir.join("usage.db")).unwrap();
+        db::upsert_usage_event(&conn, &row("old", "r", 0)).unwrap();
+        db::upsert_usage_event(&conn, &row("orphan", "r", 0)).unwrap();
+        let mut found = row("old", "r", 0);
+        found.request_id = "req_1".into();
+        let source = fake(vec![found]);
+
+        let first = run_request_ids_once(&source, &conn).unwrap();
+        let second = run_request_ids_once(&source, &conn).unwrap();
+
+        assert_eq!((first, second), (1, 0));
+        assert_eq!(source.scans.get(), 1);
+        let ids: Vec<String> = conn
+            .prepare("SELECT request_id FROM usage_events ORDER BY event_id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(ids, vec!["req_1".to_string(), String::new()]);
+        assert!(db::get_watermark(&conn, REQUEST_ID_MARKER).unwrap() > 0);
         let _ = fs::remove_dir_all(dir);
     }
 

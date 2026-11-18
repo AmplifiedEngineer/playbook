@@ -26,7 +26,7 @@
 //! The comparison is per session and needs no id join: the store keeps the
 //! transcript's message id, which telemetry does not carry.
 
-use super::db::load_usage_events_of_sessions;
+use super::db::load_transcript_events_of_sessions;
 use super::telemetry_db::{set_session_source, Source};
 use playbook_store::{params, Connection};
 
@@ -122,7 +122,7 @@ fn telemetry_totals(conn: &Connection) -> Result<Vec<(String, Totals)>, String> 
 }
 
 fn transcript_totals(conn: &Connection, session: &str) -> Result<Totals, String> {
-    let events = load_usage_events_of_sessions(conn, &[session.to_string()])?;
+    let events = load_transcript_events_of_sessions(conn, &[session.to_string()])?;
     Ok(Totals {
         tokens: events
             .iter()
@@ -206,10 +206,15 @@ mod tests {
                 output_tokens INTEGER NOT NULL, cache_creation_tokens INTEGER NOT NULL,
                 cache_read_tokens INTEGER NOT NULL, cost_usd REAL NOT NULL,
                 cache_creation_1h_tokens INTEGER NOT NULL DEFAULT 0,
-                agent TEXT NOT NULL DEFAULT 'claude-code');",
+                agent TEXT NOT NULL DEFAULT 'claude-code',
+                request_id TEXT NOT NULL DEFAULT '');",
         )
         .unwrap();
         migrate_up(&conn).unwrap();
+        conn.execute_batch(
+            "CREATE INDEX usage_events_by_request ON usage_events (session_id, request_id)",
+        )
+        .unwrap();
         conn
     }
 
