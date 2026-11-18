@@ -29,6 +29,8 @@ pub mod panels;
 mod parity;
 pub mod projection;
 pub mod reset_popup;
+#[cfg(test)]
+mod sample;
 pub mod scale;
 #[cfg(test)]
 mod screenshot;
