@@ -673,7 +673,7 @@ mod tests {
         use crate::limits::Origin;
         const DAY: i64 = 86_400;
         const DAYS: i64 = 20;
-        const DAILY_USD: f64 = 22.0;
+        const DAILY_USD: f64 = 26.0;
         const LIMIT_USD: f64 = 600.0;
         const PERIOD_DAYS: i64 = 30;
         let events: Vec<crate::UsageEvent> = (0..DAYS)
