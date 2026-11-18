@@ -21,4 +21,4 @@
 ││Marks                                                                       ││
 ││~          Tools: count only, from transcripts                              ││
 ╰╰┤ ↑/↓ j/k scroll, any other key closes ├────────────────────────────────────╯╯
- w week m month r range v view / filter ? help q quit      updated 01:46:40 UTC
+ r range ? help q quit                                     updated 01:46:40 UTC

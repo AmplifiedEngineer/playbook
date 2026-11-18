@@ -21,4 +21,4 @@
 │Turn it on with:                      ││beta              10  238.0K    $11.85│
 │playbook setup --only telemetry       ││alpha              9  214.2K     $8.25│
 ╰──────────────────────────────────────╯╰──────────────────────────────────────╯
- Tab tab w week m month v view / filter ? help q quit      updated 01:46:40 UTC
+ Tab panels r range ? help q quit                          updated 01:46:40 UTC

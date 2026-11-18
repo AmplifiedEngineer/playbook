@@ -126,13 +126,9 @@ Regenerate with: UPDATE_REFERENCE=1 cargo test -p playbook --test docs_pbtop_key
 
 | Key | What it does | Where |
 |---|---|---|
-| `d` | Show today | all panels |
-| `w` | Show this week | all panels |
 | `W` | Show last week | all panels |
-| `m` | Show this month | all panels |
 | `M` | Show last month | all panels |
-| `a` | Show all time | all panels |
-| `r` | Switch between today and this week | all panels |
+| `r` | Cycle today, this week, this month, all | all panels |
 | `z` | Switch between local time and UTC | all panels |
 
 **Views**
@@ -186,6 +182,8 @@ Regenerate with: UPDATE_REFERENCE=1 cargo test -p playbook --test docs_pbtop_key
 | `~` | Tools: count only, from transcripts |  |
 
 <!-- keys:end -->
+
+From any other range, `r` goes to the stop after the closest one. `--range` takes every range.
 
 ## Where the numbers come from
 

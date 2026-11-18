@@ -27,4 +27,4 @@
 │Wed 08-26 s-7      beta                         sonnet-5                        1   23.8K    $0.20│
 │Tue 08-25 s-old    beta                         opus-5                          1   23.8K    $6.00│
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- Tab tab w week m month r range v view / filter ? help q quit        updated 01:46:40 UTC, every 5s
+ Tab panels r range ? help q quit                                    updated 01:46:40 UTC, every 5s

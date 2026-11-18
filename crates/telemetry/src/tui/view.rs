@@ -459,56 +459,38 @@ fn footer(app: &App, pal: &Palette, area_width: u16, hidden: Option<Hidden>) -> 
     let (status, status_style) = refresh_status(app, pal, area_width);
     // The status keeps its place at the right, so the hints get what is left.
     let status_width = status.chars().count();
-    let theme = format!("theme ({})", app.theme.name());
-    // Shown in the order of the key table. When the line is too wide, hints
-    // drop in the table's `drop` order, so the ones that matter most stay.
-    let mut hints: Vec<(&str, String, u8)> = keys::footer_hints()
+    let hints: Vec<(&str, &str)> = keys::footer_hints()
         .into_iter()
         .filter(|h| app.layout.tabs.len() > 1 || h.key != "Tab")
-        .map(|h| {
-            let verb = if h.verb == "theme" {
-                theme.clone()
-            } else {
-                h.verb.to_string()
-            };
-            (h.key, verb, h.drop)
-        })
+        .map(|h| (h.key, h.verb))
         .collect();
-    let width = |hints: &[(&str, String, u8)]| {
+    let width = |hints: &[(&str, &str)]| {
         1 + hints
             .iter()
-            .map(|(k, l, _)| k.chars().count() + l.chars().count() + 2)
+            .map(|(k, l)| k.chars().count() + l.chars().count() + 2)
             .sum::<usize>()
     };
     // The note has a long and a short form. The short one is used when, with
-    // the long one, a hint the table never drops would not fit.
-    let never_dropped: Vec<_> = hints.iter().filter(|(_, _, d)| *d == 0).cloned().collect();
+    // the long one, a hint would not fit.
     let alert = hidden.map(|h| {
         let noun = if h.count == 1 { "panel" } else { "panels" };
         let long = format!(
             "{} {noun} hidden, {} rows show all ",
             h.count, h.needs_height
         );
-        if width(&never_dropped) + status_width + long.chars().count() <= usize::from(area_width) {
+        if width(&hints) + status_width + long.chars().count() <= usize::from(area_width) {
             long
         } else {
             format!("{} hidden, {} rows ", h.count, h.needs_height)
         }
     });
     let alert_width = alert.as_ref().map_or(0, |a| a.chars().count());
-    let room = usize::from(area_width).saturating_sub(status_width + alert_width);
-    for rank in 1..=u8::MAX {
-        if width(&hints) <= room {
-            break;
-        }
-        hints.retain(|(_, _, d)| *d != rank);
-    }
     let used = width(&hints) + alert_width;
     let mut spans = vec![Span::raw(" ")];
     if let Some(alert) = alert {
         spans.push(Span::styled(alert, Style::default().fg(pal.color(pal.hi))));
     }
-    for (key, label, _) in hints {
+    for (key, label) in hints {
         spans.push(Span::styled(key.to_string(), keys));
         spans.push(Span::styled(format!(" {label} "), plain));
     }
@@ -1419,30 +1401,16 @@ mod tests {
     }
 
     #[test]
-    fn the_footer_names_what_each_key_does_and_always_keeps_help_and_quit() {
+    fn the_footer_hints_only_the_range_help_and_quit_keys_at_any_width() {
         let app = App::new(Range::All);
-        let wide = screen(&app, 140, 30);
-        for hint in ["m month", "w week", "d day", "a all", "? help", "q quit"] {
-            assert!(wide.contains(hint), "{hint}");
-        }
-        for width in [80, 90, 100] {
-            let text = screen(&app, width, 24);
-            assert!(text.contains("? help") && text.contains("q quit"), "{text}");
-        }
-    }
-
-    #[test]
-    fn the_footer_lists_the_keys_and_the_active_theme() {
-        let app = App::new(Range::All);
-        let text = screen(&app, 160, 30);
-        for hint in [
-            "/ filter",
-            "s/S sort",
-            "v view",
-            "\u{2190}/\u{2192} day",
-            "t theme (default)",
-        ] {
-            assert!(text.contains(hint), "{hint}");
+        for width in [80, 100, 140, 160] {
+            let text = screen(&app, width, 30);
+            for hint in ["r range", "? help", "q quit"] {
+                assert!(text.contains(hint), "{width}: {hint}");
+            }
+            for gone in ["d day", "w week", "m month", "a all", "/ filter", "v view"] {
+                assert!(!text.contains(gone), "{width}: {gone}");
+            }
         }
     }
 
@@ -1602,18 +1570,6 @@ mod tests {
             lengths.push(len);
         }
         assert!(lengths.windows(2).all(|w| w[0] >= w[1]), "{lengths:?}");
-    }
-
-    #[test]
-    fn the_footer_drops_the_least_important_hints_first_on_a_narrow_screen() {
-        let app = App::new(Range::All);
-        let wide = screen(&app, 160, 30);
-        let narrow = screen(&app, 80, 24);
-        assert!(wide.contains("t theme"), "{wide}");
-        assert!(!narrow.contains("t theme"), "{narrow}");
-        for kept in ["m month", "v view", "/ filter", "? help", "q quit"] {
-            assert!(narrow.contains(kept), "{kept}:\n{narrow}");
-        }
     }
 
     #[test]
@@ -1802,7 +1758,7 @@ mod tests {
 
         assert!(text.contains("F1 Charts"), "{text}");
         assert!(text.contains("F3 Breakdown"), "{text}");
-        assert!(text.contains("Tab tab"), "{text}");
+        assert!(text.contains("Tab panels"), "{text}");
     }
 
     #[test]
@@ -2627,7 +2583,7 @@ mod tests {
         app.go_tab(0);
 
         // Act
-        let short = screen(&app, 100, 24);
+        let short = screen(&app, 80, 24);
         let wide = screen(&app, 150, 24);
         let tall = screen(&app, 100, 44);
 

@@ -47,4 +47,4 @@
 │                                                                              ││Fri 08-21 s-12     alpha              opus-5                1   23.8K    $0.30│
 │                                                                              ││Thu 08-20 s-13     beta               sonnet-5              1   23.8K    $0.70│
 ╰──────────────────────────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────────────────────────╯
- 1-6 panel d day w week m month a all ←/→ day r range v view / filter s/S sort t theme (default) ? help enter select q quit      updated 01:46:40 UTC, every 5s
+ r range ? help q quit                                                                                                           updated 01:46:40 UTC, every 5s

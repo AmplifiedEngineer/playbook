@@ -17,14 +17,14 @@
 │name      │Right, l   Move the chart cursor one bar forward    charts                  │▼ share   │
 │■opus-5   │                                                                            │5 ■■■■■···│
 │■sonnet-5 │Periods                                                                     │5 ■■■·····│
-│■haiku-5  │d          Show today                               all panels              │7 ········│
-╰──────────│w          Show this week                           all panels              │──────────╯
-╭─┤⁵Live se│W          Show last week                           all panels              │────┤UTC├─╮
-│state proj│m          Show this month                          all panels              │     cost▼│
-│live  alph│M          Show last month                          all panels              │     $1.25│
-│          │a          Show all time                            all panels              │     $1.25│
-│          │r          Switch between today and this week       all panels              │     $0.55│
-│          │z          Switch between local time and UTC        all panels              │     $0.80│
-│          │                                                                            │     $0.95│
+│■haiku-5  │W          Show last week                           all panels              │7 ········│
+╰──────────│M          Show last month                          all panels              │──────────╯
+╭─┤⁵Live se│r          Cycle today, this week, this month, all  all panels              │────┤UTC├─╮
+│state proj│z          Switch between local time and UTC        all panels              │     cost▼│
+│live  alph│                                                                            │     $1.25│
+│          │Views                                                                       │     $1.25│
+│          │v          Next view of the focused panel           Spend, Projects         │     $0.55│
+│          │t          Next color theme (off with NO_COLOR)     all panels              │     $0.80│
+│          │o          Mask the account email, and save it      all panels              │     $0.95│
 ╰──────────╰┤ ↑/↓ j/k scroll, any other key closes ├────────────────────────────────────╯──────────╯
- d day w week m month ←/→ day r range v view / filter ? help q quit  updated 01:46:40 UTC, every 5s
+ r range ? help q quit                                               updated 01:46:40 UTC, every 5s

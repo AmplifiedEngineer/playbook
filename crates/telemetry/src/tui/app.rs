@@ -25,7 +25,8 @@ use ratatui::layout::Rect;
 use std::time::Duration;
 
 /// Every range the view can show: the calendar ranges from the shortest to
-/// the longest, then the rolling ones.
+/// the longest, then the rolling ones. The parity tests walk all of them.
+#[cfg(test)]
 pub fn ranges(week: WeekStart) -> [Range; 9] {
     [
         Range::Today,
@@ -40,10 +41,40 @@ pub fn ranges(week: WeekStart) -> [Range; 9] {
     ]
 }
 
-/// The two ranges `r` steps between. Both are periods, so the view shows each
-/// against the one before it. The month is reached with `m`.
-pub fn default_ranges(week: WeekStart) -> [Range; 2] {
-    [Range::Today, Range::ThisWeek(week)]
+/// The longest rolling window that still counts as "a week" or "a month" when
+/// `r` looks for the nearest stop of its cycle.
+const WEEK_LIKE_DAYS: i64 = 7;
+const MONTH_LIKE_DAYS: i64 = 31;
+
+/// The ranges `r` steps through, shortest first. They are periods, so the view
+/// shows each against the one before it (all time has none).
+pub fn default_ranges(week: WeekStart) -> [Range; 4] {
+    [
+        Range::Today,
+        Range::ThisWeek(week),
+        Range::CurrentMonth,
+        Range::All,
+    ]
+}
+
+/// Where `r` goes from `current`. A range outside the cycle counts as the stop
+/// it resembles (last week as this week, last month as this month, a rolling
+/// window as the week or month it is about as long as), and `r` goes to the
+/// stop after that. A range that resembles none goes to the first stop.
+pub fn next_range(current: Range, week: WeekStart) -> Range {
+    let stops = default_ranges(week);
+    let nearest = match current {
+        Range::LastWeek(_) => Some(Range::ThisWeek(week)),
+        Range::LastMonth => Some(Range::CurrentMonth),
+        Range::LastDays(n) if n <= WEEK_LIKE_DAYS => Some(Range::ThisWeek(week)),
+        Range::LastDays(n) if n <= MONTH_LIKE_DAYS => Some(Range::CurrentMonth),
+        Range::LastDays(_) => None,
+        stop => Some(stop),
+    };
+    match nearest.and_then(|n| stops.iter().position(|r| *r == n)) {
+        Some(at) => stops[(at + 1) % stops.len()],
+        None => stops[0],
+    }
 }
 
 /// What the spend panel shows. `v` steps through them.
@@ -841,21 +872,9 @@ impl App {
                 self.mask_account = !self.mask_account;
                 return Effect::SaveMaskAccount(self.mask_account);
             }
-            Cmd::Today => return self.set_range(Range::Today),
-            Cmd::Week => return self.set_range(Range::ThisWeek(self.week_start)),
             Cmd::LastWeek => return self.set_range(Range::LastWeek(self.week_start)),
-            Cmd::Month => return self.set_range(Range::CurrentMonth),
             Cmd::LastMonth => return self.set_range(Range::LastMonth),
-            Cmd::All => return self.set_range(Range::All),
-            Cmd::CycleRange => {
-                let all = default_ranges(self.week_start);
-                // From any other range, `r` goes to the first of the two.
-                let next = match all.iter().position(|r| *r == self.range) {
-                    Some(at) => all[(at + 1) % all.len()],
-                    None => all[0],
-                };
-                return self.set_range(next);
-            }
+            Cmd::CycleRange => return self.set_range(next_range(self.range, self.week_start)),
             Cmd::Filter => {
                 self.editing = true;
                 self.draft = self.filter.clone();
@@ -1056,34 +1075,60 @@ mod tests {
     }
 
     #[test]
-    fn r_steps_between_today_and_the_week_and_starts_over_from_any_other_range() {
+    fn r_cycles_today_week_month_all_and_back() {
+        let week = WeekStart::Monday;
         let mut app = App::new(Range::Today);
-        assert_eq!(app.key(press(KeyCode::Char('r'))), Effect::Requery);
-        assert_eq!(app.range, Range::ThisWeek(WeekStart::Monday));
-        assert_eq!(app.key(press(KeyCode::Char('r'))), Effect::Requery);
-        assert_eq!(app.range, Range::Today);
-        for other in [Range::CurrentMonth, Range::LastDays(30), Range::All] {
-            app.range = other;
-            app.key(press(KeyCode::Char('r')));
-            assert_eq!(app.range, Range::Today, "{other:?}");
+        for want in [
+            Range::ThisWeek(week),
+            Range::CurrentMonth,
+            Range::All,
+            Range::Today,
+        ] {
+            assert_eq!(app.key(press(KeyCode::Char('r'))), Effect::Requery);
+            assert_eq!(app.range, want);
         }
     }
 
     #[test]
-    fn direct_keys_jump_to_a_range_and_requery_only_on_a_change() {
+    fn r_from_another_range_goes_after_the_nearest_stop_or_to_today() {
+        let week = WeekStart::Monday;
+        // Last week counts as this week, last month as this month, a rolling
+        // window as the week or month it is about as long as.
+        for (from, want) in [
+            (Range::LastWeek(week), Range::CurrentMonth),
+            (Range::LastMonth, Range::All),
+            (Range::LastDays(7), Range::CurrentMonth),
+            (Range::LastDays(30), Range::All),
+            // Nothing in the cycle is that long, so the cycle starts over.
+            (Range::LastDays(60), Range::Today),
+            (Range::LastDays(90), Range::Today),
+        ] {
+            let mut app = App::new(from);
+            app.key(press(KeyCode::Char('r')));
+            assert_eq!(app.range, want, "{from:?}");
+        }
+    }
+
+    #[test]
+    fn the_last_week_and_last_month_keys_jump_and_requery_only_on_a_change() {
         let mut app = App::new(Range::LastDays(30));
         app.week_start = WeekStart::Sunday;
         for (key, want) in [
-            ('d', Range::Today),
-            ('w', Range::ThisWeek(WeekStart::Sunday)),
             ('W', Range::LastWeek(WeekStart::Sunday)),
-            ('m', Range::CurrentMonth),
             ('M', Range::LastMonth),
-            ('a', Range::All),
         ] {
             assert_eq!(app.key(press(KeyCode::Char(key))), Effect::Requery, "{key}");
             assert_eq!(app.range, want, "{key}");
             assert_eq!(app.key(press(KeyCode::Char(key))), Effect::None, "{key}");
+        }
+    }
+
+    #[test]
+    fn the_removed_range_letters_change_nothing() {
+        let mut app = App::new(Range::LastDays(30));
+        for key in ['d', 'w', 'm', 'a'] {
+            assert_eq!(app.key(press(KeyCode::Char(key))), Effect::None, "{key}");
+            assert_eq!(app.range, Range::LastDays(30), "{key}");
         }
     }
 
@@ -1842,7 +1887,7 @@ mod tests {
         app.filter = "opus".into();
         app.key(press(KeyCode::Char('c')));
         assert!(app.cursor.is_some(), "a filter keeps the day");
-        app.key(press(KeyCode::Char('w')));
+        app.key(press(KeyCode::Char('W')));
         assert_eq!(app.cursor, None);
     }
 
@@ -1960,7 +2005,7 @@ mod tests {
         app.key(press(KeyCode::Char('?')));
         assert_eq!(app.help, Some(0));
         // A key that would change the range only closes the window.
-        assert_eq!(app.key(press(KeyCode::Char('a'))), Effect::None);
+        assert_eq!(app.key(press(KeyCode::Char('r'))), Effect::None);
         assert_eq!((app.help, app.range), (None, Range::All));
         for close in [KeyCode::Esc, KeyCode::Char('h'), KeyCode::Char('x')] {
             let mut app = loaded();
@@ -2081,12 +2126,8 @@ mod tests {
             GoTab,
             Theme,
             MaskAccount,
-            Today,
-            Week,
             LastWeek,
-            Month,
             LastMonth,
-            All,
             CycleRange,
             Filter,
             ClearFilter,
