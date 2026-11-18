@@ -286,7 +286,7 @@ pub const BINDINGS: &[Binding] = &[
         shown: "r",
         group: Group::Periods,
         panels: ALL_PANELS,
-        text: "Cycle today, week, month, all",
+        text: "Cycle today, this week, this month, all",
         hint: hint("r", "range", 1),
     },
     Binding {

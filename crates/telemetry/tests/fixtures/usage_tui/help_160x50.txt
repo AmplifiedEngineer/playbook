@@ -19,7 +19,7 @@
 │   │  ▇                     █    ▆      │Periods                                                                     │ █ █ █  █      █  █ █    █ █    █    █  │
 │ $0┤▂ █ ▁    █  ▁ ▆  ▄    ▃ █  ▁ █    ▁ │W          Show last week                           all panels              │ █ █ █  █      █  █ █    █ █    █    █  │
 │    W T F  S S  M T  W T  F S  S M  T W │M          Show last month                          all panels              │ W T F  S S  M T  W T F  S S  M T  W T  │
-│    5   7    9    11   13   15   17   19│r          Cycle today, week, month, all            all panels              │ 19  21   23   25   27   29   31   2 3  │
+│    5   7    9    11   13   15   17   19│r          Cycle today, this week, this month, all  all panels              │ 19  21   23   25   27   29   31   2 3  │
 ╰────────────────────────────────────────│z          Switch between local time and UTC        all panels              │────────────────┤tokens low ■■■■■ high├─╯
 ╭─┤³Models├──────────────────────────────│                                                                            │────────────────────────────────────────╮
 │name                                    │Views                                                                       │         msgs  tokens     cost▼ share   │

@@ -25,7 +25,8 @@ use ratatui::layout::Rect;
 use std::time::Duration;
 
 /// Every range the view can show: the calendar ranges from the shortest to
-/// the longest, then the rolling ones.
+/// the longest, then the rolling ones. The parity tests walk all of them.
+#[cfg(test)]
 pub fn ranges(week: WeekStart) -> [Range; 9] {
     [
         Range::Today,

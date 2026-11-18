@@ -131,8 +131,6 @@ Regenerate with: UPDATE_REFERENCE=1 cargo test -p playbook --test docs_pbtop_key
 | `r` | Cycle today, this week, this month, all | all panels |
 | `z` | Switch between local time and UTC | all panels |
 
-From last week, last month or a rolling range, `r` goes to the stop after the closest one, or to today when none is close. `--range` still takes every range.
-
 **Views**
 
 | Key | What it does | Where |
@@ -184,6 +182,8 @@ From last week, last month or a rolling range, `r` goes to the stop after the cl
 | `~` | Tools: count only, from transcripts |  |
 
 <!-- keys:end -->
+
+From last week, last month or a rolling range, `r` goes to the stop after the closest one, or to today when none is close. `--range` still takes every range.
 
 ## Where the numbers come from
 

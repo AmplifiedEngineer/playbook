@@ -19,6 +19,6 @@
 ││Periods                                                                     ││
 ││W          Show last week                           all panels              ││
 ││M          Show last month                          all panels              ││
-││r          Cycle today, week, month, all            all panels              ││
+││r          Cycle today, this week, this month, all  all panels              ││
 ╰╰┤ ↑/↓ j/k scroll, any other key closes ├────────────────────────────────────╯╯
  r range ? help q quit                                     updated 01:46:40 UTC

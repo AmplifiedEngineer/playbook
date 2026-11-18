@@ -19,7 +19,7 @@
 │■sonnet-5 │Periods                                                                     │5 ■■■·····│
 │■haiku-5  │W          Show last week                           all panels              │7 ········│
 ╰──────────│M          Show last month                          all panels              │──────────╯
-╭─┤⁵Live se│r          Cycle today, week, month, all            all panels              │────┤UTC├─╮
+╭─┤⁵Live se│r          Cycle today, this week, this month, all  all panels              │────┤UTC├─╮
 │state proj│z          Switch between local time and UTC        all panels              │     cost▼│
 │live  alph│                                                                            │     $1.25│
 │          │Views                                                                       │     $1.25│
