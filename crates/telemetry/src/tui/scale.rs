@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The scale math of a chart axis: a round top value for the data, and the
-//! labels at the bottom, middle and top. Pure, so every rule is a unit test.
+//! grid lines from zero to the top at a round step. Pure, so every rule is a
+//! unit test.
 
 /// The mantissas an axis top can take, times a power of ten. Half of each is
 /// still a round number, so the middle label reads cleanly.
@@ -28,29 +29,81 @@ pub fn nice_ceiling(value: f64) -> f64 {
     step * scale
 }
 
+/// The step between grid lines: the smallest 1, 2 or 5 times a power of ten
+/// that divides `max` into few enough intervals for `rows`. When none does,
+/// the middle of the axis, and when even that is too crowded, the whole axis.
+fn grid_step(max: f64, rows: u16) -> f64 {
+    let room = (usize::from(rows) * ROW_EIGHTHS).saturating_sub(HALF_ROW);
+    let intervals = (room / (MIN_LINE_ROWS * ROW_EIGHTHS)).min(MAX_INTERVALS);
+    if intervals < 2 {
+        return max;
+    }
+    let top = max.log10().floor() as i32;
+    for exp in (top - GRID_DECADES)..=top {
+        for mantissa in GRID_MANTISSAS {
+            let step = mantissa * 10f64.powi(exp);
+            let count = max / step;
+            let whole = count.round();
+            if (count - whole).abs() < WHOLE_TOLERANCE
+                && whole >= 1.0
+                && whole as usize <= intervals
+            {
+                return step;
+            }
+        }
+    }
+    max / 2.0
+}
+
 /// Eighths of a cell in one row of the plot.
 pub const ROW_EIGHTHS: usize = 8;
 /// Half a row in eighths. An axis label sits on the middle of its text row,
 /// so the top of the scale is the middle of the top row, not its edge.
 pub const HALF_ROW: usize = ROW_EIGHTHS / 2;
 
-/// The vertical axis: zero at the bottom, `max` at the top.
+/// The most grid intervals an axis has, so at most ten lines with zero.
+const MAX_INTERVALS: usize = 10 - 1;
+/// The fewest rows between two grid lines.
+const MIN_LINE_ROWS: usize = 2;
+/// The mantissas of a grid step, times a power of ten.
+const GRID_MANTISSAS: [f64; 3] = [1.0, 2.0, 5.0];
+/// How many powers of ten below the top a grid step may go.
+const GRID_DECADES: i32 = 3;
+/// How far a ratio may be from a whole number and still count as one.
+const WHOLE_TOLERANCE: f64 = 1e-6;
+
+/// The vertical axis: zero at the bottom, `max` at the top, a grid line at
+/// every multiple of `step` between them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Axis {
     pub max: f64,
+    pub step: f64,
 }
 
 impl Axis {
-    /// An axis whose top is the round value above `peak`.
-    pub fn of(peak: f64) -> Axis {
+    /// An axis whose top is the round value above `peak`, with a step that
+    /// gives a plot `rows` high about six to ten lines, none closer than two
+    /// rows. A plot too short for a middle line has only zero and the top.
+    pub fn of(peak: f64, rows: u16) -> Axis {
+        let max = nice_ceiling(peak);
         Axis {
-            max: nice_ceiling(peak),
+            max,
+            step: grid_step(max, rows),
         }
     }
 
-    /// The values at the bottom, middle and top.
-    pub fn ticks(self) -> [f64; 3] {
-        [0.0, self.max / 2.0, self.max]
+    /// The values of the grid lines, bottom to top, the last being `max`.
+    pub fn ticks(self) -> Vec<f64> {
+        let intervals = (self.max / self.step).round() as usize;
+        (0..=intervals)
+            .map(|k| {
+                if k == intervals {
+                    self.max
+                } else {
+                    k as f64 * self.step
+                }
+            })
+            .collect()
     }
 
     /// Eighths of a cell a value fills in a plot `rows` cells high. Zero is
@@ -129,15 +182,69 @@ mod tests {
     }
 
     #[test]
-    fn the_middle_tick_is_half_the_top() {
-        let axis = Axis::of(47.6);
-        assert_eq!(axis.ticks(), [0.0, 25.0, 50.0]);
-        assert_eq!(Axis::of(0.0).ticks(), [0.0, 0.5, 1.0]);
+    fn the_steps_are_one_two_or_five_times_a_power_of_ten() {
+        let want = |peak: f64, rows: u16, ticks: &[f64]| {
+            let got = Axis::of(peak, rows).ticks();
+            assert_eq!(got.len(), ticks.len(), "{peak} in {rows} rows: {got:?}");
+            for (g, w) in got.iter().zip(ticks) {
+                assert!(
+                    (g - w).abs() < w.abs() * 1e-9 + 1e-12,
+                    "{got:?} not {ticks:?}"
+                );
+            }
+        };
+        want(47.6, 12, &[0.0, 10.0, 20.0, 30.0, 40.0, 50.0]);
+        want(47.6, 20, &[0.0, 10.0, 20.0, 30.0, 40.0, 50.0]);
+        want(
+            400.0,
+            20,
+            &[0.0, 50.0, 100.0, 150.0, 200.0, 250.0, 300.0, 350.0, 400.0],
+        );
+        want(400.0, 12, &[0.0, 100.0, 200.0, 300.0, 400.0]);
+        want(100.0, 12, &[0.0, 20.0, 40.0, 60.0, 80.0, 100.0]);
+        want(0.0, 12, &[0.0, 0.2, 0.4, 0.6, 0.8, 1.0]);
+    }
+
+    #[test]
+    fn a_short_plot_keeps_only_zero_and_the_top_or_the_middle() {
+        assert_eq!(Axis::of(100.0, 1).ticks(), vec![0.0, 100.0]);
+        assert_eq!(Axis::of(100.0, 3).ticks(), vec![0.0, 100.0]);
+        assert_eq!(Axis::of(100.0, 5).ticks(), vec![0.0, 50.0, 100.0]);
+        // 2.5 has no round step with two intervals, so the middle is used.
+        assert_eq!(Axis::of(2.5, 5).ticks(), vec![0.0, 1.25, 2.5]);
+    }
+
+    #[test]
+    fn lines_are_two_rows_apart_at_least_and_ten_at_most() {
+        let mut peak = 0.01;
+        while peak < 1e10 {
+            for rows in 1..=60u16 {
+                let axis = Axis::of(peak, rows);
+                let ticks = axis.ticks();
+                assert_eq!(ticks[0], 0.0);
+                assert_eq!(*ticks.last().unwrap(), axis.max);
+                assert!(ticks.len() <= 10, "{peak} {rows}: {ticks:?}");
+                for pair in ticks.windows(2) {
+                    let (a, b) = (axis.levels(pair[0], rows), axis.levels(pair[1], rows));
+                    assert!(
+                        ticks.len() == 2 || b - a + 1 >= MIN_LINE_ROWS * ROW_EIGHTHS,
+                        "{peak} {rows}: {ticks:?}"
+                    );
+                }
+                if rows >= 20 {
+                    assert!(ticks.len() >= 5, "{peak} {rows}: {ticks:?}");
+                }
+            }
+            peak *= 1.37;
+        }
     }
 
     #[test]
     fn levels_scale_to_eighths_and_a_small_value_keeps_one() {
-        let axis = Axis { max: 100.0 };
+        let axis = Axis {
+            max: 100.0,
+            step: 50.0,
+        };
         assert_eq!(axis.levels(100.0, 2), 12);
         assert_eq!(axis.levels(50.0, 2), 6);
         assert_eq!(axis.levels(0.001, 2), 1);
@@ -148,7 +255,10 @@ mod tests {
 
     #[test]
     fn a_label_row_is_the_row_where_a_bar_of_its_value_ends() {
-        let axis = Axis { max: 100.0 };
+        let axis = Axis {
+            max: 100.0,
+            step: 50.0,
+        };
         // Five rows: 36 eighths at the top, 18 in the middle.
         assert_eq!(axis.levels(100.0, 5), 36);
         assert_eq!(axis.row_of(100.0, 5), 0);
