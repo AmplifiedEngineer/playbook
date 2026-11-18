@@ -13,7 +13,7 @@
 
 use super::budget;
 use super::data::Data;
-use super::dots::{line_dots, DotGrid};
+use super::dots::{line_dots, DotGrid, DOT_COLS};
 use super::fmt::{axis_money, fit};
 use super::icon::Icon;
 use super::theme::{Ink, Palette};
@@ -309,8 +309,9 @@ fn solid_rows(b: &Burnup, pal: &Palette, plot: &Plot) -> Vec<Vec<Span<'static>>>
         .collect()
 }
 
-/// What a dot draws. The order is the priority on a shared cell: a limit
-/// outranks the projection, which outranks the used area.
+/// What a dot draws. A cell shows the fill, else the projection, else the
+/// reference lines. The order of the variants only picks the role among dots
+/// of one of those layers.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Dot {
     /// The used area at this whole percent of the limit.
@@ -368,7 +369,8 @@ fn projection_path(b: &Burnup, fine: &Plot) -> Vec<(usize, usize)> {
     else {
         return Vec::new();
     };
-    let start = last_filled(b, fine).map_or(0, |x| x + 1);
+    // The fill owns its last cell, so the projection starts in the next one.
+    let start = last_filled(b, fine).map_or(0, |x| (x / DOT_COLS + 1) * DOT_COLS);
     if start >= fine.width {
         return Vec::new();
     }
@@ -600,8 +602,6 @@ mod tests {
         assert_eq!(Dot::used(0.0).ink(&pal), pal.usage_ink(0.0));
         assert_eq!(Dot::used(69.6).ink(&pal), pal.usage_ink(70.0));
         assert_eq!(Dot::used(400.0).ink(&pal), pal.usage_ink(255.0));
-        assert!(Dot::used(255.0) < Dot::Projection);
-        assert!(Dot::Projection < Dot::Limit);
     }
 
     #[test]
@@ -804,8 +804,43 @@ mod tests {
             .find(|x| lit(&grid, *x, f.height - 1))
             .unwrap();
         let top = (0..f.height).find(|y| lit(&grid, last, *y)).unwrap();
-        assert_eq!(path.first(), Some(&(last + 1, top)));
-        assert!((0..f.height).all(|y| !lit(&grid, last + 1, y)));
+        assert_eq!(path.first(), Some(&((last / DOT_COLS + 1) * DOT_COLS, top)));
+        assert!((0..f.height).all(|y| !lit(&grid, path[0].0, y)));
+    }
+
+    #[test]
+    fn a_projection_dot_shows_in_the_cell_after_the_fill_for_an_even_and_an_odd_last_column() {
+        let pal = Theme::Standard.palette(ColorDepth::True);
+        for now in [500, 540] {
+            // Arrange
+            let mut b = projecting(40.0, 100.0);
+            b.now = now;
+            let plot = Plot::new(&b, 10, 8);
+            let f = Plot {
+                width: plot.width * 2,
+                height: plot.height * 4,
+                top: plot.top,
+            };
+            let last = last_filled(&b, &f).unwrap();
+
+            // Act
+            let rows = dot_rows(&b, &pal, &plot);
+
+            // Assert
+            let (x, y) = projection_path(&b, &f)[0];
+            let span = &rows[y / 4][x / 2];
+            assert_eq!(x / 2, last / 2 + 1, "now {now}, last column {last}");
+            assert_eq!(
+                span.style.fg,
+                Some(pal.color(Dot::Projection.ink(&pal))),
+                "now {now}, last column {last}: {:?}",
+                span.content
+            );
+            assert!(span
+                .content
+                .chars()
+                .all(|c| ('\u{2800}'..='\u{28ff}').contains(&c)));
+        }
     }
 
     #[test]

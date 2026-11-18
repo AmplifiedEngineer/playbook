@@ -6,7 +6,8 @@
 //! resolution of whole-cell glyphs. Every set dot carries a role, and a cell
 //! takes the role that ranks highest among its dots.
 
-const DOT_COLS: usize = 2;
+/// Dot columns in one cell.
+pub const DOT_COLS: usize = 2;
 const DOT_ROWS: usize = 4;
 const BRAILLE_BASE: u32 = 0x2800;
 
