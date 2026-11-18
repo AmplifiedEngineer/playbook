@@ -13,7 +13,7 @@
 
 use super::budget;
 use super::data::Data;
-use super::dots::{braille, DotGrid};
+use super::dots::DotGrid;
 use super::fmt::{axis_money, fit};
 use super::icon::Icon;
 use super::theme::{Ink, Palette};
@@ -335,24 +335,14 @@ impl Dot {
     }
 }
 
-/// The dot row of the used line in each dot column up to `now`, `None` where
-/// nothing is used yet or the column lies after `now`.
-fn used_edge(b: &Burnup, fine: &Plot) -> Vec<Option<usize>> {
-    (0..fine.width)
-        .map(|x| {
-            let at = fine.time(b, x);
-            value_at(b, at).filter(|_| at <= b.now).map(|v| fine.row(v))
-        })
-        .collect()
-}
-
-/// The dot row of the projection in each dot column after `now`.
+/// The dot row of the projection in each dot column from `now` on, so the
+/// dotted line starts at the last used value.
 fn projection_edge(b: &Burnup, fine: &Plot) -> Vec<Option<usize>> {
     (0..fine.width)
         .map(|x| {
             let at = fine.time(b, x);
             b.projected_at(at)
-                .filter(|_| at > b.now)
+                .filter(|_| at >= b.now)
                 .map(|v| fine.row(v))
         })
         .collect()
@@ -391,61 +381,50 @@ fn connect(edge: &[Option<usize>]) -> Vec<(usize, usize)> {
         .collect()
 }
 
-/// The most dots a cell of the used line holds below the danger zone, so the
-/// line never reads denser than the half-filled area beside it.
-const LINE_DOTS: u32 = 4;
-
-/// `ch` with dots dropped from a cell below `NEAR` that holds more than
-/// `LINE_DOTS`, so a steep rise stays lighter than the danger zone.
-fn thin(ch: char, dot: Dot) -> char {
-    let mut mask = (ch as u32).saturating_sub(0x2800) as u8;
-    let danger = matches!(dot, Dot::Used(pct) if f64::from(pct) >= NEAR);
-    while !danger && mask.count_ones() > LINE_DOTS {
-        mask &= mask - 1;
+/// Fills each dot column up to `now` solid from the bottom to its value, each
+/// dot row inked by its height against the limit. The top dot row of a column
+/// is the value itself, so the edge of the fill is the used line.
+fn fill_used(b: &Burnup, fine: &Plot, grid: &mut DotGrid<Dot>) {
+    let last = fine.height - 1;
+    for x in 0..fine.width {
+        let at = fine.time(b, x);
+        let Some(value) = value_at(b, at).filter(|_| at <= b.now) else {
+            continue;
+        };
+        for y in fine.row(value)..=last {
+            let percent = b.limit.map_or(0.0, |l| fine.value(y) / l * PERCENT);
+            grid.set(x, y, Dot::used(percent));
+        }
     }
-    braille(mask)
 }
 
-/// The plot as spans of Braille cells, top row first. The roles are placed
-/// on a grid of dots, then each cell takes the highest role it holds. Below
-/// `NEAR` the used area fills half the dots (a checker); from there up it
-/// fills them all, so the danger zone reads denser without color. Markers
-/// and the other point glyphs stay whole-cell glyphs over the dots.
+/// The plot as spans of Braille cells, top row first. The used area is a solid
+/// fill, grown from the bottom of each dot column to its value. The reference
+/// lines and the projection are dots too, but only in cells the fill leaves
+/// free, so they never cut it. Markers and the other point glyphs stay
+/// whole-cell glyphs over the dots.
 fn dot_rows(b: &Burnup, pal: &Palette, plot: &Plot) -> Vec<Vec<Span<'static>>> {
     let fine = Plot {
         width: plot.width * 2,
         height: plot.height * 4,
         top: plot.top,
     };
+    let mut fill = DotGrid::new(plot.width, plot.height);
+    fill_used(b, &fine, &mut fill);
     let mut dots = DotGrid::new(plot.width, plot.height);
     let mut glyphs = vec![vec![Role::Empty; plot.width]; plot.height];
     for (y, row) in cells(b, &fine).into_iter().enumerate() {
         for (x, role) in row.into_iter().enumerate() {
             match role {
-                Role::Actual => {
-                    let percent = b.limit.map_or(0.0, |l| fine.value(y) / l * PERCENT);
-                    let dot = Dot::used(percent);
-                    if percent >= NEAR || (x + y) % 2 == 0 {
-                        dots.set(x, y, dot);
-                    }
-                }
-                Role::Projection if x % 3 != 2 => dots.set(x, y, Dot::Projection),
                 Role::Near if x % 2 == 0 => dots.set(x, y, Dot::Near),
                 Role::Half if x % 4 == 0 => dots.set(x, y, Dot::Half),
                 Role::Limit => dots.set(x, y, Dot::Limit),
                 Role::Billed | Role::Marker | Role::RateLimited => {
                     glyphs[y / 4][x / 2] = role;
                 }
-                Role::Empty | Role::Projection | Role::Near | Role::Half => {}
+                Role::Empty | Role::Actual | Role::Projection | Role::Near | Role::Half => {}
             }
         }
-    }
-    let percent = |y: usize| b.limit.map_or(0.0, |l| fine.value(y) / l * PERCENT);
-    // The used line sits on its own grid and takes over the cells it crosses,
-    // so a line cell is never denser than the fill beside it.
-    let mut edge = DotGrid::new(plot.width, plot.height);
-    for (x, y) in connect(&used_edge(b, &fine)) {
-        edge.set(x, y, Dot::used(percent(y)));
     }
     for (x, y) in connect(&projection_edge(b, &fine)) {
         if x % 3 != 2 {
@@ -456,15 +435,8 @@ fn dot_rows(b: &Burnup, pal: &Palette, plot: &Plot) -> Vec<Vec<Span<'static>>> {
         .map(|row| {
             (0..plot.width)
                 .map(|col| {
-                    match (
-                        glyphs[row][col],
-                        match (edge.cell(col, row), dots.cell(col, row)) {
-                            // A limit or projection keeps its cell over the line.
-                            (Some(_), Some(over @ (_, Dot::Limit | Dot::Projection))) => Some(over),
-                            (Some((ch, dot)), _) => Some((thin(ch, dot), dot)),
-                            (None, fill) => fill,
-                        },
-                    ) {
+                    let drawn = fill.cell(col, row).or_else(|| dots.cell(col, row));
+                    match (glyphs[row][col], drawn) {
                         (Role::Empty, Some((ch, dot))) => {
                             Span::styled(ch.to_string(), style(pal, dot.ink(pal)))
                         }
@@ -688,8 +660,6 @@ mod tests {
     fn no_samples_draw_no_line() {
         assert!(connect(&[]).is_empty());
         assert!(connect(&[None, None]).is_empty());
-        let b = line(Vec::new(), 500);
-        assert!(connect(&used_edge(&b, &fine(&b))).is_empty());
     }
 
     #[test]
@@ -724,42 +694,118 @@ mod tests {
         assert_eq!(dots, vec![(0, 1), (2, 9)]);
     }
 
-    #[test]
-    fn a_steep_window_reading_gives_a_continuous_used_line() {
-        // Arrange
-        let b = line(vec![(0, 0.0), (100, 5.0), (200, 90.0)], 300);
-        let edge = used_edge(&b, &fine(&b));
+    /// Whether dot `(x, y)` is set in `grid`.
+    fn lit(grid: &DotGrid<Dot>, x: usize, y: usize) -> bool {
+        let Some((ch, _)) = grid.cell(x / 2, y / 4) else {
+            return false;
+        };
+        let mut probe = DotGrid::new(1, 1);
+        probe.set(x % 2, y % 4, 0u8);
+        let bit = probe.cell(0, 0).map_or(0, |(c, _)| c as u32 - 0x2800);
+        (ch as u32 - 0x2800) & bit != 0
+    }
 
-        // Act
-        let dots = connect(&edge);
-
-        // Assert
-        assert!(unbroken(&dots), "{dots:?}");
-        assert!(dots.len() > edge.iter().flatten().count());
+    fn filled(b: &Burnup) -> (DotGrid<Dot>, Plot) {
+        let f = fine(b);
+        let mut grid = DotGrid::new(f.width / 2, f.height / 4);
+        fill_used(b, &f, &mut grid);
+        (grid, f)
     }
 
     #[test]
-    fn the_used_line_stops_at_now_and_the_projection_starts_after() {
+    fn a_column_is_filled_from_the_bottom_to_its_value_with_no_dot_missing() {
+        // Arrange
+        let b = line(vec![(0, 10.0), (400, 60.0)], 400);
+
+        // Act
+        let (grid, f) = filled(&b);
+
+        // Assert
+        for x in 0..f.width {
+            let at = f.time(&b, x);
+            if at > b.now {
+                continue;
+            }
+            let top = f.row(value_at(&b, at).unwrap());
+            for y in 0..f.height {
+                assert_eq!(lit(&grid, x, y), y >= top, "dot ({x}, {y})");
+            }
+        }
+    }
+
+    #[test]
+    fn the_fill_top_is_the_value_so_a_steep_rise_has_no_gap_under_it() {
+        // Arrange
+        let b = line(vec![(0, 0.0), (100, 5.0), (200, 90.0)], 300);
+
+        // Act
+        let (grid, f) = filled(&b);
+
+        // Assert
+        for x in 0..f.width {
+            let at = f.time(&b, x);
+            if at <= b.now {
+                let top = f.row(value_at(&b, at).unwrap());
+                assert!(lit(&grid, x, top), "column {x} lacks its top dot");
+                assert!(top == 0 || !lit(&grid, x, top - 1), "column {x} overshoots");
+            }
+        }
+    }
+
+    #[test]
+    fn the_fill_draws_nothing_after_now() {
+        let b = line(vec![(0, 0.0), (400, 40.0)], 400);
+        let (grid, f) = filled(&b);
+        assert!((0..f.height).any(|y| lit(&grid, 0, y)));
+        assert!((0..f.height).all(|y| !lit(&grid, f.width - 1, y)));
+    }
+
+    #[test]
+    fn a_reference_line_never_removes_a_fill_dot() {
+        // Arrange
+        let pal = Theme::Standard.palette(ColorDepth::True);
+        let b = line(vec![(0, 10.0), (500, 90.0)], 500);
+        let plot = Plot::new(&b, 10, 12);
+        let (grid, _) = {
+            let f = Plot {
+                width: plot.width * 2,
+                height: plot.height * 4,
+                top: plot.top,
+            };
+            let mut grid = DotGrid::new(plot.width, plot.height);
+            fill_used(&b, &f, &mut grid);
+            (grid, f)
+        };
+
+        // Act
+        let rows = dot_rows(&b, &pal, &plot);
+
+        // Assert
+        for (row, spans) in rows.iter().enumerate() {
+            for (col, span) in spans.iter().enumerate() {
+                if let Some((ch, _)) = grid.cell(col, row) {
+                    assert_eq!(span.content, ch.to_string(), "cell ({col}, {row})");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_projection_is_dotted_and_starts_at_the_last_used_value() {
         // Arrange
         let mut b = line(vec![(0, 0.0), (400, 40.0)], 400);
+        b.total = 40.0;
         b.projected_end = Some(100.0);
         let f = fine(&b);
 
         // Act
-        let (used, projected) = (used_edge(&b, &f), projection_edge(&b, &f));
+        let projected = projection_edge(&b, &f);
 
         // Assert
-        for x in 0..f.width {
-            assert!(used[x].is_none() || projected[x].is_none(), "column {x}");
-        }
-        assert!(used[0].is_some() && projected[f.width - 1].is_some());
-    }
-
-    #[test]
-    fn a_steep_cell_below_the_danger_zone_keeps_four_dots_and_a_danger_one_all() {
-        assert_eq!(thin('\u{28ff}', Dot::used(10.0)).to_string(), "\u{28f0}");
-        assert_eq!(thin('\u{28ff}', Dot::used(70.0)).to_string(), "\u{28f0}");
-        assert_eq!(thin('\u{28ff}', Dot::used(90.0)), '\u{28ff}');
-        assert_eq!(thin('\u{2807}', Dot::used(10.0)), '\u{2807}');
+        let first = projected.iter().position(Option::is_some).unwrap();
+        assert!(f.time(&b, first) >= b.now);
+        // The first column lies a fraction past `now`, so one dot row of rise at most.
+        assert!(projected[first].unwrap().abs_diff(f.row(40.0)) <= 1);
+        assert!(projected[f.width - 1].is_some());
     }
 }
