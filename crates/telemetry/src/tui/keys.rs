@@ -13,12 +13,8 @@ pub enum Cmd {
     Quit,
     Theme,
     MaskAccount,
-    Today,
-    Week,
     LastWeek,
-    Month,
     LastMonth,
-    All,
     CycleRange,
     Filter,
     ClearFilter,
@@ -77,15 +73,12 @@ impl Group {
     }
 }
 
-/// A short hint for the footer. `order` places it from the left. `drop` is
-/// the order hints are dropped in on a narrow screen, 1 first; 0 is never
-/// dropped.
+/// A short hint for the footer. `order` places it from the left.
 #[derive(Debug, Clone, Copy)]
 pub struct Hint {
     pub key: &'static str,
     pub verb: &'static str,
     pub order: u8,
-    pub drop: u8,
 }
 
 pub struct Binding {
@@ -106,13 +99,8 @@ const fn c(ch: char) -> KeyCode {
     KeyCode::Char(ch)
 }
 
-const fn hint(key: &'static str, verb: &'static str, order: u8, drop: u8) -> Option<Hint> {
-    Some(Hint {
-        key,
-        verb,
-        order,
-        drop,
-    })
+const fn hint(key: &'static str, verb: &'static str, order: u8) -> Option<Hint> {
+    Some(Hint { key, verb, order })
 }
 
 const ALL_PANELS: &str = "all panels";
@@ -126,7 +114,7 @@ pub const BINDINGS: &[Binding] = &[
         group: Group::Navigation,
         panels: ALL_PANELS,
         text: "Focus a panel by its number",
-        hint: hint("1-6", "panel", 1, 5),
+        hint: None,
     },
     Binding {
         cmd: Cmd::NextTab,
@@ -136,7 +124,7 @@ pub const BINDINGS: &[Binding] = &[
         group: Group::Navigation,
         panels: ALL_PANELS,
         text: "Show the next tab",
-        hint: hint("Tab", "tab", 0, 0),
+        hint: hint("Tab", "panels", 0),
     },
     Binding {
         cmd: Cmd::PrevTab,
@@ -259,7 +247,7 @@ pub const BINDINGS: &[Binding] = &[
         group: Group::Navigation,
         panels: "charts",
         text: "Move the chart cursor one bar back",
-        hint: hint("\u{2190}/\u{2192}", "day", 6, 8),
+        hint: None,
     },
     Binding {
         cmd: Cmd::CursorRight,
@@ -272,26 +260,6 @@ pub const BINDINGS: &[Binding] = &[
         hint: None,
     },
     Binding {
-        cmd: Cmd::Today,
-        keys: &[c('d')],
-        ctrl: false,
-        shown: "d",
-        group: Group::Periods,
-        panels: ALL_PANELS,
-        text: "Show today",
-        hint: hint("d", "day", 2, 7),
-    },
-    Binding {
-        cmd: Cmd::Week,
-        keys: &[c('w')],
-        ctrl: false,
-        shown: "w",
-        group: Group::Periods,
-        panels: ALL_PANELS,
-        text: "Show this week",
-        hint: hint("w", "week", 3, 10),
-    },
-    Binding {
         cmd: Cmd::LastWeek,
         keys: &[c('W')],
         ctrl: false,
@@ -300,16 +268,6 @@ pub const BINDINGS: &[Binding] = &[
         panels: ALL_PANELS,
         text: "Show last week",
         hint: None,
-    },
-    Binding {
-        cmd: Cmd::Month,
-        keys: &[c('m')],
-        ctrl: false,
-        shown: "m",
-        group: Group::Periods,
-        panels: ALL_PANELS,
-        text: "Show this month",
-        hint: hint("m", "month", 4, 11),
     },
     Binding {
         cmd: Cmd::LastMonth,
@@ -322,24 +280,14 @@ pub const BINDINGS: &[Binding] = &[
         hint: None,
     },
     Binding {
-        cmd: Cmd::All,
-        keys: &[c('a')],
-        ctrl: false,
-        shown: "a",
-        group: Group::Periods,
-        panels: ALL_PANELS,
-        text: "Show all time",
-        hint: hint("a", "all", 5, 6),
-    },
-    Binding {
         cmd: Cmd::CycleRange,
         keys: &[c('r')],
         ctrl: false,
         shown: "r",
         group: Group::Periods,
         panels: ALL_PANELS,
-        text: "Switch between today and this week",
-        hint: hint("r", "range", 7, 9),
+        text: "Cycle today, week, month, all",
+        hint: hint("r", "range", 1),
     },
     Binding {
         cmd: Cmd::NextView,
@@ -349,7 +297,7 @@ pub const BINDINGS: &[Binding] = &[
         group: Group::Views,
         panels: "Spend, Projects",
         text: "Next view of the focused panel",
-        hint: hint("v", "view", 8, 0),
+        hint: None,
     },
     Binding {
         cmd: Cmd::Theme,
@@ -359,7 +307,7 @@ pub const BINDINGS: &[Binding] = &[
         group: Group::Views,
         panels: ALL_PANELS,
         text: "Next color theme (off with NO_COLOR)",
-        hint: hint("t", "theme", 12, 2),
+        hint: None,
     },
     Binding {
         cmd: Cmd::MaskAccount,
@@ -409,7 +357,7 @@ pub const BINDINGS: &[Binding] = &[
         group: Group::Views,
         panels: ALL_PANELS,
         text: "Open the full screen Sessions list",
-        hint: hint("p", "sessions", 11, 1),
+        hint: None,
     },
     Binding {
         cmd: Cmd::EditLayout,
@@ -429,7 +377,7 @@ pub const BINDINGS: &[Binding] = &[
         group: Group::Views,
         panels: ALL_PANELS,
         text: "Show this help",
-        hint: hint("?", "help", 13, 0),
+        hint: hint("?", "help", 2),
     },
     Binding {
         cmd: Cmd::Sort,
@@ -439,7 +387,7 @@ pub const BINDINGS: &[Binding] = &[
         group: Group::Sorting,
         panels: "tables",
         text: "Sort by the next column",
-        hint: hint("s/S", "sort", 10, 4),
+        hint: None,
     },
     Binding {
         cmd: Cmd::SortFlip,
@@ -459,7 +407,7 @@ pub const BINDINGS: &[Binding] = &[
         group: Group::Filtering,
         panels: ALL_PANELS,
         text: "Type a filter on any field",
-        hint: hint("/", "filter", 9, 0),
+        hint: None,
     },
     Binding {
         cmd: Cmd::Pick,
@@ -469,7 +417,7 @@ pub const BINDINGS: &[Binding] = &[
         group: Group::Filtering,
         panels: "tables 3-6",
         text: "Filter to selected row; again to undo",
-        hint: hint("enter", "select", 14, 3),
+        hint: None,
     },
     Binding {
         cmd: Cmd::ClearFilter,
@@ -529,7 +477,7 @@ pub const BINDINGS: &[Binding] = &[
         group: Group::Quit,
         panels: ALL_PANELS,
         text: "Quit",
-        hint: hint("q", "quit", 15, 0),
+        hint: hint("q", "quit", 3),
     },
     Binding {
         cmd: Cmd::Quit,

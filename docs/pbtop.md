@@ -126,14 +126,12 @@ Regenerate with: UPDATE_REFERENCE=1 cargo test -p playbook --test docs_pbtop_key
 
 | Key | What it does | Where |
 |---|---|---|
-| `d` | Show today | all panels |
-| `w` | Show this week | all panels |
 | `W` | Show last week | all panels |
-| `m` | Show this month | all panels |
 | `M` | Show last month | all panels |
-| `a` | Show all time | all panels |
-| `r` | Switch between today and this week | all panels |
+| `r` | Cycle today, this week, this month, all | all panels |
 | `z` | Switch between local time and UTC | all panels |
+
+From last week, last month or a rolling range, `r` goes to the stop after the closest one, or to today when none is close. `--range` still takes every range.
 
 **Views**
 

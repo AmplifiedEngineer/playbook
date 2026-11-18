@@ -33,4 +33,4 @@
 │                                                ││08-27 s-6      alpha        opus-5         $1.40│
 │                                                ││08-26 s-7      beta         sonnet-5       $0.20│
 ╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
- d day w week m month ←/→ day r range v view / filter ? help q quit  updated 01:46:40 UTC, every 5s
+ r range ? help q quit                                               updated 01:46:40 UTC, every 5s

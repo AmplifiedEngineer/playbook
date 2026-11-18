@@ -21,4 +21,4 @@
 │   │                      ▇           ││     │                           █    │
 │ $0┤  ▁▄▁ ▂▁▁▁ ▁▅▁▃ ▁▂▁▁  █▁▄ ▂▂ ▅ ▃  ││   $0┤                           █    │
 ╰┤peak $6.01├─┤■ opus-5 ■ sonnet-5 +1├─╯╰┤peak $1.25├─┤■ opus-5 ■ sonnet-5 +1├─╯
- Tab tab w week m month v view / filter ? help q quit      updated 01:46:40 UTC
+ Tab panels r range ? help q quit                          updated 01:46:40 UTC
