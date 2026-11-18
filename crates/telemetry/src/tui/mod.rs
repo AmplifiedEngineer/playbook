@@ -144,6 +144,7 @@ impl Reset<'_> {
 /// including a panic (ratatui installs the hook).
 /// Opens the view on `range` and, when given, on the account `account_key`.
 pub fn run(paths: &Paths, range: Option<Range>, account_key: Option<String>) -> Result<(), String> {
+    crate::price_refresh::spawn(&crate::host::home_dir(), &paths.price_cache);
     // Nothing may write to stderr while the screen is drawn.
     crate::say::hold();
     let mut terminal = ratatui::init();

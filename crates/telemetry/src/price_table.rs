@@ -20,6 +20,7 @@ use crate::pricing::Tokens;
 use serde_json::{Map, Value};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::path::Path;
 
 /// The checked-in snapshot.
 pub const SNAPSHOT: &str = include_str!("../data/litellm-prices.json");
@@ -240,6 +241,17 @@ impl PriceTable {
 
     pub fn embedded() -> PriceTable {
         PriceTable::parse(SNAPSHOT).unwrap_or_default()
+    }
+
+    /// The embedded snapshot, or the list cached at `cache` when it parses to
+    /// a believable list that is at least as new.
+    pub fn load(cache: &Path) -> PriceTable {
+        let embedded = PriceTable::embedded();
+        std::fs::read_to_string(cache)
+            .ok()
+            .and_then(|text| PriceTable::parse(&text).ok())
+            .filter(|c| c.is_plausible() && c.snapshot_epoch >= embedded.snapshot_epoch)
+            .unwrap_or(embedded)
     }
 
     pub fn len(&self) -> usize {
@@ -502,6 +514,32 @@ mod tests {
         assert!(text.contains("input_cost_per_token_above_272k_tokens"));
         assert_eq!(table.lookup("gpt-demo"), sample().lookup("gpt-demo"));
         assert_eq!(trim(&text, 42).unwrap(), text, "trimming is idempotent");
+    }
+
+    #[test]
+    fn a_newer_cached_list_wins_and_an_older_or_broken_one_does_not() {
+        let dir = crate::util::scratch_dir("price-load");
+        std::fs::create_dir_all(&dir).unwrap();
+        let cache = dir.join("prices.json");
+        let embedded = PriceTable::embedded();
+        let cached = |epoch: i64| {
+            let models: Vec<String> = (0..MIN_ENTRIES)
+                .map(|i| {
+                    format!(
+                        r#""claude-m{i}":{{"litellm_provider":"anthropic","input_cost_per_token":1e-6,"output_cost_per_token":1e-6}}"#
+                    )
+                })
+                .collect();
+            format!(r#"{{"{EPOCH_FIELD}":{epoch},{}}}"#, models.join(","))
+        };
+
+        assert_eq!(PriceTable::load(&cache), embedded, "no cache");
+        std::fs::write(&cache, cached(embedded.snapshot_epoch + 1)).unwrap();
+        assert_eq!(PriceTable::load(&cache).len(), MIN_ENTRIES);
+        std::fs::write(&cache, cached(embedded.snapshot_epoch - 1)).unwrap();
+        assert_eq!(PriceTable::load(&cache), embedded, "older cache");
+        std::fs::write(&cache, "not json").unwrap();
+        assert_eq!(PriceTable::load(&cache), embedded, "broken cache");
     }
 
     #[test]
