@@ -21,6 +21,7 @@ pub mod codex;
 pub mod collector;
 pub mod command;
 pub mod config;
+pub mod cost_merge;
 pub mod daemon;
 pub mod data;
 pub mod db;
@@ -63,13 +64,36 @@ pub mod util;
 pub mod warm;
 pub mod writer;
 
+/// Where an event's cost came from. Only a telemetry cost is exact: the other
+/// two are estimates and views mark them as such.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CostSource {
+    /// Priced from the price table.
+    #[default]
+    Table,
+    /// Reported by Claude Code through telemetry.
+    Telemetry,
+    /// Priced from a per token rate learned from the telemetry of the same
+    /// model, because the price table lacks it.
+    Learned,
+}
+
+impl CostSource {
+    pub fn is_estimate(self) -> bool {
+        self != CostSource::Telemetry
+    }
+}
+
 /// One assistant message's token usage and derived cost. `event_id` is the
 /// source's own unique message id, the dedup key (a message can span several
 /// transcript lines carrying identical usage). `cache_creation_1h_tokens` is
 /// the part of `cache_creation_tokens` written to the one hour cache; the rest
 /// is the five minute cache. `agent` names the source (empty is filled with
 /// the source name at ingest). `cost_usd` and `unpriced` are derived from the
-/// token counts by `apply_pricing`, never read back from storage. `machine` is
+/// token counts by `apply_pricing`, never read back from storage.
+/// `request_id` is the API request the message answered (Claude Code only,
+/// empty when the source has none), the key that joins telemetry cost onto it.
+/// `cost_source` says where `cost_usd` came from. `machine` is
 /// the id of the computer that wrote the row, filled when the event is read
 /// from the store and ignored when one is written (the store stamps its own).
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -90,6 +114,8 @@ pub struct UsageEvent {
     pub cache_read_tokens: u64,
     pub cost_usd: f64,
     pub unpriced: bool,
+    pub request_id: String,
+    pub cost_source: CostSource,
     pub machine: String,
 }
 
@@ -111,8 +137,10 @@ impl UsageEvent {
             Some(usd) => {
                 self.cost_usd = usd;
                 self.unpriced = false;
+                self.cost_source = CostSource::Table;
             }
             None => {
+                self.cost_source = CostSource::Table;
                 self.cost_usd = 0.0;
                 self.unpriced = tokens.total() > 0;
             }

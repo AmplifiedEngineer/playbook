@@ -7,6 +7,7 @@
 //! other processes, which is what WAL mode and `busy_timeout` are for.
 
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};
+use crate::cost_merge::{merge, Extent};
 use crate::machine_rows::LOCAL_MACHINE_SQL;
 use crate::sync_tables::account_source;
 use crate::util::atomic::{ensure_private_dir, make_db_file_private};
@@ -16,9 +17,9 @@ use std::time::Duration;
 
 /// The usage database layout this build writes (2 added the `machine` column,
 /// 3 the one-row `machine` table, 4 the `session_account_spans` table, 5 the
-/// sync tables and the `usage_events_all` view). A database without the row
+/// sync tables and the `usage_events_all` view, 6 the `request_id` column). A database without the row
 /// counts as version 0 and is stamped on open.
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS usage_events (
@@ -137,6 +138,7 @@ fn open_prepared(path: &Path) -> Result<Connection, String> {
         .map_err(|e| format!("failed to create usage schema: {e}"))?;
     ensure_cache_1h_column(&conn)?;
     ensure_agent_column(&conn)?;
+    ensure_request_id_column(&conn)?;
     retry_busy(
         || conn.execute_batch(super::telemetry_db::UP_SQL),
         BUSY_TIMEOUT,
@@ -217,6 +219,33 @@ fn ensure_agent_column(conn: &Connection) -> Result<(), String> {
     }
 }
 
+/// Adds `request_id` to a database created before it existed, with the index
+/// the telemetry join reads. Old rows keep the empty default until the
+/// request id backfill fills them.
+fn ensure_request_id_column(conn: &Connection) -> Result<(), String> {
+    let has: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('usage_events') WHERE name = 'request_id')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("failed to inspect usage_events: {e}"))?;
+    if !has {
+        match conn.execute(
+            "ALTER TABLE usage_events ADD COLUMN request_id TEXT NOT NULL DEFAULT ''",
+            [],
+        ) {
+            Ok(_) => {}
+            Err(e) if e.to_string().contains("duplicate column") => {}
+            Err(e) => return Err(format!("failed to add request_id: {e}")),
+        }
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS usage_events_by_request ON usage_events (session_id, request_id)",
+    )
+    .map_err(|e| format!("failed to index request_id: {e}"))
+}
+
 /// Last ingested timestamp for `source`; 0 when it has never been ingested.
 pub fn get_watermark(conn: &Connection, source: &str) -> Result<i64, String> {
     conn.query_row(
@@ -271,15 +300,16 @@ pub fn upsert_usage_event(conn: &Connection, e: &UsageEvent) -> Result<usize, St
         &format!(
             "INSERT INTO usage_events (event_id, timestamp, session_id, account, model, effort,
             repo, branch, input_tokens, output_tokens, cache_creation_tokens,
-            cache_read_tokens, cost_usd, cache_creation_1h_tokens, agent, machine)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, {LOCAL_MACHINE_SQL})
+            cache_read_tokens, cost_usd, cache_creation_1h_tokens, agent, request_id, machine)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, {LOCAL_MACHINE_SQL})
          ON CONFLICT(event_id) DO UPDATE SET
             input_tokens = excluded.input_tokens,
             output_tokens = excluded.output_tokens,
             cache_creation_tokens = excluded.cache_creation_tokens,
             cache_read_tokens = excluded.cache_read_tokens,
             cost_usd = excluded.cost_usd,
-            cache_creation_1h_tokens = excluded.cache_creation_1h_tokens
+            cache_creation_1h_tokens = excluded.cache_creation_1h_tokens,
+            request_id = COALESCE(NULLIF(excluded.request_id, ''), usage_events.request_id)
          WHERE excluded.output_tokens > usage_events.output_tokens"
         ),
         params![
@@ -297,7 +327,8 @@ pub fn upsert_usage_event(conn: &Connection, e: &UsageEvent) -> Result<usize, St
             to_i64(e.cache_read_tokens),
             e.cost_usd,
             to_i64(e.cache_creation_1h_tokens),
-            e.agent
+            e.agent,
+            e.request_id
         ],
     )
     .map_err(|e2| format!("failed to upsert usage event {}: {e2}", e.event_id))
@@ -406,6 +437,20 @@ pub fn set_repo_and_cache_tier(
     .map_err(|e| format!("failed to update usage event {event_id}: {e}"))
 }
 
+/// Stores the request id of a row written before the column existed. Returns
+/// rows changed; a row that already has one is left alone.
+pub fn set_request_id(
+    conn: &Connection,
+    event_id: &str,
+    request_id: &str,
+) -> Result<usize, String> {
+    conn.execute(
+        "UPDATE usage_events SET request_id = ?2 WHERE event_id = ?1 AND request_id = ''",
+        params![event_id, request_id],
+    )
+    .map_err(|e| format!("failed to set the request id of {event_id}: {e}"))
+}
+
 pub fn insert_tool_event(conn: &Connection, e: &ToolInvocationEvent) -> Result<(), String> {
     conn.execute(
         &format!(
@@ -481,23 +526,39 @@ fn query_usage(
 /// and the current price table. The stored `cost_usd` column is ignored, so a
 /// price correction never needs a re-ingest.
 pub fn load_usage_events(conn: &Connection) -> Result<Vec<UsageEvent>, String> {
-    query_usage(conn, LOCAL_TABLE, TAIL_ALL, &[])
+    merge(
+        conn,
+        query_usage(conn, LOCAL_TABLE, TAIL_ALL, &[])?,
+        Extent::All,
+    )
 }
 
 /// Every event of the account, this machine's and the synced ones of other
 /// machines, priced like `load_usage_events`.
 pub fn load_account_events(conn: &Connection) -> Result<Vec<UsageEvent>, String> {
-    query_usage(conn, account_source(conn), TAIL_ALL, &[])
+    merge(
+        conn,
+        query_usage(conn, account_source(conn), TAIL_ALL, &[])?,
+        Extent::All,
+    )
 }
 
 /// The account's events at or after `since` (epoch seconds), oldest first.
 pub fn load_account_events_since(conn: &Connection, since: i64) -> Result<Vec<UsageEvent>, String> {
-    query_usage(conn, account_source(conn), TAIL_SINCE, &[&since])
+    merge(
+        conn,
+        query_usage(conn, account_source(conn), TAIL_SINCE, &[&since])?,
+        Extent::Since(since),
+    )
 }
 
 /// Events at or after `since` (epoch seconds), oldest first.
 pub fn load_usage_events_since(conn: &Connection, since: i64) -> Result<Vec<UsageEvent>, String> {
-    query_usage(conn, LOCAL_TABLE, TAIL_SINCE, &[&since])
+    merge(
+        conn,
+        query_usage(conn, LOCAL_TABLE, TAIL_SINCE, &[&since])?,
+        Extent::Since(since),
+    )
 }
 
 /// The newest `limit` events, newest first. `machine` keeps one machine's
@@ -507,11 +568,28 @@ pub fn load_latest_usage_events(
     limit: i64,
     machine: Option<&str>,
 ) -> Result<Vec<UsageEvent>, String> {
-    query_usage(conn, LOCAL_TABLE, TAIL_LATEST, &[&limit, &machine])
+    merge(
+        conn,
+        query_usage(conn, LOCAL_TABLE, TAIL_LATEST, &[&limit, &machine])?,
+        Extent::Picked,
+    )
 }
 
-/// Every event of the given sessions, oldest first.
+/// Every event of the given sessions, oldest first, with telemetry costs.
 pub fn load_usage_events_of_sessions(
+    conn: &Connection,
+    sessions: &[String],
+) -> Result<Vec<UsageEvent>, String> {
+    merge(
+        conn,
+        load_transcript_events_of_sessions(conn, sessions)?,
+        Extent::Sessions(sessions),
+    )
+}
+
+/// Every transcript event of the given sessions, oldest first, priced from
+/// the table only. The telemetry check compares against these.
+pub fn load_transcript_events_of_sessions(
     conn: &Connection,
     sessions: &[String],
 ) -> Result<Vec<UsageEvent>, String> {
@@ -738,7 +816,7 @@ mod tests {
             stored_schema_version(&path),
             Some(SCHEMA_VERSION.to_string())
         );
-        assert_eq!(SCHEMA_VERSION, 5);
+        assert_eq!(SCHEMA_VERSION, 6);
         let names: Vec<String> = conn
             .prepare("SELECT name FROM sqlite_master WHERE name LIKE 'sync_%' OR name IN ('usage_events_remote', 'account_aliases', 'usage_events_all') ORDER BY name")
             .unwrap()
@@ -1026,6 +1104,7 @@ mod tests {
         let conn = open_db(&path).unwrap();
         let expected = vec![
             "usage_events_by_account",
+            "usage_events_by_request",
             "usage_events_by_session",
             "usage_events_by_time",
         ];
