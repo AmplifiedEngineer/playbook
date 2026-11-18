@@ -212,7 +212,7 @@ The first line shows the id and the name. The second sets a name, and an empty n
 
 ## Cost math
 
-Transcripts carry no cost, so pbtop prices every message from a price table in `crates/telemetry/src/pricing.rs`. A person copied the table from the published pricing page, and the file says when. For one message:
+Transcripts carry no cost, so pbtop estimates each message from a price table. The table is a copy of the [LiteLLM price list](https://github.com/BerriAI/litellm) that ships with pbtop, so a new Claude or OpenAI model is priced without a code change. For one message:
 
 ```text
 cost = (input x in + output x out
@@ -293,18 +293,18 @@ Set one with `playbook config set --global usage.theme dark`. The [config keys p
 
 ## pbtop on its own
 
-The standalone program reads the same `usage.db` and the same settings. It does not start a collector. It reads transcripts and any telemetry rows that a collector already wrote to `usage.db`. It has no session records, so the full screen Sessions list is empty. To collect telemetry on such a machine, run `pbtop collect` yourself.
+The standalone program reads the same `usage.db` and settings. It does not start a collector, and it reads any telemetry rows one already wrote. It has no session records, so the full screen Sessions list is empty. Run `pbtop collect` yourself to collect telemetry.
 
 ## More machines
 
-Usage sync is an opt-in preview. It copies usage rows between your own machines through a database you own. See the [sync guide](guides/17-sync.md). Once other machines have synced rows, the dashboard reads a merged view of your own rows and theirs. Spend, tokens, models, budget, projection and burn-up count every machine. The live view, agents, skills, tools, health, sessions and projects follow the machine you pick. `x` picks the next machine and then all machines.
+Usage sync is an opt-in preview. It copies usage rows between your own machines through a database you own. See the [sync guide](guides/17-sync.md). Once other machines have synced rows, the dashboard reads a merged view. Spend, tokens, models, budget, projection and burn-up count every machine. The live view, agents, skills, tools, health, sessions and projects follow the machine you pick. `x` picks the next machine and then all machines.
 
 ## Troubleshooting
 
 - The numbers look low or stale. Run `playbook usage status` to see whether the receiver runs and how many telemetry rows exist.
-- A limit looks wrong. Run `playbook usage doctor` and share its output. It prints field names and ages, with no email, name or token.
+- A limit looks wrong. Run `playbook usage doctor`. Its output has no email, name or token, so you can share it.
 - The screen is blank or says it is too small. Make the window at least 80 columns by 24 rows.
-- A model shows $0. It is not in the price table. `--summary` names it.
+- A model shows no price. It is not in the price table. `--summary` names it.
 
 ## Next
 

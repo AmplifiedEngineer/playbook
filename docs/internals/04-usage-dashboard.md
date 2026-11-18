@@ -136,7 +136,7 @@ The source is `~/.claude/projects/**/*.jsonl`, the session transcripts Claude Co
 Four details:
 
 - **One message spans several lines.** Each content block of a message is its own transcript line, and each line repeats the same usage. Counting lines would roughly double every number, so events are deduped by message id (and by tool call id).
-- **Transcripts have no cost field.** Cost is computed from a per-model price table in `crates/telemetry/src/pricing.rs`, copied by hand from the published pricing page (the source and date are in the file). Input, output, cache reads and both cache write lifetimes (five minute and one hour) are priced separately. Cost is worked out on each read, so a price fix applies to old events without a re-ingest. It is still an estimate and can drift from published prices. A model that is not in the table is never guessed: its messages count as $0, and the summary and the JSON (`totals.unpriced_messages`, `totals.unpriced_models`) say how many and which models.
+- **Transcripts have no cost field.** Cost is computed from a per-model price table, a trimmed copy of the LiteLLM price list checked in as `crates/telemetry/data/litellm-prices.json` and read by `price_table.rs`. Only the anthropic and openai entries with a bare key are kept, with the long prompt tiers and both cache write prices. `RETIRED` in `pricing.rs` holds the few older models the list dropped. Regenerate the file with the ignored `regenerate_snapshot` test. Input, output, cache reads and both cache write lifetimes (five minute and one hour) are priced separately. Cost is worked out on each read, so a price fix applies to old events without a re-ingest. It is still an estimate and can drift from published prices. A model that is not in the table is never guessed: its messages count as $0, and the summary and the JSON (`totals.unpriced_messages`, `totals.unpriced_models`) say how many and which models.
 - **The repo is the real repository, not the last folder.** A worktree or agent folder would otherwise show up as its own repo. `crates/telemetry/src/repo.rs` maps a directory to its repo: first by path (`.claude/worktrees/<name>`, `.git/...`, and playbook's own `repos/<owner>/<repo>` storage, which still works after the directory is deleted), then by asking git for the shared git dir, then by the folder's own name.
 - **The account is not in the transcripts.** It is read once per ingest from `oauthAccount.emailAddress` in `~/.claude.json` and tagged onto every event and stored in `usage_events` on this machine. If you are not signed in, it is `unknown`. When `CLAUDE_CODE_OAUTH_TOKEN` is set, Claude Code bills that token's account first, so the `SessionStart` hook records a `token:` key instead (see Account per event). It leaves the machine only when you turn on [usage sync](../guides/17-sync.md), and then as a salted hash, never as the email.
 
@@ -161,7 +161,7 @@ The Codex source reads `~/.codex/sessions/**/rollout-*.jsonl` read-only and is s
 
 - Model, effort and cwd come from `turn_context`, the session id, cwd and branch from `session_meta`, and tokens from `event_msg` records of type `token_count`.
 - One event is one change of the cumulative `total_token_usage.total_tokens`, with tokens from `last_token_usage`. Its id is `codex:<session>:<timestamp>:<total>`, so re-reads dedupe. Cached input is reported as cache reads.
-- OpenAI models are not in the price table, so Codex events show as unpriced rather than guessed.
+- OpenAI models are priced from the same table. A model it lacks shows as unpriced rather than guessed.
 - Compressed `.jsonl.zst` rollouts are not read. The account is `unknown` because rollouts carry none.
 
 ## Tests
@@ -376,7 +376,7 @@ What the figure counts:
 - **Refresh.** `playbook setup` sets `statusLine.refreshInterval` to 5 seconds whenever the status line runs `playbook statusline`, replacing any other value, so the countdown keeps ticking while you are idle. A status line that runs another command is left alone. `playbook doctor` warns on layer 5 when the interval differs. Without a refresh interval the countdown stays stale until the next event.
 - **Model switch.** A different model starts a new cache, so a switch seen in the transcript shows the cold warning even when `prompt_cache` says warm. Its price uses the 5 minute write, because the tier of the new model's cache is not known.
 - **Not seen.** A tool call or subagent that runs longer than the cache lifetime turns the line red during the turn, because the transcript records a message only when it ends. A change to the system prompt also breaks the cache, and the estimate cannot see it.
-- **Prices.** They come from the same table as the usage dashboard (`crates/telemetry/src/pricing.rs`). A model that is not in the table shows no estimate.
+- **Prices.** They come from the same table as the usage dashboard (`crates/telemetry/src/price_table.rs`). A model that is not in the table shows no estimate.
 
 ### When a limit is reached
 

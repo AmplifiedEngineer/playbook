@@ -31,6 +31,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+The pbtop price table, crates/telemetry/data/litellm-prices.json, is a trimmed
+copy of the model price list of LiteLLM (https://github.com/BerriAI/litellm),
+Copyright (c) 2023 Berri AI, licensed under the MIT License. The permission
+notice above applies to it.
+
 The pbdoc document converter, built from the same repository, links further
 third-party crates. Their names, versions and licences, with copyright lines, are
 listed in NOTICE-pbdoc.
