@@ -214,9 +214,30 @@ pub struct Totals {
     pub cache_creation_tokens: u64,
     pub cache_read_tokens: u64,
     pub cost_usd: f64,
+    /// The part of `cost_usd` that is an estimate (from the price table or a
+    /// learned rate) rather than a cost Claude Code reported.
+    pub estimated_usd: f64,
 }
 
+/// An estimated share at or above this reads as the whole cost.
+const WHOLLY_ESTIMATED: f64 = 0.995;
+const PERCENT: f64 = 100.0;
+
 impl Totals {
+    /// The words that mark an estimate: `estimated` when all of the cost is
+    /// one, `12% estimated` when it mixes in telemetry figures. A cost wholly
+    /// from telemetry has nothing to mark.
+    pub fn estimate_label(&self) -> Option<String> {
+        if self.cost_usd <= 0.0 || self.estimated_usd <= 0.0 {
+            return None;
+        }
+        let share = self.estimated_usd / self.cost_usd;
+        if share >= WHOLLY_ESTIMATED {
+            return Some("estimated".to_string());
+        }
+        Some(format!("{}% estimated", (share * PERCENT).round().max(1.0)))
+    }
+
     pub fn tokens(&self) -> u64 {
         self.input_tokens + self.output_tokens + self.cache_creation_tokens + self.cache_read_tokens
     }
@@ -231,6 +252,11 @@ impl Totals {
             cache_creation_tokens: events.iter().map(|e| e.cache_creation_tokens).sum(),
             cache_read_tokens: events.iter().map(|e| e.cache_read_tokens).sum(),
             cost_usd: events.iter().map(|e| e.cost_usd).sum(),
+            estimated_usd: events
+                .iter()
+                .filter(|e| e.cost_source.is_estimate())
+                .map(|e| e.cost_usd)
+                .sum(),
         }
     }
 }
@@ -678,6 +704,36 @@ mod tests {
         assert_eq!(utc_month_bounds(jan + 12_345), (jan, feb));
         assert_eq!(utc_month_bounds(feb - 1), (jan, feb));
         assert_eq!(utc_month_bounds(feb).0, feb);
+    }
+
+    #[test]
+    fn the_estimate_label_marks_every_cost_that_has_an_estimate_in_it() {
+        use crate::CostSource;
+        let exact = |cost| UsageEvent {
+            cost_usd: cost,
+            cost_source: CostSource::Telemetry,
+            ..UsageEvent::default()
+        };
+        let guess = |cost| UsageEvent {
+            cost_usd: cost,
+            cost_source: CostSource::Learned,
+            ..UsageEvent::default()
+        };
+
+        let label = |events: &[UsageEvent]| Totals::of(events).estimate_label();
+
+        assert_eq!(
+            label(&[exact(88.0), guess(12.0)]).as_deref(),
+            Some("12% estimated")
+        );
+        assert_eq!(
+            label(&[exact(100_000.0), guess(0.01)]).as_deref(),
+            Some("1% estimated")
+        );
+        assert_eq!(label(&[exact(5.0)]), None);
+        assert_eq!(label(&[guess(5.0)]).as_deref(), Some("estimated"));
+        assert_eq!(label(&[]), None);
+        assert_eq!(Totals::of(&[exact(2.0), guess(1.0)]).estimated_usd, 1.0);
     }
 
     use super::*;

@@ -5,7 +5,9 @@
 //! counts, the live view and the period comparison. Built from the same
 //! aggregation the terminal summary uses.
 
-use super::aggregate::{count_tools, date_key, group_usage, unpriced_models, Dimension, Group};
+use super::aggregate::{
+    count_tools, date_key, group_usage, learned_models, unpriced_models, Dimension, Group,
+};
 use super::period::{pair_groups, Change, Comparison, Period, Span};
 pub use super::query::{active_session_ids, live_window_start, Range, FEED_LIMIT};
 use super::query::{day_of, in_range, live_view, total_tokens, LiveView, Spend, Totals};
@@ -88,8 +90,10 @@ pub fn data_json(
             "cache_creation_tokens": totals.cache_creation_tokens,
             "cache_read_tokens": totals.cache_read_tokens,
             "cost_usd": totals.cost_usd,
+            "estimated_usd": totals.estimated_usd,
             "unpriced_messages": unpriced_messages,
             "unpriced_models": unpriced_model_names,
+            "learned_models": learned_models(usage),
         },
         "groups": groups,
         "skills": counts_json(count_tools(tools, ToolKind::Skill)),
@@ -262,6 +266,21 @@ mod tests {
             .map(|m| m["unpriced"].as_u64().unwrap())
             .collect();
         assert_eq!(flags.iter().sum::<u64>(), 1);
+    }
+
+    #[test]
+    fn totals_report_the_estimated_cost_and_the_learned_models() {
+        let mut usage = vec![
+            event(1788252682, "sonnet", 1.0),
+            event(1788252683, "opus", 0.5),
+        ];
+        usage[0].cost_source = crate::CostSource::Telemetry;
+        usage[1].cost_source = crate::CostSource::Learned;
+
+        let data = data_json(&usage, &[], 1788400000, Range::All);
+
+        assert!((data["totals"]["estimated_usd"].as_f64().unwrap() - 0.5).abs() < 1e-9);
+        assert_eq!(data["totals"]["learned_models"][0], "opus");
     }
 
     #[test]

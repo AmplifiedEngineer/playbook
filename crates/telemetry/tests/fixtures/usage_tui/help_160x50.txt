@@ -1,8 +1,8 @@
 ╭─┤Agent Budget Dashboard├──┤UTC├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │last 30 days Aug 5 to Sep 3, 2026  (no p╭┤ Help: keys by group ├─────────────────────────────────────────────────────╮                                        │
-│cost          $20.27 │ No limit   ------│Navigation                                                                  │ly budget                               │
-│tokens        618.8K │ Spend    h this w│1 to 6     Focus a panel by its number              all panels              │                                        │
-│messages          26 │                  │Tab        Show the next tab                        all panels              │                                        │
+│cost         ~$20.27 (estimated) │ No li│Navigation                                                                  │ set a monthly budget                   │
+│tokens        618.8K             │ Spend│1 to 6     Focus a panel by its number              all panels              │                                        │
+│messages          26             │      │Tab        Show the next tab                        all panels              │                                        │
 ╰────────────────────────────────────────│Shift-Tab  Show the previous tab                    all panels              │────────────────────────────────────────╯
 ╭─┤¹Spend per day, USD├─┤v view: total├──│F1 to F12  Show a tab by its number                 all panels              │────────────────────────────────────────╮
 │total $20.27  peak $6.01 on 08-25  avg $│]          Focus the next panel of the tab          all panels              │ 20.6K/day                              │

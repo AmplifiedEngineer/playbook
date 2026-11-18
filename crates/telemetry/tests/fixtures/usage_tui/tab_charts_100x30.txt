@@ -1,9 +1,9 @@
 ╭─┤Agent Budget Dashboard├──┤UTC├──────────────────────────────────────────────────────────────────╮
 │last 30 days Aug 5 to Sep 3, 2026  (no previous period to compare)                                │
-│cost          $20.27 │ Monthly  u -|--------------    3%  $3.05 of $100  + ok  safe  resets in 27d│
-│tokens        618.8K │ Monthly    left $96.95   pace -4pt    allow $0.14/h $3.47/d   manual, local│
-│messages          26 │ Spend    h this week $3.05 #####-----  last week $6.21 ##########  -51%    │
-│                     │ 5 hour and weekly windows: not on this plan  (i: details)                  │
+│cost         ~$20.27 (estimated) │ Monthly  u #|-----------------    3%  + ok  safe  resets in 27d│
+│tokens        618.8K             │ Monthly    left $96.95   pace -4pt    manual, local            │
+│messages          26             │ Spend    h this week $3.05 #####-----  last week $6.21  -51%   │
+│                                 │ 5 hour and weekly windows: not on this plan  (i: details)      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  F1 Charts  F2 Numbers  F3 Breakdown
 ╭─┤¹Daily cost├──────────────────────────────────╮╭─┤Burn-up├─────────────┤spend this period, UTC├─╮

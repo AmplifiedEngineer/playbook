@@ -17,8 +17,10 @@
     "cache_creation_tokens": 0,
     "cache_read_tokens": 0,
     "cost_usd": 0.00066,
+    "estimated_usd": 0.00066,
     "unpriced_messages": 0,
-    "unpriced_models": []
+    "unpriced_models": [],
+    "learned_models": []
   },
   "groups": {
     "day": [

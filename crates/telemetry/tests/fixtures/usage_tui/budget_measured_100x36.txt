@@ -1,6 +1,6 @@
 ╭─┤Agent Budget Dashboard├──┤UTC, weeks start Mon├─────────────────────────────────────────────────╮
 │this week Aug 31 to Sep 3  vs  last week Aug 24 to Aug 27  (same span 3d 1h)                      │
-│cost $3.05 vs $6.21 -50.9%  tokens 95.2K vs 71.4K +33.3%  msgs 4 vs 3 +33.3%                      │
+│cost ~$3.05 (estimated) vs $6.21 -50.9%  tokens 95.2K vs 71.4K +33.3%  msgs 4 vs 3 +33.3%         │
 │5 hour   m ##############|###------------------   50%  ! hits it in 2h 0m  resets in 3h 0m (04:46)│
 │7 day    m ###########----|--------------------   30%  + ok  safe  resets in 4d (Mon 09-07)       │
 │Spend    h this week $3.05 #####-----  last week $6.21 ##########  -51%  avg $0.04/h $0.99/d      │

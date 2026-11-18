@@ -132,6 +132,16 @@ pub fn unpriced_models(events: &[UsageEvent]) -> (usize, Vec<String>) {
     (count, models.into_iter().collect())
 }
 
+/// The models whose cost is a rate learned from telemetry, sorted.
+pub fn learned_models(events: &[UsageEvent]) -> Vec<String> {
+    let models: std::collections::BTreeSet<&str> = events
+        .iter()
+        .filter(|e| e.cost_source == crate::CostSource::Learned)
+        .map(|e| e.model.as_str())
+        .collect();
+    models.into_iter().map(str::to_string).collect()
+}
+
 /// Invocation counts per name for one tool kind, most used first, then by name.
 pub fn count_tools(tools: &[ToolInvocationEvent], kind: ToolKind) -> Vec<(String, u64)> {
     let mut counts: BTreeMap<&str, u64> = BTreeMap::new();

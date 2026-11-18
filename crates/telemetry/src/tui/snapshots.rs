@@ -2018,7 +2018,9 @@ fn a_stacked_header_folds_the_comparison_into_one_row_and_keeps_every_figure() {
     let text = header_rows(&a, 80, 24);
 
     let row = text.lines().find(|l| l.contains("cost")).unwrap();
-    for word in ["cost", "tokens", "msgs", " vs "] {
+    // The estimate mark takes the room of the previous values at 80 columns,
+    // so the row keeps the changes.
+    for word in ["cost", "(estimated)", "tokens", "msgs", "%"] {
         assert!(row.contains(word), "{word}: {text}");
     }
     assert_eq!(
@@ -2074,10 +2076,10 @@ fn the_header_splits_into_two_columns_exactly_when_the_budget_column_fits() {
             .any(|l| l.contains("cost") && l.contains("5 hour"))
     };
 
-    // The widest metric row is 57 cells, the gap 3 and the budget 44, plus the
-    // two borders.
-    assert!(!split(105));
-    assert!(split(106));
+    // The widest metric row is 69 cells (57 and the 12 of ` (estimated)`), the
+    // gap 3 and the budget 44, plus the two borders.
+    assert!(!split(117));
+    assert!(split(118));
 }
 
 #[test]

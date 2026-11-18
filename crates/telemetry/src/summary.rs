@@ -4,7 +4,9 @@
 //! Plain-text usage report for the terminal. Structured on purpose: whatever
 //! agent is driving the session can read it and give the insights itself.
 
-use super::aggregate::{count_tools, date_key, group_usage, unpriced_models, Dimension, Group};
+use super::aggregate::{
+    count_tools, date_key, group_usage, learned_models, unpriced_models, Dimension, Group,
+};
 use super::period::{elapsed_text, Change, Comparison, Period};
 use super::query::{day_of, in_range, Range};
 use super::{ToolInvocationEvent, ToolKind, UsageEvent};
@@ -162,14 +164,17 @@ fn scoped(
     if usage.is_empty() && tools.is_empty() {
         return format!("{EMPTY_MESSAGE}\n");
     }
-    let total_cost: f64 = usage.iter().map(|e| e.cost_usd).sum();
+    let totals = crate::query::Totals::of(usage);
     let mut out = String::new();
-    let _ = writeln!(
-        out,
-        "Usage: {} messages, ${:.4} estimated cost {scope}",
-        usage.len(),
-        total_cost
-    );
+    // `estimated cost` already marks a total that is wholly an estimate.
+    let cost = match totals.estimate_label().as_deref() {
+        Some("estimated") | None if totals.estimated_usd > 0.0 || totals.cost_usd <= 0.0 => {
+            format!("${:.4} estimated cost", totals.cost_usd)
+        }
+        Some(label) => format!("~${:.4} cost ({label})", totals.cost_usd),
+        None => format!("${:.4} cost from telemetry", totals.cost_usd),
+    };
+    let _ = writeln!(out, "Usage: {} messages, {cost} {scope}", usage.len());
     let _ = writeln!(out, "Times and days are in {}.", crate::tz::describe(now));
     let (unpriced, models) = unpriced_models(usage);
     if unpriced > 0 {
@@ -177,6 +182,14 @@ fn scoped(
             out,
             "Note: {unpriced} messages are unpriced (no known price for {}); they count as $0.",
             models.join(", ")
+        );
+    }
+    let learned = learned_models(usage);
+    if !learned.is_empty() {
+        let _ = writeln!(
+            out,
+            "Note: {} priced from a rate learned from telemetry, an estimate.",
+            learned.join(", ")
         );
     }
 
@@ -263,6 +276,37 @@ mod tests {
             "Note: 1 messages are unpriced (no known price for claude-future-9); they count as $0."
         ));
         assert!(!render(&[], &[], None).contains("unpriced"));
+    }
+
+    #[test]
+    fn the_cost_line_says_what_part_is_an_estimate_and_names_learned_models() {
+        use crate::CostSource;
+        let event = |id: &str, cost: f64, source: CostSource| UsageEvent {
+            event_id: id.into(),
+            timestamp: 1788252682,
+            model: "claude-new-9".into(),
+            input_tokens: 5,
+            cost_usd: cost,
+            cost_source: source,
+            ..UsageEvent::default()
+        };
+        let exact = event("a", 3.0, CostSource::Telemetry);
+        let learned = event("b", 1.0, CostSource::Learned);
+
+        let mixed = render(&[exact.clone(), learned.clone()], &[], None);
+        let only_exact = render(&[exact], &[], None);
+        let only_guess = render(&[learned], &[], None);
+
+        assert!(mixed.contains("~$4.0000 cost (25% estimated)"), "{mixed}");
+        assert!(mixed.contains("Note: claude-new-9 priced from a rate learned from telemetry"));
+        assert!(
+            only_exact.contains("$3.0000 cost from telemetry"),
+            "{only_exact}"
+        );
+        assert!(
+            only_guess.contains("$1.0000 estimated cost"),
+            "{only_guess}"
+        );
     }
 
     #[test]
