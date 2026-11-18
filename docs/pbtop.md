@@ -183,7 +183,7 @@ Regenerate with: UPDATE_REFERENCE=1 cargo test -p playbook --test docs_pbtop_key
 
 <!-- keys:end -->
 
-From last week, last month or a rolling range, `r` goes to the stop after the closest one, or to today when none is close. `--range` still takes every range.
+From any other range, `r` goes to the stop after the closest one. `--range` takes every range.
 
 ## Where the numbers come from
 
