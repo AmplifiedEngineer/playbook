@@ -58,7 +58,7 @@ Each file here records one decision and why it was made. A decision can have a b
 | [0052](0052-signed-apt-and-dnf-repository.md) | Signed apt and dnf Package Repository | Superseded | 2026-10-22 |
 | [0053](0053-windows-experimental-cli.md) | Windows Is an Experimental CLI | Accepted | 2026-10-22 |
 | [0054](0054-completion-wiring-in-shell-files.md) | Setup Wires Shell Completion Into Shell Files | Accepted | 2026-10-23 |
-| [0055](0055-watch-mode-for-github-events.md) | A polling watch mode for GitHub events, with rules, autonomy levels and a durable queue | Proposed | 2026-10-25 |
+| [0055](0055-watch-mode-for-github-events.md) | A polling watch mode for GitHub events, with rules, autonomy levels and a durable queue | Accepted | 2026-10-25 |
 | [0056](0056-share-one-code-index-across-worktrees.md) | Share One Code Index Across the Worktrees of a Repository | Accepted | 2026-10-27 |
 | [0057](0057-index-memory-fact-bodies-with-fts5.md) | Index Memory Fact Bodies with SQLite FTS5 | Accepted | 2026-11-04 |
 | [0058](0058-answer-symbol-questions-with-language-servers.md) | Answer Symbol Questions With Language Servers, One Per Call, Behind a Trust Gate | Superseded by 0060 | 2026-10-21 |
