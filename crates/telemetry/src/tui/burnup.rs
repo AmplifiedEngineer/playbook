@@ -337,17 +337,42 @@ impl Dot {
     }
 }
 
-/// The dots of the projection, one connected path from the last used value at
-/// `now` to the period end, or none when there is no projection. Each dot
-/// touches the next, so a steep stretch has no gap.
+/// The last dot column of the used area, the last one at or before `now`.
+fn last_filled(b: &Burnup, fine: &Plot) -> Option<usize> {
+    (0..fine.width).rev().find(|x| fine.time(b, *x) <= b.now)
+}
+
+/// What the used area shows in dot column `x`. The last column shows the
+/// value at `now`, so a day boundary between it and `now` does not leave the
+/// fill a step short of the projection.
+fn fill_value(b: &Burnup, fine: &Plot, x: usize) -> Option<f64> {
+    let at = if last_filled(b, fine) == Some(x) {
+        b.now
+    } else {
+        fine.time(b, x)
+    };
+    value_at(b, at).filter(|_| at <= b.now)
+}
+
+/// The dots of the projection, one connected path that starts in the dot
+/// column right of the used area at the height of its top, and ends at the
+/// period end. None when there is no projection. Each dot touches the next, so
+/// a steep stretch has no gap.
 fn projection_path(b: &Burnup, fine: &Plot) -> Vec<(usize, usize)> {
     let Some(end) = b.projected_end else {
         return Vec::new();
     };
-    let Some(start) = (0..fine.width).rev().find(|x| fine.time(b, *x) <= b.now) else {
+    let Some(top) = last_filled(b, fine)
+        .and_then(|x| fill_value(b, fine, x))
+        .map(|v| fine.row(v))
+    else {
         return Vec::new();
     };
-    line_dots((start, fine.row(b.total)), (fine.width - 1, fine.row(end)))
+    let start = last_filled(b, fine).map_or(0, |x| x + 1);
+    if start >= fine.width {
+        return Vec::new();
+    }
+    line_dots((start, top), (fine.width - 1, fine.row(end)))
 }
 
 /// Every second dot of `path`, so the projection reads as dotted.
@@ -361,8 +386,7 @@ fn dotted(path: &[(usize, usize)]) -> impl Iterator<Item = (usize, usize)> + '_ 
 fn fill_used(b: &Burnup, fine: &Plot, grid: &mut DotGrid<Dot>) {
     let last = fine.height - 1;
     for x in 0..fine.width {
-        let at = fine.time(b, x);
-        let Some(value) = value_at(b, at).filter(|_| at <= b.now) else {
+        let Some(value) = fill_value(b, fine, x) else {
             continue;
         };
         for y in fine.row(value)..=last {
@@ -651,7 +675,7 @@ mod tests {
             if at > b.now {
                 continue;
             }
-            let top = f.row(value_at(&b, at).unwrap());
+            let top = f.row(fill_value(&b, &f, x).unwrap());
             for y in 0..f.height {
                 assert_eq!(lit(&grid, x, y), y >= top, "dot ({x}, {y})");
             }
@@ -741,6 +765,47 @@ mod tests {
                 "gap in {path:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_projection_starts_right_of_the_fill_at_its_top_even_across_a_day_boundary() {
+        // Arrange: a daily series whose last day starts between the last
+        // filled dot column and now.
+        let mut b = line(Vec::new(), 0);
+        b.basis = Basis::Daily;
+        b.unit = Unit::Dollars;
+        b.start = 0;
+        b.end = 10 * 86_400;
+        b.now = 3 * 86_400 + 600;
+        b.actual = vec![5.0, 10.0, 20.0, 60.0];
+        b.total = 60.0;
+        b.limit = Some(100.0);
+        b.projected_end = Some(90.0);
+        let f = Plot {
+            width: 200,
+            height: 20,
+            top: 100.0,
+        };
+        let (grid, f) = (
+            {
+                let mut g = DotGrid::new(f.width / 2, f.height / 4);
+                fill_used(&b, &f, &mut g);
+                g
+            },
+            f,
+        );
+
+        // Act
+        let path = projection_path(&b, &f);
+
+        // Assert
+        let last = (0..f.width)
+            .rev()
+            .find(|x| lit(&grid, *x, f.height - 1))
+            .unwrap();
+        let top = (0..f.height).find(|y| lit(&grid, last, *y)).unwrap();
+        assert_eq!(path.first(), Some(&(last + 1, top)));
+        assert!((0..f.height).all(|y| !lit(&grid, last + 1, y)));
     }
 
     #[test]
