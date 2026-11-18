@@ -29,48 +29,24 @@ pub fn nice_ceiling(value: f64) -> f64 {
     step * scale
 }
 
-/// The step between grid lines: the smallest 1, 2 or 5 times a power of ten
-/// that divides `max` into few enough intervals for `rows`. When none does,
-/// the middle of the axis, and when even that is too crowded, the whole axis.
-fn grid_step(max: f64, rows: u16) -> f64 {
-    let room = (usize::from(rows) * ROW_EIGHTHS).saturating_sub(HALF_ROW);
-    let intervals = (room / (MIN_LINE_ROWS * ROW_EIGHTHS)).min(MAX_INTERVALS);
-    if intervals < 2 {
-        return max;
-    }
-    let top = max.log10().floor() as i32;
-    for exp in (top - GRID_DECADES)..=top {
-        for mantissa in GRID_MANTISSAS {
-            let step = mantissa * 10f64.powi(exp);
-            let count = max / step;
-            let whole = count.round();
-            if (count - whole).abs() < WHOLE_TOLERANCE
-                && whole >= 1.0
-                && whole as usize <= intervals
-            {
-                return step;
-            }
-        }
-    }
-    max / 2.0
-}
-
 /// Eighths of a cell in one row of the plot.
 pub const ROW_EIGHTHS: usize = 8;
 /// Half a row in eighths. An axis label sits on the middle of its text row,
 /// so the top of the scale is the middle of the top row, not its edge.
 pub const HALF_ROW: usize = ROW_EIGHTHS / 2;
 
-/// The most grid intervals an axis has, so at most ten lines with zero.
-const MAX_INTERVALS: usize = 10 - 1;
-/// The fewest rows between two grid lines.
+/// The fewest rows between two grid lines, to within the half row the axis
+/// loses at the top.
 const MIN_LINE_ROWS: usize = 2;
 /// The mantissas of a grid step, times a power of ten.
 const GRID_MANTISSAS: [f64; 3] = [1.0, 2.0, 5.0];
-/// How many powers of ten below the top a grid step may go.
-const GRID_DECADES: i32 = 3;
-/// How far a ratio may be from a whole number and still count as one.
-const WHOLE_TOLERANCE: f64 = 1e-6;
+/// How far a ratio may be above a whole number and still count as it.
+const WHOLE_TOLERANCE: f64 = 1e-9;
+/// The least gap between two lines in eighths that the rule above allows.
+#[cfg(test)]
+const MIN_LINE_EIGHTHS: usize = 14;
+/// The peak of an empty chart, so it still has a scale.
+const EMPTY_PEAK: f64 = 1.0;
 
 /// The vertical axis: zero at the bottom, `max` at the top, a grid line at
 /// every multiple of `step` between them.
@@ -81,15 +57,38 @@ pub struct Axis {
 }
 
 impl Axis {
-    /// An axis whose top is the round value above `peak`, with a step that
-    /// gives a plot `rows` high about six to ten lines, none closer than two
-    /// rows. A plot too short for a middle line has only zero and the top.
+    /// An axis for a plot `rows` high: the smallest step of 1, 2 or 5 times a
+    /// power of ten that keeps the lines at least two rows apart, and a top
+    /// that is the next multiple of it above `peak`. A plot too short for a
+    /// middle line has only zero and the round top.
     pub fn of(peak: f64, rows: u16) -> Axis {
-        let max = nice_ceiling(peak);
-        Axis {
-            max,
-            step: grid_step(max, rows),
+        let peak = if peak.is_finite() && peak > 0.0 {
+            peak
+        } else {
+            EMPTY_PEAK
+        };
+        // A plot of 14 rows holds seven intervals. The axis is half a row
+        // short of the full height, so lines can be a little under two rows
+        // apart, never in the same row.
+        let intervals = usize::from(rows) / MIN_LINE_ROWS;
+        if intervals < 2 {
+            let max = nice_ceiling(peak);
+            return Axis { max, step: max };
         }
+        let start = (peak / intervals as f64).log10().floor() as i32;
+        for exp in start.. {
+            for mantissa in GRID_MANTISSAS {
+                let step = mantissa * 10f64.powi(exp);
+                let count = (peak / step * (1.0 - WHOLE_TOLERANCE)).ceil().max(1.0);
+                if count as usize <= intervals {
+                    return Axis {
+                        max: count * step,
+                        step,
+                    };
+                }
+            }
+        }
+        unreachable!("a large enough step always fits")
     }
 
     /// The values of the grid lines, bottom to top, the last being `max`.
@@ -194,7 +193,13 @@ mod tests {
             }
         };
         want(47.6, 12, &[0.0, 10.0, 20.0, 30.0, 40.0, 50.0]);
-        want(47.6, 20, &[0.0, 10.0, 20.0, 30.0, 40.0, 50.0]);
+        want(
+            47.6,
+            20,
+            &[
+                0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0,
+            ],
+        );
         want(
             400.0,
             20,
@@ -206,16 +211,38 @@ mod tests {
     }
 
     #[test]
-    fn a_short_plot_keeps_only_zero_and_the_top_or_the_middle() {
+    fn a_short_plot_keeps_only_zero_and_the_top() {
         assert_eq!(Axis::of(100.0, 1).ticks(), vec![0.0, 100.0]);
         assert_eq!(Axis::of(100.0, 3).ticks(), vec![0.0, 100.0]);
+        assert_eq!(Axis::of(2.2, 3).ticks(), vec![0.0, 2.5]);
         assert_eq!(Axis::of(100.0, 5).ticks(), vec![0.0, 50.0, 100.0]);
-        // 2.5 has no round step with two intervals, so the middle is used.
-        assert_eq!(Axis::of(2.5, 5).ticks(), vec![0.0, 1.25, 2.5]);
     }
 
     #[test]
-    fn lines_are_two_rows_apart_at_least_and_ten_at_most() {
+    fn real_charts_get_dense_round_lines() {
+        let close = |got: Vec<f64>, want: &[f64]| {
+            assert_eq!(got.len(), want.len(), "{got:?}");
+            for (g, w) in got.iter().zip(want) {
+                assert!(
+                    (g - w).abs() < w.abs() * 1e-9 + 1e-12,
+                    "{got:?} not {want:?}"
+                );
+            }
+        };
+        // About $350 on 14 rows: a line every $50.
+        let spend = Axis::of(347.0, 14);
+        assert_eq!(spend.step, 50.0);
+        assert_eq!(spend.max, 350.0);
+        // About 800M tokens on 11 rows: a line every 200M.
+        let tokens = Axis::of(790e6, 11);
+        assert_eq!(tokens.step, 200e6);
+        close(tokens.ticks(), &[0.0, 200e6, 400e6, 600e6, 800e6]);
+        // 1.4B tokens on 11 rows needs 500M: 250M and 800M are not round.
+        assert_eq!(Axis::of(1.4e9, 11).step, 500e6);
+    }
+
+    #[test]
+    fn every_step_is_one_two_or_five_and_lines_keep_two_rows_apart() {
         let mut peak = 0.01;
         while peak < 1e10 {
             for rows in 1..=60u16 {
@@ -223,16 +250,24 @@ mod tests {
                 let ticks = axis.ticks();
                 assert_eq!(ticks[0], 0.0);
                 assert_eq!(*ticks.last().unwrap(), axis.max);
-                assert!(ticks.len() <= 10, "{peak} {rows}: {ticks:?}");
+                assert!(axis.max >= peak * (1.0 - 1e-9), "{peak} {rows}");
+                if ticks.len() == 2 {
+                    continue;
+                }
+                let decade = 10f64.powf(axis.step.log10().floor());
+                let mantissa = (axis.step / decade).round();
+                assert!(
+                    [1.0, 2.0, 5.0].contains(&mantissa),
+                    "{peak} {rows}: {axis:?}"
+                );
+                assert!((axis.step - mantissa * decade).abs() < axis.step * 1e-9);
                 for pair in ticks.windows(2) {
                     let (a, b) = (axis.levels(pair[0], rows), axis.levels(pair[1], rows));
-                    assert!(
-                        ticks.len() == 2 || b - a + 1 >= MIN_LINE_ROWS * ROW_EIGHTHS,
-                        "{peak} {rows}: {ticks:?}"
-                    );
+                    assert!(b - a + 1 >= MIN_LINE_EIGHTHS, "{peak} {rows}: {ticks:?}");
                 }
-                if rows >= 20 {
-                    assert!(ticks.len() >= 5, "{peak} {rows}: {ticks:?}");
+                // The next smaller step would crowd the lines.
+                if rows >= 30 {
+                    assert!(ticks.len() >= 6, "{peak} {rows}: {ticks:?}");
                 }
             }
             peak *= 1.37;

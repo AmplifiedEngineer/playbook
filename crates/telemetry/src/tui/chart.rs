@@ -962,9 +962,10 @@ fn runs(bar: &Bar, slots: &Slots, levels: usize) -> Vec<(usize, usize)> {
 }
 
 /// Bars stacked by model: each run of eighths in its model's color. A cell
-/// that holds the edge between two models is one block in the lower color on
-/// the upper one, so the edge is exact to an eighth of a cell. Without color
-/// the models are told apart by pattern.
+/// that holds the edge between two models goes whole to the model with the
+/// larger part of it, so a column never has an empty eighth between its
+/// bottom and its top and is as tall as the plain bar. Without color the
+/// models are told apart by pattern.
 fn draw_stacked(buf: &mut Buffer, plot: &Plot, slots: &Slots, pal: &Palette) {
     let geo = &plot.geo;
     let p = geo.plot;
@@ -992,14 +993,6 @@ fn draw_stacked(buf: &mut Buffer, plot: &Plot, slots: &Slots, pal: &Palette) {
                     (PATTERNS[runs[main].0 % PATTERNS.len()], Style::default())
                 }
                 (true, _) => (EIGHTHS[eighths - 1], Style::default()),
-                // An edge inside a full cell: lower run as the block, upper as the ground.
-                (false, [low, high]) if eighths == 8 => {
-                    let edge = runs[*low].1 - lo;
-                    let style = Style::default()
-                        .fg(pal.color(pal.series[runs[*low].0 % SERIES]))
-                        .bg(pal.color(pal.series[runs[*high].0 % SERIES]));
-                    (EIGHTHS[edge - 1], style)
-                }
                 (false, _) => (
                     EIGHTHS[eighths - 1],
                     Style::default().fg(pal.color(pal.series[runs[main].0 % SERIES])),
@@ -1716,7 +1709,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stacked_bar_has_each_model_in_its_color_with_an_exact_edge() {
+    fn a_stacked_bar_gives_the_edge_cell_to_the_larger_model() {
         let slots = slots();
         let pal = pal();
         let series = two_models(2.5, 1.5);
@@ -1728,32 +1721,45 @@ mod tests {
         let opus = pal.color(pal.series[slots.slot("opus")]);
         let sonnet = pal.color(pal.series[slots.slot("sonnet")]);
         assert_ne!(opus, sonnet);
-        // 2.5 of 4 is 62.5%: the cell at that height holds the edge, with the
-        // lower model as the block and the upper one behind it.
-        let edge_row = (h * 5 / 8).min(h - 1);
-        let edge = cell(edge_row);
-        assert_eq!((edge.fg, edge.bg), (opus, sonnet), "edge cell");
-        assert!(('\u{2581}'..='\u{2587}').contains(&edge.symbol().chars().next().unwrap()));
         assert_eq!(cell(0).fg, opus);
         assert_eq!(cell(h - 1).fg, sonnet);
         assert_eq!(cell(h - 1).symbol(), EIGHTHS[HALF_ROW - 1].to_string());
         assert_eq!(cell(h - 2).symbol(), "\u{2588}");
+        // Every cell has one color and no background, and the color changes
+        // once going up.
+        let colors: Vec<_> = (0..h).map(|r| cell(r).fg).collect();
+        assert!(colors.windows(2).filter(|w| w[0] != w[1]).count() == 1);
+        assert!((0..h).all(|r| cell(r).bg == ratatui::style::Color::Reset));
     }
 
     #[test]
-    fn a_stacked_bar_is_as_tall_as_the_plain_one() {
-        let series = two_models(2.5, 1.0);
+    fn a_stacked_bar_has_no_empty_eighth_and_is_as_tall_as_the_plain_bar() {
         let slots = slots();
-        let height = |buf: &Buffer, plot: &Plot| {
-            let x = plot.geo.x_of(0);
-            let p = plot.geo.plot;
-            (p.y..p.y + p.height)
-                .filter(|y| buf[(x, *y)].symbol() != " " && buf[(x, *y)].symbol() != "\u{2504}")
-                .count()
-        };
-        let (plain, a) = draw_with(Rect::new(0, 0, 40, 12), &series, None, None, &pal());
-        let (stacked, b) = draw_with(Rect::new(0, 0, 40, 12), &series, None, Some(&slots), &pal());
-        assert_eq!(height(&a, &plain), height(&b, &stacked));
+        for (opus, sonnet) in [(2.5, 1.0), (0.3, 0.2), (1.0, 1.0), (3.3, 0.1), (0.05, 0.04)] {
+            for height in 8..40u16 {
+                let series = two_models(opus, sonnet);
+                let panel = Rect::new(0, 0, 40, height);
+                let (plain, a) = draw_with(panel, &series, None, None, &pal());
+                let (stacked, b) = draw_with(panel, &series, None, Some(&slots), &pal());
+                let p = plain.geo.plot;
+                let x = plain.geo.x_of(0);
+                let column = |buf: &Buffer| -> Vec<String> {
+                    (p.y..p.y + p.height)
+                        .map(|y| buf[(x, y)].symbol().to_string())
+                        .filter(|s| s != "\u{2504}")
+                        .collect()
+                };
+                let (plain_col, stacked_col) = (column(&a), column(&b));
+                assert_eq!(plain_col, stacked_col, "{opus}+{sonnet} at {height}");
+                // From the bottom up: full blocks, then at most one partial
+                // block on top.
+                let filled: Vec<&String> = stacked_col.iter().filter(|s| *s != " ").collect();
+                let (top, below) = filled.split_first().expect("a bar");
+                assert!(below.iter().all(|s| *s == "\u{2588}"), "{filled:?}");
+                assert!(EIGHTHS.iter().any(|g| g.to_string() == **top));
+                assert_eq!(stacked.geo.plot, plain.geo.plot);
+            }
+        }
     }
 
     #[test]
