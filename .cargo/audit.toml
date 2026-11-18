@@ -13,6 +13,14 @@ ignore = [
     "RUSTSEC-2026-0368",
     "RUSTSEC-2026-0369",
     "RUSTSEC-2026-0429",
+    # zip: extract through symlink targets (0546) and the stream reader
+    # (0548) are never called. AES entries (0545) need the aes-crypto
+    # feature and the legacy decoders (0547) need legacy-zip; neither is
+    # enabled. The fix is zip 9, which anydoc 0.2.4 does not support.
+    "RUSTSEC-2026-0545",
+    "RUSTSEC-2026-0546",
+    "RUSTSEC-2026-0547",
+    "RUSTSEC-2026-0548",
     # ttf-parser: an unmaintained notice, not a vulnerability. It is a
     # transitive dependency of pdf-inspector inside anydoc.
     "RUSTSEC-2026-0192",
