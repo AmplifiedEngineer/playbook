@@ -92,6 +92,11 @@ pub const RM_GUARD_NOTICE_STEP: &str = "rm guard";
 /// What the notice says (docs/guides/07-rm-guard.md).
 const RM_GUARD_NOTICE: &str = "the rm guard now denies only rm of / or your home folder, and hooks.rmGuard.allowedRoots is no longer used; see docs/guides/07-rm-guard.md";
 
+/// The `Consent` question about real plugin skill names in pbtop. It asks once,
+/// where playbook owns the telemetry keys and `usage.toolDetails` was
+/// never answered.
+pub const TOOL_DETAILS_MIGRATION: &str = "telemetry-tool-details";
+
 /// What a migration needs to find the state it moves.
 pub struct Ctx {
     pub home: PathBuf,
@@ -459,7 +464,33 @@ pub fn registry() -> Vec<Migration> {
             scope: Scope::Owned,
             run: sessions_runtime_files_to_db,
         },
+        Migration {
+            id: TOOL_DETAILS_MIGRATION,
+            since: "next",
+            kind: Kind::Idempotent,
+            scope: Scope::Consent {
+                check: tool_details_pending,
+                command: "playbook setup --only telemetry",
+            },
+            run: tool_details_by_setup,
+        },
     ]
+}
+
+/// An earlier install whose telemetry playbook set up and that never answered
+/// the tool details question. A user with a collector of their own is never
+/// listed, because setup never asks them.
+fn tool_details_pending(ctx: &Ctx) -> Option<String> {
+    crate::init::telemetry::tool_details_unanswered(&ctx.home, &ctx.claude_home).then(|| {
+        "pbtop shows third party plugin skills as \"names hidden\"; to show their real names, answer the question in `playbook setup --only telemetry`, or run: playbook config set usage.toolDetails true".to_string()
+    })
+}
+
+/// Setup's telemetry part, `playbook doctor --fix` and `config set` ask and
+/// store the answer. Nothing runs unattended, because the flag makes Claude
+/// Code send more to the collector.
+fn tool_details_by_setup(_: &Ctx) -> Outcome {
+    Outcome::Quiet
 }
 
 /// Moves every stored row of a renamed config key to its new name, in every
@@ -2833,6 +2864,92 @@ mod tests {
             .all(|(p, _)| p.starts_with(playbook_root_from(&h))));
         assert_eq!(snapshot(&h), after_first);
         assert!(open_items(&ctx(&h), None).is_empty());
+    }
+
+    /// Settings and record for telemetry that playbook set up and points at
+    /// `endpoint`.
+    fn telemetry_set_up(h: &Path, endpoint: &str) {
+        let env = serde_json::json!({
+            "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+            "OTEL_EXPORTER_OTLP_ENDPOINT": endpoint,
+        });
+        fs::create_dir_all(h.join(".claude")).unwrap();
+        fs::write(
+            h.join(".claude").join("settings.json"),
+            serde_json::json!({ "env": env }).to_string(),
+        )
+        .unwrap();
+        fs::create_dir_all(playbook_root_from(h)).unwrap();
+        fs::write(
+            playbook_root_from(h).join("telemetry-env.json"),
+            env.to_string(),
+        )
+        .unwrap();
+    }
+
+    fn tool_details_items(h: &Path) -> Vec<OpenItem> {
+        open_items_in(
+            &registry(),
+            &ctx(h),
+            Some(&[TOOL_DETAILS_MIGRATION.to_string()]),
+        )
+    }
+
+    #[test]
+    fn the_tool_details_question_is_open_once_for_telemetry_playbook_owns() {
+        let h = home("tool-details-open");
+        telemetry_set_up(&h, "http://127.0.0.1:47318");
+
+        let open = tool_details_items(&h);
+
+        assert_eq!(open.len(), 1, "{open:?}");
+        assert_eq!(open[0].command, Some("playbook setup --only telemetry"));
+        assert!(open[0].message.contains("usage.toolDetails"));
+    }
+
+    #[test]
+    fn a_stored_answer_closes_the_tool_details_question_either_way() {
+        for answer in [true, false] {
+            let h = home(&format!("tool-details-answered-{answer}"));
+            telemetry_set_up(&h, "http://127.0.0.1:47318");
+            crate::config::write::set(
+                crate::config::write::Tier::Global,
+                "usage.toolDetails",
+                &serde_json::Value::Bool(answer),
+                &h,
+                None,
+            )
+            .unwrap();
+
+            assert!(tool_details_items(&h).is_empty(), "answer {answer}");
+        }
+    }
+
+    #[test]
+    fn the_tool_details_question_never_opens_without_playbook_telemetry() {
+        let none = home("tool-details-none");
+        let own = home("tool-details-own");
+        telemetry_set_up(&own, "https://collector.example.com");
+
+        assert!(tool_details_items(&none).is_empty());
+        assert!(tool_details_items(&own).is_empty());
+    }
+
+    #[test]
+    fn the_tool_details_migration_writes_nothing_and_ships_with_the_next_release() {
+        let h = home("tool-details-quiet");
+        telemetry_set_up(&h, "http://127.0.0.1:47318");
+        let entry = registry()
+            .into_iter()
+            .find(|m| m.id == TOOL_DETAILS_MIGRATION)
+            .unwrap();
+        let before = snapshot(&h);
+
+        let outcome = (entry.run)(&ctx(&h));
+
+        assert!(matches!(outcome, Outcome::Quiet));
+        assert_eq!(snapshot(&h), before);
+        assert_eq!(entry.since(), Since::Next);
     }
 
     fn with_since(id: &'static str, since: &'static str) -> Migration {

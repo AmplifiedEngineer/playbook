@@ -612,7 +612,9 @@ fn yes_repairs_missing_keys_and_no_terminal_without_yes_prints_the_command() {
     let out = yes.run(&["setup", "--yes"]);
 
     assert!(out.status.success(), "{}", text(&out));
-    assert_eq!(otel_keys(&yes.env()), 7);
+    // The seven collector keys, and the tool details flag that --yes accepts.
+    assert_eq!(otel_keys(&yes.env()), 8);
+    assert_eq!(yes.env()["OTEL_LOG_TOOL_DETAILS"], "1");
 }
 
 #[test]

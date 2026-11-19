@@ -149,6 +149,7 @@ const PROBES: [Probe; 27] = [
             .into_iter()
             .chain(watch_service_row(&env.home))
             .chain(telemetry_rows(env))
+            .chain(tool_details_row(env))
             .collect()
     },
     |env| vec![attribution_row(env)],
@@ -1178,6 +1179,60 @@ fn leftover_service_row(home: &Path) -> Option<Row> {
             format!("{LEFTOVER_SERVICE}: {}", names.join("; ")),
         )
         .hint(hint)
+    })
+}
+
+/// Whether `OTEL_LOG_TOOL_DETAILS` is on, off or not applicable. It stays out
+/// when `usage.telemetry` is off, which the telemetry row already says.
+fn tool_details_row(env: &Env) -> Option<Row> {
+    use crate::init::telemetry::{
+        tool_details_state, ToolDetailsState as State, TOOL_DETAILS_SETTING, TOOL_DETAILS_VAR,
+    };
+    let off = matches!(
+        crate::config::resolve_valid("usage.telemetry", &env.home, None),
+        Ok((serde_json::Value::String(v), _, _)) if v == "off"
+    );
+    if off {
+        return None;
+    }
+    let settings = env.settings();
+    let claude_home = settings.parent().unwrap_or(&env.home);
+    let turn_on = format!("run: playbook config set {TOOL_DETAILS_SETTING} true");
+    Some(match tool_details_state(&env.home, claude_home) {
+        State::On => Row::new(
+            "-",
+            Level::Pass,
+            "tool details on: pbtop shows real plugin skill names, and the collector keeps names only",
+        ),
+        State::Off => Row::new(
+            "-",
+            Level::Info,
+            "tool details off: pbtop shows third party plugin skills as \"names hidden\"",
+        )
+        .hint(turn_on),
+        State::Unanswered => Row::new(
+            "-",
+            Level::Info,
+            "tool details not answered: pbtop shows third party plugin skills as \"names hidden\"",
+        )
+        .hint("run: playbook setup --only telemetry (or playbook doctor --fix)"),
+        State::FlagMissing => Row::new(
+            "-",
+            Level::Warn,
+            format!("tool details are on in your config but {TOOL_DETAILS_VAR} is missing from settings.json"),
+        )
+        .hint(TELEMETRY_SETUP_FIX),
+        State::NotApplicable => Row::new(
+            "-",
+            Level::Info,
+            "tool details not applicable: telemetry is not set up by playbook, or goes to a collector of your own, so the variable is never written",
+        ),
+        State::Stray => Row::new(
+            "-",
+            Level::Warn,
+            format!("{TOOL_DETAILS_VAR} is set in settings.json but telemetry no longer goes to the local collector, so commands and file paths reach another one"),
+        )
+        .hint(format!("remove {TOOL_DETAILS_VAR} from the env block of {}", settings.display())),
     })
 }
 

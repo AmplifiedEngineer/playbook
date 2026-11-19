@@ -51,6 +51,9 @@ pub struct InitPaths {
     /// may be replaced. True only for an answer to the question or an explicit
     /// `--telemetry`; `--yes` alone leaves a value the user set.
     pub telemetry_replace_off: bool,
+    /// How the tool details question is answered when playbook owns the
+    /// telemetry keys and no answer is stored.
+    pub tool_details: super::telemetry::ToolDetailsMode,
     /// An `--only` run: only the parts that are on run, and the migrations,
     /// the trust entry and the old launcher notes are skipped.
     pub only: bool,
@@ -492,6 +495,13 @@ pub(crate) fn telemetry_step(paths: &InitPaths, epoch: u64) -> StepReport {
         epoch,
         super::telemetry::process_configured_beyond_settings(&paths.claude_home),
         paths.telemetry_replace_off,
+        &mut || {
+            super::telemetry::decide_tool_details(
+                &paths.home,
+                paths.tool_details,
+                &mut super::attribution::ask_on_terminal,
+            )
+        },
     )
 }
 

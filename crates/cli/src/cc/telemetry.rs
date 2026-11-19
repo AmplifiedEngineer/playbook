@@ -22,8 +22,10 @@
 //! starter one open and one `try_lock`. Nothing outside playbook's own data
 //! directory is written: no launchd or systemd file and no Claude Code setting.
 //!
-//! Prompt, tool detail, tool content and raw body logging are never turned on
-//! and the account uuid is left out of the metrics.
+//! Prompt, tool content and raw body logging are never turned on and the
+//! account uuid is left out of the metrics. Tool detail logging is set only
+//! while `usage.toolDetails` is on, and only here, where the session
+//! goes to playbook's own collector.
 
 use crate::usage::collector::{read_state, running, state_path, State};
 pub use crate::usage::daemon::Ensured;
@@ -85,8 +87,26 @@ pub fn session_env(home: &Path, cwd: &Path) -> Vec<(String, String)> {
     }
     let collector = read_state(&state_path(&Paths::from_home(home)));
     let kind = configured(home, cwd, collector.as_ref().map(|s| s.port));
-    decide(true, kind != Configured::Nothing, false, collector.as_ref())
+    with_tool_details(
+        decide(true, kind != Configured::Nothing, false, collector.as_ref()),
+        crate::init::telemetry::tool_details_enabled(home),
+    )
 }
+
+/// `env` with the variable that makes Claude Code name every skill, when `on`.
+/// It goes only where `decide` already pointed the session at the local
+/// collector, so an empty `env` (a collector of the user's own) stays empty.
+fn with_tool_details(mut env: Vec<(String, String)>, on: bool) -> Vec<(String, String)> {
+    if on && !env.is_empty() {
+        env.push((
+            crate::init::telemetry::TOOL_DETAILS_VAR.to_string(),
+            TOOL_DETAILS_ON.to_string(),
+        ));
+    }
+    env
+}
+
+const TOOL_DETAILS_ON: &str = "1";
 
 /// What asks for a collector. Each has its own wait and stop budget.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -394,11 +414,24 @@ mod tests {
     }
 
     #[test]
+    fn tool_details_join_a_session_for_the_local_collector_only_while_the_setting_is_on() {
+        let local = env_for(&live());
+
+        let on = with_tool_details(local.clone(), true);
+        let off = with_tool_details(local.clone(), false);
+        let own_collector = with_tool_details(Vec::new(), true);
+
+        assert_eq!(get(&on, "OTEL_LOG_TOOL_DETAILS"), Some("1"));
+        assert_eq!(on.len(), local.len() + 1);
+        assert_eq!(off, local);
+        assert!(own_collector.is_empty());
+    }
+
+    #[test]
     fn content_logging_is_never_turned_on() {
         let env = env_for(&live());
         for name in [
             "OTEL_LOG_USER_PROMPTS",
-            "OTEL_LOG_TOOL_DETAILS",
             "OTEL_LOG_TOOL_CONTENT",
             "OTEL_LOG_RAW_API_BODIES",
         ] {

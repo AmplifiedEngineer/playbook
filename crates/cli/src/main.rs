@@ -798,6 +798,11 @@ fn real_main() {
                     choices.telemetry,
                     only_run,
                 ),
+                tool_details: match (flags.yes, terminal) {
+                    (true, _) => init::telemetry::ToolDetailsMode::Default,
+                    (false, true) if !flags.dry_run => init::telemetry::ToolDetailsMode::Ask,
+                    (false, _) => init::telemetry::ToolDetailsMode::Unasked,
+                },
                 only: only_run,
                 short_name: init::choices::short_name_choice(
                     &flags,
@@ -1823,6 +1828,20 @@ fn real_main() {
                                     "telemetry: Claude Code settings follow the global value, so they were not changed; to change them, run: playbook config set --global usage.telemetry {}",
                                     value.trim()
                                 );
+                            } else if key == init::telemetry::TOOL_DETAILS_SETTING {
+                                let cwd_epoch = common::time::now_epoch_secs();
+                                match init::telemetry::sync_tool_details_setting(
+                                    &home,
+                                    &home.join(".claude"),
+                                    cwd_epoch,
+                                    shown == "true",
+                                ) {
+                                    Ok(lines) => lines.iter().for_each(|l| println!("{l}")),
+                                    Err(err) => {
+                                        eprintln!("config set: telemetry: {err}");
+                                        std::process::exit(1);
+                                    }
+                                }
                             } else if key == "usage.telemetry" {
                                 let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
                                 let epoch = common::time::now_epoch_secs();
@@ -2580,7 +2599,7 @@ fn real_main() {
                 init::choices::stdio_is_interactive(),
                 &mut init::attribution::ask_on_terminal,
             );
-            let failed = match fixed {
+            let mut failed = match fixed {
                 Ok(Some(step)) => {
                     println!("{}", step.render());
                     false
@@ -2591,6 +2610,20 @@ fn real_main() {
                     true
                 }
             };
+            match init::telemetry::fix_tool_details_with_consent(
+                &home,
+                &home.join(".claude"),
+                common::time::now_epoch_secs(),
+                init::choices::stdio_is_interactive(),
+                &mut init::attribution::ask_on_terminal,
+            ) {
+                Ok(Some(line)) => println!("{line}"),
+                Ok(None) => {}
+                Err(err) => {
+                    eprintln!("doctor --fix: {err}");
+                    failed = true;
+                }
+            }
             let code =
                 playbook::migrate_cli::run(&home, playbook::migrate_cli::Mode::Run, false, false);
             std::process::exit(if failed { 1 } else { code });
