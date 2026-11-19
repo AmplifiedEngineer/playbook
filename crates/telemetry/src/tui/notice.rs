@@ -124,7 +124,7 @@ fn empty_range(app: &App, d: &Data) -> Notice {
     if !d.filter.is_empty() {
         lines.push("Press c to clear the filter.".into());
     }
-    lines.push("Press a to show all time, m for this month, w for this week.".into());
+    lines.push("Press r to step to a longer range.".into());
     Notice {
         title: "No usage in this range".into(),
         lines,
@@ -200,7 +200,7 @@ mod tests {
         let t = text(&n);
         assert!(t.contains("No messages in today"), "{t}");
         assert!(t.contains("2 messages from 2026-07-"), "{t}");
-        assert!(t.contains("Press a to show all time"), "{t}");
+        assert!(t.contains("Press r to step to a longer range"), "{t}");
     }
 
     #[test]
