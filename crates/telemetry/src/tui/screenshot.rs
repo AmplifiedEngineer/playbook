@@ -149,7 +149,7 @@ struct View {
 /// layout, so a tab shot sets the layout first.
 fn tabs(app: &mut App, tab: usize) {
     app.layout = super::layout::Layout::default();
-    app.tab = tab;
+    app.go_tab(tab as isize);
 }
 
 fn charts(app: &mut App) {
