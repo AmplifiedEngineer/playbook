@@ -46,6 +46,7 @@ fn paths(home: &Path, root: &Path, repo: Option<(PathBuf, PathBuf)>) -> InitPath
         security: false,
         telemetry: false,
         telemetry_replace_off: false,
+        tool_details: playbook::init::telemetry::ToolDetailsMode::Default,
         only: false,
         short_name: playbook::init::pb_link::Choice::Skip,
         policy_guard: false,

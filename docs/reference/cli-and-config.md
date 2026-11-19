@@ -44,6 +44,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
 | `usage.timeZone` | `local` | `local`, `utc` |
 | `usage.telemetry` | `auto` | `auto`, `off` |
+| `usage.toolDetails` | `true` | `true`, `false` |
 | `usage.priceRefresh` | `auto` | `auto`, `off` |
 | `usage.budget.monthlyUsd` | `0` | a number, see the config keys page for the range |
 | `usage.budget.weeklyUsd` | `0` | a number, see the config keys page for the range |

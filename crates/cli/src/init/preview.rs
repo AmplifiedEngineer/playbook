@@ -193,6 +193,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         security: paths.security,
         telemetry: paths.telemetry,
         telemetry_replace_off: paths.telemetry_replace_off,
+        tool_details: crate::init::telemetry::ToolDetailsMode::Default,
         only: paths.only,
         short_name: paths.short_name,
         policy_guard: false,
@@ -208,6 +209,16 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
     };
     let epoch = crate::common::time::now_epoch_secs();
     let (settings_step, hooks_step) = run::settings_and_hooks_steps(&scratch_paths, epoch);
+    // The preview must show the answer a real run keeps.
+    if let Some(stored) = crate::init::telemetry::stored_tool_details(&paths.home) {
+        let _ = crate::config::write::set(
+            crate::config::write::Tier::Global,
+            crate::init::telemetry::TOOL_DETAILS_SETTING,
+            &serde_json::Value::Bool(stored),
+            &sh,
+            None,
+        );
+    }
     let telemetry_step = run::telemetry_step(&scratch_paths, epoch);
     let attribution_step = run::attribution_step(&scratch_paths, epoch);
     let short_line =

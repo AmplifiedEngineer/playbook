@@ -878,7 +878,7 @@ fn setting_telemetry_to_auto_writes_the_claude_keys_and_says_how_to_undo() {
     );
     assert!(stdout.contains("<token>"), "{stdout}");
     assert!(
-        stdout.contains("OTEL_LOG_TOOL_DETAILS stays off"),
+        stdout.contains("until you answer usage.toolDetails"),
         "{stdout}"
     );
     assert!(
@@ -887,7 +887,51 @@ fn setting_telemetry_to_auto_writes_the_claude_keys_and_says_how_to_undo() {
     );
     let written = fs::read_to_string(claude_settings(&home)).unwrap();
     assert!(written.contains("\"FOO\""), "{written}");
-    assert!(!written.contains("OTEL_LOG_TOOL_DETAILS"), "{written}");
+    assert!(
+        !written.contains("OTEL_LOG_TOOL_DETAILS"),
+        "no answer yet, so the flag is not written: {written}"
+    );
+}
+
+#[test]
+fn the_tool_details_setting_adds_and_removes_the_flag_in_claude_settings() {
+    // Arrange
+    let repo = seeded_repo("tel-details-sync");
+    let home = scratch_dir("tel-details-sync-home");
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    fs::write(claude_settings(&home), r#"{"env":{"FOO":"1"}}"#).unwrap();
+    let on = run_playbook(&repo, &home, &["config", "set", "usage.telemetry", "auto"]);
+    assert!(on.status.success(), "stderr: {}", stderr_of(&on));
+
+    // Act
+    let yes = run_playbook(
+        &repo,
+        &home,
+        &["config", "set", "usage.toolDetails", "true"],
+    );
+    let with_flag = fs::read_to_string(claude_settings(&home)).unwrap();
+    let no = run_playbook(
+        &repo,
+        &home,
+        &["config", "set", "usage.toolDetails", "false"],
+    );
+    let without_flag = fs::read_to_string(claude_settings(&home)).unwrap();
+
+    // Assert
+    assert!(yes.status.success(), "stderr: {}", stderr_of(&yes));
+    assert!(no.status.success(), "stderr: {}", stderr_of(&no));
+    assert!(
+        with_flag.contains("\"OTEL_LOG_TOOL_DETAILS\": \"1\""),
+        "{with_flag}"
+    );
+    assert!(
+        !without_flag.contains("OTEL_LOG_TOOL_DETAILS"),
+        "{without_flag}"
+    );
+    assert!(
+        without_flag.contains("OTEL_EXPORTER_OTLP_ENDPOINT"),
+        "{without_flag}"
+    );
 }
 
 #[test]

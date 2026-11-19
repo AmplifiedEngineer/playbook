@@ -82,6 +82,9 @@ fn reason(slug: &str) -> Option<&'static str> {
         migrate::PROMPT_DEFAULT_MIGRATION => {
             "pb cc sessions start without the playbook system prompt until it is installed or turned off"
         }
+        migrate::TOOL_DETAILS_MIGRATION => {
+            "pbtop shows every skill of a third party plugin as one row with its name hidden"
+        }
         "other-playbook-plugins" => "hooks and skills run twice in every session",
         PLUGIN_RANGE => "skills and commands may call binary features that work differently in this version",
         PLUGIN_NEEDS_BINARY => "skills from this plugin call binary features this version does not have",

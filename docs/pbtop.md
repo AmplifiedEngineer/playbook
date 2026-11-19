@@ -11,7 +11,7 @@
 
 - You want to see what your sessions cost, and which models and projects cost most.
 - You want to know how far along you are against a Claude plan limit or a budget you set.
-- You want a number for a script: `--json` and `--summary` print the same data without a terminal.
+- You want a number for a script: `--json` and `--summary` print the same data.
 
 ## Open it
 
@@ -193,6 +193,8 @@ From any other range, `r` goes to the stop after the closest one. `--range` take
 
 Unless you turn on usage sync, nothing leaves your machine. The receiver stores no prompts, tool content, paths, emails or user ids.
 
+Claude Code hides the names of skills from non-official plugins ("plugin skills (names hidden)"). Setup asks whether to show them (`usage.toolDetails`). See [what it sends](internals/04-usage-dashboard.md#telemetry-privacy).
+
 ## The store
 
 Both tools keep their data in one file: `~/.config/playbook/data/usage.db`. It holds the events read from transcripts, one row per assistant message, with the model, the effort, the repo, the branch, the account, the token counts and the cost. It also holds tool calls, the telemetry tables, the machine row and the tables that [usage sync](guides/17-sync.md) fills.
@@ -294,11 +296,11 @@ Set one with `playbook config set --global usage.theme dark`. The [config keys p
 
 ## pbtop on its own
 
-The standalone program reads the same `usage.db` and settings. It does not start a collector, and it reads any telemetry rows one already wrote. It has no session records, so the full screen Sessions list is empty. Run `pbtop collect` yourself to collect telemetry.
+The standalone program reads the same `usage.db` and settings. It starts no collector and has no session records, so the Sessions list is empty. Run `pbtop collect` to collect telemetry.
 
 ## More machines
 
-Usage sync is an opt-in preview. It copies usage rows between your own machines through a database you own. See the [sync guide](guides/17-sync.md). Once other machines have synced rows, the dashboard reads a merged view. Spend, tokens, models, budget, projection and burn-up count every machine. The live view, agents, skills, tools, health, sessions and projects follow the machine you pick. `x` picks the next machine and then all machines.
+Usage sync is an opt-in preview that copies usage rows between your own machines through a database you own. See the [sync guide](guides/17-sync.md). Once machines have synced, the dashboard reads a merged view. Spend, tokens, models, budget, projection and burn-up count every machine. The live view, agents, skills, tools, health, sessions and projects follow the machine you pick. `x` picks the next machine and then all machines.
 
 ## Troubleshooting
 

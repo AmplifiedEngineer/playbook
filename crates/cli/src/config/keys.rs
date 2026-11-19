@@ -75,6 +75,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "usage.weekStart",
     "usage.timeZone",
     "usage.telemetry",
+    "usage.toolDetails",
     "usage.priceRefresh",
     "usage.budget.monthlyUsd",
     "usage.budget.weeklyUsd",
@@ -298,6 +299,7 @@ pub const USER_KEYS: &[&str] = &[
     "watch.limits.dailyActions",
     "watch.limits.dailyUsd",
     "usage.telemetry",
+    "usage.toolDetails",
     "usage.priceRefresh",
 ];
 
@@ -351,6 +353,7 @@ pub const LOCAL_ONLY_KEYS: &[&str] = &[
     "fix.maxLines",
     "security.defaults",
     "usage.telemetry",
+    "usage.toolDetails",
     "usage.priceRefresh",
     "usage.ui.state",
     "sessions.autoClose",
@@ -462,6 +465,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "launcher.shortName" => Some(Value::Bool(false)),
         "systemPrompt.enabled" => Some(Value::Bool(true)),
         "attribution.enabled" => Some(Value::Bool(false)),
+        "usage.toolDetails" => Some(Value::Bool(true)),
         "hooks.proseLint.mode" => Some(Value::String("warn".to_string())),
         "hooks.policyGuard.enabled" => Some(Value::Bool(false)),
         "upgrade.mode" => Some(Value::String("notify".to_string())),
@@ -541,7 +545,7 @@ const COMPOUND_GROUPS: &[&str] = &["proseLint", "policyGuard", "systemPrompt"];
 /// The exact count of `KNOWN_KEYS`: adding or bringing back a key raises it,
 /// cutting keys lowers it.
 #[cfg(test)]
-const KEY_CEILING: usize = 56;
+const KEY_CEILING: usize = 57;
 
 #[cfg(test)]
 mod tests {
