@@ -13,7 +13,11 @@
 //! ever read, so prompts, tool content, paths, emails, user ids and resource
 //! attributes are dropped here and never reach storage. String values that
 //! are kept (model, effort, agent name, ids) are checked for a safe charset
-//! and length, and a value that fails the check is dropped.
+//! and length, and a value that fails the check is dropped. Skill, tool and
+//! agent names get a stricter check (`safe_name`), because Claude Code logs
+//! the real skill name, with the command, file path and input of every tool
+//! call beside it, once `OTEL_LOG_TOOL_DETAILS` is on. Only the name fields
+//! are read, so none of that is stored.
 
 use super::telemetry_db::{TelemetryError, TelemetryMetric, TelemetryRequest, TelemetryTool};
 use serde_json::Value;
@@ -57,6 +61,9 @@ const METRIC_KEYS: &[&str] = &["session.id", "type"];
 pub const MAX_RECORDS: usize = 2000;
 
 const MAX_NAME_LEN: usize = 64;
+/// A stored name has at most this many `/` separated parts, so a file path
+/// never passes as a skill, tool or agent name.
+const MAX_NAME_SEGMENTS: usize = 2;
 const MAX_ID_LEN: usize = 128;
 const EVENT_PREFIX: &str = "claude_code.";
 
@@ -91,6 +98,24 @@ pub(crate) fn safe_text(value: &str, max: usize) -> Option<String> {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"._-:/".contains(&b));
     ok.then(|| value.to_string())
+}
+
+/// A skill, plugin, tool or agent name: [`safe_text`] that also starts with a
+/// letter or digit, has no `..` and no empty part, and has at most
+/// `MAX_NAME_SEGMENTS` parts, so a path or a flag that reaches a name field is
+/// dropped instead of stored.
+pub(crate) fn safe_name(value: &str, max: usize) -> Option<String> {
+    let text = safe_text(value, max)?;
+    let starts_plain = text
+        .bytes()
+        .next()
+        .is_some_and(|b| b.is_ascii_alphanumeric());
+    let parts: Vec<&str> = text.split('/').collect();
+    let ok = starts_plain
+        && !text.contains("..")
+        && parts.len() <= MAX_NAME_SEGMENTS
+        && parts.iter().all(|part| !part.is_empty());
+    ok.then_some(text)
 }
 
 fn any_value(v: &Value) -> Option<&Value> {
@@ -155,9 +180,9 @@ fn read_attributes(attrs: &Value) -> Fields {
             "request_id" => f.request = text.and_then(|t| safe_text(t, MAX_ID_LEN)),
             "model" => f.model = text.and_then(|t| safe_text(t, MAX_NAME_LEN)),
             "effort" => f.effort = text.and_then(|t| safe_text(t, MAX_NAME_LEN)),
-            "agent.name" => f.agent = text.and_then(|t| safe_text(t, MAX_NAME_LEN)),
-            "skill.name" => f.skill = text.and_then(|t| safe_text(t, MAX_NAME_LEN)),
-            "tool_name" => f.tool = text.and_then(|t| safe_text(t, MAX_NAME_LEN)),
+            "agent.name" => f.agent = text.and_then(|t| safe_name(t, MAX_NAME_LEN)),
+            "skill.name" => f.skill = text.and_then(|t| safe_name(t, MAX_NAME_LEN)),
+            "tool_name" => f.tool = text.and_then(|t| safe_name(t, MAX_NAME_LEN)),
             "tool_use_id" => f.tool_use = text.and_then(|t| safe_text(t, MAX_ID_LEN)),
             "success" => f.success = as_bool(value),
             "duration_ms" => f.duration_ms = as_u64(value),
@@ -580,6 +605,68 @@ mod tests {
             .unwrap()
             .push(s("agent.name", "/Users/me/my project"));
         assert_eq!(parse_logs(&body(vec![rec]), 5).unwrap()[0].agent_name, "");
+    }
+
+    #[test]
+    fn a_skill_or_tool_name_that_looks_like_a_path_flag_or_command_is_dropped() {
+        let long = "a".repeat(MAX_NAME_LEN + 1);
+        let bad = [
+            "/etc/passwd",
+            "../secrets",
+            "a/b/c",
+            "x..y",
+            ".env",
+            "-rf",
+            "a//b",
+            "trailing/",
+            "ls -la /tmp",
+            "$(whoami)",
+            "name;rm",
+            "caf\u{e9}",
+            long.as_str(),
+        ];
+        for name in bad {
+            let rec = api_request(vec![s("skill.name", name)]);
+            let rows = parse_logs(&body(vec![rec]), 5).unwrap();
+            assert_eq!(rows[0].skill_name, "", "{name} was stored as a skill");
+            let rec = tool_result(vec![s("tool_name", name)]);
+            let parsed = parse_events(&body(vec![rec]), 5).unwrap();
+            assert!(
+                parsed.tools.iter().all(|t| t.tool_name.is_empty()),
+                "{name} was stored as a tool"
+            );
+        }
+    }
+
+    #[test]
+    fn real_plugin_skill_and_tool_names_are_kept() {
+        for name in [
+            "review",
+            "playbook:review",
+            "my-plugin.v2:do_it",
+            "plugin/skill",
+            "mcp__srv__tool",
+        ] {
+            let rec = api_request(vec![s("skill.name", name)]);
+            let rows = parse_logs(&body(vec![rec]), 5).unwrap();
+            assert_eq!(rows[0].skill_name, name);
+        }
+    }
+
+    #[test]
+    fn a_command_and_a_path_logged_beside_the_name_are_never_stored() {
+        let rec = tool_result(vec![
+            s("tool_name", "Bash"),
+            s("tool_input", "{\"command\":\"cat ~/.ssh/id_rsa\"}"),
+            s("tool_parameters", "{\"bash_command\":\"curl evil\"}"),
+            s("file_path", "/Users/me/secret.txt"),
+        ]);
+        let parsed = parse_events(&body(vec![rec]), 5).unwrap();
+        let dump = format!("{:?}", parsed.tools);
+        for leaked in ["id_rsa", "evil", "secret.txt", "/Users"] {
+            assert!(!dump.contains(leaked), "{leaked} leaked into {dump}");
+        }
+        assert!(dump.contains("Bash"));
     }
 
     #[test]
