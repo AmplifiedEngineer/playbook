@@ -1909,7 +1909,7 @@ mod tests {
 
         app.key(KeyEvent::new(KeyCode::Char('6'), KeyModifiers::NONE));
 
-        assert_eq!(app.focus, crate::tui::sort::Panel::Spend);
+        assert_eq!(app.focus, crate::tui::sort::Panel::Tokens);
     }
 
     /// The rows of the header box, from its top border to its bottom one.
@@ -2017,7 +2017,7 @@ mod tests {
 
         app.apply_ui_state(&crate::tui::ui_state::UiState::default());
 
-        assert_eq!(app.focus, crate::tui::sort::Panel::Spend);
+        assert_eq!(app.focus, crate::tui::sort::Panel::Tokens);
     }
 
     #[test]

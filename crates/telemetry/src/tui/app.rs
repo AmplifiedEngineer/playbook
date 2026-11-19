@@ -580,7 +580,11 @@ impl App {
         match self.focus_slot() {
             Some(slot) => self.focus_on(slot),
             None => {
-                if let Some(first) = shown.first() {
+                let first = shown
+                    .iter()
+                    .find(|id| self.draws_chart(**id))
+                    .or(shown.first());
+                if let Some(first) = first {
                     self.focus_on(*first);
                 }
             }
@@ -606,14 +610,21 @@ impl App {
         self.focus_on(shown[(at + by).rem_euclid(shown.len() as isize) as usize]);
     }
 
+    /// Whether the focusable slot draws a chart. The Models, Breakdown, Live
+    /// and Sessions panels are tables, and so is Spend on its daily view.
+    fn draws_chart(&self, id: PanelId) -> bool {
+        match id.panel() {
+            Some(Panel::Spend) => self.spend_view_of(id) != SpendView::Daily,
+            Some(panel) => panel == Panel::Tokens,
+            None => false,
+        }
+    }
+
     /// The slot whose chart the cursor keys move: the focused Spend slot when
     /// it charts, else the first slot of the tab that charts `panel`. A Spend
     /// slot on the daily table has no chart.
     fn chart_slot(&self, panel: Panel) -> Option<PanelId> {
-        let charts = |id: &PanelId| {
-            id.panel() == Some(panel)
-                && (panel != Panel::Spend || self.spend_view_of(*id) != SpendView::Daily)
-        };
+        let charts = |id: &PanelId| id.panel() == Some(panel) && self.draws_chart(*id);
         self.focus_slot()
             .filter(charts)
             .or_else(|| self.tab_ids().iter().copied().find(charts))
@@ -1742,7 +1753,7 @@ mod tests {
         let mut app = charted(Range::LastDays(30), 30);
         app.layout = crate::tui::layout::Layout::parse("A=spend.daily,spend.total").unwrap();
         app.go_tab(0);
-        app.focus = Panel::Spend;
+        app.focus_on(PanelId::SpendDaily);
         let on_table = app.is_table(Panel::Spend);
         app.key(press(KeyCode::Left));
         let cursor_on_table = app.cursor;
@@ -2221,5 +2232,32 @@ mod tests {
         app.apply_ui_state(&state);
 
         assert_eq!(app.sort(Panel::Live), Panel::Live.default_sort());
+    }
+
+    #[test]
+    fn a_fresh_start_on_the_default_layout_focuses_a_panel_that_draws_a_chart() {
+        let home = crate::util::scratch_dir("fresh-focus");
+        let mut app = App::new(Range::All);
+        let (layout, warning) = super::super::ui_state::load_layout(&home);
+        app.layout = layout;
+
+        app.apply_ui_state(&super::super::ui_state::load(&home));
+
+        assert_eq!(warning, None);
+        assert_eq!(app.tab, 0);
+        assert_eq!(app.focus, Panel::Tokens);
+        assert_eq!(app.focus_slot(), Some(PanelId::Tokens));
+        assert!(app.draws_chart(PanelId::Tokens));
+        assert!(!app.draws_chart(PanelId::SpendDaily));
+    }
+
+    #[test]
+    fn a_tab_of_tables_still_focuses_its_first_panel() {
+        let mut app = App::new(Range::All);
+        app.layout = crate::tui::layout::Layout::parse("A=models,live").unwrap();
+
+        app.apply_ui_state(&super::super::ui_state::UiState::default());
+
+        assert_eq!(app.focus_slot(), Some(PanelId::Models));
     }
 }
