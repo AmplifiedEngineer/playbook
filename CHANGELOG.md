@@ -2,6 +2,32 @@
 
 Release notes for playbook: the binary and the plugin in `plugins/playbook`. From 0.34.0 they ship together as one `vX.Y.Z` release with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). Each release has a section named `## playbook <version>`, newest first, which the release pull request adds from the notes that `scripts/release-notes.sh` builds. The sections from 0.33.0 down are plugin releases from before the two lines joined. The binary skips 0.27 to 0.33: it goes from 0.26 to 0.34.0.
 
+## playbook 0.45.0
+
+### Features
+
+- **pbtop**: shorten the key hints and make r cycle the range ([#1865](https://github.com/AmplifiedEngineer/playbook/pull/1865))
+- **telemetry**: price models from an embedded LiteLLM price list ([#1869](https://github.com/AmplifiedEngineer/playbook/pull/1869))
+- **telemetry**: refresh the price list once a day ([#1870](https://github.com/AmplifiedEngineer/playbook/pull/1870))
+- **telemetry**: use telemetry cost per request, estimate the rest ([#1871](https://github.com/AmplifiedEngineer/playbook/pull/1871))
+- **telemetry**: mark estimated cost, name unpriced models ([#1872](https://github.com/AmplifiedEngineer/playbook/pull/1872))
+- **telemetry**: ask to show real plugin skill names in pbtop ([#1879](https://github.com/AmplifiedEngineer/playbook/pull/1879))
+
+### Fixes
+
+- **pbtop**: fill the burn-up area solid like btop ([#1863](https://github.com/AmplifiedEngineer/playbook/pull/1863))
+- **pbtop**: keep bars and gaps equal and add axis steps ([#1864](https://github.com/AmplifiedEngineer/playbook/pull/1864))
+- **pbtop**: fix the empty-range hint and document schema 6 ([#1873](https://github.com/AmplifiedEngineer/playbook/pull/1873))
+- **pbtop**: drop the at sign from a masked account ([#1874](https://github.com/AmplifiedEngineer/playbook/pull/1874))
+- **pbtop**: focus the first chart panel on a fresh start ([#1875](https://github.com/AmplifiedEngineer/playbook/pull/1875))
+- **test**: stop watch and doc\_read tests failing under load ([#1877](https://github.com/AmplifiedEngineer/playbook/pull/1877))
+- **telemetry**: drop skill, tool and agent names that look like paths ([#1878](https://github.com/AmplifiedEngineer/playbook/pull/1878))
+
+### Other changes
+
+- docs(pbtop): fill the README screenshot with a full month of sample data ([#1789](https://github.com/AmplifiedEngineer/playbook/pull/1789))
+- chore(plugin): remove the session-handoff alias ([#1876](https://github.com/AmplifiedEngineer/playbook/pull/1876))
+
 ## playbook 0.44.0
 
 ### Breaking changes

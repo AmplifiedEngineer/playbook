@@ -466,7 +466,7 @@ pub fn registry() -> Vec<Migration> {
         },
         Migration {
             id: TOOL_DETAILS_MIGRATION,
-            since: "next",
+            since: "0.45.0",
             kind: Kind::Idempotent,
             scope: Scope::Consent {
                 check: tool_details_pending,
