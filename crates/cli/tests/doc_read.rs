@@ -25,6 +25,48 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Names the debug build reads from `LIMITS_VAR` to lower a limit.
 const LIMITS_VAR: &str = "PLAYBOOK_TEST_DOC_LIMITS";
 
+const SCRIPT_MODE: u32 = 0o755;
+/// Pause between tries to start a script that is still open for writing.
+const BUSY_POLL: Duration = Duration::from_millis(10);
+/// The longest wait for such a script, and for its first run, which the system
+/// scans before it lets it start.
+const FIRST_RUN_DEADLINE: Duration = Duration::from_secs(180);
+/// How long the converters that wait to be stopped would run if left alone.
+const IDLE_CONVERTER_SECONDS: u64 = 30;
+
+/// Writes `script` to `path` and returns only once it can be started.
+///
+/// Another test's `fork` can copy this file's write handle, and a file open
+/// for writing cannot be executed until that copy goes away at the child's
+/// `exec`. Under load that takes long enough for the converter under test to
+/// fail to start, so this runs the script with `--version`, which every fake
+/// answers before doing anything else, and retries while it is busy.
+fn install_runnable(path: &Path, script: &str) {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(SCRIPT_MODE)
+        .open(path)
+        .unwrap();
+    file.write_all(script.as_bytes()).unwrap();
+    file.sync_all().unwrap();
+    drop(file);
+    let deadline = Instant::now() + FIRST_RUN_DEADLINE;
+    loop {
+        match Command::new(path).arg("--version").output() {
+            Ok(_) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                assert!(Instant::now() < deadline, "{} stayed busy", path.display());
+                std::thread::sleep(BUSY_POLL);
+            }
+            Err(e) => panic!("cannot start {}: {e}", path.display()),
+        }
+    }
+}
+
 struct Env {
     root: PathBuf,
     home: PathBuf,
@@ -86,8 +128,7 @@ impl Env {
             env = self.env_log().display(),
             started = self.started().display(),
         );
-        fs::write(path, script).unwrap();
-        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        install_runnable(path, &script);
     }
 
     /// The directory holding a copy of the playbook binary, so a `pbdoc`
@@ -385,7 +426,7 @@ fn a_scanned_pdf_says_it_needs_ocr_and_never_retries() {
 fn a_converter_that_runs_too_long_is_stopped_and_cleaned_up() {
     // Arrange
     let env = Env::new("timeout");
-    env.fake("sleep 30");
+    env.fake(&format!("sleep {IDLE_CONVERTER_SECONDS}"));
     env.limit("timeout_seconds", 1);
     let doc = env.doc("slow.pdf", b"%PDF-1.4");
     let start = Instant::now();
@@ -396,7 +437,8 @@ fn a_converter_that_runs_too_long_is_stopped_and_cleaned_up() {
     // Assert
     assert_eq!(out.status.code(), Some(1));
     assert!(text(&out).contains("stopped after 1 seconds"));
-    assert!(start.elapsed() < Duration::from_secs(15));
+    // Stopped by the limit, not by the converter finishing on its own.
+    assert!(start.elapsed() < Duration::from_secs(IDLE_CONVERTER_SECONDS));
     assert!(env.leftovers().is_empty());
 }
 
@@ -425,7 +467,7 @@ fn a_converter_that_uses_too_much_memory_is_stopped() {
 fn sigterm_stops_the_converter_and_removes_the_temp_dir() {
     // Arrange
     let env = Env::new("signal");
-    env.fake("sleep 30");
+    env.fake(&format!("sleep {IDLE_CONVERTER_SECONDS}"));
     let doc = env.doc("slow.pdf", b"%PDF-1.4");
     let mut child = env
         .command(&["doc", "read", doc.to_str().unwrap()])
@@ -433,7 +475,7 @@ fn sigterm_stops_the_converter_and_removes_the_temp_dir() {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + FIRST_RUN_DEADLINE;
     while !env.started().exists() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
