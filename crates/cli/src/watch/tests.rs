@@ -23,6 +23,12 @@ const RULE: &str = r#"{"on":"issue.opened","do":"label","with":{"labels":["triag
 const ISSUE: &str = r#"[{"number":7,"created_at":"2026-11-05T10:00:00Z","updated_at":"2026-11-05T10:00:00Z","user":{"login":"stranger"},"author_association":"NONE","labels":[],"body":"hello"}]"#;
 const NOW: &str = "2026-11-05T12:00:00Z";
 const EARLIER: &str = "2026-11-05T09:00:00Z";
+const BUSY: &str = "watch already running\n";
+const LOCK_POLL: std::time::Duration = std::time::Duration::from_millis(10);
+/// Polls a test makes for a lock that another test's child still shares, which
+/// is 30 seconds in all. Counted rather than timed: no watch source but the
+/// clock reads the wall clock.
+const LOCK_POLLS: u32 = 3000;
 
 #[derive(Default)]
 struct Spy {
@@ -138,8 +144,23 @@ impl Env {
         }
     }
 
+    /// One `watch once`, after which the lock is free again.
     fn once(&self, since: Option<&str>) -> Result<String, String> {
+        let out = self.once_raw(since);
+        self.settle();
+        out
+    }
+
+    fn once_raw(&self, since: Option<&str>) -> Result<String, String> {
         once(&self.ctx(), since, || Canned(self.requests.clone()))
+    }
+
+    /// Waits until the lock is free. A lock file stays locked for as long as
+    /// any process shares its open handle, and another test that forks while
+    /// this one holds the lock gives its child a copy of that handle until the
+    /// child replaces itself with its program.
+    fn settle(&self) {
+        drop(hold(&self.data));
     }
 
     fn rows(&self, state: &str) -> Vec<i64> {
@@ -152,10 +173,13 @@ impl Env {
 
 fn hold(data: &Path) -> lock::InstanceLock {
     fs::create_dir_all(data).unwrap();
-    match acquire(&data.join("watch.lock")).unwrap() {
-        Acquire::Held(lock) => lock,
-        Acquire::Busy => panic!("the lock was taken"),
+    for _ in 0..LOCK_POLLS {
+        if let Acquire::Held(lock) = acquire(&data.join("watch.lock")).unwrap() {
+            return lock;
+        }
+        std::thread::sleep(LOCK_POLL);
     }
+    panic!("the lock was taken");
 }
 
 #[test]
@@ -229,10 +253,10 @@ fn a_second_watch_process_prints_already_running_and_polls_nothing() {
     let _held = hold(&e.data);
 
     // Act
-    let out = e.once(Some(EARLIER)).unwrap();
+    let out = e.once_raw(Some(EARLIER)).unwrap();
 
     // Assert
-    assert_eq!(out, "watch already running\n");
+    assert_eq!(out, BUSY);
     assert_eq!(e.requests.get(), 0);
 }
 
@@ -278,6 +302,7 @@ fn the_running_watch_carries_out_an_approved_item_on_its_next_cycle() {
     let held = hold(&e.data);
     approve(&e.ctx(), 1).unwrap();
     drop(held);
+    e.settle();
 
     // Act
     let out = e.once(None).unwrap();
