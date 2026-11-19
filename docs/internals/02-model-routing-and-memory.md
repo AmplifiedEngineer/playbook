@@ -9,7 +9,7 @@ The policy lives in each file's frontmatter (`agents/*.md` and `commands/*.md`) 
 | Tier | Takes |
 |---|---|
 | **Sonnet** (session default) | Most coding: `/playbook:implement`, `/playbook:fix`, the `implementer` and the `critic`. |
-| **Haiku** | Mechanical, formatting and search work: `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, `writer`, and the `doctor`, `session-handoff`, `session-start` and `setup` commands. |
+| **Haiku** | Mechanical, formatting and search work: `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, `writer`, and the `doctor`, `session-start` and `setup` commands. |
 | **Opus** | Design (`/playbook:plan`, `/playbook:adr`), every `reviewer` (`/playbook:review --quick`, `/playbook:review --deep` and `/playbook:implement` Step 9, all at the reviewer's own medium effort unless a variant is picked), the `auditor` behind `/playbook:audit`, `/playbook:pr-comments` and `/playbook:learn`. |
 
 Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mode.
