@@ -350,8 +350,9 @@ const HIDDEN_PLUGIN_SKILL: &str = "third-party";
 /// request made while a skill was active carries its name; the rest are not
 /// part of any skill row. Claude Code reports a skill of a plugin that is not
 /// an official one as `third-party`, the real name is hidden unless tool
-/// details are logged, which playbook never asks for. The row is relabeled so
-/// it does not read as a skill with that name.
+/// details are logged, which playbook's setup asks about. Data from before
+/// that, or from a user who said no, still has the row, so it is relabeled
+/// and does not read as a skill with that name.
 pub fn load_skills(
     conn: &Connection,
     range: Range,
