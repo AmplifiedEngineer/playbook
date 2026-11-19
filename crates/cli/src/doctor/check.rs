@@ -1198,7 +1198,8 @@ fn tool_details_row(env: &Env) -> Option<Row> {
     let settings = env.settings();
     let claude_home = settings.parent().unwrap_or(&env.home);
     let turn_on = format!("run: playbook config set {TOOL_DETAILS_SETTING} true");
-    Some(match tool_details_state(&env.home, claude_home) {
+    let cwd = env.repo_root.clone().unwrap_or_else(|| env.home.clone());
+    Some(match tool_details_state(&env.home, claude_home, &cwd) {
         State::On => Row::new(
             "-",
             Level::Pass,

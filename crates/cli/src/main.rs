@@ -1829,11 +1829,12 @@ fn real_main() {
                                     value.trim()
                                 );
                             } else if key == init::telemetry::TOOL_DETAILS_SETTING {
-                                let cwd_epoch = common::time::now_epoch_secs();
+                                let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
                                 match init::telemetry::sync_tool_details_setting(
                                     &home,
                                     &home.join(".claude"),
-                                    cwd_epoch,
+                                    &cwd,
+                                    common::time::now_epoch_secs(),
                                     shown == "true",
                                 ) {
                                     Ok(lines) => lines.iter().for_each(|l| println!("{l}")),
@@ -2613,6 +2614,7 @@ fn real_main() {
             match init::telemetry::fix_tool_details_with_consent(
                 &home,
                 &home.join(".claude"),
+                &std::env::current_dir().unwrap_or_else(|_| home.clone()),
                 common::time::now_epoch_secs(),
                 init::choices::stdio_is_interactive(),
                 &mut init::attribution::ask_on_terminal,

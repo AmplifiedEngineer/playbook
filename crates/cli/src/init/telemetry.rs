@@ -531,6 +531,7 @@ pub fn apply(
         Overrides {
             process_demo: std::env::var(DEMO_VAR).ok(),
             tool_details,
+            process_endpoints: None,
         },
     )
 }
@@ -542,6 +543,8 @@ struct Overrides<'a> {
     process_demo: Option<String>,
     /// The tool details answer, asked only once playbook owns the keys.
     tool_details: &'a mut dyn FnMut() -> Option<bool>,
+    /// The endpoint variables of the process, `None` to read the real ones.
+    process_endpoints: Option<Vec<(String, String)>>,
 }
 
 /// [`apply`] with the process's `IS_DEMO` passed in, so tests do not read the
@@ -556,6 +559,7 @@ fn apply_with_demo(
     Overrides {
         process_demo,
         tool_details,
+        process_endpoints,
     }: Overrides<'_>,
 ) -> StepReport {
     let step = apply_keys(
@@ -577,7 +581,11 @@ fn apply_with_demo(
         Ok(Some((changed, line))) => with_line(step, changed, &line),
         Err(e) => return StepReport::failed("telemetry", e),
     };
-    match sync_tool_details(home, claude_home, epoch, tool_details) {
+    let mut scope = Scope::new(home, claude_home, cwd);
+    if let Some(endpoints) = process_endpoints {
+        scope.process_endpoints = endpoints;
+    }
+    match sync_tool_details(&scope, epoch, tool_details) {
         Ok(None) => step,
         Ok(Some((changed, line))) => with_line(step, changed, &line),
         Err(e) => StepReport::failed("telemetry", e),
@@ -949,45 +957,128 @@ pub fn decide_tool_details(
     Some(answer)
 }
 
-/// Whether playbook owns the telemetry in `env`: a recorded key still holds
-/// its value, and the endpoint is still the local collector's. A copy of the
-/// keys that now points elsewhere is not ours, so the flag never goes there.
-fn owns_local_telemetry(env: &Map<String, Value>, record: &Map<String, Value>) -> bool {
-    record_is_live(env, record)
-        && env
-            .get(ENDPOINT_KEY)
-            .map(value_text)
-            .is_some_and(|e| is_local_endpoint(&e))
+/// The other variables that can send logs or metrics somewhere else than
+/// `OTEL_EXPORTER_OTLP_ENDPOINT` does.
+const SIGNAL_ENDPOINT_KEYS: [&str; 2] = [
+    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+];
+
+/// Where ownership of the telemetry is read from: the user's settings.json,
+/// the other settings files that apply in `cwd`, and the process environment.
+/// Project and local settings are read for `cwd` only, as the rest of the
+/// telemetry detection does, so a project elsewhere can still set its own
+/// endpoint without this seeing it.
+struct Scope<'a> {
+    home: &'a Path,
+    claude_home: &'a Path,
+    cwd: &'a Path,
+    /// The endpoint variables of the process environment.
+    process_endpoints: Vec<(String, String)>,
 }
 
-/// Whether playbook owns the telemetry in the user's settings.json: the keys
-/// it recorded are still there and point at the local collector. Reads only.
-pub fn owns_telemetry(home: &Path, claude_home: &Path) -> bool {
-    let Ok(root) = load(&claude_home.join("settings.json")) else {
-        return false;
-    };
-    let record = load(&marker_path(home)).unwrap_or_default();
-    root.get("env")
-        .and_then(Value::as_object)
-        .is_some_and(|env| owns_local_telemetry(env, &record))
+impl<'a> Scope<'a> {
+    fn new(home: &'a Path, claude_home: &'a Path, cwd: &'a Path) -> Self {
+        let process_endpoints = std::env::vars_os()
+            .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+            .filter(|(k, _)| k == ENDPOINT_KEY || SIGNAL_ENDPOINT_KEYS.contains(&k.as_str()))
+            .collect();
+        Scope {
+            home,
+            claude_home,
+            cwd,
+            process_endpoints,
+        }
+    }
+
+    fn settings_path(&self) -> PathBuf {
+        self.claude_home.join("settings.json")
+    }
+
+    /// Whether playbook owns the telemetry: a recorded key still holds its
+    /// value, the endpoint is exactly the recorded local one, and no other
+    /// source sends logs or metrics elsewhere. Anything else is not ours, so
+    /// the flag never goes there.
+    fn owns(&self, env: &Map<String, Value>, record: &Map<String, Value>) -> bool {
+        let Some(recorded) = record.get(ENDPOINT_KEY).map(value_text) else {
+            return false;
+        };
+        record_is_live(env, record)
+            && env.get(ENDPOINT_KEY).map(value_text).as_deref() == Some(recorded.as_str())
+            && is_local_endpoint(&recorded)
+            && !self.redirected(env, &recorded)
+    }
+
+    /// Whether a source other than the recorded endpoint names where logs or
+    /// metrics go: a signal specific endpoint in the user file, or any
+    /// endpoint variable with another value in the process environment or in
+    /// another settings file.
+    fn redirected(&self, env: &Map<String, Value>, recorded: &str) -> bool {
+        let differs = |value: &str| value.trim_end_matches('/') != recorded.trim_end_matches('/');
+        if SIGNAL_ENDPOINT_KEYS.iter().any(|k| env.contains_key(*k)) {
+            return true;
+        }
+        if self
+            .process_endpoints
+            .iter()
+            .any(|(_, value)| differs(value))
+        {
+            return true;
+        }
+        let settings = self.settings_path();
+        std::iter::once(ENDPOINT_KEY)
+            .chain(SIGNAL_ENDPOINT_KEYS)
+            .any(|key| {
+                crate::usage::telemetry_detect::env_value_in_other_files(
+                    self.home, self.cwd, &settings, key,
+                )
+                .iter()
+                .any(|(_, value)| differs(value))
+            })
+    }
+
+    /// The user's `env` block and the record, read without writing.
+    fn read(&self) -> (Map<String, Value>, Map<String, Value>) {
+        let env = load(&self.settings_path())
+            .ok()
+            .and_then(|root| root.get("env").and_then(Value::as_object).cloned())
+            .unwrap_or_default();
+        (env, load(&marker_path(self.home)).unwrap_or_default())
+    }
+
+    fn owns_now(&self) -> bool {
+        let (env, record) = self.read();
+        self.owns(&env, &record)
+    }
+}
+
+/// Whether playbook owns the telemetry: see [`Scope::owns`]. Reads only.
+/// `cwd` is where project settings are looked up.
+pub fn owns_telemetry(home: &Path, claude_home: &Path, cwd: &Path) -> bool {
+    Scope::new(home, claude_home, cwd).owns_now()
 }
 
 /// Whether the tool details question is still open: playbook owns the
 /// telemetry and no answer is stored.
-pub fn tool_details_unanswered(home: &Path, claude_home: &Path) -> bool {
-    stored_tool_details(home).is_none() && owns_telemetry(home, claude_home)
+pub fn tool_details_unanswered(home: &Path, claude_home: &Path, cwd: &Path) -> bool {
+    unanswered(&Scope::new(home, claude_home, cwd))
+}
+
+fn unanswered(scope: &Scope<'_>) -> bool {
+    stored_tool_details(scope.home).is_none() && scope.owns_now()
 }
 
 /// Where tool details stand, as `playbook doctor` shows them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolDetailsState {
-    /// Playbook owns the telemetry and the flag is in settings.json.
+    /// Playbook owns the telemetry, the answer is yes and the variable is in
+    /// settings.json, whoever put it there.
     On,
     /// Playbook owns the telemetry and the answer is no.
     Off,
     /// Playbook owns the telemetry and the question was never answered.
     Unanswered,
-    /// The answer is yes but the flag is not in settings.json.
+    /// The answer is yes but the variable is not in settings.json.
     FlagMissing,
     /// The telemetry is the user's own or not set up: the flag is never
     /// written, so there is nothing to show.
@@ -998,44 +1089,57 @@ pub enum ToolDetailsState {
 }
 
 /// The tool details state. Reads only.
-pub fn tool_details_state(home: &Path, claude_home: &Path) -> ToolDetailsState {
-    let env = load(&claude_home.join("settings.json"))
-        .ok()
-        .and_then(|root| root.get("env").and_then(Value::as_object).cloned())
-        .unwrap_or_default();
-    let record = load(&marker_path(home)).unwrap_or_default();
-    let wrote_flag = env.get(TOOL_DETAILS_VAR).is_some()
-        && env.get(TOOL_DETAILS_VAR) == record.get(TOOL_DETAILS_VAR);
-    if !owns_local_telemetry(&env, &record) {
+pub fn tool_details_state(home: &Path, claude_home: &Path, cwd: &Path) -> ToolDetailsState {
+    state_in(&Scope::new(home, claude_home, cwd))
+}
+
+fn state_in(scope: &Scope<'_>) -> ToolDetailsState {
+    let (env, record) = scope.read();
+    let present = env.contains_key(TOOL_DETAILS_VAR);
+    let wrote_flag = present && env.get(TOOL_DETAILS_VAR) == record.get(TOOL_DETAILS_VAR);
+    if !scope.owns(&env, &record) {
         return if wrote_flag {
             ToolDetailsState::Stray
         } else {
             ToolDetailsState::NotApplicable
         };
     }
-    match (stored_tool_details(home), wrote_flag) {
-        (_, true) => ToolDetailsState::On,
-        (None, false) => ToolDetailsState::Unanswered,
-        (Some(true), false) => ToolDetailsState::FlagMissing,
-        (Some(false), false) => ToolDetailsState::Off,
+    match (stored_tool_details(scope.home), present, wrote_flag) {
+        (_, _, true) | (Some(true), true, _) => ToolDetailsState::On,
+        (None, _, false) => ToolDetailsState::Unanswered,
+        (Some(true), false, false) => ToolDetailsState::FlagMissing,
+        (Some(false), _, false) => ToolDetailsState::Off,
     }
 }
 
-/// The tool details part of `playbook doctor --fix`. It asks only at a
-/// terminal, only while the question is open, and a yes or a no is stored, so
-/// it asks once. Returns the line to print, or `None` when it asked nothing.
+/// The tool details part of `playbook doctor --fix`. It removes a flag
+/// playbook wrote that would reach a collector that is not its own, with no
+/// question, because that only undoes its own write. Otherwise it asks only at
+/// a terminal, only while the question is open, and a yes or a no is stored,
+/// so it asks once. Returns the line to print, or `None` when it did nothing.
 pub fn fix_tool_details_with_consent(
     home: &Path,
     claude_home: &Path,
+    cwd: &Path,
     epoch: u64,
     interactive: bool,
     ask: &mut dyn FnMut(&str, bool) -> bool,
 ) -> Result<Option<String>, String> {
-    if !interactive || !tool_details_unanswered(home, claude_home) {
+    fix_in(&Scope::new(home, claude_home, cwd), epoch, interactive, ask)
+}
+
+fn fix_in(
+    scope: &Scope<'_>,
+    epoch: u64,
+    interactive: bool,
+    ask: &mut dyn FnMut(&str, bool) -> bool,
+) -> Result<Option<String>, String> {
+    let stray = state_in(scope) == ToolDetailsState::Stray;
+    if !stray && !(interactive && unanswered(scope)) {
         return Ok(None);
     }
-    let line = sync_tool_details(home, claude_home, epoch, &mut || {
-        decide_tool_details(home, ToolDetailsMode::Ask, ask)
+    let line = sync_tool_details(scope, epoch, &mut || {
+        decide_tool_details(scope.home, ToolDetailsMode::Ask, ask)
     })?;
     Ok(line.map(|(_, line)| format!("telemetry: {line}")))
 }
@@ -1044,30 +1148,29 @@ pub fn fix_tool_details_with_consent(
 /// answer `want` gives, and records it beside the other keys so uninstall and
 /// turning telemetry off remove it. `want` runs only when playbook owns the
 /// telemetry keys, so a user with their own collector is never asked and
-/// never gets the flag. Returns `None` when nothing applies, else whether the
-/// file changed and a line for the step.
+/// never gets the flag. A flag playbook wrote is removed whenever telemetry is
+/// not owned, because it would reach another collector. Returns `None` when
+/// nothing applies, else whether the file changed and a line for the step.
 fn sync_tool_details(
-    home: &Path,
-    claude_home: &Path,
+    scope: &Scope<'_>,
     epoch: u64,
     want: &mut dyn FnMut() -> Option<bool>,
 ) -> Result<Option<(bool, String)>, String> {
-    let settings_path = claude_home.join("settings.json");
+    let settings_path = scope.settings_path();
     let mut root = load(&settings_path)?;
     let was_sorted = root.keys().is_sorted();
-    let marker = marker_path(home);
+    let marker = marker_path(scope.home);
     let mut record = load(&marker)?;
     let Some(env) = root.get_mut("env").and_then(Value::as_object_mut) else {
         return Ok(None);
     };
-    if !owns_local_telemetry(env, &record) {
-        return Ok(None);
-    }
-    let Some(on) = want() else {
-        return Ok(None);
-    };
     let held = env.get(TOOL_DETAILS_VAR).map(value_text);
     let written_by_us = held.is_some() && record.get(TOOL_DETAILS_VAR).map(value_text) == held;
+    let owned = scope.owns(env, &record);
+    let on = if owned { want() } else { Some(false) };
+    let Some(on) = on else {
+        return Ok(None);
+    };
     let line = if on {
         match held {
             None => {
@@ -1089,7 +1192,11 @@ fn sync_tool_details(
     } else if written_by_us {
         env.remove(TOOL_DETAILS_VAR);
         record.remove(TOOL_DETAILS_VAR);
-        format!("{TOOL_DETAILS_VAR} removed, so pbtop hides third party plugin skill names")
+        if owned {
+            format!("{TOOL_DETAILS_VAR} removed, so pbtop hides third party plugin skill names")
+        } else {
+            format!("{TOOL_DETAILS_VAR} removed, because your telemetry no longer goes to the collector playbook set up")
+        }
     } else {
         return Ok(None);
     };
@@ -1104,16 +1211,23 @@ fn sync_tool_details(
 pub fn sync_tool_details_setting(
     home: &Path,
     claude_home: &Path,
+    cwd: &Path,
     epoch: u64,
     on: bool,
 ) -> Result<Vec<String>, String> {
-    let line = match sync_tool_details(home, claude_home, epoch, &mut || Some(on))? {
+    setting_in(&Scope::new(home, claude_home, cwd), epoch, on)
+}
+
+fn setting_in(scope: &Scope<'_>, epoch: u64, on: bool) -> Result<Vec<String>, String> {
+    let line = match sync_tool_details(scope, epoch, &mut || Some(on))? {
         Some((_, line)) => line,
         None if on => {
             "playbook does not own the telemetry keys in your settings, so the flag was not written"
                 .to_string()
         }
-        None => format!("{TOOL_DETAILS_VAR} was not written by playbook, left as it is"),
+        None => {
+            format!("{TOOL_DETAILS_VAR} is not in your settings from playbook, nothing to remove")
+        }
     };
     Ok(vec![format!("telemetry: {line}")])
 }
@@ -1443,6 +1557,7 @@ mod tests {
             Overrides {
                 process_demo: None,
                 tool_details: &mut || None,
+                process_endpoints: Some(Vec::new()),
             },
         )
     }
@@ -2641,6 +2756,7 @@ mod tests {
             Overrides {
                 process_demo: Some("1".into()),
                 tool_details: &mut || None,
+                process_endpoints: Some(Vec::new()),
             },
         );
         assert!(
@@ -2663,6 +2779,7 @@ mod tests {
             Overrides {
                 process_demo: Some("1".into()),
                 tool_details: &mut || None,
+                process_endpoints: Some(Vec::new()),
             },
         );
         assert!(step.detail.contains("removed IS_DEMO"), "{}", step.detail);
@@ -2883,8 +3000,19 @@ mod tests {
             Overrides {
                 process_demo: None,
                 tool_details: &mut || answer,
+                process_endpoints: Some(Vec::new()),
             },
         )
+    }
+
+    /// A scope that reads no process environment, whatever the machine has.
+    fn iso<'a>(home: &'a Path, claude: &'a Path) -> Scope<'a> {
+        Scope {
+            home,
+            claude_home: claude,
+            cwd: home,
+            process_endpoints: Vec::new(),
+        }
     }
 
     fn recorded(home: &Path) -> Map<String, Value> {
@@ -2934,6 +3062,7 @@ mod tests {
                     asked = true;
                     Some(true)
                 },
+                process_endpoints: Some(Vec::new()),
             },
         );
 
@@ -2956,7 +3085,7 @@ mod tests {
         doc["env"][ENDPOINT_KEY] = json!("https://collector.example");
         fs::write(claude.join("settings.json"), doc.to_string()).unwrap();
 
-        let out = sync_tool_details(&home, &claude, 2, &mut || Some(true)).unwrap();
+        let out = sync_tool_details(&iso(&home, &claude), 2, &mut || Some(true)).unwrap();
 
         assert_eq!(out, None);
         assert!(!env_of(&claude).contains_key(TOOL_DETAILS_VAR));
@@ -3004,9 +3133,9 @@ mod tests {
         let (home, claude, cwd) = setup("init-tel-td-setting", "{}");
         apply_answering(&home, &claude, &cwd, 1, Some(false));
 
-        let on = sync_tool_details_setting(&home, &claude, 2, true).unwrap();
+        let on = setting_in(&iso(&home, &claude), 2, true).unwrap();
         assert_eq!(env_of(&claude)[TOOL_DETAILS_VAR], "1");
-        let off = sync_tool_details_setting(&home, &claude, 3, false).unwrap();
+        let off = setting_in(&iso(&home, &claude), 3, false).unwrap();
 
         assert!(on[0].contains("added"), "{on:?}");
         assert!(off[0].contains("removed"), "{off:?}");
@@ -3018,7 +3147,7 @@ mod tests {
     fn the_setting_says_so_when_playbook_does_not_own_the_keys() {
         let (home, claude, _) = setup("init-tel-td-unowned", r#"{"env":{"FOO":"1"}}"#);
 
-        let lines = sync_tool_details_setting(&home, &claude, 1, true).unwrap();
+        let lines = setting_in(&iso(&home, &claude), 1, true).unwrap();
 
         assert!(lines[0].contains("does not own"), "{lines:?}");
         assert!(!env_of(&claude).contains_key(TOOL_DETAILS_VAR));
@@ -3080,18 +3209,15 @@ mod tests {
     fn the_state_names_on_off_unanswered_and_not_applicable() {
         let (home, claude, cwd) = setup("init-tel-td-state", "{}");
         assert_eq!(
-            tool_details_state(&home, &claude),
+            state_in(&iso(&home, &claude)),
             ToolDetailsState::NotApplicable
         );
         apply_answering(&home, &claude, &cwd, 1, None);
-        assert_eq!(
-            tool_details_state(&home, &claude),
-            ToolDetailsState::Unanswered
-        );
+        assert_eq!(state_in(&iso(&home, &claude)), ToolDetailsState::Unanswered);
 
         apply_answering(&home, &claude, &cwd, 2, Some(true));
-        let on = tool_details_state(&home, &claude);
-        sync_tool_details_setting(&home, &claude, 3, false).unwrap();
+        let on = state_in(&iso(&home, &claude));
+        setting_in(&iso(&home, &claude), 3, false).unwrap();
         crate::config::write::set(
             crate::config::write::Tier::Global,
             TOOL_DETAILS_SETTING,
@@ -3102,7 +3228,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(on, ToolDetailsState::On);
-        assert_eq!(tool_details_state(&home, &claude), ToolDetailsState::Off);
+        assert_eq!(state_in(&iso(&home, &claude)), ToolDetailsState::Off);
     }
 
     #[test]
@@ -3115,13 +3241,13 @@ mod tests {
 
         doc["env"].as_object_mut().unwrap().remove(TOOL_DETAILS_VAR);
         fs::write(&settings, doc.to_string()).unwrap();
-        let missing = tool_details_state(&home, &claude);
+        let missing = state_in(&iso(&home, &claude));
         doc["env"][TOOL_DETAILS_VAR] = json!("1");
         doc["env"][ENDPOINT_KEY] = json!("https://collector.example");
         fs::write(&settings, doc.to_string()).unwrap();
 
         assert_eq!(missing, ToolDetailsState::FlagMissing);
-        assert_eq!(tool_details_state(&home, &claude), ToolDetailsState::Stray);
+        assert_eq!(state_in(&iso(&home, &claude)), ToolDetailsState::Stray);
     }
 
     #[test]
@@ -3134,9 +3260,9 @@ mod tests {
             true
         };
 
-        let piped = fix_tool_details_with_consent(&home, &claude, 2, false, &mut ask).unwrap();
-        let first = fix_tool_details_with_consent(&home, &claude, 3, true, &mut ask).unwrap();
-        let second = fix_tool_details_with_consent(&home, &claude, 4, true, &mut ask).unwrap();
+        let piped = fix_in(&iso(&home, &claude), 2, false, &mut ask).unwrap();
+        let first = fix_in(&iso(&home, &claude), 3, true, &mut ask).unwrap();
+        let second = fix_in(&iso(&home, &claude), 4, true, &mut ask).unwrap();
 
         assert_eq!(piped, None);
         assert!(first.unwrap().contains("added"));
@@ -3150,12 +3276,147 @@ mod tests {
         let own = r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"https://collector.example"}}"#;
         let (home, claude, _) = setup("init-tel-td-fix-own", own);
 
-        let out = fix_tool_details_with_consent(&home, &claude, 1, true, &mut |_, _| {
+        let out = fix_in(&iso(&home, &claude), 1, true, &mut |_, _| {
             panic!("a user with their own collector is never asked")
         })
         .unwrap();
 
         assert_eq!(out, None);
         assert_eq!(stored_tool_details(&home), None);
+    }
+
+    fn set_env(claude: &Path, key: &str, value: &str) {
+        let path = claude.join("settings.json");
+        let mut doc: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        doc["env"][key] = json!(value);
+        fs::write(path, doc.to_string()).unwrap();
+    }
+
+    fn recorded_endpoint(home: &Path) -> String {
+        value_text(&recorded(home)[ENDPOINT_KEY])
+    }
+
+    #[test]
+    fn a_different_local_port_or_path_is_not_ours_so_nothing_is_asked_or_written() {
+        for (tag, other) in [("port", "http://127.0.0.1:9"), ("path", "")] {
+            let (home, claude, cwd) = setup(&format!("init-tel-td-fwd-{tag}"), "{}");
+            apply_answering(&home, &claude, &cwd, 1, Some(false));
+            let ours = recorded_endpoint(&home);
+            let endpoint = if other.is_empty() {
+                format!("{ours}/forward")
+            } else {
+                other.to_string()
+            };
+            set_env(&claude, ENDPOINT_KEY, &endpoint);
+            let mut asked = false;
+
+            let out = sync_tool_details(&iso(&home, &claude), 2, &mut || {
+                asked = true;
+                Some(true)
+            })
+            .unwrap();
+
+            assert_eq!(out, None, "{endpoint}");
+            assert!(!asked, "{endpoint}");
+            assert!(!env_of(&claude).contains_key(TOOL_DETAILS_VAR));
+            assert_eq!(
+                state_in(&iso(&home, &claude)),
+                ToolDetailsState::NotApplicable
+            );
+        }
+    }
+
+    #[test]
+    fn a_signal_endpoint_in_the_user_file_means_the_telemetry_is_not_ours() {
+        let (home, claude, cwd) = setup("init-tel-td-signal", "{}");
+        apply_answering(&home, &claude, &cwd, 1, Some(false));
+        set_env(
+            &claude,
+            "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+            "http://127.0.0.1:1",
+        );
+
+        let lines = setting_in(&iso(&home, &claude), 2, true).unwrap();
+
+        assert!(lines[0].contains("does not own"), "{lines:?}");
+        assert!(!env_of(&claude).contains_key(TOOL_DETAILS_VAR));
+    }
+
+    #[test]
+    fn a_project_or_process_endpoint_that_differs_is_not_ours_and_the_same_one_is() {
+        let (home, claude, cwd) = setup("init-tel-td-sources", "{}");
+        apply_answering(&home, &claude, &cwd, 1, Some(false));
+        let ours = recorded_endpoint(&home);
+        let project = home.join("project");
+        let scope = |endpoints: Vec<(String, String)>| Scope {
+            home: &home,
+            claude_home: &claude,
+            cwd: &project,
+            process_endpoints: endpoints,
+        };
+        assert!(scope(Vec::new()).owns_now());
+        let theirs = vec![(ENDPOINT_KEY.to_string(), "http://127.0.0.1:1".to_string())];
+        let same = vec![(ENDPOINT_KEY.to_string(), format!("{ours}/"))];
+
+        assert!(!scope(theirs).owns_now(), "process endpoint");
+        assert!(scope(same).owns_now(), "a copy of ours");
+        fs::create_dir_all(project.join(".claude")).unwrap();
+        fs::write(
+            project.join(".claude").join("settings.json"),
+            r#"{"env":{"OTEL_EXPORTER_OTLP_ENDPOINT":"http://localhost:4318"}}"#,
+        )
+        .unwrap();
+        assert!(!scope(Vec::new()).owns_now(), "project settings");
+    }
+
+    #[test]
+    fn a_flag_playbook_wrote_is_removed_when_the_endpoint_moves_whoever_owns_it_now() {
+        let (home, claude, cwd) = setup("init-tel-td-stray", "{}");
+        apply_answering(&home, &claude, &cwd, 1, Some(true));
+        set_env(&claude, ENDPOINT_KEY, "https://collector.example");
+
+        let lines = setting_in(&iso(&home, &claude), 2, false).unwrap();
+
+        assert!(lines[0].contains("removed"), "{lines:?}");
+        assert!(!lines[0].contains("not written by playbook"), "{lines:?}");
+        assert!(!env_of(&claude).contains_key(TOOL_DETAILS_VAR));
+        assert!(!recorded(&home).contains_key(TOOL_DETAILS_VAR));
+    }
+
+    #[test]
+    fn turning_telemetry_off_removes_the_flag_after_the_endpoint_moved() {
+        let (home, claude, cwd) = setup("init-tel-td-off-moved", "{}");
+        apply_answering(&home, &claude, &cwd, 1, Some(true));
+        set_env(&claude, ENDPOINT_KEY, "https://collector.example");
+
+        remove(&home, &claude.join("settings.json"), 2, false).unwrap();
+
+        assert!(!env_of(&claude).contains_key(TOOL_DETAILS_VAR));
+    }
+
+    #[test]
+    fn doctor_fix_removes_a_stray_flag_without_asking_or_a_terminal() {
+        let (home, claude, cwd) = setup("init-tel-td-fix-stray", "{}");
+        apply_answering(&home, &claude, &cwd, 1, Some(true));
+        set_env(&claude, ENDPOINT_KEY, "https://collector.example");
+        assert_eq!(state_in(&iso(&home, &claude)), ToolDetailsState::Stray);
+
+        let line = fix_in(&iso(&home, &claude), 2, false, &mut |_, _| {
+            panic!("removing a stray flag asks nothing")
+        })
+        .unwrap();
+
+        assert!(line.unwrap().contains("removed"));
+        assert!(!env_of(&claude).contains_key(TOOL_DETAILS_VAR));
+    }
+
+    #[test]
+    fn a_flag_the_user_set_counts_as_on_once_the_answer_is_yes() {
+        let (home, claude, cwd) = setup("init-tel-td-user-flag", "{}");
+        apply_answering(&home, &claude, &cwd, 1, None);
+        set_env(&claude, TOOL_DETAILS_VAR, "true");
+        decide_tool_details(&home, ToolDetailsMode::Default, &mut |_, _| true);
+
+        assert_eq!(state_in(&iso(&home, &claude)), ToolDetailsState::On);
     }
 }

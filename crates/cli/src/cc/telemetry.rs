@@ -87,6 +87,8 @@ pub fn session_env(home: &Path, cwd: &Path) -> Vec<(String, String)> {
     }
     let collector = read_state(&state_path(&Paths::from_home(home)));
     let kind = configured(home, cwd, collector.as_ref().map(|s| s.port));
+    // An unanswered setting counts as on here: the session goes only to
+    // playbook's own collector, which keeps names only, and yes is the default.
     with_tool_details(
         decide(true, kind != Configured::Nothing, false, collector.as_ref()),
         crate::init::telemetry::tool_details_enabled(home),
