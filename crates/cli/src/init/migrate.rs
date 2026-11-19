@@ -481,7 +481,10 @@ pub fn registry() -> Vec<Migration> {
 /// the tool details question. A user with a collector of their own is never
 /// listed, because setup never asks them.
 fn tool_details_pending(ctx: &Ctx) -> Option<String> {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| ctx.home.clone());
+    let cwd = crate::init::telemetry::lookup_dir(
+        ctx.repo.as_ref().map(|(root, _)| root.clone()),
+        &ctx.home,
+    );
     crate::init::telemetry::tool_details_unanswered(&ctx.home, &ctx.claude_home, &cwd).then(|| {
         "pbtop shows third party plugin skills as \"names hidden\"; to show their real names, answer the question in `playbook setup --only telemetry`, or run: playbook config set usage.toolDetails true".to_string()
     })

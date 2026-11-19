@@ -1198,12 +1198,12 @@ fn tool_details_row(env: &Env) -> Option<Row> {
     let settings = env.settings();
     let claude_home = settings.parent().unwrap_or(&env.home);
     let turn_on = format!("run: playbook config set {TOOL_DETAILS_SETTING} true");
-    let cwd = env.repo_root.clone().unwrap_or_else(|| env.home.clone());
+    let cwd = crate::init::telemetry::lookup_dir(env.repo_root.clone(), &env.home);
     Some(match tool_details_state(&env.home, claude_home, &cwd) {
         State::On => Row::new(
             "-",
             Level::Pass,
-            "tool details on: pbtop shows real plugin skill names, and the collector keeps names only",
+            "tool details on: pbtop shows real plugin skill names, and the collector keeps names only. The flag is global, so a project whose own settings send telemetry elsewhere would also send command and file details there",
         ),
         State::Off => Row::new(
             "-",

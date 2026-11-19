@@ -1829,7 +1829,8 @@ fn real_main() {
                                     value.trim()
                                 );
                             } else if key == init::telemetry::TOOL_DETAILS_SETTING {
-                                let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
+                                let cwd =
+                                    init::telemetry::lookup_dir(manifest::check::toplevel(), &home);
                                 match init::telemetry::sync_tool_details_setting(
                                     &home,
                                     &home.join(".claude"),
@@ -2614,7 +2615,7 @@ fn real_main() {
             match init::telemetry::fix_tool_details_with_consent(
                 &home,
                 &home.join(".claude"),
-                &std::env::current_dir().unwrap_or_else(|_| home.clone()),
+                &init::telemetry::lookup_dir(manifest::check::toplevel(), &home),
                 common::time::now_epoch_secs(),
                 init::choices::stdio_is_interactive(),
                 &mut init::attribution::ask_on_terminal,

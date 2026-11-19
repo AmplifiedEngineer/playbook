@@ -901,7 +901,7 @@ pub const TOOL_DETAILS_SETTING: &str = "usage.toolDetails";
 
 /// The question setup, `doctor --fix` and `playbook setup --only telemetry`
 /// ask. `ask_on_terminal` adds the `[Y/n]` after it.
-pub const TOOL_DETAILS_QUESTION: &str = "Show real plugin skill names in pbtop? Claude Code then also sends Bash commands and file paths to the collector on this machine, which keeps only names.";
+pub const TOOL_DETAILS_QUESTION: &str = "Show real plugin skill names in pbtop? Claude Code then also sends Bash commands and file paths to the collector on this machine, which keeps only names. The flag is global: a project whose own settings send telemetry elsewhere would also send command and file details there.";
 
 /// How setup decides the tool details answer when none is stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -964,6 +964,15 @@ const SIGNAL_ENDPOINT_KEYS: [&str; 2] = [
     "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
 ];
 
+/// The folder whose project settings are read: the repo root, else the
+/// current folder, else the home folder. `doctor`, `doctor --fix`, `config set`
+/// and the migration all use it, so they agree on who owns the telemetry.
+pub fn lookup_dir(repo_root: Option<PathBuf>, home: &Path) -> PathBuf {
+    repo_root
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| home.to_path_buf())
+}
+
 /// Where ownership of the telemetry is read from: the user's settings.json,
 /// the other settings files that apply in `cwd`, and the process environment.
 /// Project and local settings are read for `cwd` only, as the rest of the
@@ -1018,10 +1027,13 @@ impl<'a> Scope<'a> {
         if SIGNAL_ENDPOINT_KEYS.iter().any(|k| env.contains_key(*k)) {
             return true;
         }
+        // A local endpoint in the process environment is a copy of an earlier
+        // setup, as in a Claude Code session opened before the port moved, so
+        // only a remote one counts as another owner.
         if self
             .process_endpoints
             .iter()
-            .any(|(_, value)| differs(value))
+            .any(|(_, value)| !is_local_endpoint(value) && differs(value))
         {
             return true;
         }
@@ -3355,7 +3367,10 @@ mod tests {
             process_endpoints: endpoints,
         };
         assert!(scope(Vec::new()).owns_now());
-        let theirs = vec![(ENDPOINT_KEY.to_string(), "http://127.0.0.1:1".to_string())];
+        let theirs = vec![(
+            ENDPOINT_KEY.to_string(),
+            "https://collector.example".to_string(),
+        )];
         let same = vec![(ENDPOINT_KEY.to_string(), format!("{ours}/"))];
 
         assert!(!scope(theirs).owns_now(), "process endpoint");
@@ -3418,5 +3433,38 @@ mod tests {
         decide_tool_details(&home, ToolDetailsMode::Default, &mut |_, _| true);
 
         assert_eq!(state_in(&iso(&home, &claude)), ToolDetailsState::On);
+    }
+
+    #[test]
+    fn a_local_process_endpoint_is_stale_and_only_a_remote_one_is_a_redirect() {
+        let (home, claude, cwd) = setup("init-tel-td-stale-env", "{}");
+        apply_answering(&home, &claude, &cwd, 1, Some(true));
+        decide_tool_details(&home, ToolDetailsMode::Default, &mut |_, _| true);
+        let scope = |value: &str| Scope {
+            home: &home,
+            claude_home: &claude,
+            cwd: &home,
+            process_endpoints: vec![(ENDPOINT_KEY.to_string(), value.to_string())],
+        };
+
+        assert!(scope("http://127.0.0.1:1").owns_now(), "an old local port");
+        assert!(!scope("https://collector.example").owns_now());
+        let kept = fix_in(&scope("http://localhost:2"), 2, true, &mut |_, _| {
+            panic!("nothing to ask")
+        })
+        .unwrap();
+        assert_eq!(kept, None);
+        assert_eq!(env_of(&claude)[TOOL_DETAILS_VAR], "1");
+    }
+
+    #[test]
+    fn the_lookup_folder_is_the_repo_root_then_the_current_folder() {
+        let home = Path::new("/home/x");
+
+        let in_repo = lookup_dir(Some(PathBuf::from("/work/repo")), home);
+        let outside = lookup_dir(None, home);
+
+        assert_eq!(in_repo, PathBuf::from("/work/repo"));
+        assert_eq!(outside, std::env::current_dir().unwrap());
     }
 }
