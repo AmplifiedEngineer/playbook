@@ -223,6 +223,10 @@ pub(crate) fn header_label(key: &str, name: &str, choices: &[(String, String)]) 
     }
 }
 
+/// Label for an email key whose domain is empty, so a masked key never shows
+/// the `@` that marks it as an address.
+const MASKED_NO_DOMAIN: &str = "account";
+
 /// `None` for a named account or a key with no local part to hide.
 fn email_cut(key: &str, name: &str) -> Option<String> {
     if name != key {
@@ -236,7 +240,12 @@ fn email_cut(key: &str, name: &str) -> Option<String> {
         .split('.')
         .find(|part| !part.is_empty())
         .unwrap_or("");
-    Some(format!("@{host}"))
+    let label = if host.is_empty() {
+        MASKED_NO_DOMAIN
+    } else {
+        host
+    };
+    Some(label.to_string())
 }
 
 /// A store with four events on two accounts and one skill record, for tests.
@@ -326,10 +335,10 @@ pub(crate) mod tests {
 
     #[test]
     fn an_unnamed_email_account_shows_only_its_domain_name() {
-        assert_eq!(label("dev@example.com.invalid"), "@example");
-        assert_eq!(label("a@example.com"), "@example");
-        assert_eq!(label("dev@.com"), "@com");
-        assert_eq!(label("dev@"), "@");
+        assert_eq!(label("dev@example.com.invalid"), "example");
+        assert_eq!(label("a@example.com"), "example");
+        assert_eq!(label("dev@.com"), "com");
+        assert_eq!(label("dev@"), MASKED_NO_DOMAIN);
     }
 
     #[test]
@@ -347,8 +356,8 @@ pub(crate) mod tests {
                 .map(|k| (k.to_string(), k.to_string()))
                 .to_vec();
         let shown = |key: &str| header_label(key, key, &choices);
-        assert_eq!(shown("dev@example.com"), "@example (1)");
-        assert_eq!(shown("ana@example.com"), "@example (2)");
-        assert_eq!(shown("bo@work.invalid"), "@work");
+        assert_eq!(shown("dev@example.com"), "example (1)");
+        assert_eq!(shown("ana@example.com"), "example (2)");
+        assert_eq!(shown("bo@work.invalid"), "work");
     }
 }

@@ -374,8 +374,8 @@ mod tests {
 
         let text = render(&events, &[], Some(&choices));
 
-        assert!(text.contains("@example"), "{text}");
-        assert!(!text.contains("dev@example.com"), "{text}");
+        assert!(text.contains("example"), "{text}");
+        assert!(!text.contains('@'), "{text}");
     }
 
     #[test]
@@ -392,7 +392,7 @@ mod tests {
         let text = render(&events, &[], Some(&choices));
 
         assert!(
-            text.contains("@example (1)") && text.contains("@example (2)"),
+            text.contains("example (1)") && text.contains("example (2)"),
             "{text}"
         );
     }
