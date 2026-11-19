@@ -1333,7 +1333,7 @@ mod tests {
         for (w, h) in [(80, 24), (100, 30), (160, 50)] {
             let text = screen(&app, w, h);
             assert!(text.contains("The store has 3 messages from"), "{text}");
-            assert!(text.contains("Press a to show all time"), "{text}");
+            assert!(text.contains("Press r to step to a longer range"), "{text}");
             assert!(!text.contains("No usage in this range.\n"), "{text}");
         }
     }
