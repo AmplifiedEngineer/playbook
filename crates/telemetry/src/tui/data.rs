@@ -659,9 +659,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(d.accounts.shown, "dev@example.com.br");
-        assert_eq!(d.accounts.masked, "@example");
+        assert_eq!(d.accounts.masked, "example");
         assert_eq!(d.accounts.label(false), "dev@example.com.br");
-        assert_eq!(d.accounts.label(true), "@example");
+        assert_eq!(d.accounts.label(true), "example");
     }
 
     /// One event and one telemetry request per machine and account pair. The
