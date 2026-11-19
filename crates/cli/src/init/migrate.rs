@@ -466,7 +466,7 @@ pub fn registry() -> Vec<Migration> {
         },
         Migration {
             id: TOOL_DETAILS_MIGRATION,
-            since: "next",
+            since: "0.45.0",
             kind: Kind::Idempotent,
             scope: Scope::Consent {
                 check: tool_details_pending,
@@ -2953,7 +2953,8 @@ mod tests {
 
         assert!(matches!(outcome, Outcome::Quiet));
         assert_eq!(snapshot(&h), before);
-        assert_eq!(entry.since(), Since::Next);
+        // `next` on main; release-prepare.sh fills in the version on the release branch.
+        assert!(matches!(entry.since(), Since::Next | Since::At(_)));
     }
 
     fn with_since(id: &'static str, since: &'static str) -> Migration {
