@@ -26,7 +26,6 @@ pub(crate) const FALLBACK_PHRASE: &str = "Otherwise do this";
 pub(crate) const SLIMMED: &[&str] = &[
     "commands/fix.md",
     "commands/handoff.md",
-    "commands/session-handoff.md",
     "commands/session-start.md",
     "commands/pr-comments.md",
     "commands/review.md",
@@ -65,6 +64,7 @@ pub(crate) const MOVED: &[(&str, &str)] = &[
         "commands/quick-review.md",
         "skills/grounding-review/references/quick-pass.md",
     ),
+    ("commands/session-handoff.md", "commands/handoff.md"),
 ];
 
 /// Which budget a file gets.
