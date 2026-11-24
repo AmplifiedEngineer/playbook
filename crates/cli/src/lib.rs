@@ -2127,8 +2127,8 @@ pub enum CommitCommand {
     ///
     /// Reads the message from stdin, or from `--message-file`. With `-A`,
     /// `-m` or `--json` it drafts the message with a small model (Haiku),
-    /// or from the staged file names when `commit.aiMessage` is false or the
-    /// model fails, unless `-m` gives one, and refuses the default branch.
+    /// or from the staged file names when `commit.aiMessage` is false, the
+    /// model fails or a staged file looks like a secret, unless `-m` gives one, and refuses the default branch.
     /// Adds a sign-off per `commit.signOff` and signs when `user.signingkey`
     /// is set. A rejected push is never forced. Exits 1 on any failure.
     ///

@@ -149,6 +149,9 @@ fn compose(
         return (draft(changes), None);
     };
     let paths: Vec<&str> = changes.iter().map(|c| c.path.as_str()).collect();
+    if let Some(reason) = model::skip_reason(&paths) {
+        return (draft(changes), Some(format!("{NOTE_PREFIX}{reason}")));
+    }
     match model::draft(runner, &context(), &paths) {
         Ok(message) => (message, None),
         Err(reason) => {
@@ -550,5 +553,39 @@ mod tests {
         // Assert
         assert_eq!(message, draft(&staged));
         assert_eq!(note, None);
+    }
+
+    #[test]
+    fn a_long_multiline_error_gives_a_one_line_capped_note() {
+        // Arrange
+        let reason = format!("first line\n{}", "x".repeat(300));
+        let runner = Fake::new(Err(reason));
+        let staged = changes("M\tcrates/cli/src/a.rs");
+
+        // Act
+        let (_, note) = compose(Some(&runner), model::Context::default, &staged);
+
+        // Assert
+        let note = note.unwrap();
+        assert!(!note.contains('\n'));
+        assert_eq!(
+            note.chars().count(),
+            NOTE_PREFIX.chars().count() + NOTE_REASON_CHARS
+        );
+    }
+
+    #[test]
+    fn a_secret_path_means_no_call_and_a_note() {
+        // Arrange
+        let runner = Fake::new(Ok(good_reply()));
+        let staged = changes("A\t.env");
+
+        // Act
+        let (message, note) = compose(Some(&runner), model::Context::default, &staged);
+
+        // Assert
+        assert_eq!(runner.calls(), 0);
+        assert_eq!(message, draft(&staged));
+        assert!(note.is_some_and(|n| n.ends_with("not sent to a model")));
     }
 }

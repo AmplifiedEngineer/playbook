@@ -4,8 +4,8 @@
 //! Ports the retired shell original: a mechanical sanity pass over the staged
 //! diff before a commit.
 //!
-//! `/playbook:commit` drafts the message from the staged diff with no
-//! model, so nothing in that flow judges the diff it is about to commit. This covers the half that needs
+//! `/playbook:commit` drafts the message from the staged diff, and a model
+//! that writes a message does not judge the diff it is about to commit. This covers the half that needs
 //! no judgement: debug leftovers, secret-shaped filenames, an oversized commit.
 //!
 //! Warn, never block. A debug statement can be deliberate and a large commit
@@ -116,7 +116,7 @@ fn is_commit(cmd: &str) -> bool {
     })
 }
 
-fn looks_secret(path: &str) -> bool {
+pub(crate) fn looks_secret(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path).to_lowercase();
     name == ".env"
         || name.starts_with(".env.")
