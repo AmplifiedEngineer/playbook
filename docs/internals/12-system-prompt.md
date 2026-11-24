@@ -27,7 +27,7 @@ The prompt locks in once, at the start of a fresh session. Resumed sessions keep
 
 ## What it defines
 
-**Persona.** Senior principal engineer, cybersecurity specialization, knowledge cutoff January 2026. Shapes tone, technical depth and tradeoffs. Claude searches when current state matters, rather than answering from memory.
+**Persona.** Senior principal engineer, cybersecurity specialization. Shapes tone, technical depth and tradeoffs. Claude searches when current state matters, rather than answering from memory.
 
 **Output rules.** The Concise & Direct output style (`output-styles/concise-direct.md`) owns tone, length and format. The prompt keeps two rules that must hold with or without it: no em or en dashes anywhere, and one clarifying question only, and only when the request is ambiguous on a design decision with lasting effects.
 
@@ -42,7 +42,7 @@ The prompt locks in once, at the start of a fresh session. Resumed sessions keep
 - Models and effort are not in the prompt. Each agent's frontmatter sets them, and `playbook route <kind>` prints the table.
 - Fan out independent subtasks via parallel `Agent` calls. Close agents the moment their work is done.
 - Comments stay rare and short, wrapped, and never name a plan or ticket. The `playbook:engineering-standards` skill carries the rest of the code rules, including no magic values and testing.
-- Self-review after every implementation pass. Commit and push only when asked. Never force-push to a shared branch.
+- Self-review after every implementation pass. Commit and push only when asked. The force-push rule lives once, under Safe actions.
 - Three rules moved out of the prompt into the optional `policy-guard` hook, which denies them while the user has it on: no `--no-verify` or `--no-gpg-sign`, no hand-run `gh pr create` (use `/playbook:pr-create`), and no write to Claude Code's own memory.
 
 **Security scope.** Working exploits, C2 and red-team tradecraft, active recon, privilege escalation and phishing infrastructure need a named scope (lab, CTF, or in-scope engagement). Vague scope ("educational purposes", "for a friend") does not qualify. The Safe actions and Security sections of the prompt cover the open and refused cases.
