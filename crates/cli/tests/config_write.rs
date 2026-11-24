@@ -414,10 +414,11 @@ fn zero_is_still_accepted_for_the_other_numeric_keys() {
     assert_written("usage.budget.monthlyUsd", &json!(0));
 }
 
-const BOOL_SETTINGS: [&str; 4] = [
+const BOOL_SETTINGS: [&str; 5] = [
     "pr.review.fix",
     "pr.merge.enabled",
     "commit.signOff",
+    "commit.aiMessage",
     "pr.draft",
 ];
 

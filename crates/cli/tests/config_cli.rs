@@ -679,6 +679,7 @@ fn the_pr_and_commit_settings_default_then_follow_a_global_set() {
         ("pr.review.fix", "false", "true"),
         ("pr.merge.enabled", "false", "true"),
         ("commit.signOff", "true", "false"),
+        ("commit.aiMessage", "true", "false"),
         ("pr.draft", "true", "false"),
     ];
 

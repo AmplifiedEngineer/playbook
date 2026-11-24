@@ -135,7 +135,7 @@ In `ask` mode, the default, nothing changes. Pass `--auto` or `--ask` to overrid
 
 ## PR and commit settings
 
-Six keys shape the PR flow and the commit trailer. Read one with `playbook config get <key>`. Set it with `playbook config set [--global|--org] <key> <value>`: no flag writes the repo tier. Repo wins over org, and org over global. All keys: [Config keys](../reference/config-keys.md).
+Seven keys shape the PR flow and the commit. Read one with `playbook config get <key>`. Set it with `playbook config set [--global|--org] <key> <value>`: no flag writes the repo tier. Repo wins over org, and org over global. All keys: [Config keys](../reference/config-keys.md).
 
 | Key | Default | What it does |
 |---|---|---|
@@ -144,6 +144,7 @@ Six keys shape the PR flow and the commit trailer. Read one with `playbook confi
 | `pr.review.fix` | `false` | After the self-review, fixes every finding that survived the review's verification, pushes the fixes to the PR branch, and re-runs the scoped checks. |
 | `pr.merge.enabled` | `false` | After the review and fixes, marks the PR ready, waits until every check on the PR head is green, runs `gh pr merge <n> --auto`, then re-reads the PR and reports whether it merged, is queued, was rejected, or was closed. |
 | `commit.signOff` | `true` | Commits made through `/playbook:commit` carry a `Signed-off-by` trailer. |
+| `commit.aiMessage` | `true` | `playbook commit run -A` drafts the commit message with a small model and falls back to one built from the file names. Set it to `false` for no model call. |
 | `pr.draft` | `true` | `/playbook:pr-create` opens the PR as a draft. Set it to `false` to open PRs ready for review. |
 
 ```bash

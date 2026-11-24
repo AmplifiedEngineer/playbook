@@ -3236,6 +3236,8 @@ fn effort_diff_shape(base: &str) -> Result<effort::auto::Shape, String> {
 /// `commit all`. With `--json` the report always exits 0; otherwise a failure
 /// exits 1.
 fn commit_drafted(dir: &std::path::Path, opts: commit::all::Options, json: bool, args_stdin: bool) {
+    let ai: Option<&dyn commit::model::MessageRunner> =
+        commit_ai_message_on().then_some(&commit::model::ClaudeRunner);
     if json {
         let text = if args_stdin {
             read_stdin_to_string()
@@ -3254,11 +3256,11 @@ fn commit_drafted(dir: &std::path::Path, opts: commit::all::Options, json: bool,
         };
         println!(
             "{}",
-            commit::all::run_inline(&text, opts, commit_signoff_on())
+            commit::all::run_inline(&text, opts, commit_signoff_on(), ai)
         );
         return;
     }
-    match commit::all::run(dir, opts, commit_signoff_on()) {
+    match commit::all::run(dir, opts, commit_signoff_on(), ai) {
         Ok(text) => println!("{text}"),
         Err(err) => {
             eprintln!("{err}");
@@ -3313,6 +3315,18 @@ fn commit_signoff_on() -> bool {
     let slug = common::repo_slug();
     config::resolve_valid(
         "commit.signOff",
+        &common::home_dir(),
+        (!slug.is_empty()).then_some(slug.as_str()),
+    )
+    .map(|(v, _, _)| v != serde_json::Value::Bool(false))
+    .unwrap_or(true)
+}
+
+/// Whether `commit.aiMessage` is on (the default).
+fn commit_ai_message_on() -> bool {
+    let slug = common::repo_slug();
+    config::resolve_valid(
+        "commit.aiMessage",
         &common::home_dir(),
         (!slug.is_empty()).then_some(slug.as_str()),
     )

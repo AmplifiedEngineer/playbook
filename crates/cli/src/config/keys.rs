@@ -50,6 +50,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "pr.review.fix",
     "pr.merge.enabled",
     "commit.signOff",
+    "commit.aiMessage",
     "handoff.onClear",
     "pr.draft",
     "pr.rules",
@@ -329,6 +330,7 @@ pub const SHARED_KEYS: &[&str] = &[
     "auto.budget.ceilingUsd",
     "pr.draft",
     "commit.signOff",
+    "commit.aiMessage",
 ];
 
 /// Every other known key. Paths, hosts, token names, machine state, safety
@@ -431,6 +433,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "pr.review.fix" => Some(Value::Bool(false)),
         "pr.merge.enabled" => Some(Value::Bool(false)),
         "commit.signOff" => Some(Value::Bool(true)),
+        "commit.aiMessage" => Some(Value::Bool(true)),
         "handoff.onClear" => Some(Value::Bool(false)),
         "pr.draft" => Some(Value::Bool(true)),
         "pr.rules" => Some(Value::String("default".to_string())),
@@ -545,7 +548,7 @@ const COMPOUND_GROUPS: &[&str] = &["proseLint", "policyGuard", "systemPrompt"];
 /// The exact count of `KNOWN_KEYS`: adding or bringing back a key raises it,
 /// cutting keys lowers it.
 #[cfg(test)]
-const KEY_CEILING: usize = 57;
+const KEY_CEILING: usize = 58;
 
 #[cfg(test)]
 mod tests {
@@ -1048,6 +1051,7 @@ mod tests {
             ("pr.review.fix", false),
             ("pr.merge.enabled", false),
             ("commit.signOff", true),
+            ("commit.aiMessage", true),
             ("pr.draft", true),
         ];
 
@@ -1067,6 +1071,7 @@ mod tests {
             "pr.review.fix",
             "pr.merge.enabled",
             "commit.signOff",
+            "commit.aiMessage",
             "pr.draft",
         ];
 
