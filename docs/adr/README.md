@@ -65,3 +65,4 @@ Each file here records one decision and why it was made. A decision can have a b
 | [0059](0059-tombstone-format.md) | Tombstone format for on disk state | Accepted | 2026-11-05 |
 | [0060](0060-use-tree-sitter-only-for-the-code-index.md) | Answer Code Questions From the Tree-sitter Index Only, With a Precision and Recall Gate | Accepted | 2026-11-06 |
 | [0061](0061-opt-in-usage-sync.md) | Sync Usage Between One User's Computers Only When the User Turns It On | Accepted | 2026-11-07 |
+| [0062](0062-playbook-bridges-the-ae-skills.md) | Playbook Bridges the Independent ae Skills With Hidden Markers | Accepted | 2026-11-20 |
