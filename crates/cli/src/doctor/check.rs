@@ -836,6 +836,7 @@ fn config_rows(env: &Env) -> Vec<Row> {
         "pr.review.fix",
         "pr.merge.enabled",
         "commit.signOff",
+        "commit.aiMessage",
         "pr.draft",
     ]
     .iter()

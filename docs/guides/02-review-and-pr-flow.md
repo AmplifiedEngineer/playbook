@@ -14,7 +14,7 @@ Four commands take a ready branch to a merged PR: `/playbook:commit`, `/playbook
 /playbook:commit --no-signoff  # no Signed-off-by on this commit
 ```
 
-With `-A` and no message, the command is one call to `playbook commit run -A`. It stages everything, drafts a conventional message from the staged files with no model, commits, rebases if you are behind and pushes. The type comes from the files: only docs gives `docs`, only tests `test`, only workflow files `ci`, only lock files `chore(deps)`, a new source file `feat`, and any other change `fix`. The scope is the shared top level area, and it is left out when the files span areas. The message is a guide. The PR title and body carry the meaning. Run it yourself too:
+With `-A` and no message, the command is one call to `playbook commit run -A`. It stages everything, has a small model (Haiku) draft a conventional message from the staged diff, commits, rebases if you are behind and pushes. The model gets the branch name, the last five commit subjects, the staged file list and up to 24,000 bytes of the staged diff. The command refuses a message that breaks the commit rules and drops a body that breaks them. The file name rules are the fallback when `commit.aiMessage` is `false`, when the call fails, or when a staged file looks like a secret (it sends nothing then). They pick the type from the files: only docs gives `docs`, only tests `test`, only workflow files `ci`, only lock files `chore(deps)`, a new source file `feat`, and any other change `fix`. The scope is the shared top level area, and it is left out when the files span areas. A fallback prints a `NOTE=` line. The PR title and body carry the meaning. Run it yourself too:
 
 ```bash
 playbook commit run -A              # stage everything, draft the message, commit, push
@@ -135,7 +135,7 @@ In `ask` mode, the default, nothing changes. Pass `--auto` or `--ask` to overrid
 
 ## PR and commit settings
 
-Six keys shape the PR flow and the commit trailer. Read one with `playbook config get <key>`. Set it with `playbook config set [--global|--org] <key> <value>`: no flag writes the repo tier. Repo wins over org, and org over global. All keys: [Config keys](../reference/config-keys.md).
+Seven keys shape the PR flow and the commit. Read one with `playbook config get <key>`. Set it with `playbook config set [--global|--org] <key> <value>`: no flag writes the repo tier. Repo wins over org, and org over global. All keys: [Config keys](../reference/config-keys.md).
 
 | Key | Default | What it does |
 |---|---|---|
@@ -144,6 +144,7 @@ Six keys shape the PR flow and the commit trailer. Read one with `playbook confi
 | `pr.review.fix` | `false` | After the self-review, fixes every finding that survived the review's verification, pushes the fixes to the PR branch, and re-runs the scoped checks. |
 | `pr.merge.enabled` | `false` | After the review and fixes, marks the PR ready, waits until every check on the PR head is green, runs `gh pr merge <n> --auto`, then re-reads the PR and reports whether it merged, is queued, was rejected, or was closed. |
 | `commit.signOff` | `true` | Commits made through `/playbook:commit` carry a `Signed-off-by` trailer. |
+| `commit.aiMessage` | `true` | `playbook commit run -A` drafts the commit message with a small model. It sends the branch name, the last five commit subjects and up to 24,000 bytes of the staged diff to that model. It falls back to a message built from the file names when the call fails, and sends nothing when a staged file looks like a secret. Set it to `false` for no model call. |
 | `pr.draft` | `true` | `/playbook:pr-create` opens the PR as a draft. Set it to `false` to open PRs ready for review. |
 
 ```bash

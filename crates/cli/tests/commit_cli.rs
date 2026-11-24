@@ -81,13 +81,83 @@ impl Repo {
         git(&work, &["commit", "-q", "-m", "init"]);
         git(&work, &["push", "-q", "-u", "origin", "main"]);
         git(&work, &["checkout", "-q", "-b", "feat"]);
-        Repo { root, work, origin }
+        let repo = Repo { root, work, origin };
+        repo.install_stub_claude();
+        // Off by default, so the file name subjects below stay exact.
+        assert!(repo
+            .pb(
+                &["config", "set", "--global", "commit.aiMessage", "false"],
+                ""
+            )
+            .status
+            .success());
+        repo
+    }
+
+    /// A `claude` that records each call and, when a reply file exists,
+    /// prints it. It stands first on `PATH`, so no test reaches the real one.
+    fn install_stub_claude(&self) {
+        let bin = self.root.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let script = format!(
+            "#!/bin/sh\necho called >> '{calls}'\ncat > /dev/null\n[ -f '{reply}' ] || exit 1\ncat '{reply}'\n",
+            calls = self.claude_calls_file().display(),
+            reply = self.claude_reply_file().display(),
+        );
+        let path = bin.join("claude");
+        fs::write(&path, script).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    fn claude_calls_file(&self) -> PathBuf {
+        self.root.join("claude-calls")
+    }
+
+    fn claude_reply_file(&self) -> PathBuf {
+        self.root.join("claude-reply")
+    }
+
+    /// How many times the stub `claude` ran.
+    fn claude_calls(&self) -> usize {
+        fs::read_to_string(self.claude_calls_file())
+            .map(|t| t.lines().count())
+            .unwrap_or(0)
+    }
+
+    /// Makes the stub print a model reply with this header and body.
+    fn stub_reply(&self, header: &str, body: &str) {
+        let envelope = serde_json::json!({
+            "is_error": false,
+            "structured_output": {"header": header, "body": body},
+        });
+        fs::write(self.claude_reply_file(), envelope.to_string()).unwrap();
+    }
+
+    fn turn_model_on(&self) {
+        assert!(self
+            .pb(
+                &["config", "set", "--global", "commit.aiMessage", "true"],
+                ""
+            )
+            .status
+            .success());
+    }
+
+    /// `PATH` with the stub first.
+    fn path_env(&self) -> String {
+        format!(
+            "{}:{}",
+            self.root.join("bin").display(),
+            std::env::var("PATH").unwrap_or_default()
+        )
     }
 
     fn pb(&self, args: &[&str], stdin: &str) -> Output {
         let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
             .args(args)
             .env("HOME", self.root.join("home"))
+            .env("PATH", self.path_env())
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")
             .env("GIT_AUTHOR_NAME", "t")
@@ -764,6 +834,7 @@ fn inline_with(args: &[&str], r: &Repo, cwd: &Path, text: &str) -> serde_json::V
     let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(args)
         .env("HOME", r.root.join("home"))
+        .env("PATH", r.path_env())
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .env("GIT_AUTHOR_NAME", "t")
@@ -1021,4 +1092,144 @@ fn legacy_inline_reports_like_run_inline_for_each_stdin_flag() {
         assert_eq!(legacy["commit"], current["commit"], "{tag}");
         assert!(!legacy["commit"].as_str().unwrap().is_empty(), "{tag}");
     }
+}
+
+// commit run -A with the model
+
+#[test]
+fn the_model_message_is_committed_when_the_model_is_on() {
+    // Arrange
+    let r = Repo::new("model-on");
+    r.turn_model_on();
+    r.stub_reply(
+        "refactor(outbox): replace full sort with heap pop for batching",
+        "",
+    );
+    put(&r, "crates/outbox/src/lib.rs", "x\n");
+
+    // Act
+    let o = r.pb(RUN_ALL, "");
+
+    // Assert
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert_eq!(
+        last_subject(&r),
+        "refactor(outbox): replace full sort with heap pop for batching"
+    );
+    assert!(!out(&o).contains("NOTE="), "{}", out(&o));
+    assert_eq!(r.claude_calls(), 1);
+}
+
+#[test]
+fn a_failed_model_call_falls_back_and_prints_a_note() {
+    // Arrange
+    let r = Repo::new("model-fails");
+    r.turn_model_on();
+    put(&r, "docs/guide.md", "g\n");
+
+    // Act
+    let o = r.pb(RUN_ALL, "");
+
+    // Assert
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert_eq!(last_subject(&r), "docs: add guide.md");
+    assert!(
+        out(&o)
+            .contains("\nNOTE=message drafted from file names, no model: claude exited with 1\n"),
+        "{}",
+        out(&o)
+    );
+}
+
+#[test]
+fn the_json_report_carries_the_note_in_its_warnings() {
+    // Arrange
+    let r = Repo::new("model-fails-json");
+    r.turn_model_on();
+    put(&r, "docs/guide.md", "g\n");
+
+    // Act
+    let v = inline(&r, &r.work, "-A");
+
+    // Assert
+    assert_eq!(v["verdict"], "PUSHED", "{v}");
+    let warnings = v["warnings"].to_string();
+    assert!(
+        warnings.contains("message drafted from file names, no model: claude exited with 1"),
+        "{warnings}"
+    );
+}
+
+#[test]
+fn a_staged_secret_file_is_never_sent_to_the_model() {
+    // Arrange
+    let r = Repo::new("model-secret");
+    r.turn_model_on();
+    r.stub_reply("feat(app): add a thing", "");
+    put(&r, ".env", "KEY=1\n");
+
+    // Act
+    let o = r.pb(RUN_ALL, "");
+
+    // Assert
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert_eq!(r.claude_calls(), 0);
+    assert!(
+        out(&o).contains("staged file looks like a secret"),
+        "{}",
+        out(&o)
+    );
+}
+
+#[test]
+fn the_model_is_not_called_for_a_given_message() {
+    // Arrange
+    let r = Repo::new("model-given");
+    r.turn_model_on();
+    r.stub_reply("feat(app): add a thing", "");
+    put(&r, "docs/guide.md", "g\n");
+
+    // Act
+    let o = r.pb(&["commit", "run", "-A", "-m", "docs: add the guide"], "");
+
+    // Assert
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert_eq!(last_subject(&r), "docs: add the guide");
+    assert_eq!(r.claude_calls(), 0);
+}
+
+#[test]
+fn the_model_is_not_called_when_an_amend_keeps_its_message() {
+    // Arrange
+    let r = Repo::new("model-amend");
+    r.turn_model_on();
+    r.stub_reply("feat(app): add a thing", "");
+    put(&r, "a2.txt", "a\n");
+    git(&r.work, &["add", "."]);
+    git(&r.work, &["commit", "-q", "-m", "feat: keep this message"]);
+    put(&r, "b2.txt", "b\n");
+
+    // Act
+    let _ = r.pb(&["commit", "run", "-A", "--amend"], "");
+
+    // Assert
+    assert_eq!(last_subject(&r), "feat: keep this message");
+    assert_eq!(r.claude_calls(), 0);
+}
+
+#[test]
+fn the_model_is_not_called_when_ai_message_is_off() {
+    // Arrange
+    let r = Repo::new("model-off");
+    r.stub_reply("feat(app): add a thing", "");
+    put(&r, "docs/guide.md", "g\n");
+
+    // Act
+    let o = r.pb(RUN_ALL, "");
+
+    // Assert
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert_eq!(last_subject(&r), "docs: add guide.md");
+    assert_eq!(r.claude_calls(), 0);
+    assert!(!out(&o).contains("NOTE="), "{}", out(&o));
 }

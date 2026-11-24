@@ -5,10 +5,11 @@
 //! stages, formats and prints what the message drafter needs. `run` commits
 //! with a sign-off and signing decision, rebases when behind, and pushes
 //! without ever escalating a rejected push to a force. `run -A` does the three
-//! in one call with a message drafted from the files (`all` is its legacy
-//! name).
+//! in one call with a message drafted by a small model, or from the files when
+//! the model is off or fails (`all` is its legacy name).
 
 pub mod all;
+pub mod model;
 pub mod prepare;
 pub mod run;
 pub mod typecheck;

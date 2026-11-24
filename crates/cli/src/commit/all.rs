@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The drafting commit behind `playbook commit run -A` and the hidden legacy
-//! `playbook commit all`: stage, draft a conventional message from the staged
-//! files with no model, then commit, rebase when behind and push through the
+//! `playbook commit all`: stage, draft a conventional message with a small
+//! model (or from the staged files when it is off or fails), then commit, rebase when behind and push through the
 //! same code as the message-file path of `commit run`.
 
+use super::model::{self, MessageRunner};
 use super::typecheck::{kind_of, Kind};
 use super::{current_branch, git_text, prepare, run};
 use std::path::Path;
@@ -131,9 +132,58 @@ fn subject_for(changes: &[Change], area: &Option<String>) -> String {
     }
 }
 
+/// What the note says when the message came from file names.
+const NOTE_PREFIX: &str = "message drafted from file names, no model: ";
+/// The longest reason kept in a note.
+const NOTE_REASON_CHARS: usize = 200;
+
+/// The message for `changes`: the model's when `ai` is given and its reply is
+/// valid, else the file name draft with a note that says why. `context` runs
+/// only when a model is asked.
+fn compose(
+    ai: Option<&dyn MessageRunner>,
+    context: impl FnOnce() -> model::Context,
+    changes: &[Change],
+) -> (String, Option<String>) {
+    let Some(runner) = ai else {
+        return (draft(changes), None);
+    };
+    let paths: Vec<&str> = changes.iter().map(|c| c.path.as_str()).collect();
+    if let Some(reason) = model::skip_reason(&paths) {
+        return (draft(changes), Some(format!("{NOTE_PREFIX}{reason}")));
+    }
+    match model::draft(runner, &context(), &paths) {
+        Ok(message) => (message, None),
+        Err(reason) => {
+            let reason: String = reason
+                .chars()
+                .map(|c| if c.is_control() { ' ' } else { c })
+                .take(NOTE_REASON_CHARS)
+                .collect();
+            (draft(changes), Some(format!("{NOTE_PREFIX}{reason}")))
+        }
+    }
+}
+
 /// Stage everything, commit, rebase when behind and push. `Ok` is the text to
-/// print, `Err` the text for stderr.
-pub fn run(dir: &Path, opts: Options, config_signoff: bool) -> Result<String, String> {
+/// print, `Err` the text for stderr. `ai` is the model that drafts the
+/// message, or `None` for the file name draft.
+pub fn run(
+    dir: &Path,
+    opts: Options,
+    config_signoff: bool,
+    ai: Option<&dyn MessageRunner>,
+) -> Result<String, String> {
+    run_noted(dir, opts, config_signoff, ai).map(|(text, _)| text)
+}
+
+/// Like [`run`], and also the note that says the message came from file names.
+pub fn run_noted(
+    dir: &Path,
+    opts: Options,
+    config_signoff: bool,
+    ai: Option<&dyn MessageRunner>,
+) -> Result<(String, Option<String>), String> {
     let staged = prepare::run(
         dir,
         prepare::Options {
@@ -143,28 +193,39 @@ pub fn run(dir: &Path, opts: Options, config_signoff: bool) -> Result<String, St
         },
     )?;
     if staged == NOTHING_STAGED {
-        return Ok(staged);
+        return Ok((staged, None));
     }
-    let changes = parse_changes(
-        &git_text(
-            dir,
-            &[
-                "-c",
-                "core.quotepath=off",
-                "diff",
-                "--staged",
-                "--name-status",
-            ],
-        )
-        .unwrap_or_default(),
-    );
+    let name_status = git_text(
+        dir,
+        &[
+            "-c",
+            "core.quotepath=off",
+            "diff",
+            "--staged",
+            "--name-status",
+        ],
+    )
+    .unwrap_or_default();
+    let changes = parse_changes(&name_status);
     let kept = if opts.amend && opts.message.is_none() {
         git_text(dir, &["log", "-1", "--format=%B"]).filter(|m| !m.is_empty())
     } else {
         None
     };
     let drafted = opts.message.is_none() && kept.is_none();
-    let message = opts.message.or(kept).unwrap_or_else(|| draft(&changes));
+    let mut note = None;
+    let message = match opts.message.or(kept) {
+        Some(message) => message,
+        None => {
+            let (message, why) = compose(
+                ai,
+                || model::gather(dir, &current_branch(dir), &name_status),
+                &changes,
+            );
+            note = why;
+            message
+        }
+    };
 
     let file = std::env::temp_dir().join(format!("playbook-commit-all-{}.txt", std::process::id()));
     std::fs::write(&file, format!("{message}\n"))
@@ -185,11 +246,16 @@ pub fn run(dir: &Path, opts: Options, config_signoff: bool) -> Result<String, St
     let pushed = result?;
 
     let sha = git_text(dir, &["rev-parse", "--short", "HEAD"]).unwrap_or_default();
-    Ok(format!(
-        "{pushed}\nBRANCH={}\nCOMMIT={sha}\nMESSAGE={}",
+    let note_line = note
+        .as_ref()
+        .map(|n| format!("\nNOTE={n}"))
+        .unwrap_or_default();
+    let text = format!(
+        "{pushed}\nBRANCH={}{note_line}\nCOMMIT={sha}\nMESSAGE={}",
         current_branch(dir),
         message.lines().next().unwrap_or("")
-    ))
+    );
+    Ok((text, note))
 }
 
 /// The `--json` form. Parses `text` (the command's arguments and the
@@ -197,7 +263,12 @@ pub fn run(dir: &Path, opts: Options, config_signoff: bool) -> Result<String, St
 /// envelope. `base` carries the message and the check skips given on the
 /// command line; staging, mode and amend come from `text`. It never fails the
 /// process: the outcome is in `verdict`.
-pub fn run_inline(text: &str, base: Options, config_signoff: bool) -> serde_json::Value {
+pub fn run_inline(
+    text: &str,
+    base: Options,
+    config_signoff: bool,
+    ai: Option<&dyn MessageRunner>,
+) -> serde_json::Value {
     use crate::common::inline_args;
     use crate::json::envelope::wrap;
     use serde_json::json;
@@ -263,7 +334,7 @@ pub fn run_inline(text: &str, base: Options, config_signoff: bool) -> serde_json
     // Before the commit: afterwards nothing is staged to look at. A protected
     // branch is refused by `run` without touching the index.
     let on_protected = prepare::is_protected(&current_branch(root), &prepare::default_branch(root));
-    let warnings = if on_protected {
+    let mut warnings = if on_protected {
         Vec::new()
     } else {
         if parsed.stage_all {
@@ -273,7 +344,11 @@ pub fn run_inline(text: &str, base: Options, config_signoff: bool) -> serde_json
         }
         crate::hooks::precommit_check::findings_in(Some(root))
     };
-    let result = run(root, opts, config_signoff);
+    let (result, note) = match run_noted(root, opts, config_signoff, ai) {
+        Ok((text, note)) => (Ok(text), note),
+        Err(text) => (Err(text), None),
+    };
+    warnings.extend(note);
     let branch = current_branch(root);
     let sha = git_text(root, &["rev-parse", "--short", "HEAD"]).unwrap_or_default();
     let message = git_text(root, &["log", "-1", "--format=%B"]).unwrap_or_default();
@@ -358,5 +433,159 @@ mod tests {
             draft(&changes("M\t.github/workflows/a.yml")),
             "ci: update ci"
         );
+    }
+
+    struct Fake {
+        reply: Result<String, String>,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Fake {
+        fn new(reply: Result<String, String>) -> Self {
+            Fake {
+                reply,
+                calls: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+        fn calls(&self) -> usize {
+            self.calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl MessageRunner for Fake {
+        fn run(&self, _prompt: &str) -> Result<String, String> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.reply.clone()
+        }
+    }
+
+    fn good_reply() -> String {
+        serde_json::json!({
+            "is_error": false,
+            "structured_output": {
+                "header": "fix(cli): stop the double send",
+                "body": "",
+            },
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn a_valid_model_reply_is_the_message_with_no_note() {
+        // Arrange
+        let runner = Fake::new(Ok(good_reply()));
+        let staged = changes("M\tcrates/cli/src/a.rs");
+
+        // Act
+        let (message, note) = compose(Some(&runner), model::Context::default, &staged);
+
+        // Assert
+        assert_eq!(message, "fix(cli): stop the double send");
+        assert_eq!(note, None);
+        assert_eq!(runner.calls(), 1);
+    }
+
+    #[test]
+    fn a_runner_error_falls_back_to_the_draft_with_a_note() {
+        // Arrange
+        let runner = Fake::new(Err("claude exited with 1".to_string()));
+        let staged = changes("M\tcrates/cli/src/a.rs");
+
+        // Act
+        let (message, note) = compose(Some(&runner), model::Context::default, &staged);
+
+        // Assert
+        assert_eq!(message, draft(&staged));
+        assert_eq!(
+            note.as_deref(),
+            Some("message drafted from file names, no model: claude exited with 1")
+        );
+    }
+
+    #[test]
+    fn invalid_json_and_is_error_fall_back_to_the_draft() {
+        // Arrange
+        let staged = changes("M\tcrates/cli/src/a.rs");
+        let replies = [
+            "not json".to_string(),
+            serde_json::json!({"is_error": true}).to_string(),
+        ];
+
+        for raw in replies {
+            let runner = Fake::new(Ok(raw));
+
+            // Act
+            let (message, note) = compose(Some(&runner), model::Context::default, &staged);
+
+            // Assert
+            assert_eq!(message, draft(&staged));
+            assert!(note.is_some_and(|n| n.starts_with(NOTE_PREFIX)));
+        }
+    }
+
+    #[test]
+    fn a_rejected_reply_falls_back_to_the_draft() {
+        // Arrange
+        let raw = serde_json::json!({
+            "is_error": false,
+            "structured_output": {"header": "feat(docs): explain it", "body": ""},
+        })
+        .to_string();
+        let runner = Fake::new(Ok(raw));
+        let staged = changes("M\tdocs/a.md");
+
+        // Act
+        let (message, note) = compose(Some(&runner), model::Context::default, &staged);
+
+        // Assert
+        assert_eq!(message, draft(&staged));
+        assert!(note.is_some_and(|n| n.contains("commit type check")));
+    }
+
+    #[test]
+    fn with_the_model_off_the_heuristic_runs_and_nothing_is_gathered() {
+        // Arrange
+        let staged = changes("M\tcrates/cli/src/a.rs");
+
+        // Act
+        let (message, note) = compose(None, || unreachable!("no context without a model"), &staged);
+
+        // Assert
+        assert_eq!(message, draft(&staged));
+        assert_eq!(note, None);
+    }
+
+    #[test]
+    fn a_long_multiline_error_gives_a_one_line_capped_note() {
+        // Arrange
+        let reason = format!("first line\n{}", "x".repeat(300));
+        let runner = Fake::new(Err(reason));
+        let staged = changes("M\tcrates/cli/src/a.rs");
+
+        // Act
+        let (_, note) = compose(Some(&runner), model::Context::default, &staged);
+
+        // Assert
+        let note = note.unwrap();
+        assert!(!note.contains('\n'));
+        assert_eq!(
+            note.chars().count(),
+            NOTE_PREFIX.chars().count() + NOTE_REASON_CHARS
+        );
+    }
+
+    #[test]
+    fn a_secret_path_means_no_call_and_a_note() {
+        // Arrange
+        let runner = Fake::new(Ok(good_reply()));
+        let staged = changes("A\t.env");
+
+        // Act
+        let (message, note) = compose(Some(&runner), model::Context::default, &staged);
+
+        // Assert
+        assert_eq!(runner.calls(), 0);
+        assert_eq!(message, draft(&staged));
+        assert!(note.is_some_and(|n| n.ends_with("not sent to a model")));
     }
 }
